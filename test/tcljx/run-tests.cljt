@@ -1,0 +1,91 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.run-tests
+  (:require
+   #_(tinyclj.alpha ptest-test ptest__align-test ptest__pp-test)
+   #_(tcljx parser-test reader-test synquote-test grammar-test
+
+            invoke-test bootstrap-test
+          
+            const-test conv-test prim-conv-test dot-form-test new-test arith-test
+            let-test quote-test meta-test str-test bits-test switch-test cond-test
+            try-test array-test loop-test logic-test clone-test xcmp-test
+            unboxing-test boxing-test fn-member-test
+
+            namespace-test fn-test itf-fn-test variadic-test macro-test
+            deftype-test record-test set-test definterface-test closure-test
+            line-test letfn-test reify-test require-test main-test
+
+            rtiow-nocore-test)
+   
+   tcljx.main                    ;at least compile unused namespaces
+   
+   [tinyclj.alpha.ptest :refer [run-scoped-tests]]))
+
+(def all-namespaces
+  '[#_tinyclj.alpha.ptest-test
+    #_tinyclj.alpha.ptest__align-test
+    #_tinyclj.alpha.ptest__pp-test
+    
+   #_tcljx.parser-test
+   #_tcljx.reader-test
+   #_tcljx.synquote-test
+   #_tcljx.grammar-test
+
+   #_tcljx.invoke-test
+   #_tcljx.bootstrap-test
+    
+   #_tcljx.const-test
+   #_tcljx.conv-test
+   #_tcljx.prim-conv-test
+   #_tcljx.dot-form-test
+   #_tcljx.new-test
+   #_tcljx.arith-test
+   #_tcljx.let-test
+   #_tcljx.quote-test
+   #_tcljx.meta-test
+   #_tcljx.str-test
+   #_tcljx.bits-test
+   #_tcljx.switch-test
+   #_tcljx.cond-test
+   #_tcljx.try-test
+   #_tcljx.array-test
+   #_tcljx.loop-test
+   #_tcljx.logic-test
+   #_tcljx.clone-test
+   #_tcljx.xcmp-test
+   #_tcljx.unboxing-test
+   #_tcljx.boxing-test
+   #_tcljx.fn-member-test
+
+   #_tcljx.namespace-test
+   #_tcljx.fn-test
+   #_tcljx.itf-fn-test
+   #_tcljx.variadic-test
+   #_tcljx.macro-test
+   #_tcljx.deftype-test
+   #_tcljx.record-test
+   #_tcljx.set-test
+   #_tcljx.definterface-test
+   #_tcljx.closure-test
+   #_tcljx.line-test
+   #_tcljx.letfn-test
+   #_tcljx.reify-test
+   #_tcljx.require-test
+   #_tcljx.main-test
+
+   #_tcljx.rtiow-nocore-test])
+
+(defn run []
+  (run-scoped-tests all-namespaces))
+
+(defn -main [& args]
+  (try
+    (apply run args)
+    (finally
+      (shutdown-agents))))     ;can only shut down when owning the JVM

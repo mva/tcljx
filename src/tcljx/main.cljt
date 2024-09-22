@@ -1,0 +1,82 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.main
+  (:require #_[tcljx.config :as cfg]
+            #_[tcljx.wrong :as wrong]
+            #_[tcljx.main.options :as options]
+            #_[tcljx.main.invoke :as invoke]
+            #_[tcljx.main.tclj0 :as tclj0]
+            #_[tcljx.main.tclj1 :as tclj1])
+  (:import #_(tcljx.main.options Options)
+           #_(java.util Optional)
+           #_(java.util.function Consumer)))
+
+(defn run []
+  (prn :hi))
+
+(defn -main [& args]
+  (run))
+
+;; (defn print-exception-info [^tcljx.wrong.WrongInfo e]
+;;   (println "WrongInfo:" (ex-message e))
+;;   (run! println (sort-by key (wrong/wr-data e))))
+
+;; (defn -main [& args]
+;;   (let [res (try
+;;               (if (contains? #{nil, "--help", "-h"} (first args))
+;;                 (do (println (str "usage: java ... [--watch] [-d <dest-dir] "
+;;                                   "[-s <classpath>]... <main-ns>/<run>..."))
+;;                     false)
+;;                 (if-some [opts (options/parse args)]
+;;                   (if (.watch-mode? opts)
+;;                     (tclj1/run opts)
+;;                     (tclj0/run opts))
+;;                   false))
+;;               (catch tcljx.wrong.WrongInfo e
+;;                 (print-exception-info e)
+;;                 false)
+;;               (catch Throwable t
+;;                 (.printStackTrace t)
+;;                 false)        ;failure because of unhandled expception
+;;               (finally
+;;                 (shutdown-agents)))] ;can only shut down when owning the JVM
+;;     (System/exit (if res 0 1)))) ;can only exit when owning the JVM
+
+;; ;;; Start watch/compile/report loop.  After each build attempt,
+;; ;;; `value-consumer` is called with an argument of type Optional.  On
+;; ;;; success it holds the value of the namespace var to which
+;; ;;; `var-name` resolves.  On failure it is empty.  This function never
+;; ;;; returns normally.
+;; (defn start
+;;   ^void [^String dest-dir               ;nil means default directory
+;;          ^clojure.lang.IPersistentVector sourcev
+;;          ^clojure.lang.Symbol var-name  ;namespace qualified
+;;          ^java.util.function.Consumer value-consumer]
+;;   (when (nil? (namespace var-name))
+;;     (options/abort (str "error: var name `" var-name
+;;                         "` must be a namespace qualified symbol")))
+;;   (doseq [x sourcev]
+;;     (when-not (instance? java.nio.file.Path x)
+;;       (options/abort (str "error: sourcev entry must java.nio.file.Path"))))
+;;   (let [opts (Options. (options/to-dest-dir dest-dir) ;dest-dir
+;;                        :system               ;parent-classloader
+;;                        sourcev               ;sourcev
+;;                        (list (str var-name)) ;targets
+;;                        false                 ;deterministic?
+;;                        15000                 ;wait-cyclic-ms
+;;                        true                  ;watch-mode?
+;;                        20)                   ;wait-after-change-ms
+;;         on-completion (^Consumer fn [opt-nmsp-map]
+;;                        (.accept value-consumer
+;;                                 (if (.isEmpty ^Optional opt-nmsp-map)
+;;                                   (Optional/empty)
+;;                                   (let [nmsp-map (.get ^Optional opt-nmsp-map)]
+;;                                     (-> (invoke/namespace-of nmsp-map var-name)
+;;                                         (invoke/var-value var-name)
+;;                                         (Optional/of))))))]
+;;     (tclj1/run opts on-completion)))
