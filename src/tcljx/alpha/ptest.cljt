@@ -1,0 +1,75 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.ptest ;small subset of clojure.test -- partial but parallel
+  (:require [tcljx.alpha.ptest__impl :refer :all]))
+
+(defmacro deftest [nm & body]
+  (assert (symbol? nm))
+  (let [m {:var true, :test true, :line (:line (meta &form))}]
+    ;; Meta map has :test to identify test vars, and :line number to
+    ;; sort the vars into source code order.
+    `(defn ~(vary-meta nm merge m) ^void []
+       ~@body)))
+
+(defmacro thrown-msg-test [ctx class re form]
+  (assert (symbol? class))
+  `(try
+     ~form
+     (outcome-fail ~ctx nil "no exception was raised"
+                   (object ~class) nil)
+     ~(if (nil? re)
+        `(catch ~class _
+           (outcome-pass ~ctx))
+        `(catch ~class e#
+           (let [m# (.getMessage e#), re# ~re]
+             (if (re-find re# m#)
+               (outcome-pass ~ctx)
+               (outcome-fail ~ctx e# "unexpected exception message"
+                                  (object re#) m#)))))
+     (catch Throwable t#
+       (outcome-fail ~ctx t# "unexpected exception type"
+                     ~class (class t#)))))
+
+(defmacro is [form]
+  (let [ctx (gensym "__ctx")
+        line (-> &form (meta) :line)]
+    (assert (some? line) "form of `is` macro has no :line meta")
+    `(when-some [~ctx (this-test-context-if-selected ~line)]
+       ~(case (when (seq? form) (first form))
+          (= tinyclj.core/= tinyclj.lang.primitive/equiv-nary)
+          `(equiv-test ~ctx ~form)
+          
+          (thrown? tinyclj.alpha.ptest/thrown?)
+          `(thrown-msg-test ~ctx ~(second form) nil ~@(nthrest form 2))
+          
+          (thrown-with-msg? tinyclj.alpha.ptest/thrown-with-msg?)
+          `(thrown-msg-test ~ctx ~@(rest form))
+          
+          #_else `(boolean-test ~ctx ~form)))))
+
+;;; ------------------------------------------------------------------------
+
+(defn run-scoped-tests
+  "If `scope` (by default environment variable \"TEST\") is not nil,
+  then only run the test of this namespaced var or only the tests from
+  the given namespace.  Optionally, limit this to matching line
+  numbers if the suffix `:<number>` is present.  If `scope` is nil,
+  run the tests from the namespaces in `else-namespaces`.  Var and
+  namespace can be specified as symbol or string.  Depending on the
+  outcome, result is one of the keywords :error, :fail, or :success."
+  (^keyword [else-namespaces]
+   (run-scoped-tests (System/getenv "TEST") else-namespaces))
+  (^keyword [scope else-namespaces]
+   (let [r (time (-> (if (some? scope)
+                       (run-scope scope)
+                       (run-namespaces (mapv symbol else-namespaces)))
+                     (print-report)))]
+     (println "\nRan" (.tests r) "tests containing"
+              (assert-count r) "assertions.")
+     (println (.fail r) "failures," (.error r) "errors.")
+     (exit-status r))))

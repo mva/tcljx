@@ -1,0 +1,202 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.wrong
+  (:require [tcljx.config :as cfg]
+            [tinyclj.alpha.ptest__term :as term]
+            [tinyclj.string :as str])
+  (:import (clojure.lang Symbol IPersistentMap)))
+
+;;; Compilation errors raise an exception of type WrongInfo.  It
+;;; mirrors ExceptionInfo, but does not implement IExceptionInfo.  The
+;;; compiler turns such an exception into a readable error message,
+;;; without confronting the user with its long and confusing stack
+;;; trace.
+(deftype WrongInfo [^:pass-to-super-constructor ^String message
+                    ^:pass-to-super-constructor ^Throwable cause
+                    ^IPersistentMap data]
+  RuntimeException
+  (toString [this]
+    (str "tcljx.wrong.WrongInfo: " (.getMessage this) " " (.toString data))))
+
+(defn wr-info
+  (^WrongInfo [^String msg]
+   (wr-info msg nil))
+  (^WrongInfo [^String msg ^IPersistentMap map]
+   (wr-info msg map nil))
+  (^WrongInfo [^String msg ^IPersistentMap map ^Throwable cause]
+   #_(prn :error msg map)
+   #_(.printStackTrace (Throwable.))
+   (WrongInfo. msg cause (or map clojure.lang.PersistentArrayMap/EMPTY))))
+
+(defn wr-data ^IPersistentMap [ex]
+  (when (instance? WrongInfo ex)
+    (.data ^WrongInfo ex)))
+
+;;; Note: core's `ex-message` and `ex-cause` work on any Throwable, so
+;;; there is no need to duplicate the functions here.
+
+;;; ------------------------------------------------------------------------
+
+(defn update-wr-data ^WrongInfo [^WrongInfo ex f & args]
+  (let [ex* (wr-info (ex-message ex) (apply f (wr-data ex) args) (ex-cause ex))]
+    (when-some [t (.getStackTrace ex)]
+      (.setStackTrace ex* t))
+    ex*))
+
+;; ;;; The compiler reports errors by throwing an WrongInfo instance.
+;; ;;; Its data map encodes information about the context of the error,
+;; ;;; while the exception's message is a free form error message.
+;; ;;;
+;; ;;; If it exists, then :form/line-number is the line number of the
+;; ;;; innermost list form "around" the point of error.
+;; ;;;
+;; ;;; If a `WrongInfo` is decorated with a ex-cause value, then it
+;; ;;; is assumed that this Throwable originates outside of the control
+;; ;;; of the compiler (e.g. during macro expansion).
+;; (defn push-line-number ^WrongInfo [^WrongInfo ex ^int ln]
+;;   (cond-> ex
+;;     (and (not= ln cfg/no-line-number)
+;;          (not (contains? (wr-data ex) :form/line-number)))
+;;     (update-wr-data assoc :form/line-number (object ln))))
+
+;; (defn rethrow-with-line-number ^void [^WrongInfo e ^int ln]
+;;   (throw (push-line-number e ln)))
+
+;; (defn wr-info-line-number ^WrongInfo [msg form]
+;;   (push-line-number (wr-info msg) (cfg/line-number form)))
+
+;; ;;; Only assoc `k` to the exception's data if this key is not defined
+;; ;;; yet.  With exceptions decorated from the most to the least
+;; ;;; specific context, this is used to preserve the most specific
+;; ;;; information available.
+;; (defn assoc-if-new ^WrongInfo [^WrongInfo e k v]
+;;   (cond-> e
+;;     (not (contains? (wr-data e) k))
+;;     (update-wr-data assoc k v)))
+
+;; (defn assoc-dep-map ^WrongInfo [^Throwable t ^IPersistentMap dep-map]
+;;   #_(.printStackTrace t)
+;;   (-> (if (instance? WrongInfo t)
+;;         ^WrongInfo t
+;;         (do (.printStackTrace t)
+;;             (wr-info "unhandled exception" {} t)))
+;;       (update-wr-data assoc :emitter/namespaces dep-map)))
+
+;; ;;; If `t` has a compiler error as one of its causes, then return the
+;; ;;; WrongInfo instance.  Otherwise, return nil.
+;; (defn first-wrong-info ^WrongInfo [^Throwable t]
+;;   (cond (nil? t) nil
+;;         (instance? tcljx.wrong.WrongInfo t) ^WrongInfo t
+;;         :else (recur (.getCause t))))
+
+;; ;;; ------------------------------------------------------------------------
+
+;; (defn str* ^String [x]
+;;   (cond
+;;     (nil? x) "nil"
+;;     (class? x) (str (cfg/type-symbol x))
+;;     (string? x) (pr-str x)
+;;     :else (str x)))
+
+;; (defn q ^String [x]                    ;quoting a source code fragment
+;;   (let [s (str* x), s' (term/quote s)]
+;;     (if (identical? s s')
+;;       (str "`" s "`")                 ;fallback if styles are disabled
+;;       s')))
+;; (defn q-symbol ^String [x]
+;;   (if (symbol? x)
+;;     (q x)
+;;     (str x)))
+
+;; (defn got ^String [x] (str " (got: " (str* x) ")"))
+;; (defn got-int ^String [^int i] (got (object i)))
+;; (defn got-q ^String [x] (got (q x)))
+;; (defn got-classes ^String [cls]
+;;   (str " (got: " (->> (map #(.getName ^Class %) cls)
+;;                       (sort)
+;;                       (str/join " ")) ")"))
+
+
+
+;; (defn syntax
+;;   ([^String msg]
+;;    (throw (wr-info msg)))
+;;   ([^String msg-prefix form]
+;;    (throw (wr-info-line-number (str msg-prefix (got-q form)) form))))
+;; (defn ensure-sym
+;;   (^Symbol [form]
+;;    (if (symbol? form)
+;;      form
+;;      (syntax "expect symbol" form)))
+;;   (^Symbol [form ^Symbol exp]
+;;    (if (= form exp)
+;;      exp
+;;      (syntax (str "expected symbol " (q exp)) form))))
+;; (defn ensure-simple-sym ^Symbol [form]
+;;   (if (and (symbol? form) (nil? (namespace form)))
+;;     form
+;;     (syntax "expect unqualified symbol" form)))
+
+
+
+
+;; (defn unresolved [^String msg-prefix sym-or-str]
+;;   (throw (wr-info (str msg-prefix (q sym-or-str)))))
+;; (defn unresolved-nmsp-sym [resolved-ns-nm ^Symbol fq-sym]
+;;   (throw (wr-info (str "no public var " (q (name fq-sym)) " in namespace "
+;;                        (q resolved-ns-nm)))))
+;; (defn unresolved-interop [^String msg-prefix ^String nm ^Class opt-owner
+;;                           ^IPersistentMap data]
+;;   (throw (wr-info (cond-> (str msg-prefix (q (symbol nil nm)))
+;;                     (some? opt-owner) (str " in " (cfg/type-symbol opt-owner)))
+;;                   data)))
+
+;; (defn class-not-found [x]
+;;   (if (instance? NoClassDefFoundError x)
+;;     (class-not-found (ex-message ^NoClassDefFoundError x))
+;;     (let [sym (symbol x)]               ;idempotent
+;;       (unresolved "class not found: " sym))))
+;; (defn no-class-def-found ^WrongInfo [^NoClassDefFoundError e]
+;;   (let [nm (.replace (ex-message e) \/ \.)]
+;;     (wr-info (str "failed to load class " (q (symbol nil nm))) {} e)))
+
+
+;; (defn file [^java.nio.file.Path rpath]
+;;   (throw (wr-info (str "failed to locate resource file " (q (str rpath))))))
+
+;; ;;; This indicates an error regarding a type expression, i.e. an
+;; ;;; expression of type Class.
+;; (defn type-expr [^String msg-prefix
+;;                  ^java.lang.invoke.TypeDescriptor$OfField tp]
+;;   (throw (wr-info (str msg-prefix (got tp)))))
+
+;; (defn other
+;;   ([^String msg]
+;;    (throw (wr-info msg)))
+;;   ([^String msg form]
+;;    (throw (wr-info-line-number msg form))))
+
+;; ;;; ------------------------------------------------------------------------
+
+;; (defn check-argc
+;;   ([^int n form]
+;;    (let [argc (dec (count form))]
+;;      (when-not (= argc n)
+;;        (other (str (q (first form)) " takes " n " argument"
+;;                    (when-not (= 1 n) "s") (got-int argc))))))
+;;   ([^int n ^int m form]
+;;    (let [argc (dec (count form))]
+;;      (when-not (<= n argc m)
+;;        (other (str (q (first form)) " takes " n " to " m " arguments"
+;;                    (got-int argc)))))))
+
+;; (defn check-argc-min [^int n form]
+;;   (let [argc (dec (count form))]
+;;     (when-not (>= argc n)
+;;       (other (str (q (first form)) " takes " n " or more arguments"
+;;                   (got-int argc))))))

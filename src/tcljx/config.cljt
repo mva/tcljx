@@ -1,0 +1,368 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.config
+  (:require
+   #_[tinyclj.string :as str])
+  (:import
+   #_(clojure.lang Symbol)
+   #_(java.lang.constant ClassDesc)
+   #_(java.lang.invoke MethodHandles$Lookup)
+   #_(java.net URLClassLoader URL)
+   #_(java.nio.file Path Files)
+   #_(java.nio.file.attribute PosixFilePermission PosixFilePermissions)
+   #_(java.util Set)
+   #_(java.util.function Predicate)))
+
+;; ;;; If true, the both the compilation and the emit thread are free to
+;; ;;; fork of work to other threads.  Set this to false to force them to
+;; ;;; compile namespaces sequentially and emit class files in order.
+;; (def fork-work? #_false true)
+
+;; ;; Emit ClassFile attribute SourceFile & Code attribute LineNumberTable?
+;; (def enable-line-numbers true)
+
+;; ;; Emit Code attribute LocalVariableTable?  This adds constant pool
+;; ;; entries for parameter and bindings names plus their type
+;; ;; descriptors, increasing the pressure on the constant pool.
+;; (def enable-local-variables true)
+
+
+
+(def core-lib "tinyclj.core")
+;; (def core-lib-sym (symbol nil core-lib))
+;; (defn core-lib? ^boolean [^String ns-str] (= core-lib ns-str))
+
+;;; note: the `regex-literal` symbols is spliced into the core lib's
+;;; namespace (similar to e.g. `*ns*`) and bound to a predefined macro
+(def sym-regex-literal (symbol core-lib "regex-literal"))
+(def sym-quote 'quote)
+
+;;; note: a copy of this lives in tinyclj.core/specials
+(def specials '#{def loop* recur if case* let* letfn*
+                 do fn* quote var import* . set! deftype* reify* try throw
+                 monitor-enter monitor-exit catch finally new &
+                 ;; special forms that are not special in Clojure:
+                 definterface* instanceof*})
+
+(definterface NamespaceContext
+  (ns-str ^String [])
+  (lookup-namespace ^String [^String alias])  ;nil if not found
+  (lookup-class ^Class [^symbol sym])         ;nil if not found
+  (lookup-global-qname ^symbol [^String nm])) ;nil if no such global
+
+;; (def primitive-ns-str "tinyclj.lang.primitive")
+
+;; (def key-force-clinit nil)
+
+;; (def wait-cyclic-ms (* 5 1000l))
+
+;; (def java-base-classes              ;almost all from package java.lang
+;;   [Boolean Byte Character Class ClassLoader #_clojure.lang.Compiler Double
+;;    Enum Float InheritableThreadLocal Integer Long Math Number Object
+;;    Package Process ProcessBuilder Runtime RuntimePermission
+;;    Short StackTraceElement StrictMath String
+;;    #_StringBuffer StringBuilder System Thread ThreadGroup ThreadLocal
+;;    Throwable Void Appendable CharSequence Cloneable Comparable
+;;    Iterable Readable Runnable java.util.concurrent.Callable
+;;    BigInteger BigDecimal
+             
+;;    ArithmeticException ArrayIndexOutOfBoundsException
+;;    ArrayStoreException ClassCastException ClassNotFoundException
+;;    CloneNotSupportedException EnumConstantNotPresentException
+;;    Exception IllegalAccessException IllegalArgumentException
+;;    IllegalMonitorStateException IllegalStateException
+;;    IllegalThreadStateException IndexOutOfBoundsException
+;;    InstantiationException  NegativeArraySizeException
+;;    NoSuchFieldException NoSuchMethodException NullPointerException
+;;    NumberFormatException RuntimeException SecurityException
+;;    StringIndexOutOfBoundsException TypeNotPresentException
+;;    UnsupportedOperationException AbstractMethodError AssertionError
+;;    ClassCircularityError ClassFormatError Error
+;;    ExceptionInInitializerError IllegalAccessError
+;;    IncompatibleClassChangeError InstantiationError InternalError
+;;    LinkageError NoClassDefFoundError NoSuchFieldError
+;;    NoSuchMethodError OutOfMemoryError StackOverflowError
+;;    UnknownError UnsatisfiedLinkError
+;;    UnsupportedClassVersionError VerifyError VirtualMachineError
+             
+;;    Thread$UncaughtExceptionHandler Thread$State
+;;    Deprecated Override SuppressWarnings])
+
+;; (defn spec-dimensions ^int [^Symbol tp] ;zero if not name of array type
+;;   (when (some? (namespace tp))
+;;     (let [nm (name tp)]
+;;       (when (= (.length nm) 1)
+;;         (let [n (- (int (.charAt nm 0)) (int \0))]
+;;           (when (<= 1 n 9)
+;;             n))))))
+
+;; (defn type-dimensions ^int [^Class tp]
+;;   (loop [n 0, tp tp]
+;;     (if (.isArray tp)
+;;       (recur (inc n) (.componentType tp))
+;;       n)))
+
+;; (defn array-type-of-class ^Class [^Class cl ^int array-rank]
+;;   (if (zero? array-rank)
+;;     cl
+;;     (recur (.arrayType cl) (dec array-rank))))
+
+;; (defn type-symbol ^clojure.lang.Symbol [^Class tp]
+;;   (let [n (type-dimensions tp)]
+;;     (if (zero? n)
+;;       (symbol nil (.getName tp))
+;;       (symbol (loop [cl tp]
+;;                 (if (.isArray cl)
+;;                   (recur (.componentType cl))
+;;                   (.getName cl)))
+;;               (str n)))))
+
+;; ;;; ------------------------------------------------------------------------
+
+;; (def source-suffix ".cljt")
+;; (def class-suffix ".class")
+
+;; (defn path-of
+;;   (^Path [^String x]
+;;    (Path/of x))
+;;   (^Path [^String x & ^String/1 more]
+;;    (Path/of x more)))
+
+;; (defn path-url ^URL [^Path p]
+;;   (-> p (.toUri) (.toURL)))
+
+;; (defn nmsp-rpath ^Path [^String ns-str]
+;;   (path-of (str (str/replace ns-str "." "/") source-suffix)))
+
+
+;; (defn default-project-name ^String []
+;;   (-> (path-of (System/getProperty "user.dir"))
+;;       (.getFileName)
+;;       (.toString)))
+;; (defn dest-dir ^Path [^String dir-name]
+;;   (path-of (System/getProperty "java.io.tmpdir")
+;;            (System/getProperty "user.name") "tinyclj" dir-name))
+
+;; (defn- path-seq [^Path p ^int max-depth ^Predicate pred]
+;;   (try
+;;     (-> p (Files/walk max-depth) (.filter pred) (.toArray) (seq))
+;;     (catch java.nio.file.NoSuchFileException _ ;thrown if `p` does not exist
+;;       nil)))
+
+;; (def ^:private dir?
+;;   (^Predicate fn [x]
+;;    (Files/isDirectory x)))
+;; (defn recursive-directory-seq [^Path p]
+;;   (path-seq p Integer/MAX_VALUE dir?))
+
+;; (def ^:private file?
+;;   (^Predicate fn [x]
+;;    (Files/isRegularFile x)))
+;; (defn file-seq [^Path p]
+;;   (path-seq p Integer/MAX_VALUE file?))
+;; (defn- directory-file-seq [^Path p]
+;;   (path-seq p 1 file?))
+
+;; (defn- class-file? ^boolean [^Path x]
+;;   (str/ends-with? (.toString x) class-suffix))
+
+;; (defn create-directories ^Path [^Path p]
+;;   (let [perm (-> (Set/of PosixFilePermission/OWNER_READ
+;;                          PosixFilePermission/OWNER_WRITE
+;;                          PosixFilePermission/OWNER_EXECUTE)
+;;                  (PosixFilePermissions/asFileAttribute))]
+;;     (Files/createDirectories p perm)))
+
+;; (defn package-directory ^Path [^Path dest-dir ^String ns-str]
+;;   (.resolve dest-dir (path-of (str/replace ns-str "." "/"))))
+
+;; (defn delete-package-classes
+;;   (^void [^Path pkg-dir]
+;;    #_(prn :delete-package-classes (str pkg-dir "/*.class"))
+;;    (doseq [^Path x (directory-file-seq pkg-dir) :when (class-file? x)]
+;;      (Files/delete x)))
+;;   (^void [^Path dest-dir ^String ns-str]
+;;    (delete-package-classes (package-directory dest-dir ns-str))))
+
+;; #_
+;; (defn spit-class ^void [^Path dest-prefix ^String owner-name ^byte/1 b]
+;;   (when (some? dest-prefix)
+;;     (let [f (.resolve dest-prefix (path-of (str owner-name class-suffix)))]
+;;       #_(println :spit-class (.toString f))
+;;       (create-directories (.getParent f))
+;;       (with-open [w (Files/newOutputStream f)]
+;;         (.write w b)))))
+
+;; ;;; ------------------------------------------------------------------------
+
+;; ;;; Compilation scenario "distinct runtimes".  The compiler is, for
+;; ;;; example, a Clojure application running from `getSystemClassLoader`
+;; ;;; with its own runtime.  On the other hand, the application being
+;; ;;; compiled needs to see the Tinyclj runtime, plus any additional
+;; ;;; classes imported by the application.  In this case, the
+;; ;;; application can not be based on `getSystemClassLoader`, but only
+;; ;;; on the neutral `getPlatformClassLoader`.  The Tinyclj runtime and
+;; ;;; imported application classes must be installed manually into a
+;; ;;; fresh application class loader.
+;; (defn app-class-loader ^URLClassLoader [parent class-paths]
+;;   (URLClassLoader. "tclj-app"
+;;                    (->> (map #(-> ^Path % (.toUri) (.toURL)) class-paths)
+;;                         ^URL/1 (into-array URL))
+;;                    (case parent
+;;                      :platform (ClassLoader/getPlatformClassLoader)
+;;                      :system (ClassLoader/getSystemClassLoader))))
+
+;; (defn get-rt-lookup ^MethodHandles$Lookup [^ClassLoader app-ld]
+;;   (let [cl (Class/forName "tinyclj.lang.CljCljMapper" false app-ld)
+;;         f (.getDeclaredField cl "rtLookup")]
+;;     (.get f nil)))
+
+;; (defn class-loader-instance ^URLClassLoader [^ClassLoader parent ^String name
+;;                                              source-paths]
+;;   (let [dyn-cl-class (.loadClass parent "tinyclj.lang.DynamicClassLoader")
+;;         c (.getConstructor dyn-cl-class String URL/1 ClassLoader)
+;;         urls (->> source-paths (map path-url) (distinct) (into-array URL))]
+;;     (.newInstance c name urls parent)))
+
+;; (defn dyn-class-loader ^URLClassLoader [^ClassLoader app-ld source-paths]
+;;   (class-loader-instance app-ld "tclj-dyn" source-paths))
+
+;; (defn validate-defined-class ^Class [^Class cl]
+;;   (let [nm (.getName cl)]
+;;     (when-not (identical? cl (Class/forName nm false (.getClassLoader cl)))
+;;       (throw (IllegalStateException.
+;;               (str "failed to define class " nm " over existing class from "
+;;                    "classpath")))))
+;;   cl)
+
+;; (defn internal-name ^String [^ClassDesc cd]
+;;   (assert (not (.isArray cd)))
+;;   (assert (not (.isPrimitive cd)))
+;;   (let [desc (.descriptorString cd)]
+;;     (.substring desc 1 (dec (.length desc))))) ;drop "L" and ";", but keep "/"
+
+;; ;;; ------------------------------------------------------------------------
+
+;; (def no-line-number 0)
+;; (defn line-number ^int [form]
+;;   (if (seq? form)
+;;     (if-some [m (.meta ^clojure.lang.IMeta form)]
+;;       (if-some [line (.valAt m :line nil)]
+;;         ^int line)
+;;       no-line-number)
+;;     no-line-number))
+
+;;; Return the source code meta information of `x`.  For non-empty
+;;; list `x`, first strip :line/:column information added by the
+;;; reader.
+(defn source-meta [x]
+  (let [m (meta x)]
+    (if (and (some? m) (seq? x) (some? (seq x)))
+      (let [m' (dissoc m :line)]
+        (when (pos? (count m'))
+          m'))
+      m)))
+
+;; ;;; Copy `form`'s :line to `x` if it has no line number of its own.
+;; (defn with-line [x form]
+;;   (let [m (meta x)]
+;;     (if (and (seq? x) (not (contains? m :line)))
+;;       (if-some [line (-> form (meta) :line)]
+;;         (with-meta x (assoc m :line line))
+;;         x)
+;;       x)))
+
+;; ;;; Because application and compiler can live in different class
+;; ;;; loaders with a different runtime (e.g. when bootstrapping
+;; ;;; tclj-in-tclj), it is easier to duplicate munge/demunge code.  See
+;; ;;; tinyclj/lang/Compiler.java
+
+;; ;;; see OpenJDK classFileParser.cpp, verify_unqualified_name
+;; (defn nm-repl ^String [^char c]
+;;   (case c
+;;     ;; \; nil                             ;invalid in symbol & class name
+;;     ;; \[ nil                             ;invalid in symbol & class name
+;;     \/ "_SLASH_"                        ;"/"
+;;     \\ "_BSLASH_"                       ;"\\"
+;;     \< "_LT_"                           ;"<"
+;;     \> "_GT_"                           ;">"
+;;     \. "_DOT_"                          ;"."
+;;     nil))                              ;accept char
+
+;; (def ^:private ^java.util.Map de-repl
+;;   (java.util.Map/of "_SLASH_" "/"
+;;                     "_BSLASH_" "\\"
+;;                     "_LT_" "<"
+;;                     "_GT_" ">"
+;;                     "_DOT_" "."))
+
+;; (defn munge-name ^String [nm-sym]   ;pre: `nm-sym` is symbol or string
+;;   (let [nm (name nm-sym)]
+;;     (letfn [(up-to-replacement ^int [^int s]
+;;               (loop [i s]
+;;                 (if (and (< i (.length nm))
+;;                          (nil? (nm-repl (.charAt nm i))))
+;;                   (recur (inc i))
+;;                   i)))
+;;             (replace-all ^String [^int s ^StringBuilder b]
+;;               (let [e (up-to-replacement s)]
+;;                 (if (= e (.length nm))
+;;                   (str (.append b (subs nm s)))
+;;                   (recur (inc e)
+;;                          (doto b
+;;                            (.append (subs nm s e))
+;;                            (.append (nm-repl (.charAt nm e))))))))]
+;;       (let [i (up-to-replacement 0)]
+;;         (if (= i (.length nm))
+;;           nm               ;common fast path: return existing instance
+;;           (replace-all 0 (StringBuilder.)))))))
+
+;; (defn demunge-name ^String [^String s]
+;;   (if (neg? (.indexOf s "_"))
+;;     s                      ;common fast path: return existing instance
+;;     (str/replace s #"_(?:DOT|[LG]T|B?SLASH)_"
+;;                  (fn [^String m] (.getOrDefault de-repl m m)))))
+
+;; ;;; ------------------------------------------------------------------------
+
+;; (def nano-time-zero (System/nanoTime))
+;; (defn fmt-duration ^String [^long nanos]
+;;   (let [ms (/ nanos 1000000.0)]
+;;     (String/format java.util.Locale/ROOT "%5.2f" (object ms))))
+;; (defn fmt-instance ^String [^long inst]
+;;   (let [ms (/ (- inst nano-time-zero) 1000000.0)]
+;;     (String/format java.util.Locale/ROOT "%7.2f" (object ms))))
+
+;; (def ^:private *logger* (agent {}))
+
+;; (defn- print-log [a ^String s]
+;;   (.println System/out s)
+;;   a)
+
+;; (defn log-info ^void [label & parts]
+;;   (let [now (System/nanoTime)
+;;         s (str (fmt-instance now) " (info) "
+;;                label " " (str/join " " parts)
+;;                " [tid=" (.threadId (Thread/currentThread)) "]")]
+;;     (send-off *logger* print-log s)))
+
+;; (defn log-start ^long [label & parts]
+;;   (let [now (System/nanoTime)
+;;         s (str (fmt-instance now) " (start) "
+;;                label " " (str/join " " parts)
+;;                " [tid=" (.threadId (Thread/currentThread)) "]")]
+;;     (send-off *logger* print-log s)
+;;     now))
+
+;; (defn log-end ^long [^long start label & parts]
+;;   (let [now (System/nanoTime)
+;;         s (str (fmt-instance now) " (" (fmt-duration (- now start)) ") "
+;;                label " " (str/join " " parts)
+;;                " [tid=" (.threadId (Thread/currentThread)) "]")]
+;;     (send-off *logger* print-log s)
+;;     now))
