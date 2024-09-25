@@ -6,7 +6,7 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.alpha.ptest ;small subset of clojure.test -- partial but parallel
-  (:require [tcljx.alpha.ptest__impl :refer :all]))
+  (:require [tcljx.alpha.ptest__impl :as impl]))
 
 (defmacro deftest [nm & body]
   (assert (symbol? nm))
@@ -20,56 +20,63 @@
   (assert (symbol? class))
   `(try
      ~form
-     (outcome-fail ~ctx nil "no exception was raised"
-                   (object ~class) nil)
+     (.outcome-fail ~ctx "no exception was raised"
+                    (object ~class) nil)
      ~(if (nil? re)
         `(catch ~class _
-           (outcome-pass ~ctx))
+           (.outcome-pass ~ctx))
         `(catch ~class e#
            (let [m# (.getMessage e#), re# ~re]
              (if (re-find re# m#)
-               (outcome-pass ~ctx)
-               (outcome-fail ~ctx e# "unexpected exception message"
-                                  (object re#) m#)))))
+               (.outcome-pass ~ctx)
+               (.outcome-fail ~ctx "unexpected exception message"
+                              (object re#) m#)))))
      (catch Throwable t#
-       (outcome-fail ~ctx t# "unexpected exception type"
-                     ~class (class t#)))))
+       (.outcome-fail ~ctx "unexpected exception type"
+                      ~class (class t#)))))
 
 (defmacro is [form]
   (let [ctx (gensym "__ctx")
         line (-> &form (meta) :line)]
     (assert (some? line) "form of `is` macro has no :line meta")
-    `(when-some [~ctx (this-test-context-if-selected ~line)]
+    `(when-some [~ctx (impl/is-context-if-selected ~line)]
        ~(case (when (seq? form) (first form))
           (= tinyclj.core/= tinyclj.lang.primitive/equiv-nary)
-          `(equiv-test ~ctx ~form)
+          `(impl/equiv-test ~ctx ~form)
           
-          (thrown? tinyclj.alpha.ptest/thrown?)
+          (thrown? tcljx.alpha.ptest/thrown?)
           `(thrown-msg-test ~ctx ~(second form) nil ~@(nthrest form 2))
           
-          (thrown-with-msg? tinyclj.alpha.ptest/thrown-with-msg?)
+          (thrown-with-msg? tcljx.alpha.ptest/thrown-with-msg?)
           `(thrown-msg-test ~ctx ~@(rest form))
           
-          #_else `(boolean-test ~ctx ~form)))))
+          #_else `(impl/boolean-test ~ctx ~form)))))
 
 ;;; ------------------------------------------------------------------------
 
+;;; Calls `.printStackTrace` with output redirected to `*err*`.  Use
+;;; inside a `deftest` to have the stack trace captured as part of the
+;;; test output.  Calling the single argument JDK method writes to
+;;; `System/err`, bypassing the captured `*err*`.
+(defn print-stack-trace ^void [^Throwable t]
+  (.printStackTrace t ^java.io.PrintWriter *err*))
+
+(defn run-and-report ^keyword [^vector nmspv]
+  (let [rep (-> (impl/run-tests nmspv) (time))]
+    (println "\nRan" (.tests rep) "tests containing"
+             (impl/is-count rep) "assertions.")
+    (println (.is-fail rep) "failures," (.is-error rep) "errors.")
+    (impl/exit-status rep)))
+
 (defn run-scoped-tests
-  "If `scope` (by default environment variable \"TEST\") is not nil,
-  then only run the test of this namespaced var or only the tests from
-  the given namespace.  Optionally, limit this to matching line
-  numbers if the suffix `:<number>` is present.  If `scope` is nil,
-  run the tests from the namespaces in `else-namespaces`.  Var and
-  namespace can be specified as symbol or string.  Depending on the
-  outcome, result is one of the keywords :error, :fail, or :success."
+  "If the environment variable \"TEST\") is set, then only run the test
+  of this namespaced var or only the tests from the given namespace.
+  Optionally, limit this to matching line numbers if the suffix
+  `:<number>` is present.  Otherwise, run the tests from the
+  namespaces in `else-namespaces`.  Var and namespace can be specified
+  as symbol or string.  Depending on the outcome, result is one of the
+  keywords :error, :fail, or :success."
   (^keyword [else-namespaces]
-   (run-scoped-tests (System/getenv "TEST") else-namespaces))
-  (^keyword [scope else-namespaces]
-   (let [r (time (-> (if (some? scope)
-                       (run-scope scope)
-                       (run-namespaces (mapv symbol else-namespaces)))
-                     (print-report)))]
-     (println "\nRan" (.tests r) "tests containing"
-              (assert-count r) "assertions.")
-     (println (.fail r) "failures," (.error r) "errors.")
-     (exit-status r))))
+   (run-and-report (if-some [spec (System/getenv "TEST")]
+                     (impl/parse-scope-spec spec)
+                     (impl/parse-scope-specs else-namespaces)))))

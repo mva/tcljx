@@ -10,14 +10,17 @@
    [tinyclj.alpha.ptest__term :as term]
    [tinyclj.alpha.ptest__align :as align])
   (:import
-   (clojure.lang Symbol Keyword Namespace Var ExceptionInfo
-                 IPersistentVector IPersistentMap)
+   (clojure.lang Var)
    (java.io StringWriter)
+   (java.time Instant)
    (java.util ArrayList)
-   (java.util.concurrent Future ExecutorService TimeUnit)
+   (java.util.concurrent StructuredTaskScope StructuredTaskScope$Subtask
+                         CountDownLatch)
    (java.util.function IntPredicate)))
 
-(def ^:private single-threaded false)
+(def ^:private run-tests-as-concurrent-tasks? true)
+(def ^:private deadline-test-var-seconds (* 1 60))
+(def ^:private deadline-namespace-seconds (* 2 60))
 
 ;;; Disables all of the pretty printing machinery when false.  Highly
 ;;; recommended when tinkering with the printer logic, because this
@@ -25,303 +28,305 @@
 (def ^:private pretty-print-expected-actual true)
 
 
-(deftype TestContext [^Symbol namespace
-                      ^Symbol name
-                      ^IntPredicate select ;enable `is` based on line number
+(letfn [(nmsp-of ^String [^String spec]
+          (let [i-var (.indexOf spec (int \/))]
+            (if (neg? i-var)
+              spec
+              (.substring spec 0 i-var))))
+        (namespace-scope ^vector [^String spec]
+          (let [nmsp (nmsp-of spec)]
+            (if (identical? nmsp spec)
+              [spec true]               ;scope is whole nmsp
+              (let [i-var (inc (.length nmsp))
+                    i-line (inc (.indexOf spec (int \:) i-var))]
+                (if (zero? i-line)
+                  [nmsp {(.substring spec i-var) true}] ;scope is nmsp/var
+                  (let [var (.substring spec i-var (dec i-line))
+                        line (.substring spec i-line)]
+                    [nmsp {var #{(Integer/parseInt line)}}]))))))
+        (scope-map ^map [^vector nmsp-scope]
+          (conj {} nmsp-scope))]
+  
+  (defn parse-scope-spec ^vector [spec]
+    [(namespace-scope (str spec))])
+
+  (defn parse-scope-specs ^vector [specs]
+    (letfn [(union-var [a b]
+              (or (true? a) (true? b) (into a b))) ;use `into` as `set/union`
+            (union-nmsp [a b]
+              (or (true? a) (true? b) (merge-with union-var a b)))]
+      (let [m (transduce (map (comp scope-map namespace-scope str))
+                         (completing (partial merge-with union-nmsp))
+                         {} specs)]
+        (->> (map (comp nmsp-of str) specs)
+             (distinct)
+             (mapv (partial find m)))))))
+
+;;; ------------------------------------------------------------------------
+
+(deftype Report [^int tests ^int is-pass ^int is-fail ^int is-error]
+  java.lang.Record)
+(def ^:private report-empty (Report. 0 0 0 0))
+(def ^:private test-report-empty (Report. 1 0 0 0))
+(def ^:private is-report-pass (Report. 0 1 0 0))
+(def ^:private is-report-fail (Report. 0 0 1 0))
+(def ^:private is-report-error (Report. 0 0 0 1))
+
+(defn- add-report ^Report [^Report a ^Report b]
+  (Report. (+ (.tests a) (.tests b))
+           (+ (.is-pass a) (.is-pass b))
+           (+ (.is-fail a) (.is-fail b))
+           (+ (.is-error a) (.is-error b))))
+(defn- add-reports ^Report [^Report init reports]
+  (reduce add-report init reports))
+
+(defn is-count ^int [^Report rep]
+  (+ (.is-pass rep) (.is-fail rep) (.is-error rep)))
+
+(defn all-pass? ^boolean [^Report rep]
+  (zero? (+ (.is-error rep) (.is-fail rep))))
+
+(defn exit-status ^keyword [^Report rep]
+  (if (zero? (.is-error rep) )
+    (if (zero? (.is-fail rep)) :success :fail)
+    :error))
+
+;;; ------------------------------------------------------------------------
+
+(defn- print-lines [^java.lang.StringBuffer buffer ^int start ^int end]
+  (let [s (.substring buffer start end)]
+    (print s)
+    (when-not (.endsWith s "\n") (newline))))
+
+(definterface ITestContext
+  (output-position ^int [])
+  (register-outcome ^void [^int out-start ^int out-end ^Callable outcome]))
+
+(deftype TestContext [^symbol var-symbol
+                      ^IntPredicate select-is? ;enable `is` based on line number
                       ^StringWriter output ;target of *out* and *err*
-                      ^ArrayList outcomes  ;receives `is` outcomes
-                      ^int line])    ;line number of `deftest` or `is`
-                      
-
-;;; An `Outcome` records the outcome of an `is` form, or reports an
-;;; exception raised outside of any `is`.
-(deftype Outcome [^int line             ;line number of `is` or `deftest` form
-                  ^boolean pass?        ;if neither ERROR nor FAIL
-                  ^int out-start        ;negative if outside of `is`
-                  ^int out-end
-                  ^Throwable ex         ;always set if error
-                  ^String msg           ;set if failure, nil otherwise
-                  ^Object expected
-                  ^Object actual])
-
-(defn- output-pos ^int [^TestContext ctx]
-  (-> ctx .output (.getBuffer) (.length)))
-
-(defn pass? ^boolean [^Outcome oc]
-  (.pass? oc))
-(defn fail? ^boolean [^Outcome oc]
-  (some? (.msg oc)))
-(defn error? ^boolean [^Outcome oc]
-  (and (some? (.ex oc)) (not (fail? oc))))
-
-(defn- output-seen ^int [^TestContext ctx]
-  (let [a (.outcomes ctx)]
-    (if (.isEmpty a)
-      0
-      (.out-end ^Outcome (.get a (dec (.size a)))))))
-
-;;; An error is any unexpected exception outside or within an `is`
-;;; form.
-(defn outcome-error ^void [^TestContext ctx ^Throwable ex]
-  ;; note: `out-start` is negative if outside an `is` form
-  (.add (.outcomes ctx)
-        (Outcome. (.line ctx) false (output-seen ctx) (output-pos ctx)
-                  ex nil nil nil)))
-
-(defn outcome-fail ^void [^TestContext ctx ^Throwable ex
-                          ^String msg expected actual]
-  (.add (.outcomes ctx)
-        (Outcome. (.line ctx) false (output-seen ctx) (output-pos ctx)
-                  ex msg expected actual)))
-
-(defn outcome-pass ^void [^TestContext ctx]
-  (.add (.outcomes ctx)
-        (Outcome. (.line ctx) true (output-seen ctx) (output-pos ctx)
-                  nil nil nil nil)))
-
-
-(def ^:private ^:var ^:dynamic ^TestContext *ctx* nil)
-
-(defn this-test-context-if-selected ^TestContext [^int line] ;called from `is`
-  (if-some [ctx *ctx*]
-    (when (.test (.select ctx) line)
-      (TestContext. (.namespace ctx) (.name ctx) (.select ctx)
-                    (.output ctx) (.outcomes ctx) line))
-    (throw (IllegalStateException. "no test context"))))
-
-(defn get-test-context ^TestContext []  ;to get namespace & test var
-  (when-some [ctx *ctx*]
-    (TestContext. (.namespace ctx) (.name ctx) nil nil nil -1)))
+                      ^ArrayList outcomes ;receives `is` outcome Callables
+                      ;; ^int line    ;line number of `deftest` or `is`
+                      ^:unsynchronized-mutable ^int out-mark]
+  ITestContext
+  (output-position [_]
+    (-> output (.getBuffer) (.length)))
+  (register-outcome [_ out-start out-end outcome]
+    (when (< out-mark out-start)
+      (.add outcomes
+            (^Callable fn []
+             (print-lines (.getBuffer output) out-mark out-start)
+             report-empty)))
+    (when (some? outcome)       ;omit when marking the `deftest`'s end
+      (.add outcomes outcome))
+    (set! out-mark out-end)))
 
 ;;; ------------------------------------------------------------------------
 
-(defn- get-future [x]
-  (if (instance? Future x)
-    (.get ^Future x 5 TimeUnit/HOURS) ;timeout earlier than with-executor
-    x))
-
-(defmacro with-fork [exc & body]
-  (if single-threaded
-    `(do (object ~@body))
-    `(.submit ~exc (^Callable fn [] ~@body))))
-
-(defmacro with-executor [exc & body]
-  (assert (symbol? exc))
-  `(let [~exc (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor)]
-     (try
-       (let [res# (do ~@body)]
-         (.shutdown ~exc)
-         (when-not (.awaitTermination ~exc 6 TimeUnit/HOURS)
-           (throw (java.util.concurrent.TimeoutException.)))
-         res#)
-       (finally
-         ;; if body throws, do shutdown before re-raising the original
-         ;; exception; if body succeeds, the second shutdown has no
-         ;; effect
-         (.shutdown ~exc)))))
-
-;;; ------------------------------------------------------------------------
+(definterface IsContext
+  ;; An error is any unexpected exception outside or within an `is`
+  ;; form.
+  (outcome-error ^void [^Throwable ex])
+  (outcome-fail ^void [^String msg expected actual])
+  (outcome-pass ^void []))
 
 (defmacro equiv-test ^void [ctx [_ exp act :as form]]
   (assert (= (count form) 3))
   `(try
      (let [exp# ~exp, act# ~act]
        (if (= exp# act#)
-         (outcome-pass ~ctx)
-         (outcome-fail ~ctx nil "expected not equivalent to actual value"
-                       (object exp#) (object act#))))
+         (.outcome-pass ~ctx)
+         (.outcome-fail ~ctx "expected not equivalent to actual value"
+                        (object exp#) (object act#))))
      (catch Throwable t#
-       (outcome-error ~ctx t#))))
+       (.outcome-error ~ctx t#))))
 
 (defmacro boolean-test ^void [ctx form]
   `(try
      (let [form# ~form]
        (if form#
-         (outcome-pass ~ctx)
-         (outcome-fail ~ctx nil "expression evaluates to false"
-                       (object true) (object form#))))
+         (.outcome-pass ~ctx)
+         (.outcome-fail ~ctx "expression evaluates to false"
+                        (object true) (object form#))))
      (catch Throwable t#
-       (outcome-error ~ctx t#))))
+       (.outcome-error ~ctx t#))))
 
 ;;; ------------------------------------------------------------------------
 
-(deftype Report [^int tests
-                 ^int pass
-                 ^int fail
-                 ^int error
-                 
-                 scope             ;Var, Namespace, or nil
-                 ^String output    ;*out* and *err* if scope is Var
-                 ^IPersistentVector details]) ;of Outcome or Report
+(defn- print-stack-trace ^void [^Throwable t]
+  (when (some? t)
+    (.printStackTrace t (java.io.PrintWriter. *out*))
+    (println)))
 
-(defn- test-report? ^boolean [x]
-  (and (instance? Report x) (instance? Var (.scope ^Report x))))
-(defn- nmsp-report? ^boolean [x]
-  (and (instance? Report x) (instance? Namespace (.scope ^Report x))))
+(defn- print-header [^TestContext test-ctx ^String prefix ^int line]
+  (let [line-suffix (when (>= line 0)
+                      (str ":" (term/highlight (str line))))]
+    (println prefix (str (.var-symbol test-ctx) line-suffix))))
 
-(defn assert-count ^int [^Report r]
-  ;; actually "count of `is` forms plus any exceptions outside of `is`"
-  (+ (.error r) (.fail r) (.pass r)))
-
-(defn exit-status ^Keyword [^Report r]
-  (if (zero? (.error r) )
-    (if (zero? (.fail r)) :success :fail)
-    :error))
-
-(defn- line-count ^int [^String s]
-  (loop [n 0, i 0]
-    (let [j (.indexOf s (int \newline) i)]
-      (if (neg? j)
-        (+ n (int (< i (.length s))))
-        (recur (inc n) (inc j))))))
-
-;;; Don't call this when materializing a lazy seq.
-(defn- nmsp-report ^Report [^Namespace ns-obj xs]
-  (loop [tests 0,
-         pass 0, fail 0, error 0, lines 0,
-         details (transient []),
-         [x & xr :as xs] (seq xs)]
-    (if (some? xs)
-      (let [r ^Report (get-future x)]
-        (recur (+ tests (.tests r))
-               (+ pass (.pass r)) (+ fail (.fail r)) (+ error (.error r))
-               (+ lines (line-count (.output r)))
-               (conj! details r) xr))
-      (Report. tests pass fail error ns-obj
-               (if (pos? lines)
-                 (str ", " lines " lines of output") ;for print-nmsp-report
-                 "")
-               (persistent! details)))))
-
-(defn- line-number ^Integer [^Var v]
-  (-> v (meta) :line))
-
-(defn- output? ^boolean [^Outcome oc]
-  (and (<= 0 (.out-start oc)) (< (.out-start oc) (.out-end oc))))
-
-(defn outcome-output ^String [^Report r ^Outcome oc]
-  (when (output? oc)
-    (.substring (.output r) (.out-start oc) (.out-end oc))))
-
-
-(def ^:private select-all (^IntPredicate fn [_] true))
-
-(defn- run-test-var ^Report [^IntPredicate select ^Var v]
-  (let [line ^int (or (line-number v) (object -1))
-        ctx (TestContext. (-> v .ns .name) (.sym v)
-                          (if (.test select line) select-all select)
-                          (StringWriter.) (ArrayList.) line)]
-    (try
-      ;; note: the unit tests of this namespace call this function
-      ;; recursively, i.e. there really must be a binding that
-      ;; establishes a nested context and restores the parent context
-      (binding [*out* (.output ctx), *err* (.output ctx), *ctx* ctx]
-        (@v)
-        (flush))
-      (catch Throwable t
-        (outcome-error ctx t)))
-
-    ;; summarize outcomes
-    (let [outcomes (.outcomes ctx)]
-      (loop [pass 0, fail 0, error 0, ocs (transient []), i 0]
-        (if (= i (.size outcomes))
-          (Report. 1 pass fail error v
-                   (.toString (.output ctx)) (persistent! ocs))
-          (let [oc ^Outcome (.get outcomes i)]
-            (recur (+ pass (int (pass? oc)))
-                   (+ fail (int (fail? oc)))
-                   (+ error (int (error? oc)))
-                   (conj! ocs oc) (inc i))))))))
-
-(defn- run-nmsp-tests [^IntPredicate select ^Symbol nmsp]
-  ;; Note: Forking of a virtual thread for every `deftest` in the
-  ;; namespace can be overkill.  The alternative is to use a single
-  ;; virtual thread per namespace, without subdividing the load
-  ;; further.
-  (let [ns-obj (the-ns nmsp)]
-    (with-executor exc
-      (->> (vals (ns-interns ns-obj))   ;all vars of the namespace
-           (filter #(-> % (meta) :test (true?)))
-           (sort-by line-number) ;bring vars into source code order
-           ;;note: eager mapv produces all test futures
-           (mapv #(with-fork exc (run-test-var select %)))
-           (nmsp-report ns-obj)))))
+(defn- some-output? ^boolean [^int out-start ^int out-end]
+  (< out-start out-end))
+(defn- print-output ^void [^TestContext test-ctx ^int out-start ^int out-end]
+  (when (some-output? out-start out-end)
+    (println (term/dim "---- output start ----"))
+    (print-lines (-> test-ctx .output (.getBuffer)) out-start out-end)
+    (println (term/dim "----- output end -----"))))
 
 (def ^:private header-pass (term/success "PASS"))
 (def ^:private header-fail (term/error-header " FAIL " "*FAIL*"))
 (def ^:private header-error (term/error-header " ERROR " "*ERROR*"))
-(defn run-namespaces [nmsps]
-  (with-executor exc
-    (->> nmsps
-         ;;note: eager mapv produces all namespace futures
-         (mapv #(with-fork exc (run-nmsp-tests select-all %))))))
 
-(letfn [(print-stacktrace ^void [^Throwable t]
-          (when (some? t)
-            (.printStackTrace t)
-            (println)))
-        (print-fail ^void [^Outcome oc]
-          (if pretty-print-expected-actual
-            (align/print-a-b (.msg oc)
-                             (.expected oc)
-                             (.actual oc))
-            (align/print-cea (.msg oc)
-                             (.expected oc)
-                             (.actual oc)))
-          (print-stacktrace (.ex oc))
-          (println))
-        (print-outcome ^void [^Var v ^String output ^Outcome oc]
-          (when (or (not (.pass? oc)) (output? oc))
-            (let [prefix (cond
-                           (pass? oc) header-pass
-                           (fail? oc) (str header-fail " at")
-                           (error? oc) (str header-error " at")
-                           :else (throw (IllegalStateException.)))
-                  line-suffix (when (>= (.line oc) 0)
-                                (str ":" (term/highlight (str (.line oc)))))]
-              (println prefix (str (.ns v) "/" (.sym v) line-suffix))
-              (when (output? oc)
-                (println (term/dim "---- output start ----"))
-                (println (.substring output (.out-start oc) (.out-end oc)))
-                (println (term/dim "----- output end -----"))))
-            (cond
-              (pass? oc) (println)
-              (fail? oc) (print-fail oc)
-              (error? oc) (print-stacktrace (.ex oc)))))
-        
-        (print-test-report ^Report [^Report r]
-          (doseq [oc (.details r)
-                  :when (not (pass? oc))]
-            (print-outcome (.scope r) (.output r) oc))
-          r)
+(deftype IsContextImpl [^TestContext test-ctx
+                        ^int line    ;negative if "between" `is` forms
+                        ^int out-start]
+  IsContext
+  (outcome-error [this ex]
+    (let [out-end (.output-position test-ctx)]
+      (.register-outcome test-ctx out-start out-end
+                         (^Callable fn []
+                          (print-header test-ctx header-error line)
+                          (print-output test-ctx out-start out-end)
+                          (print-stack-trace ex)
+                          is-report-error))))
+  (outcome-fail [this msg expected actual]
+    (let [out-end (.output-position test-ctx)]
+      (.register-outcome test-ctx out-start out-end 
+                         (^Callable fn []
+                          (print-header test-ctx header-fail line)
+                          (print-output test-ctx out-start out-end)
+                          (if pretty-print-expected-actual
+                            (align/print-a-b msg expected actual)
+                            (align/print-cea msg expected actual))
+                          is-report-fail))))
+  (outcome-pass [this]
+    (let [out-end (.output-position test-ctx)]
+      (.register-outcome test-ctx out-start out-end
+                         (^Callable fn []
+                          (when (some-output? out-start out-end)
+                            (print-header test-ctx header-pass line)
+                            (print-output test-ctx out-start out-end))
+                          is-report-pass)))))
 
-        (all-pass? ^boolean [^Report r]
-          (zero? (+ (.error r) (.fail r))))
-        (print-nmsp-report ^Report [^Report r]
-          (if (all-pass? r)
-            (println (str (term/success "PASS ") (ns-name (.scope r)) "/... "
-                          "(" (.tests r) " tests" (.output r) ")"))
-            (run! print-test-report (.details r)))
-          r)]
-  
-  ;; Don't call this when materializing a lazy seq.
-  (defn print-report ^Report [x]
-    (cond
-      (test-report? x) (print-test-report x)
-      (nmsp-report? x) (print-nmsp-report x)
-      (instance? Future x) (recur (get-future x))
-      :else (nmsp-report nil (mapv print-report x)))))
+(def ^:private TEST-CTX (java.lang.ScopedValue/newInstance))
 
-(defn run-scope ^Report [scope]
-  (letfn [(resolve-fq-nm ^Var [^Symbol fq-nm]
-            (or (find-var fq-nm)
-                (throw (Exception. (str "No var: " fq-nm " found")))))]
-    (let [[_ scope-nm line-num] (re-matches #"([^:]*)(?::(\d+))?" (name scope))
-          select (if (some? line-num)
-                   (let [n (Integer/parseInt line-num)]
-                     (^IntPredicate fn [line] (= line n)))
-                   select-all)
-          test-sym (symbol scope-nm)]
-      (if (some? (namespace test-sym))  ;symbol has form nmsp/test
-        (run-test-var select (resolve-fq-nm test-sym))
-        (run-nmsp-tests select test-sym)))))
+(defn is-context-if-selected ^IsContext [^int line] ;called from `is`
+  (let [test-ctx ^TestContext (.get TEST-CTX)]
+    (when (.test (.select-is? test-ctx) line)
+      (IsContextImpl. test-ctx line (.output-position test-ctx)))))
+
+;;; ------------------------------------------------------------------------
+
+(defn- var-line ^Integer [^Var var] (-> var (meta) :line))
+(defn- var-name ^String [^Var var] (name (symbol var)))
+
+(defn- run-test-var ^Callable [^Var var ^IntPredicate select-is?]
+  (let [test-ctx (TestContext. (symbol var) select-is?
+                               (StringWriter.) (ArrayList.) 0)]
+    ;; Runs the deftest function `var` with `*out*` and
+    ;; `*err` redirected to the output member of `ctx`.
+    (java.lang.ScopedValue/runWhere
+     TEST-CTX test-ctx                 ;provide context to `is` macros
+     (^Runnable fn []
+      ;; note: the unit tests of this namespace call this function
+      ;; recursively, i.e. there really must be a binding that
+      ;; establishes a nested context and restores the parent context
+      (try
+        (binding [*out* (.output test-ctx)
+                  *err* (.output test-ctx)]
+          (@var))
+        (catch Throwable t              ;any exception outside `is`
+          (let [out-pos (.output-position test-ctx)]
+            (.outcome-error (IsContextImpl. test-ctx -1 out-pos) t))))))
+    
+    (let [size (.output-position test-ctx)]
+      (.register-outcome test-ctx size size nil)) ;capture any remaining output
+    
+    (^Callable fn []
+     ;; print deftest outcomes only on demand
+     (->> (map Callable/.call (.outcomes test-ctx))
+          (add-reports test-report-empty)))))
+
+(def ^:private select-all (^IntPredicate fn [line] true))
+
+(defmacro ^:private with-fork [scope binding-frame & body]
+  `(let [binding-frame# ~binding-frame]
+     (.fork ~scope
+            (^java.util.concurrent.Callable fn []
+             (clojure.lang.Var/resetThreadBindingFrame binding-frame#)
+             ~@body))))
+
+(defn- run-tests* ^Report [binding-frame ^vector nmspv]
+  (letfn [(nmsp-test-vars ^seq [nmsp vars] ;returns a seq of Var
+            (letfn [(resolve-var [^String var]
+                      (let [sym (symbol nmsp var)]
+                        (or (find-var sym)
+                            (throw (Exception. (str "no var found: " sym))))))]
+              (sort-by var-line
+                       (if (true? vars)
+                         (->> (vals (ns-interns (the-ns (symbol nil nmsp))))
+                              (filter #(-> % (meta) :test (true?))))
+                         (map resolve-var (keys vars))))))
+          (run-var-with-pred ^Callable [^map var-line-map ^Var var]
+            (let [lines (var-line-map (var-name var) true)]
+              (run-test-var var (if (true? lines)
+                                  select-all
+                                  (^IntPredicate fn [line]
+                                   (contains? lines line))))))
+          (collect-run-var-outcomes ^vector [^String nmsp vars]
+            (let [var-line-map (if (true? vars) {} vars)
+                  vars (nmsp-test-vars nmsp vars)]
+              (if run-tests-as-concurrent-tasks?
+                (with-open [scope (StructuredTaskScope.)]
+                  (let [taskv (mapv #(with-fork scope binding-frame
+                                       (run-var-with-pred var-line-map %))
+                                    vars)]
+                    (.joinUntil scope (.plusSeconds (Instant/now)
+                                                    deadline-test-var-seconds))
+                    (mapv StructuredTaskScope$Subtask/.get taskv)))
+
+                ;; alternative: sequential execution
+                (mapv (partial run-var-with-pred var-line-map) vars))))
+          (run-nmsp ^Callable [[nmsp vars]]
+            (let [outcomes (collect-run-var-outcomes nmsp vars)]
+              ;; print deftest results of the whole namespace as one
+              ;; block, but only on demand
+              (^Callable fn []
+               (let [report (->> (map Callable/.call outcomes)
+                                 (add-reports report-empty))]
+                 (when (all-pass? report)
+                   (println (str header-pass " " nmsp "/... ("
+                                 (.tests report) " tests)")))
+                 report))))]
+    
+    ;; Print outcomes sequentially in namespace execution order, as
+    ;; soon as they become available.  A long running namespace blocks
+    ;; the output of all following namespaces.
+    (->> (if run-tests-as-concurrent-tasks?
+           (with-open [scope (StructuredTaskScope.)]
+             (let [n (count nmspv)
+                   alatch (new CountDownLatch/1 (inc n))
+                   atask (new StructuredTaskScope$Subtask/1 n)]
+               (dotimes [i (alength alatch)]
+                 (aset alatch i (CountDownLatch. 1)))
+               (.countDown (aget alatch 0)) ;first task can print immediately
+               
+               (dotimes [i (alength atask)]
+                 (->> (with-fork scope binding-frame
+                        (let [outcome (run-nmsp (nth nmspv i))]
+                          (.await (aget alatch i))
+                          (let [report (.call outcome)]
+                            ;; only unlock next task's output if this
+                            ;; task completes successfully
+                            (.countDown (aget alatch (inc i)))
+                            report)))
+                      (aset atask i)))
+               
+               (.joinUntil scope (.plusSeconds (Instant/now)
+                                               deadline-namespace-seconds))
+               (mapv StructuredTaskScope$Subtask/.get atask)))
+
+           ;; alternative: sequential execution
+           (mapv #(.call (run-nmsp %)) nmspv))
+         (add-reports report-empty))))
+
+(defn run-tests ^Report [^vector nmspv]
+  (run-tests* (Var/cloneThreadBindingFrame) nmspv))
