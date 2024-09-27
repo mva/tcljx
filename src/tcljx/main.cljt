@@ -8,9 +8,98 @@
 (ns tcljx.main
   (:require [tcljx.wrong :as wrong]
             [tcljx.reader :as reader]
-            [tcljx.reader-test :as reader-test]))
+            [tcljx.reader-test :as reader-test]
+
+            [tcljx.alpha.textflow :as tf]))
+
+(def multi-style (-> (tf/mk-cursor)
+                     (tf/intensity-bright)
+                     (tf/background-4bit tf/palette-blue)
+                     (tf/font-italic)
+                     (tf/strikethrough)
+                     (.style)))
+(def multi-text "int+bg+font+strike ")
+
+(defn demo-page ^Object/1 []
+  (-> (tf/mk-cursor)
+      (tf/text "default test") (tf/newline)
+      
+      (tf/text "foreground ")
+      (tf/with-save-restore->
+        (tf/foreground-4bit tf/palette-red) (tf/text "red ")
+        (tf/foreground-4bit tf/palette-green) (tf/text "green ")
+        (tf/foreground-4bit tf/palette-blue) (tf/text "blue "))
+      (tf/newline)
+      
+      (tf/text "background ")
+      (tf/with-save-restore->
+        (tf/background-4bit tf/palette-red) (tf/text "red ")
+        (tf/background-4bit tf/palette-green) (tf/text "green ")
+        (tf/background-4bit tf/palette-blue) (tf/text "blue "))
+      (tf/newline)
+
+      (tf/text "intensity ")
+      (tf/with-save-restore->
+        (tf/intensity-faint) (tf/text "faint ")
+        (tf/intensity-normal) (tf/text "normal ")
+        (tf/intensity-bright) (tf/text "bright "))
+      (tf/newline)
+
+      (tf/text "normal ")
+      (tf/with-save-restore-> (tf/underline) (tf/text "underline "))
+      (tf/with-save-restore-> (tf/strikethrough) (tf/text "strikethrough "))
+      (tf/newline)
+      
+      (tf/text "plain ")
+      (tf/with-save-restore->
+        (tf/font-bold) (tf/text "bold "))
+      (tf/with-save-restore->
+        (tf/font-italic) (tf/text "italic "))
+      (tf/with-save-restore->
+        (tf/font-bold) (tf/font-italic) (tf/text "bold-italic "))
+      (tf/newline)
+
+      (tf/text "multi ")
+      (tf/with-save-restore-> (tf/with-style multi-style) (tf/text multi-text))
+      (tf/text "off") (tf/newline)
+
+      (tf/text "conceal ")
+      (tf/with-save-restore->
+        (tf/conceal-invisible) (tf/text "AAA ")
+        (tf/conceal-XXX) (tf/text "BBB ")
+        (tf/conceal-spaces) (tf/text "CCC "))
+      (tf/text "off") (tf/newline)
+      
+      (tf/text "column")
+      (tf/forward-to-column 10) (tf/text "10")
+      (tf/forward-to-column 20) (tf/text "20")
+      
+      (tf/page)))
+
+(defn print-demo-page []
+  (let [page (demo-page)
+        empty-page (-> (tf/mk-cursor) (tf/page))
+        short-page (-> (tf/mk-cursor)
+                       (tf/text "full line")
+                       (tf/newline 4)
+                       (tf/text "line without newline")
+                       (tf/page))]
+    #_(-> page
+          (tf/print-page))
+    (-> (tf/side-by-side (doto (new Object/2 3)
+                           (aset 0 page)
+                           (aset 1 page)
+                           (aset 2 short-page))
+                         (doto (new int/1 3)
+                           (aset 0 2)
+                           (aset 1 34)
+                           (aset 2 66)))
+        (tf/print-page))))
 
 (defn run []
+  (print-demo-page)
+  
+  #_
   (try
     (let [nmsp-ctx (reader-test/stub-nmsp-ctx "ns.pkg0" {})
           cs (slurp "../tcljc/src/tinyclj.core/tinyclj/core.cljt")
