@@ -80,20 +80,24 @@
 ;;; for the command id.  The command value "all zeros" is reserved.
 
 (letfn [(grow-cmds ^Object/1 [^Object/1 cmds ^int i]
-          (cond-> cmds (= i (alength cmds)) (Arrays/copyOf (* i 2))))
-        (add-object ^Cursor [^Cursor csr ^Object cmd ^long style]
-          (let [i (.cmd-count csr)]
-            (Cursor. (inc i)
-                     (doto (grow-cmds (.cmds csr) i) (aset i cmd))
-                     style)))
-        (add-cmd
-          (^Cursor [^Cursor csr ^Integer cmd]
-           (let [style' (impl/apply-command (.style csr) ^int cmd)]
-             (add-object csr cmd style')))
-          (^Cursor [^Cursor csr ^int id ^int arg]
-           (add-cmd csr (object (impl/mk-cmd id arg)))))
-        (add-cmd-bool ^Cursor [^Cursor csr ^int id ^boolean arg?]
-          (add-cmd csr id (int arg?)))]
+          (cond-> cmds (= i (alength cmds)) (Arrays/copyOf (* i 2))))]
+  (defn add-object
+    (^Cursor [^Cursor csr ^Object cmd]
+     (add-object csr cmd (.style csr)))
+    (^Cursor [^Cursor csr ^Object cmd ^long style]
+     (let [i (.cmd-count csr)]
+       (Cursor. (inc i)
+                (doto (grow-cmds (.cmds csr) i) (aset i cmd))
+                style))))
+  (defn add-cmd
+    (^Cursor [^Cursor csr ^Integer cmd]
+     (let [style' (impl/apply-command (.style csr) ^int cmd)]
+       (add-object csr cmd style')))
+    (^Cursor [^Cursor csr ^int id ^int arg]
+     (add-cmd csr (object (impl/mk-cmd id arg)))))
+  (defn add-cmd-bool ^Cursor [^Cursor csr ^int id ^boolean arg?]
+    (add-cmd csr id (int arg?)))
+
   (defn text ^Cursor [^Cursor csr ^String txt]
     (add-object csr txt (.style csr)))
   (defn newline
@@ -188,9 +192,7 @@
 
 ;;; ------------------------------------------------------------------------
 
-(letfn [(text-width ^int [^String txt]
-          (.codePointCount txt 0 (.length txt)))
-        (append-text ^StringBuilder [^StringBuilder sb ^String txt ^int width
+(letfn [(append-text ^StringBuilder [^StringBuilder sb ^String txt ^int width
                                      ^long style]
           (let [conceal (impl/extract impl/mask-style-conceal style)]
             (if (< conceal impl/conceal-XXX)
@@ -226,7 +228,7 @@
          (let [x (aget frag i)]
            (cond
              (instance? String x)
-             (let [txt ^String x, width (text-width txt)]
+             (let [txt ^String x, width (impl/text-width txt)]
                (recur (append-text sb txt width style)
                       style (+ column width) (inc i)))
              
@@ -265,7 +267,7 @@
          (let [x (aget frag i)]
            (cond
              (instance? String x)
-             (let [txt ^String x, width (text-width txt)]
+             (let [txt ^String x, width (impl/text-width txt)]
                (recur (append-text sb txt width style)
                       style (+ column width) (inc i)))
              

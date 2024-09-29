@@ -7,6 +7,9 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.alpha.textflow__impl)
 
+(defn text-width ^int [^String txt]
+  (.codePointCount txt 0 (.length txt)))
+
 (def color-mode-default 0)
 (def color-mode-palette-4bit 1)
 (def color-mode-palette-8bit 2)
@@ -23,38 +26,40 @@
 (def conceal-spaces 3)                  ;via replacement text
 
 
-(let [shift-cmd-arg 5
-      mask-cmd-id (dec (bit-shift-left 1 shift-cmd-arg))
-      mask-cmd-arg (bit-not mask-cmd-id)]
-  
-  (defn mk-cmd ^int [^int id ^int arg]
-    (bit-or (bit-and id mask-cmd-id id) (bit-shift-left arg shift-cmd-arg)))
-  
-  (defn cmd-id ^int [^int cmd]
-    (bit-and cmd mask-cmd-id))
-  (defn cmd-arg ^int [^int cmd]
-    (unsigned-bit-shift-right cmd shift-cmd-arg))
-  
-  (defn cmd?
-    (^boolean [^int id x]
-     (and (instance? Integer x) (= (cmd-id ^int x) id)))
-    (^boolean [^int id ^Object/1 page ^int i]
-     (cmd? id (aget page i))))
+(def ^:private shift-cmd-arg 5)
+(def ^:private mask-cmd-id (dec (bit-shift-left 1 shift-cmd-arg)))
+(def mask-cmd-arg (bit-not mask-cmd-id))
 
-  ;; command identifiers
-  (def cmd-id-invalid 0)
-  (def end-current-line 1)
-  (def forward-to-column 2)
-  (def set-font-bold 3)
-  (def set-font-italic 4)
-  (def set-underline 5)
-  (def set-strikethrough 6)
-  (def set-intensity 7)
-  (def set-foreground 8 #_plus-color-mode)
-  (def set-background 12 #_plus-color-mode)
-  (def set-conceal 16)
-  (def cmd-id-last set-conceal)
-  (assert (<= cmd-id-last mask-cmd-id)))
+(defn mk-cmd ^int [^int id ^int arg]
+  (bit-or (bit-and id mask-cmd-id id) (bit-shift-left arg shift-cmd-arg)))
+
+(defn cmd-id ^int [^int cmd]
+  (bit-and cmd mask-cmd-id))
+(defn cmd-arg ^int [^int cmd]
+  (unsigned-bit-shift-right cmd shift-cmd-arg))
+
+(defn cmd?
+  (^boolean [^int id x]
+   (and (instance? Integer x) (= (cmd-id ^int x) id)))
+  (^boolean [^int id ^Object/1 page ^int i]
+   (cmd? id (aget page i))))
+
+;; command identifiers
+(def cmd-id-invalid 0)
+(def end-current-line 1)
+(def forward-to-column 2)
+(def set-font-bold 3)
+(def set-font-italic 4)
+(def set-underline 5)
+(def set-strikethrough 6)
+(def set-intensity 7)
+(def set-foreground 8 #_plus-color-mode)
+(def set-background 12 #_plus-color-mode)
+(def set-conceal 16)
+(def cmd-id-last set-conceal)
+(def reserved-cmd-ids 2)
+(assert (<= (+ cmd-id-last reserved-cmd-ids) mask-cmd-id))
+
 
 (let [shift-arg-red 16
       shift-arg-green 8

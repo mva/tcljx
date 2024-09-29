@@ -1,0 +1,307 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.ptest__pp
+  (:require [tcljx.alpha.textflow :as tf]
+            [tcljx.alpha.textflow__impl :as tfi]
+            [tinyclj.core.protocols :refer [datafy]])
+  (:import (tcljx.alpha.textflow Cursor)
+           (tinyclj.core.protocols Datafiable)
+           (java.util Map$Entry)
+           (clojure.lang IMeta)
+           (java.util.regex Pattern)))
+
+;;; based on Kiselyov, Peyton-Jones, and Sabry: "Lazy v. Yield:
+;;; Incremental, Linear Pretty-printing"
+;;; http://www.cs.indiana.edu/~sabry/papers/yield-pp.pdf which in turn
+;;; builds upon the Derek C. Oppen's paper "Prettyprinting" (1980)
+;;; https://www.cs.tufts.edu/~nr/cs257/archive/derek-oppen/prettyprinting.pdf
+
+;;; Marks the beginning of a flex group.  Its column provides the
+;;; indentation of group elements if newlines are inserted.
+(def ^:private cmd-flex-start (+ tfi/cmd-id-last 1))
+(def ^:private marker-flex-start (object (tfi/mk-cmd cmd-flex-start 0)))
+(defn- mark-flex-start ^Cursor [^Cursor csr]
+  (-> csr (tf/add-object marker-flex-start)))
+(defn- flex-start? ^boolean [cmd]
+  (identical? marker-flex-start cmd))
+
+;;; Follows the closing delimiter of a flex group.
+(def ^:private cmd-flex-end (+ tfi/cmd-id-last 2))
+(def ^:private marker-flex-end (object (tfi/mk-cmd cmd-flex-end 0)))
+(defn- mark-flex-end ^Cursor [^Cursor csr ^String end]
+  (-> csr (tf/text end) (tf/add-object marker-flex-end)))
+(defn- flex-end? ^boolean [cmd]
+  (identical? marker-flex-end cmd))
+
+;;; FIXME... remove no-break-space and replace it with generic
+;;; collection?
+(def flex-space "\u0020")              ;can be replaced with a newline
+(def no-break-space "\u00a0")          ;No-Break Space (NBSP)
+
+;;; ------------------------------------------------------------------------
+
+(letfn
+    [(text-coll ^Cursor [^Cursor csr ^String begin ^String end xs]
+       (loop [csr (-> csr (tf/text begin) (mark-flex-start))
+              [x & xr :as xs] (seq xs)]
+         (if (nil? xs)
+           (mark-flex-end csr end)
+           (recur (cond-> (text-form csr x)
+                    (some? xr)
+                    (tf/text flex-space))
+                  (next xs)))))
+     (text-coll-entry ^Cursor [^Cursor csr ^String begin ^String end xs]
+       (loop [csr (-> csr (tf/text begin) (mark-flex-start))
+              [x & xr :as xs] (seq xs)]
+         (if (nil? xs)
+           (mark-flex-end csr end)
+           (recur (cond-> (-> (text-form csr (key x))
+                              (tf/text no-break-space)
+                              (text-form (val x)))
+                    (some? xr)
+                    (-> (tf/text ",") (tf/text flex-space)))
+                  (next xs)))))
+     
+     (cntrl? ^boolean [^char c]
+       (or (< (int c) (int \u0020)) (= c \u007f)))
+     (escape-char ^String [^Character c]
+       (str "\\u" (.toHexDigits (java.util.HexFormat/of) ^char c)))
+     (text-string ^Cursor [^Cursor csr ^String s]
+       (loop [sb (StringBuilder. "\""), i 0]
+         (if (= i (.length s))
+           (tf/text csr (-> (.append sb "\"") (.toString)))
+           (let [c (.charAt s i)]
+             (recur (if (or (= c \\) (= c \") (cntrl? c))
+                      (let [c* (object c)]
+                        (.append sb (or (get char-escape-string c*)
+                                        (escape-char c*))))
+                      (.append sb c))
+                    (inc i))))))
+     (text-pattern ^Cursor [^Cursor csr ^Pattern p] ;see core_print.clj
+       (let [s (.pattern p)]
+         (loop [sb (StringBuilder. "#\""), i 0, qmode false]
+           (if (= i (.length s))
+             (tf/text csr (-> (.append sb "\"") (.toString)))
+             (let [c (.charAt s i)]
+               (case c
+                 \\ (let [c2 (.charAt s (inc i))]
+                      (recur (-> sb (.append \\) (.append c2)) (+ i 2)
+                             (if qmode (not= c2 \E) (= c2 \Q))))
+                 \" (recur (if qmode
+                             (.append sb "\\E\\\"\\Q")
+                             (.append sb "\\\""))
+                           (inc i) qmode)
+                 (recur (.append sb c) (inc i) qmode)))))))
+     (text-char ^Cursor [^Cursor csr ^Character c]
+       (if-some [nm (char-name-string c)]
+         (tf/text csr (str "\\" nm))
+         (if (cntrl? ^char c)
+           (tf/text csr (escape-char c))
+           (tf/text csr (str "\\" c)))))
+     
+     (text-double ^Cursor [^Cursor csr ^double n]
+       (cond
+         (= Double/POSITIVE_INFINITY n) (tf/text csr "##Inf")
+         (= Double/NEGATIVE_INFINITY n) (tf/text csr "##-Inf")
+         (Double/isNaN n) (tf/text csr "##NaN")
+         :else (tf/text csr (str n))))
+     (text-float ^Cursor [^Cursor csr ^float n]
+       (if (or (= Float/POSITIVE_INFINITY n)
+               (= Float/NEGATIVE_INFINITY n)
+               (Float/isNaN n))
+         (throw (IllegalArgumentException. "not a regular float value"))
+         (tf/text csr (str n "f"))))
+     (text-imeta-value ^Cursor [^Cursor csr ^IMeta form]
+       ;; note: map & set have non-deterministic order
+       (cond
+         (symbol? form) (tf/text csr (str form))
+         (seq? form) (text-coll csr "(" ")" (seq form))
+         (vector? form) (text-coll csr "[" "]" (seq form))
+         (map? form) (text-coll-entry csr "{" "}" (seq form))
+         (set? form) (text-coll csr "#{" "}" (seq form))
+         :else (throw (IllegalArgumentException. (str (class form))))))
+     (meta-value ^Object [^map m]
+       (if (= (count m) 1)
+         (let [[k v] (first m)]
+           (cond
+             (and (identical? :tag k) (or (symbol? v) (string? v))) v
+             (and (identical? :param-tags k) (vector? v)) v
+             (and (keyword? k) (true? v)) k
+             :else m))
+         m))
+     (text-imeta-form ^Cursor [^Cursor csr ^IMeta form]
+       (if-some [m (meta form)]
+         (-> (tf/text csr "^")
+             (text-form (meta-value m))
+             (tf/text flex-space)
+             (text-imeta-value form))
+         (text-imeta-value csr form)))
+     (text-datafiable ^Cursor [^Cursor csr ^Datafiable form]
+       ;; Right now, this only picks up *classes* implementing
+       ;; Datafiable.  Probably better: always call the protocol
+       ;; function datafy and then produce the Doc.  But this would
+       ;; expand Class, which should be rendered as just the name
+       ;; text.  See https://corfield.org/blog/2018/12/03/datafy-nav/
+       (let [ex (datafy form)]
+         (if (identical? ex form)
+           (tf/text csr (str form))
+           (text-form csr ex))))
+
+     (array? ^boolean [form]
+       (if (some? form)
+         (.isArray (class form))
+         false))
+     
+     (text-form ^Cursor [^Cursor csr form]
+       (cond
+         (instance? IMeta form)
+         (text-imeta-form csr form)
+         
+         (instance? Map$Entry form)
+         (text-imeta-value csr (vec form))
+         
+         (instance? Datafiable form)
+         (text-datafiable csr form)
+
+         (array? form)
+         (recur csr (vec form))
+         
+         :else
+         (cond
+           (nil? form) (tf/text csr "nil")
+           (instance? Long form) (tf/text csr (str form "l"))
+           (instance? Double form) (text-double csr form)
+           (instance? Float form) (text-float csr form)
+           (string? form) (text-string csr form)
+           (char? form) (text-char csr form)
+           (instance? Pattern form) (text-pattern csr form)
+           :else (tf/text csr (str form)))))]
+
+    (def text-form text-form)
+
+    (defn text-forms ^Cursor [^Cursor csr forms]
+      (text-coll csr "" "" forms)))
+
+;;; ------------------------------------------------------------------------
+
+(defn format! ^Object/1 [^Object/1 frag ^int page-width]
+  (letfn [(mk-i-remaining ^long [^int i ^int column]
+            (bit-or (bit-shift-left (long i) 32)
+                    (Integer/toUnsignedLong column)))
+          (i-of ^int [^long ir]
+            (int (unsigned-bit-shift-right ir 32)))
+          (remaining-of ^int [^long ir]
+            (int ir))
+          
+          (flex-space-in-reach? ^boolean [^int i ^int remaining]
+            (if (neg? remaining)
+              false
+              (if (< i (alength frag))
+                (let [x (aget frag i)]
+                  (cond
+                    (identical? flex-space x)
+                    true
+                    (instance? String x)
+                    (recur (inc i) (- remaining (tfi/text-width x)))
+                    :else
+                    (recur (inc i) remaining)))
+                true)))
+          (fits? ^boolean [^int i ^int remaining ^int nesting]
+            (let [x (aget frag i)]
+              (cond
+                (neg? remaining)
+                false
+                
+                (instance? String x)
+                (recur (inc i) (- remaining (tfi/text-width x)) nesting)
+                
+                (flex-start? x)
+                (recur (inc i) remaining (inc nesting))
+
+                (flex-end? x)
+                (if (zero? nesting)
+                  (flex-space-in-reach? i remaining)
+                  (recur (inc i) remaining (dec nesting)))
+                    
+                :else (recur (inc i) remaining nesting))))
+
+          (inline? ^boolean [^Integer nl]
+            (nil? nl))
+          (force-inline ^Integer []
+            nil)
+          (newline-then ^Integer [^int column]
+            (tfi/mk-cmd tfi/end-current-line column))
+
+          (to-empty! ^int [^int i]
+            (aset frag i "")
+            (inc i))
+          (to-space! ^int [^int i]
+            (aset frag i flex-space)
+            (inc i))
+          (to-newline! ^int [^int i ^Integer nl]
+            (aset frag i nl)
+            (inc i))
+          
+          ;; `remaining` is the number of code points remaining until
+          ;; `page-width`.  This is the amount of space left in the
+          ;; current line until the soft limit is reached.
+          (rewrite-to-flex-end ^long [^int i ^int remaining ^Integer nl]
+            (let [x (aget frag i)]
+              (cond
+                (identical? no-break-space x)
+                (recur (to-space! i) (dec remaining) nl)
+                
+                (and (identical? flex-space x) (not (inline? nl)))
+                (recur (to-newline! i nl)
+                       (- page-width (tfi/cmd-arg nl))
+                       nl)
+                
+                (instance? String x)
+                (recur (inc i) (- remaining (tfi/text-width x)) nl)
+                
+                (flex-start? x)
+                (let [ir (rewrite-flex-group i remaining nl)]
+                  (recur (i-of ir) (remaining-of ir) nl))
+                
+                (flex-end? x)
+                (mk-i-remaining (to-empty! i) remaining)
+                
+                :else (recur (inc i) remaining nl))))
+          
+          (rewrite-flex-group ^long [^int i ^int remaining ^Integer nl]
+            ;; pre: looking at `marker-flex-start`
+            (assert (flex-start? (aget frag i)))
+            
+            ;; Note: There is some amount of redundant work done by
+            ;; the independent fits? tests.  Maybe reconsider this
+            ;; later?  FIXME...
+            (rewrite-to-flex-end
+             (to-empty! i) remaining
+             (cond (inline? nl) nl ;if parent fits, then this one fits as well
+                   (fits? (inc i) remaining 0) (force-inline)
+                   :else (let [column (- page-width remaining)]
+                           (newline-then column )))))]
+
+    (assert (= (aget frag 0) ""))
+    (let [inline-all? (= page-width Integer/MAX_VALUE)
+          ir (rewrite-flex-group 1 page-width (if inline-all?
+                                                (force-inline)
+                                                (newline-then 0)))]
+      (assert (= (i-of ir) (alength frag)))
+      frag)))
+
+(letfn [(forms-fragment ^Object/1 [forms]
+          (-> (tf/mk-cursor)
+              (text-forms forms)
+              (tf/fragment)))]
+  
+  (defn pretty0-fragment ^Object/1 [forms]
+    (-> forms (forms-fragment) (format! Integer/MAX_VALUE)))
+
+  (defn pretty1-fragment ^Object/1 [forms ^int page-width]
+    (-> forms (forms-fragment) (format! page-width))))
