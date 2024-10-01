@@ -1,0 +1,253 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.textflow__insn)
+
+(defn text?
+  (^boolean [insn]
+   (instance? String insn))
+  (^boolean [^Object/1 frag ^int i]
+   (text? (aget frag i))))
+
+(defn text-width ^int [^String txt]
+  (.codePointCount txt 0 (.length txt)))
+
+;;; ------------------------------------------------------------------------
+
+(def style-default 0l)
+(def insn-reset-style (object style-default))
+
+(defn mk-style ^Long [^long style]
+  (if (= style style-default)
+    insn-reset-style
+    (object style)))
+
+(defn style? ^boolean [insn]
+  (instance? Long insn))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private shift-cmd-arg 5)
+(def ^:private mask-cmd-id (dec (bit-shift-left 1 shift-cmd-arg)))
+(def ^:private mask-cmd-arg (bit-not mask-cmd-id))
+
+(defn cmd-id ^int [^int cmd]
+  (bit-and cmd mask-cmd-id))
+(defn cmd-arg ^int [^int cmd]
+  (unsigned-bit-shift-right cmd shift-cmd-arg))
+(defn mk-cmd ^Integer [^int id ^int arg]
+  (bit-or (bit-and id mask-cmd-id id) (bit-shift-left arg shift-cmd-arg)))
+
+(defn cmd?
+  (^boolean [insn]
+   (instance? Integer insn))
+  (^boolean [^int id insn]
+   (and (cmd? insn) (= (cmd-id ^int insn) id)))
+  (^boolean [^int id ^Object/1 frag ^int i]
+   (cmd? id (aget frag i))))
+
+(def color-mode-default 0)
+(def color-mode-palette-4bit 1)
+(def color-mode-palette-8bit 2)
+(def color-mode-rgb 3)
+
+;;; https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_(Select_Graphic_Rendition)_parameters
+(def intensity-normal 0)
+(def intensity-bright 1)
+(def intensity-faint 2)
+
+(def conceal-off 0)
+(def conceal-invisible 1) ;can cut&paste; Wikipedia: "Not widely supported"
+(def conceal-XXX 2)                     ;via replacement text
+(def conceal-spaces 3)                  ;via replacement text
+
+
+;; command identifiers
+(def no-operation 0)        ;arbitrary arg: no effect on text or style
+(def end-current-line 1)                ;arg is target column
+(def advance-lines 2)                   ;arg is number of lines
+(def forward-to-column 3)               ;arg is target column
+(def skip-commands 4)               ;arg is positive(!) number to skip
+(def set-style-flag 5)                  ;arg is style flag
+(def clear-style-flag 6)                ;arg is style flag
+(def set-intensity 7)
+(def set-foreground 8 #_plus-color-mode) ;arg is 4, 8, or 24 bit number
+(def set-background 12 #_plus-color-mode);arg is 4, 8, or 24 bit number
+(def set-conceal 16)
+
+(def last-command-id set-conceal)
+(def reserved-command-ids 3)
+(assert (<= (+ last-command-id reserved-command-ids) mask-cmd-id))
+(def last-no-operation-arg 0)
+
+(def ^:private mask-printable
+  (bit-or (bit-shift-left 1 end-current-line)
+          (bit-shift-left 1 advance-lines)
+          (bit-shift-left 1 forward-to-column)))
+(def ^:private mask-styling
+  (-> (dec (bit-shift-left 1 (inc last-command-id)))
+      (bit-and-not (dec (bit-shift-left 1 set-style-flag)))))
+
+(defn mk-noop ^Integer [^int arg]
+  (assert (> arg last-no-operation-arg))
+  (mk-cmd no-operation arg))
+
+(def insn-noop (mk-cmd no-operation 0))
+(def insn-end-current-line-0 (mk-cmd end-current-line 0))
+
+(defn printable? ^boolean [insn]
+  (if (cmd? insn)
+    (bit-test mask-printable (cmd-id insn))
+    (text? insn)))
+
+(defn styling? ^boolean [insn]
+  (if (cmd? insn)
+    (bit-test mask-styling (cmd-id insn))
+    (style? insn)))
+
+(defn skip-to-index ^int [^int i ^int cmd]
+  (if (= (cmd-id cmd) skip-commands)
+    (let [n (cmd-arg cmd)]
+      (assert (pos? n))
+      (+ i n))
+    (inc i)))
+
+(let [shift-arg-red 16
+      shift-arg-green 8
+      shift-arg-blue 0
+      mask-channel 0xff]
+
+  (defn arg-red [^int cmd]
+    (-> cmd (unsigned-bit-shift-right shift-arg-red) (bit-and mask-channel)))
+  (defn arg-green [^int cmd]
+    (-> cmd (unsigned-bit-shift-right shift-arg-green) (bit-and mask-channel)))
+  (defn arg-blue [^int cmd]
+    (-> cmd (unsigned-bit-shift-right shift-arg-blue) (bit-and mask-channel))))
+
+
+;;; State bits from LSB to MSB:
+;;; 2 (foreground mode), 24 (fg color)
+;;; 2 (background mode), 24 (bg color)
+;;; 2 (intensity), 2 (conceal)
+;;; 1 (underline), 1 (strikethrough), 1 (bold), 1 (italic)
+;;; used: 60 bits, remaining 4
+;;;
+;;; Note: Two bits can be freed by folding the palette color
+;;; modes (default, 4 bit, 8 bit) into the 24 bits of the rgb fields.
+;;; Then the foreground/background mode fields become one bit each,
+;;; and the palette mode and argument is decoded from the color value.
+
+(def shift-style-foreground 0)
+(def shift-style-background 26 #_(+ shift-style-foreground 2 24))
+(def shift-style-intensity 52 #_(+ shift-style-background 2 24))
+(def shift-style-conceal 54 #_(+ shift-style-intensity 2))
+(def flag-style-underline 56 #_(+ shift-style-conceal 2))
+(def flag-style-strikethrough 57 #_(+ flag-style-underline 1))
+(def flag-style-font-bold 58 #_(+ flag-style-strikethrough 1))
+(def flag-style-font-italic 59 #_(+ flag-style-font-bold 1))
+(def flag-style-unused 60 #_(+ flag-style-conceal 2))
+
+(let [mask-color-mode (dec (bit-shift-left 1l 2))
+      mask-color-rgb (dec (bit-shift-left 1l 24))]
+  (def mask-style-foreground-mode
+    (bit-shift-left mask-color-mode shift-style-foreground))
+  (def mask-style-foreground-color
+    (bit-shift-left mask-color-rgb (+ shift-style-foreground 2)))
+  (def mask-style-foreground (bit-or mask-style-foreground-mode
+                                     mask-style-foreground-color))
+  
+  (def mask-style-background-mode
+    (bit-shift-left mask-color-mode shift-style-background))
+  (def mask-style-background-color
+    (bit-shift-left mask-color-rgb (+ shift-style-background 2)))
+  (def mask-style-background (bit-or mask-style-background-mode
+                                     mask-style-background-color))
+
+  (def mask-style-intensity (bit-shift-left 3l shift-style-intensity))
+  (def mask-style-conceal (bit-shift-left 3l shift-style-conceal)))
+
+(defn extract ^int [^long style ^long mask]
+  (int (Long/compress style mask)))
+(defn- splice ^long [^long style ^long mask ^int arg]
+  (bit-or (bit-and-not style mask) (Long/expand arg mask)))
+
+(defn apply-to-style ^long [^long style ^int cmd]
+  (let [cid (cmd-id cmd), arg (cmd-arg cmd)]
+    (case cid
+      (, #_no-operation 0 #_end-current-line 1 #_advance-lines 2
+       , #_forward-to-column 3 #_skip-commands 4) style
+      
+      (#_set-style-flag 5 #_clear-style-flag 6)
+      (splice style (bit-shift-left 1l arg) (bit-and 1 cid))
+      
+      (#_set-intensity 7)
+      (splice style mask-style-intensity arg)
+      
+      (#_set-foreground 8 9 10 11)
+      (splice style mask-style-foreground
+              (-> arg (bit-shift-left 2) (bit-or (- cid set-foreground))))
+      
+      (#_set-background 12 13 14 15)
+      (splice style mask-style-background
+              (-> arg (bit-shift-left 2) (bit-or (- cid set-background))))
+
+      (#_set-conceal 16)
+      (splice style mask-style-conceal arg))))
+
+;;; Returns sum of `end-current-line` and `advance-line` commands.
+(defn line-count
+  (^int [^Object/1 frag]
+   (line-count frag 0 (alength frag)))
+  (^int [^Object/1 frag ^int start ^int end]
+   (loop [acc 0, i start]
+     (if (< i end)
+       (let [insn (aget frag i)]
+         (if (cmd? insn)
+           (let [cmd ^int insn]
+             (recur (+ acc (case (cmd-id cmd)
+                             (#_end-current-line 1) 1
+                             (#_advance-lines 2) (cmd-arg cmd)
+                             #_else 0))
+                    (skip-to-index i cmd)))
+           (recur acc (inc i))))
+       acc))))
+
+;;; ------------------------------------------------------------------------
+
+(defn insn-data [insn]
+  (cond
+    (nil? insn)
+    :insn-nil
+    
+    (text? insn)
+    insn
+    
+    (style? insn)
+    [:style insn]
+    
+    (cmd? insn)
+    [(nth [#_0 :noop :end-current-line :advance-lines
+           #_3 :forward-to-column :skip-commands
+           #_5 :set-style-flag :clear-style-flag :set-intensity
+           #_8 :set-foreground-default :set-foreground-4bit
+           #_10 :set-foreground-8bit :set-foreground-rgb
+           #_12 :set-background-default :set-background-4bit
+           #_14 :set-background-8bit :set-background-rgb
+           #_16 :set-conceal
+           #_17 #_:reserved-0 #_:reserved-1 #_:reserved-2
+           #_17 :mark-alternate :reserved-1 :reserved-2
+           ]
+          (cmd-id insn))
+     (cmd-arg insn)]
+
+    :else (throw (IllegalArgumentException. (str (class insn))))))
+
+(defn mk-indexed-insn-data [noopv]
+  (fn [idx insn]
+    (list idx (if (cmd? no-operation insn)
+                [:noop (nth noopv (cmd-arg insn) (cmd-arg insn))]
+                (insn-data insn)))))

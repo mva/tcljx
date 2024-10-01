@@ -1,12 +1,13 @@
 (ns tcljx.alpha.ptest__pp-test
   (:require [tcljx.alpha.textflow :as tf]
             [tcljx.alpha.ptest__pp :as pp]
-            [tcljx.alpha.ptest :refer :all]))
+            [tcljx.alpha.ptest :refer :all]
+            [tinyclj.string :as str]))
 
 ;;; Emit `forms` as a single long line.  Not pretty, but very simple.
 (defn pretty0-forms ^String [forms]
   (-> (StringBuilder.)
-      (tf/print-into (pp/pretty0-fragment forms))
+      (tf/print-into (-> (tf/mk-cursor) (pp/pretty0 forms) (tf/fragment)))
       (.toString)))
 (defn pretty0-form ^String [form]
   (pretty0-forms (list form)))
@@ -109,7 +110,9 @@
 
 (defn pretty1-forms ^String [^int page-width forms]
   (-> (StringBuilder.)
-      (tf/print-into (pp/pretty1-fragment forms page-width))
+      (tf/print-into (-> (tf/mk-cursor)
+                         (pp/pretty1 forms page-width)
+                         (tf/fragment)))
       (.toString)))
 (defmacro is-pr1 [exp page-width forms]
   (with-meta `(is (= ~exp (pretty1-forms ~page-width ~forms)))
@@ -163,5 +166,68 @@
              {:fct "vkDestroyDebugUtilsMessengerEXT"})))
 
 (deftest nested-data-test
-  (is-pr1 "({:args [[\"VkInstance = 0x7f1bd84f53d0\" 0]\n         [\"const VkAllocationCallbacks* = NULL\" 0]]}\n {:fct \"vkDestroyDebugUtilsMessengerEXT\"})"
+  (is-pr1 "({:args\n  [[\"VkInstance = 0x7f1bd84f53d0\" 0] [\"const VkAllocationCallbacks* = NULL\" 0]]}\n {:fct \"vkDestroyDebugUtilsMessengerEXT\"})"
           80 nested-data))
+
+;;; ------------------------------------------------------------------------
+
+(defn alts [& forms]
+  (pp/alternates nil forms))
+
+(letfn [(frag-linev ^vector [^Object/1 frag]
+          (vec (-> (StringBuilder.)
+                   (tf/print-into frag)
+                   (.toString)
+                   (str/split #"\n"))))
+        (side-by-side ^vector [^seq linev-seq]
+          (let [n (count (first linev-seq))]
+            (doseq [linev linev-seq]
+              (assert (= (count linev) n)))
+            (apply mapv vector linev-seq)))]
+  (defn view-forms ^vector [^int page-width ^int view-count forms]
+    (assert (pos? view-count))
+    (let [multi-frag (-> (tf/mk-cursor)
+                         (pp/pretty1 forms page-width)
+                         (tf/fragment))
+          views (map #(-> (tf/mk-cursor)
+                          (pp/isolate-view-into multi-frag ^int %)
+                          (tf/fragment)
+                          (frag-linev))
+                     (range view-count))]
+      (side-by-side views))))
+
+(defmacro is-alts [exp page-width view forms]
+  (with-meta `(is (= ~exp (view-forms ~page-width ~view ~forms)))
+    (meta &form)))                      ;provide correct :line to `is`
+
+(deftest empty-alternates-test
+  ;; the empty alternates show up as an empty form surrounded by
+  ;; spaces
+  (is-alts [["a  b"]] 16 1 (list 'a (alts) 'b))
+
+  ;; selecting a non-existing view looks like an empty view
+  (is-alts [["a A b" "a  b"]] 16 2 (list 'a (alts 'A) 'b)))
+
+(deftest basic-alternates-test
+  (is-alts [["a A b" "a B b" "a  b"]] 16 3 (list 'a (alts 'A 'B) 'b)))
+
+(deftest different-width-alternates-test
+  (is-alts [["foobar" "123   "]]
+           16 2 (list (alts 'foobar 123)))
+  (is-alts [["123   " "foobar"]]
+           16 2 (list (alts 123 'foobar)))
+  
+  (is-alts [["[foobar]" "[123   ]"]]
+           16 2 (list (vector (alts 'foobar 123))))
+  (is-alts [["[123   ]" "[foobar]"]]
+           16 2 (list (vector (alts 123 'foobar))))
+  
+  (is-alts [["foobar" "      "]]
+           16 2 (list (alts 'foobar pp/empty-form)))
+  (is-alts [["      " "foobar"]]
+           16 2 (list (alts pp/empty-form 'foobar)))
+  
+  (is-alts [["[foobar]" "[      ]"]]
+           16 2 (list (vector (alts 'foobar pp/empty-form))))
+  (is-alts [["[      ]" "[foobar]"]]
+           16 2 (list (vector (alts pp/empty-form 'foobar)))))

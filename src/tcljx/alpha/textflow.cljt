@@ -6,7 +6,7 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.alpha.textflow
-  (:require [tcljx.alpha.textflow__impl :as impl]
+  (:require [tcljx.alpha.textflow__insn :as insn]
             [tcljx.alpha.textflow__ansi :as ansi])
   (:import (java.util Arrays)))
 
@@ -41,37 +41,37 @@
 
 
 ;;; A cursor aggregates the stream of commands that should be printed.
-(deftype Cursor [^int cmd-count ^Object/1 cmds ^long style]
+(deftype Cursor [^int insn-count ^Object/1 insns ^long style]
   ;; FIXME... Valhalla value type & not null
   )
 
 ;;; A fragment is the sequence of commands that have been collected
 ;;; into cursor `csr`.
 (defn fragment ^Object/1 [^Cursor csr]
-  (Arrays/copyOf (.cmds csr) (.cmd-count csr)))
+  (Arrays/copyOf (.insns csr) (.insn-count csr)))
 
 ;;; A page is a normalized sequence of commands.  It is either empty,
 ;;; or sequence ending with text, followed by a `style-default`
 ;;; command, followed by a `end-current-line` command.
 (defn page ^Object/1 [^Cursor csr]
   (letfn [(end-of-text ^int [^int i]
-            (if (or (zero? i) (string? (aget (.cmds csr) (dec i))))
+            (if (or (zero? i) (insn/text? (.insns csr) (dec i)))
               i
               (recur (dec i))))]
-    (let [eot (end-of-text (.cmd-count csr))]
+    (let [eot (end-of-text (.insn-count csr))]
       (if (zero? eot)
         (new Object/1 0)
-        (doto (Arrays/copyOf (.cmds csr) (+ eot 2))
-          (aset (+ eot 0) (object impl/style-default))
-          (aset (+ eot 1) (object (impl/mk-cmd impl/end-current-line 0))))))))
+        (doto (Arrays/copyOf (.insns csr) (+ eot 2))
+          (aset (+ eot 0) insn/insn-reset-style)
+          (aset (+ eot 1) insn/insn-end-current-line-0))))))
 
 (defn page? ^boolean [^Object/1 frag]
   (or (zero? (alength frag))
-      (impl/cmd? impl/end-current-line frag (dec (alength frag)))))
+      (insn/cmd? insn/end-current-line frag (dec (alength frag)))))
 
 (defn mk-cursor
   (^Cursor []
-   (mk-cursor impl/style-default))
+   (mk-cursor insn/style-default))
   (^Cursor [^long style]
    (Cursor. 0 (new Object/1 16) style)))
 
@@ -79,112 +79,130 @@
 ;;; A command is encoded as an int.  24 bits for an argument, 8 bits
 ;;; for the command id.  The command value "all zeros" is reserved.
 
-(letfn [(grow-cmds ^Object/1 [^Object/1 cmds ^int i]
-          (cond-> cmds (= i (alength cmds)) (Arrays/copyOf (* i 2))))]
-  (defn add-object
-    (^Cursor [^Cursor csr ^Object cmd]
-     (add-object csr cmd (.style csr)))
-    (^Cursor [^Cursor csr ^Object cmd ^long style]
-     (let [i (.cmd-count csr)]
-       (Cursor. (inc i)
-                (doto (grow-cmds (.cmds csr) i) (aset i cmd))
-                style))))
-  (defn add-cmd
+(letfn [(grow-insns ^Object/1 [^Object/1 insns ^int i]
+          (cond-> insns (= i (alength insns)) (Arrays/copyOf (* i 2))))
+        (add-insn+style ^Cursor [^Cursor csr ^Object insn ^long style]
+          (let [i (.insn-count csr)]
+            (Cursor. (inc i)
+                     (doto (grow-insns (.insns csr) i) (aset i insn))
+                     style)))]
+  (defn add-printable-insn ^Cursor [^Cursor csr insn]
+    (add-insn+style csr insn (.style csr)))
+  (defn add-printable-cmd ^Cursor [^Cursor csr ^int cmd-id ^int cmd-arg]
+    (add-printable-insn csr (insn/mk-cmd cmd-id cmd-arg)))
+  (defn- add-styling-cmd
     (^Cursor [^Cursor csr ^Integer cmd]
-     (let [style' (impl/apply-command (.style csr) ^int cmd)]
-       (add-object csr cmd style')))
+     (add-insn+style csr cmd (insn/apply-to-style (.style csr) ^int cmd)))
     (^Cursor [^Cursor csr ^int id ^int arg]
-     (add-cmd csr (object (impl/mk-cmd id arg)))))
-  (defn add-cmd-bool ^Cursor [^Cursor csr ^int id ^boolean arg?]
-    (add-cmd csr id (int arg?)))
+     (add-styling-cmd csr (insn/mk-cmd id arg))))
+  (defn- set-style-flag ^Cursor [^Cursor csr ^int flag ^boolean enabled?]
+    (add-styling-cmd csr (- insn/clear-style-flag (int enabled?)) flag))
 
   (defn text ^Cursor [^Cursor csr ^String txt]
-    (add-object csr txt (.style csr)))
+    (add-insn+style csr txt (.style csr)))
   (defn newline
     (^Cursor [^Cursor csr]
      (newline csr 0))
     (^Cursor [^Cursor csr ^int then-column]
-     (add-cmd csr impl/end-current-line then-column)))
+     (let [cmd (if (zero? then-column)
+                 insn/insn-end-current-line-0
+                 (insn/mk-cmd insn/end-current-line then-column))]
+       (add-printable-insn csr cmd))))
+  (defn advance-lines ^Cursor [^Cursor csr ^int n]
+    (add-printable-cmd csr insn/advance-lines n))
   (defn forward-to-column ^Cursor [^Cursor csr ^int column]
-    (add-cmd csr impl/forward-to-column column))
+    (add-printable-cmd csr insn/forward-to-column column))
+  (defn skip-commands ^Cursor [^Cursor csr ^int n]
+    (add-printable-cmd csr insn/skip-commands n))
   
   (defn with-style ^Cursor [^Cursor csr ^long style]
     (cond-> csr
       (not= style (.style csr))
-      (add-object (object style) style)))
+      (add-insn+style (insn/mk-style style) style)))
 
-  (defn- replay ^Cursor [^Cursor csr x]
+  (defn replay-insn ^Cursor [^Cursor csr insn]
     (cond
-      (instance? String x) (text csr x)
-      (instance? Integer x) (add-cmd csr x)
-      (instance? Long x) (with-style csr ^long x)
+      (insn/text? insn) (text csr insn)
+      (insn/cmd? insn) (add-styling-cmd csr insn)
+      (insn/style? insn) (with-style csr ^long insn)
       :else (throw (IllegalStateException.))))
+  (defn replay-fragment ^Cursor [^Cursor csr ^Object/1 frag
+                                 ^int start ^int end]
+    (loop [csr csr, i start]
+      (if (< i end)
+        (let [insn (aget frag i)]
+          (if (insn/cmd? insn)
+            (let [cmd ^int insn]
+              (if (insn/cmd? insn/skip-commands cmd)
+                (recur csr (insn/skip-to-index i cmd))
+                (recur (replay-insn csr insn) (inc i))))
+            (recur (replay-insn csr insn) (inc i))))
+        csr)))
 
   (let [mask-4bit 0xf
         mask-8bit 0xff
         mask-24bit 0xffffff]
     (defn foreground-default ^Cursor [^Cursor csr]
-      (add-cmd csr (+ impl/set-foreground impl/color-mode-default) 0))
+      (add-styling-cmd csr (+ insn/set-foreground insn/color-mode-default) 0))
     (defn foreground-4bit ^Cursor [^Cursor csr ^int color]
-      (add-cmd csr (+ impl/set-foreground impl/color-mode-palette-4bit)
-               (bit-and mask-4bit color)))
+      (add-styling-cmd csr (+ insn/set-foreground insn/color-mode-palette-4bit)
+                       (bit-and mask-4bit color)))
     (defn foreground-8bit ^Cursor [^Cursor csr ^int color]
-      (add-cmd csr (+ impl/set-foreground impl/color-mode-palette-8bit)
-               (bit-and mask-8bit color)))
+      (add-styling-cmd csr (+ insn/set-foreground insn/color-mode-palette-8bit)
+                       (bit-and mask-8bit color)))
     (defn foreground-rgb ^Cursor [^Cursor csr ^int rgb]
-      (add-cmd csr (+ impl/set-foreground impl/color-mode-default)
-               (bit-and mask-24bit rgb)))
+      (add-styling-cmd csr (+ insn/set-foreground insn/color-mode-default)
+                       (bit-and mask-24bit rgb)))
 
     (defn background-default ^Cursor [^Cursor csr]
-      (add-cmd csr (+ impl/set-background impl/color-mode-default) 0))
+      (add-styling-cmd csr (+ insn/set-background insn/color-mode-default) 0))
     (defn background-4bit ^Cursor [^Cursor csr ^int color]
-      (add-cmd csr (+ impl/set-background impl/color-mode-palette-4bit)
-               (bit-and mask-4bit color)))
+      (add-styling-cmd csr (+ insn/set-background insn/color-mode-palette-4bit)
+                       (bit-and mask-4bit color)))
     (defn background-8bit ^Cursor [^Cursor csr ^int color]
-      (add-cmd csr (+ impl/set-background impl/color-mode-palette-8bit)
-               (bit-and mask-8bit color)))
+      (add-styling-cmd csr (+ insn/set-background insn/color-mode-palette-8bit)
+                       (bit-and mask-8bit color)))
     (defn background-rgb ^Cursor [^Cursor csr ^int rgb]
-      (add-cmd csr (+ impl/set-background impl/color-mode-default)
-               (bit-and mask-24bit rgb))))
+      (add-styling-cmd csr (+ insn/set-background insn/color-mode-default)
+                       (bit-and mask-24bit rgb))))
 
   (defn intensity-normal ^Cursor [^Cursor csr]
-    (add-cmd csr impl/set-intensity impl/intensity-normal))
+    (add-styling-cmd csr insn/set-intensity insn/intensity-normal))
   (defn intensity-bright ^Cursor [^Cursor csr]
-    (add-cmd csr impl/set-intensity impl/intensity-bright))
+    (add-styling-cmd csr insn/set-intensity insn/intensity-bright))
   (defn intensity-faint ^Cursor [^Cursor csr]
-    (add-cmd csr impl/set-intensity impl/intensity-faint))
+    (add-styling-cmd csr insn/set-intensity insn/intensity-faint))
 
   (defn underline
     (^Cursor [^Cursor csr]
      (underline csr true))
     (^Cursor [^Cursor csr ^boolean enabled?]
-     (add-cmd-bool csr impl/set-underline enabled?)))
+     (set-style-flag csr insn/flag-style-underline enabled?)))
   (defn strikethrough
     (^Cursor [^Cursor csr]
      (strikethrough csr true))
     (^Cursor [^Cursor csr ^boolean enabled?]
-     (add-cmd-bool csr impl/set-strikethrough enabled?)))
-
+     (set-style-flag csr insn/flag-style-strikethrough enabled?)))
+  
   (defn font-bold
     (^Cursor [^Cursor csr]
      (font-bold csr true))
     (^Cursor [^Cursor csr ^boolean enabled?]
-     (add-cmd-bool csr impl/set-font-bold enabled?)))
+     (set-style-flag csr insn/flag-style-font-bold enabled?)))
   (defn font-italic
     (^Cursor [^Cursor csr]
      (font-italic csr true))
     (^Cursor [^Cursor csr ^boolean enabled?]
-     (add-cmd-bool csr impl/set-font-italic enabled?)))
+     (set-style-flag csr insn/flag-style-font-italic enabled?)))
 
   (defn conceal-off ^Cursor [^Cursor csr]
-    (add-cmd csr impl/set-conceal impl/conceal-off))
+    (add-styling-cmd csr insn/set-conceal insn/conceal-off))
   (defn conceal-invisible ^Cursor [^Cursor csr] ;can be extracted via cut&paste
-    (add-cmd csr impl/set-conceal impl/conceal-invisible))
+    (add-styling-cmd csr insn/set-conceal insn/conceal-invisible))
   (defn conceal-XXX ^Cursor [^Cursor csr]
-    (add-cmd csr impl/set-conceal impl/conceal-XXX))
+    (add-styling-cmd csr insn/set-conceal insn/conceal-XXX))
   (defn conceal-spaces ^Cursor [^Cursor csr]
-    (add-cmd csr impl/set-conceal impl/conceal-spaces))
-  )
+    (add-styling-cmd csr insn/set-conceal insn/conceal-spaces)))
 
 (defmacro with-save-restore-> [csr & body]
   `(let [csr# ~csr]
@@ -194,109 +212,139 @@
 
 (letfn [(append-text ^StringBuilder [^StringBuilder sb ^String txt ^int width
                                      ^long style]
-          (let [conceal (impl/extract impl/mask-style-conceal style)]
-            (if (< conceal impl/conceal-XXX)
+          (let [conceal (insn/extract style insn/mask-style-conceal)]
+            (if (< conceal insn/conceal-XXX)
               (.append sb txt)
-              (.repeat sb (if (= conceal impl/conceal-spaces) " " "X") width))))
-        
-        (line-count ^int [^Object/1 frag] ;number of `end-current-line`
-          (loop [acc 0, i (dec (alength frag))]
-            (if (neg? i)
-              acc
-              (recur (+ acc (int (impl/cmd? impl/end-current-line frag i)))
-                     (dec i)))))
+              (.repeat sb (if (= conceal insn/conceal-spaces) " " "X") width))))
+
         (beginning-of-line-array ^int/1 [^Object/1 page]
-          (let [n (line-count page)
+          (let [n (insn/line-count page)
                 off (new int/1 (inc n))]
             (loop [next-line 1, i 0]
               (if (< i (alength page))
-                (recur (if (impl/cmd? impl/end-current-line page i)
-                         (do (aset off next-line (inc i))
-                             (inc next-line))
-                         next-line)
-                       (inc i))
+                (let [insn (aget page i)]
+                  (if (insn/cmd? insn)
+                    (let [cmd ^int insn]
+                      (case (insn/cmd-id cmd)
+                        (#_end-current-line 1)
+                        (do (aset off next-line (inc i))
+                            (recur (inc next-line) (inc i)))
+                        (#_advance-lines 2)
+                        (let [n (insn/cmd-arg cmd)]
+                          (Arrays/fill off next-line (+ next-line n) (inc i))
+                          (recur (+ next-line n) (inc i)))
+                        (#_skip-commands 4)
+                        (recur next-line (insn/skip-to-index i cmd))
+                        #_else
+                        (recur next-line (inc i))))
+                    (recur next-line (inc i))))
                 off))))
         (end-of-line ^int [^int/1 bola ^int line]
           (dec (aget bola (inc line))))]
   
   (defn render-into
     (^StringBuilder [^StringBuilder sb ^Object/1 frag]
-     (render-into sb frag impl/style-default))
+     (render-into sb frag insn/style-default))
     (^StringBuilder [^StringBuilder sb ^Object/1 frag ^long style]
-     (loop [sb sb, style style, column 0, i 0]
+     (loop [sb sb, sb-style style, style style, column 0, i 0]
        (if (< i (alength frag))
-         (let [x (aget frag i)]
+         (let [insn (aget frag i)
+               sb-style (if (and (not= sb-style style) (insn/printable? insn))
+                          (do (ansi/sgr-delta sb sb-style style)
+                              style)
+                          sb-style)]
            (cond
-             (instance? String x)
-             (let [txt ^String x, width (impl/text-width txt)]
+             (insn/text? insn)
+             (let [txt ^String insn, width (insn/text-width txt)]
                (recur (append-text sb txt width style)
-                      style (+ column width) (inc i)))
+                      sb-style style (+ column width) (inc i)))
              
-             (instance? Integer x)
-             (let [cmd ^int x, arg (impl/cmd-arg cmd)]
-               (case (impl/cmd-id cmd)
+             (insn/cmd? insn)
+             (let [cmd ^int insn, arg (insn/cmd-arg cmd)]
+               (case (insn/cmd-id cmd)
                  (#_end-current-line 1)
                  (let [column' arg]
-                   (recur (-> (.append sb \newline)
-                              (ansi/cursor-forward column'))
-                          style column' (inc i)))
+                   (recur (-> sb (.append \newline) (.repeat " " column'))
+                          sb-style style column' (inc i)))
                  
-                 (#_forward-to-column 2)
-                 (let [column' (max column arg)]
-                   (recur (ansi/cursor-forward sb (- column' column))
-                          style column' (inc i)))
-                 
-                 #_else
-                 (let [style' (impl/apply-command style cmd)]
-                   (recur (ansi/sgr-delta sb style style')
-                          style' column (inc i)))))
+                 (#_advance-lines 2)
+                 ;; Note: "Cursor Next Line" at bottom does not scroll
+                 ;; up.  Stick with repeated newline.
+                 (if (zero? arg)
+                   (recur sb sb-style style column (inc i))
+                   (recur (.repeat sb "\n" arg) sb-style style 0 (inc i)))
 
-             (instance? Long x)
-             (let [style' ^long x]
-               (recur (ansi/sgr-delta sb style style') style' column (inc i)))
+                 (#_forward-to-column 3)
+                 (let [column' (max column arg)]
+                   ;; Note: "Cursor Forward" at the right edge of the
+                   ;; screen does not move into the next line.  Stick
+                   ;; with repeated spaces.
+                   (recur (.repeat sb " " (- column' column))
+                          sb-style style column' (inc i)))
+
+                 (#_skip-commands 4)
+                 (recur sb sb-style style column (insn/skip-to-index i cmd))
+                 
+                 #_else (let [style' (insn/apply-to-style style cmd)]
+                          (recur sb sb-style style' column (inc i)))))
+
+             (insn/style? insn)
+             (recur sb sb-style ^long insn column (inc i))
              
-             :else (throw (IllegalStateException. (str x)))))
-         sb))))
+             :else (throw (IllegalStateException. (str insn)))))
+         (ansi/sgr-delta sb sb-style style)))))
+  (defn str-render ^String [^Object/1 frag]
+    (-> (StringBuilder.) (render-into frag) (.toString)))
 
   (defn print-into
     (^StringBuilder [^StringBuilder sb ^Object/1 frag]
-     (print-into sb frag impl/style-default))
+     (print-into sb frag insn/style-default))
     (^StringBuilder [^StringBuilder sb ^Object/1 frag ^long style]
      (loop [sb sb, style style, column 0, i 0]
+       ;; only `conceal-XXX` and `conceal-spaces` are picked up from
+       ;; `style`
        (if (< i (alength frag))
-         (let [x (aget frag i)]
+         (let [insn (aget frag i)]
            (cond
-             (instance? String x)
-             (let [txt ^String x, width (impl/text-width txt)]
+             (insn/text? insn)
+             (let [txt ^String insn, width (insn/text-width txt)]
                (recur (append-text sb txt width style)
                       style (+ column width) (inc i)))
              
-             (instance? Integer x)
-             (let [cmd ^int x, arg (impl/cmd-arg cmd)]
-               (case (impl/cmd-id cmd)
+             (insn/cmd? insn)
+             (let [cmd ^int insn, arg (insn/cmd-arg cmd)]
+               (case (insn/cmd-id cmd)
                  (#_end-current-line 1)
                  (let [column' arg]
-                   (recur (-> (.append sb \newline)
-                              (.repeat " " column'))
+                   (recur (-> sb (.append \newline) (.repeat " " column'))
                           style column' (inc i)))
                  
-                 (#_forward-to-column 2)
+                 (#_advance-lines 2)
+                 (if (zero? arg)
+                   (recur sb style column (inc i))
+                   (recur (.repeat sb "\n" arg) style 0 (inc i)))
+
+                 (#_forward-to-column 3)
                  (let [column' (max column arg)]
                    (recur (.repeat sb " " (- column' column))
                           style column' (inc i)))
                  
+                 (#_skip-commands 4)
+                 (recur sb style column (insn/skip-to-index i cmd))
+                 
                  #_else
-                 (let [style' (impl/apply-command style cmd)]
+                 (let [style' (insn/apply-to-style style cmd)]
                    (recur sb style' column (inc i)))))
 
-             (instance? Long x)
-             (let [style' ^long x]
-               (recur sb style' column (inc i)))
+             (insn/style? insn)
+             (recur sb ^long insn column (inc i))
              
-             :else (throw (IllegalStateException. (str x)))))
+             :else (throw (IllegalStateException. (str insn)))))
          sb))))
+  (defn str-print ^String [^Object/1 frag]
+    (-> (StringBuilder.) (print-into frag) (.toString)))
 
-  (defn- side-by-side* ^Object/1 [^Object/2 pages ^int/1 columns]
+  (defn- side-by-side* ^Cursor [^Cursor csr ^Object/2 pages ^int/1 columns]
     (let [n (alength pages)
           bolas (new int/2 n)] 
       (letfn [(line-count ^int [^int p]
@@ -305,18 +353,25 @@
                 (if (zero? start)
                   0
                   (let [cmd ^int (aget page (dec start))]
-                    (assert (impl/cmd? impl/end-current-line cmd))
-                    (impl/cmd-arg cmd))))
+                    (case (insn/cmd-id cmd)
+                      (#_end-current-line 1) (insn/cmd-arg cmd)
+                      (#_advance-lines 2) 0))))
               (append-page-line ^Cursor [^Cursor acc ^Object/1 page
-                                         ^int column ^int start ^int end]
+                                         ^int page-column ^int start ^int end]
                 (loop [acc acc, i start]
                   (if (< i end)
-                    (let [x (aget page i)]
-                      (recur (if (impl/cmd? impl/forward-to-column x)
-                               (let [column' (+ (impl/cmd-arg x) column)]
-                                 (forward-to-column acc column'))
-                               (replay acc x))
-                             (inc i)))
+                    (let [insn (aget page i)]
+                      (if (insn/cmd? insn)
+                        (let [cmd ^int insn]
+                          (case (insn/cmd-id cmd)
+                            (#_forward-to-column 3)
+                            (let [column' (+ (insn/cmd-arg insn) page-column)]
+                              (recur (forward-to-column acc column') (inc i)))
+                            (#_skip-commands 4)
+                            (recur acc (insn/skip-to-index i cmd))
+                            #_else
+                            (recur (replay-insn acc insn) (inc i))))
+                        (recur (replay-insn acc insn) (inc i))))
                     acc)))
               (append-line! ^Cursor [^Cursor acc ^int line ^long/1 !styles]
                 (loop [acc acc, p 0]
@@ -325,11 +380,13 @@
                       (let [page (aget pages p)
                             start (aget bolas p line)
                             end (end-of-line (aget bolas p) line)
-                            column (+ (aget columns p)
-                                      (page-line-column page start))
-                            csr' (-> (forward-to-column acc column)
+                            page-column (aget columns p)
+                            column-0 (+ page-column
+                                        (page-line-column page start))
+                            csr' (-> (forward-to-column acc column-0)
                                      (with-style (aget !styles p))
-                                     (append-page-line page column start end))]
+                                     (append-page-line page page-column
+                                                       start end))]
                         (aset !styles p (.style csr'))
                         (recur csr' (inc p)))
                       (recur acc (inc p)))
@@ -338,27 +395,25 @@
           (aset bolas p (beginning-of-line-array (aget pages p))))
         (let [total-lines ^int (reduce #(max ^int %1 (line-count ^int %2))
                                        0 (range n))
-              !styles (new long/1 n)] ;initialized to impl/style-default
-          (loop [acc (mk-cursor), line 0]
+              !styles (new long/1 n)] ;initialized to insn/style-default
+          (loop [csr csr, line 0]
             (if (< line total-lines)
-              (recur (-> (with-style acc impl/style-default)
+              (recur (-> (with-style csr insn/style-default)
                          (append-line! line !styles))
                      (inc line))
-              (page acc)))))))
+              csr))))))
 
-  (defn side-by-side ^Object/1 [^Object/2 pages ^int/1 columns]
+  (defn side-by-side-into ^Cursor [^Cursor csr ^Object/2 pages ^int/1 columns]
     (dotimes [i (alength pages)]
       (when-not (page? (aget pages i))
         (throw (IllegalArgumentException. "page required"))))
-    (if (and (= (alength pages) 1) (zero? (aget columns 0)))
-      (aget pages 0)
-      (side-by-side* pages columns))))
+    (side-by-side* csr pages columns)))
 
 (defn print-page ^void [^Object/1 page]
   (-> (StringBuilder.)
-      (.append "---- start of page ----\n")
+      #_(.append "---- start of page ----\n")
       (render-into #_print-into page)
-      (.append "---- end of page ----\n")
+      #_(.append "---- end of page ----\n")
       (.toString)
       (print))
   ;; print without newline is not automatically flushed on program

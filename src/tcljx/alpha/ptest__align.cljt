@@ -1,0 +1,365 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.ptest__align
+  (:require [tcljx.alpha.textflow :as tf]
+            [tcljx.alpha.ptest__style :as style]
+            [tcljx.alpha.ptest__pp :as pp])
+  (:import (tcljx.alpha.ptest__style Style)
+           (clojure.lang PersistentHashMap)
+           (java.util.function BiFunction)))
+
+;;; Aligns small(!) nested data structures for the purpose of
+;;; visualization.  All meta data is stripped from the input
+;;; beforehand.
+;;; 
+;;; The sequence alignment algorithm is the most basic one, and is of
+;;; O(n*m) if `n` and `m` is the size of the input.  There are no
+;;; improvements, like using Dijkstra's shortest path, memoizing
+;;; already computed alignments, stripping shared prefix and suffix
+;;; sequences, and so on.
+;;;
+;;; Lists and vectors are not considered equivalent.  That means that
+;;; while a test like `(is (= () []))` would be successful, the
+;;; alignment would not match up `()` against `[]`.
+;;;
+;;; Set elements and map entries are sorted before trying to align
+;;; them.  If the natural sort fails, then it is replaced with one
+;;; using the elements' `pr-str` representation.
+;;;
+;;; For a more complete implementation, see
+;;; https://github.com/lambdaisland/clj-diff and in particular check
+;;; out its README's notes and references.
+;;;
+;;; "An O(NP) Sequence Comparison Algorithm" by Sun Wu, Udi Manber,
+;;; Gene Myers and Webb Miller
+;;; http://portal.acm.org/citation.cfm?id=96223
+;;;
+;;; "Diff Strategies by Neil Fraser"
+;;; http://neil.fraser.name/writing/diff/
+
+(def ^:private arr-root 0)
+(def ^:private arr-list 1)
+(def ^:private arr-vector 2)
+(def ^:private arr-set 3)
+(def ^:private arr-map 4)
+(def ^:private arr-entry 5)
+
+(def part-of-a 2r10)
+(def part-of-b 2r01)
+(def ^:private part-of-both 2r11)
+
+(deftype Arr [^int render-class
+              ^boolean alignment?
+              ^Object/1 data             ;array of Step if alignment
+              ^int cost])
+
+(defn- arr? ^boolean [x]
+  (instance? Arr x))
+
+(defn- arr-length ^int [^Arr a]
+  (alength (.data a)))
+
+(defn arr-data [^Arr a ^int i]
+  (aget (.data a) i))
+
+(defn- arr-same-class? ^boolean [^Arr a ^Arr b]
+  (= (.render-class a) (.render-class b)))
+
+(defn- alignable? ^boolean [a b]
+  (and (arr? a) (arr? b) (arr-same-class? a b)))
+
+(defn- cost ^int [x]
+  (if (arr? x)
+    (.cost ^Arr x)
+    1))
+
+
+(deftype Step [^int idx ^int mask ^int cost ^Object x #_Step prefix])
+
+(defn- mk-arr ^Arr [^int render-class ^clojure.lang.ISeq data]
+  (letfn [(cost* ^int [^Object/1 objs]
+            (loop [acc 1, i (dec (alength objs))]
+              (if (neg? i)
+                acc
+                (recur (+ acc (cost (aget objs i)) ) (dec i)))))]
+    (let [objs ^Object/1 (into-array Object data)]
+      (Arr. render-class false objs (cost* objs)))))
+
+(defn- mk-alignment ^Arr [^int render-class ^Step rpath]
+  (let [steps (new Step/1 (inc (.idx rpath)))]
+    (loop [s rpath]
+      (when (>= (.idx s) 0)
+        (aset steps (.idx s) s)
+        (recur (.prefix s))))
+    (Arr. render-class true steps (.cost rpath))))
+
+(defn- al-steps ^Step/1 [^Arr al]
+  (.data al))
+
+
+(defn- equal? ^boolean [a b]          ;list is *never* equal to vector
+  (letfn [(data-equal ^boolean [^Object/1 a ^Object/1 b]
+            (loop [i (dec (alength a))]
+              (cond
+                (neg? i) true
+                (equal? (aget a i) (aget b i)) (recur (dec i))
+                :else false)))
+          (arr-equal ^boolean [^Arr a ^Arr b]
+            (and (= (alength (.data a)) (alength (.data b)))
+                 (arr-same-class? a b)
+                 (data-equal (.data a) (.data b))))]
+    (if (arr? a)
+      (if (arr? b) (arr-equal a b) false)
+      (if (arr? b) false (= a b)))))
+
+(defn- safe-sort [xs]
+  (try
+    (sort xs)
+    (catch ClassCastException _         ;hacky & fragile
+      (sort-by pr-str xs))))
+
+(defn- safe-sort-by-key [m]
+  (try
+    (sort-by key m)
+    (catch ClassCastException _         ;hacky & fragile
+      (sort-by #(pr-str (key %)) m))))
+
+(defn arrify ^Arr [x]            ;pre: sets and map keys are sortable
+  (letfn [(mk-arr-entry ^Arr [^java.util.Map$Entry e]
+            (mk-arr arr-entry (list (arr* (key e)) (arr* (val e)))))
+          (arr* ^Object [x]
+            (cond
+              (vector? x) (->> (seq x)
+                               (map arr*)
+                               (mk-arr arr-vector))
+              (set? x) (->> (safe-sort x)
+                            (map arr*)
+                            (mk-arr arr-set))
+              (map? x) (->> (safe-sort-by-key x)
+                            (map mk-arr-entry)
+                            (mk-arr arr-map))
+              (seq? x) (->> x
+                            (map arr*)
+                            (mk-arr arr-list))
+              :else x))]
+    (mk-arr arr-root (list (arr* x)))))
+
+
+;;; `invalid-cost` is so large, that it is guaranteed to never improve
+;;; an existing alignment path.  Still, twice it's value will not
+;;; overflow the range of an int.
+(def ^:private invalid-cost (quot Integer/MAX_VALUE 2))
+(def ^:private invalid-step (Step. -1 2r00 invalid-cost nil nil))
+(def ^:private init-step (Step. -1 2r00 0 nil nil))
+
+;;; FIXME... memoize (align a b) calls?
+(defn align ^Arr [^Arr a ^Arr b]
+  (let [grid (new Step/2 (inc (arr-length a)))]
+    (letfn [(step-at ^Step [^int i ^int j]
+              (if (zero? (+ i j))
+                init-step
+                (or (aget grid i j) invalid-step)))
+            (min-step ^Step [^Step a ^Step b]
+              (if (< (.cost b) (.cost a)) b a)) ;return `a` if cost is equal
+            (data-cost ^int [^Arr a ^int i]
+              (if (neg? i) invalid-cost (cost (arr-data a i))))
+            (extend* ^Step [^int i ^int j ^int mask x ^int cost-x]
+              (let [prefix (step-at i j)]
+                (Step. (inc (.idx prefix)) mask (+ (.cost prefix) cost-x)
+                       x prefix)))
+            (extend ^Step [^int i ^int j ^int mask x]
+              (extend* i j mask x (cost x)))
+            
+            (insert-from-a ^Step [^int i ^int j]
+              (if (pos? i)
+                (extend (dec i) j part-of-a (arr-data a (dec i)))
+                invalid-step))
+            (insert-from-b ^Step [^int i ^int j]
+              (if (pos? j)
+                (extend i (dec j) part-of-b (arr-data b (dec j)))
+                invalid-step))
+            (align-a-and-b ^Step [^int i ^int j]
+              (if (and (pos? i) (pos? j))
+                (let [xa (arr-data a (dec i)), xb (arr-data b (dec j))]
+                  (cond
+                    (equal? xa xb)
+                    ;; assign zero cost to matching pairs, regardless
+                    ;; of the size of the matched element
+                    (extend* (dec i) (dec j) part-of-both xa 0)
+
+                    (alignable? xa xb)
+                    (extend (dec i) (dec j) part-of-both (align xa xb))
+
+                    :else invalid-step))
+                invalid-step))]
+      
+      (dotimes [i (alength grid)]
+        (let [row (new Step/1
+                       (inc (arr-length b)))]
+          (aset grid i row)
+          (dotimes [j (alength row)]
+            (aset row j (-> (step-at i j)
+                            (min-step (insert-from-b i j))
+                            (min-step (insert-from-a i j))
+                            (min-step (align-a-and-b i j)))))
+          ;; clear row that will never be accessed again;
+          ;; alternatively, extend the `i` loop to maintain just two
+          ;; rows, `row` and `row-m1`, and drop `grid` altogether
+          (when (pos? i)
+            (aset grid (dec i) nil))))
+      (mk-alignment (.render-class a)
+                    (step-at (arr-length a) (arr-length b))))))
+
+;;; ------------------------------------------------------------------------
+
+(defn aligned-form [form-a form-b ^boolean compact? ^BiFunction/1 alt-text]
+  (letfn [(form-arr [^Arr x xs]
+            (case (.render-class x)
+              (#_arr-root 0 #_arr-list 1) xs
+              (#_arr-vector 2) (vec xs)
+              (#_arr-set 3) (set xs)
+              (#_arr-map 4) (PersistentHashMap/create (to-array xs))))
+          
+          (alternates-interleaved [^Step/1 steps]
+            (map (fn [^Step step]
+                   (let [x' (form (.x step))]
+                     (case (.mask step)
+                       #_part-of-a 2r10 (pp/alternates alt-text
+                                                       (list x' pp/empty-form))
+                       #_part-of-b 2r01 (pp/alternates alt-text
+                                                       (list pp/empty-form x'))
+                       #_part-of-both 2r11 x')))
+                 steps))
+          (next-candidate ^int [^int i ^Step/1 steps ^int mask]
+            (loop [i (inc i)]
+              (if (and (< i (alength steps))
+                       (zero? (bit-and mask (.mask (aget steps i)))))
+                (recur (inc i))
+                i)))
+          (candidate-shared? ^boolean [^int i ^Step/1 steps]
+            (or (>= i (alength steps))
+                (= part-of-both (.mask (aget steps i)))))
+          (alternates-compact [^Step/1 steps]
+            (loop [acc []
+                   i-a (next-candidate -1 steps part-of-a)
+                   i-b (next-candidate -1 steps part-of-b)]
+              (if (= i-a i-b)           ;pairing: x/x
+                (if (< i-a (alength steps))
+                  (let [x' (form (.x (aget steps i-a)))]
+                    (recur (conj acc x')
+                           (next-candidate i-a steps part-of-a)
+                           (next-candidate i-b steps part-of-b)))
+                  acc)
+
+                ;; pairings: a/empty, empty/b, or a/b
+                (let [a' (if (candidate-shared? i-a steps)
+                           pp/empty-form
+                           (form (.x (aget steps i-a))))
+                      b' (if (candidate-shared? i-b steps)
+                           pp/empty-form
+                           (form (.x (aget steps i-b))))]
+                  (recur (conj acc (pp/alternates alt-text (list a' b')))
+                         (cond-> i-a
+                           (not (identical? pp/empty-form a'))
+                           (next-candidate steps part-of-a))
+                         (cond-> i-b
+                           (not (identical? pp/empty-form b'))
+                           (next-candidate steps part-of-b)))))))
+          (form-alignment [^Arr al]
+            (form-arr al (let [steps (al-steps al)]
+                           (if compact?
+                             (alternates-compact steps)
+                             (alternates-interleaved steps)))))
+          
+          (form [x]
+            (if (arr? x)
+              (if (.alignment? ^Arr x)
+                (form-alignment x)
+                (form-arr x (map form (.data ^Arr x))))
+              x))]
+
+    (-> (align (arrify form-a) (arrify form-b))
+        (form-alignment))))
+
+;;; ------------------------------------------------------------------------
+
+(defn print-ea-lines ^void [^String msg exp act ^Style style]
+  (let [forms (aligned-form exp act
+                            (.compact-diff? style) (.alternates-style style))
+        multi-frag (-> (tf/mk-cursor) (pp/pretty0 forms) (tf/fragment))
+
+        col-0 (-> (tf/mk-cursor) ((.style-dim-fn style))
+                  (tf/text "   cause:") (tf/newline)
+                  (tf/text "expected:") (tf/newline)
+                  (tf/text "  actual:") (tf/page))
+        col-1 (-> (tf/mk-cursor)
+                  (tf/text msg) (tf/newline)
+                  (pp/isolate-view-into multi-frag 0) (tf/newline)
+                  (pp/isolate-view-into multi-frag 1) (tf/page))]
+    ;; use side-by-side to offset the column values in `col-1`
+    (-> (tf/mk-cursor)
+        (tf/side-by-side-into (doto (new Object/2 2)
+                                (aset 0 col-0)
+                                (aset 1 col-1))
+                              (doto (new int/1 2)
+                                (aset 0 0)
+                                (aset 1 10)))
+        (tf/page)
+        (tf/print-page))))
+
+(defn print-ea-columns [^String msg a b ^Style style]
+  (let [forms (aligned-form a b
+                            (.compact-diff? style) (.alternates-style style))
+        side-by-side-gap 4
+        side-by-side-width (quot (- (.page-width style) side-by-side-gap) 2)
+        column-a 0
+        column-b (+ side-by-side-width side-by-side-gap)
+        multi-frag (-> (tf/mk-cursor)
+                       (pp/pretty1 forms side-by-side-width)
+                       (tf/page))]
+
+    (-> (tf/mk-cursor)
+        (tf/with-save-restore-> ((.style-dim-fn style)) (tf/text "cause: "))
+        (tf/text msg)
+        (tf/newline)
+        
+        (tf/with-save-restore-> ((.style-dim-fn style)) (tf/text "expected:"))
+        (tf/forward-to-column column-b)
+        (tf/with-save-restore-> ((.style-dim-fn style)) (tf/text "actual:"))
+        (tf/newline)
+
+        (tf/side-by-side-into (doto (new Object/2 2)
+                                (aset 0 (-> (tf/mk-cursor)
+                                            (pp/isolate-view-into multi-frag 0)
+                                            (tf/page)))
+                                (aset 1 (-> (tf/mk-cursor)
+                                            (pp/isolate-view-into multi-frag 1)
+                                            (tf/page))))
+                              (doto (new int/1 2)
+                                (aset 0 column-a)
+                                (aset 1 column-b)))
+        (tf/page)
+        (tf/print-page))))
+
+(letfn [(atomic? ^boolean [x]
+          (or (string? x) (not (seqable? x))))
+        (single-line-form? ^boolean [x]
+          ;; Consider a form `x` "multi-line" if it is a collection
+          ;; exeeding a certain size or if it contains a collection.
+          (or (atomic? x)
+              (let [x (seq x), threshold 8]
+                (and (< (bounded-count threshold x) threshold)
+                     (every? atomic? x)))))]
+  
+  (defn print-expected-actual
+    ([^String msg a b]
+     (print-expected-actual msg a b (style/env-style)))
+    ([^String msg a b ^Style style]
+     (if (and (single-line-form? a) (single-line-form? b))
+       (print-ea-lines msg a b style)
+       (print-ea-columns msg a b style)))))

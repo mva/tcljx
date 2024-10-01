@@ -7,12 +7,13 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.alpha.ptest__pp
   (:require [tcljx.alpha.textflow :as tf]
-            [tcljx.alpha.textflow__impl :as tfi]
+            [tcljx.alpha.textflow__insn :as insn]
             [tinyclj.core.protocols :refer [datafy]])
   (:import (tcljx.alpha.textflow Cursor)
            (tinyclj.core.protocols Datafiable)
            (java.util Map$Entry)
            (clojure.lang IMeta)
+           (java.util.function BiFunction IntUnaryOperator)
            (java.util.regex Pattern)))
 
 ;;; based on Kiselyov, Peyton-Jones, and Sabry: "Lazy v. Yield:
@@ -23,49 +24,98 @@
 
 ;;; Marks the beginning of a flex group.  Its column provides the
 ;;; indentation of group elements if newlines are inserted.
-(def ^:private cmd-flex-start (+ tfi/cmd-id-last 1))
-(def ^:private marker-flex-start (object (tfi/mk-cmd cmd-flex-start 0)))
-(defn- mark-flex-start ^Cursor [^Cursor csr]
-  (-> csr (tf/add-object marker-flex-start)))
-(defn- flex-start? ^boolean [cmd]
-  (identical? marker-flex-start cmd))
+(def ^:private noop-flex-start (+ insn/last-no-operation-arg 1))
+(def ^:private marker-flex-start (insn/mk-noop noop-flex-start))
+(defn- flex-start? ^boolean [insn]
+  (identical? marker-flex-start insn))
 
 ;;; Follows the closing delimiter of a flex group.
-(def ^:private cmd-flex-end (+ tfi/cmd-id-last 2))
-(def ^:private marker-flex-end (object (tfi/mk-cmd cmd-flex-end 0)))
-(defn- mark-flex-end ^Cursor [^Cursor csr ^String end]
-  (-> csr (tf/text end) (tf/add-object marker-flex-end)))
-(defn- flex-end? ^boolean [cmd]
-  (identical? marker-flex-end cmd))
+(def ^:private noop-flex-end (+ insn/last-no-operation-arg 2))
+(def ^:private marker-flex-end (insn/mk-noop noop-flex-end))
+(defn- flex-end? ^boolean [insn]
+  (identical? marker-flex-end insn))
 
-;;; FIXME... remove no-break-space and replace it with generic
-;;; collection?
-(def flex-space "\u0020")              ;can be replaced with a newline
-(def no-break-space "\u00a0")          ;No-Break Space (NBSP)
+(def ^:private flex-space "\u0020")    ;can be replaced with a newline
+(def ^:private suffix-comma ",")       ;can follow a map entry
+(def ^:private close-rparen ")")
+(def ^:private close-rbracket "]")
+(def ^:private close-rbrace "}")
+(def ^:private close-rempty (insn/mk-noop (+ insn/last-no-operation-arg 3)))
+
+(defn- closing? ^boolean [^Object insn]
+  (condp identical? insn
+    close-rparen true
+    close-rbracket true
+    close-rbrace true
+    close-rempty true
+    #_else false))
+
+(def ^:private cmd-mark-alternate (+ insn/last-command-id 1))
+(def ^:private end-of-alternates (insn/mk-cmd cmd-mark-alternate 0))
+
+(def ^:private insn-data-noopv (vec (concat
+                                    (range (+ insn/last-no-operation-arg 1))
+                                    [:flex-start :flex-end :close-rempty])))
 
 ;;; ------------------------------------------------------------------------
 
+(def empty-form (new Object))
+(defn empty-form? ^boolean [form]
+  (identical? empty-form form))
+
+(deftype Alternates [^BiFunction/1 alt-text ^Object/1 alt-forms])
 (letfn
-    [(text-coll ^Cursor [^Cursor csr ^String begin ^String end xs]
-       (loop [csr (-> csr (tf/text begin) (mark-flex-start))
-              [x & xr :as xs] (seq xs)]
+    [(mark-flex-start ^Cursor [^Cursor csr]
+       (tf/add-printable-insn csr marker-flex-start))
+     
+     ;; Protocol: `insn-close` is followed by arbitrary many
+     ;; `closing?`, `styling?`, or `suffix-comma` instructions, and
+     ;; then a `flex-space` (or the end of a top-level container).
+     (push-flex-end ^Cursor [^Cursor csr ^Object insn-close]
+       #_(assert (close? insn-close))
+       (tf/add-printable-insn csr insn-close))
+     
+     ;; Called before a `flex-space`, at the end of a
+     ;; `text-forms-into`, before an alternates block, and at the end
+     ;; of every alternate.  The test for `suffix-comma` handles the
+     ;; case of a `flex-end` following a map entry pair.
+     (pop-flex-end* ^Cursor [^Cursor csr]
+       (let [insns (.insns csr)]
+         (loop [csr csr, i (dec (.insn-count csr))]
+           (let [insn (aget insns i)]
+             (cond
+               (closing? insn)
+               (recur (tf/add-printable-insn csr marker-flex-end) (dec i))
+               
+               (or (identical? suffix-comma insn) ;comma after map entry
+                   (insn/styling? insn))
+               (recur csr (dec i))
+
+               :else csr)))))
+     (text-flex-space ^Cursor [^Cursor csr]
+       (-> csr (pop-flex-end*) (tf/text flex-space)))
+
+     (text-flex-seq* ^Cursor [^Cursor csr ^seq xs ^Object insn-close]
+       ;; pre: `xs` is nil when empty (i.e. result of a `seq` call)
+       (loop [csr (mark-flex-start csr), [x & ^seq xr :as ^seq xs] xs]
          (if (nil? xs)
-           (mark-flex-end csr end)
+           (push-flex-end csr insn-close)
            (recur (cond-> (text-form csr x)
-                    (some? xr)
-                    (tf/text flex-space))
-                  (next xs)))))
-     (text-coll-entry ^Cursor [^Cursor csr ^String begin ^String end xs]
-       (loop [csr (-> csr (tf/text begin) (mark-flex-start))
-              [x & xr :as xs] (seq xs)]
-         (if (nil? xs)
-           (mark-flex-end csr end)
-           (recur (cond-> (-> (text-form csr (key x))
-                              (tf/text no-break-space)
-                              (text-form (val x)))
-                    (some? xr)
-                    (-> (tf/text ",") (tf/text flex-space)))
-                  (next xs)))))
+                    (some? xr) (text-flex-space))
+                  xr))))
+     (text-coll ^Cursor [^Cursor csr ^String begin ^String end ^seq xs]
+       (-> csr (tf/text begin) (text-flex-seq* xs end)))
+     (text-map* ^Cursor [^Cursor csr [x & ^seq xr :as ^seq xs]]
+       (if (nil? xs)
+         csr
+         (recur (cond-> (text-flex-seq* csr (seq x) close-rempty)
+                  (some? xr) (-> (tf/text suffix-comma) (text-flex-space)))
+                xr)))
+     (text-map ^Cursor [^Cursor csr ^map map]
+       (-> (tf/text csr "{")
+           (mark-flex-start)
+           (text-map* (seq map))
+           (push-flex-end close-rbrace)))
      
      (cntrl? ^boolean [^char c]
        (or (< (int c) (int \u0020)) (= c \u007f)))
@@ -120,10 +170,10 @@
        ;; note: map & set have non-deterministic order
        (cond
          (symbol? form) (tf/text csr (str form))
-         (seq? form) (text-coll csr "(" ")" (seq form))
-         (vector? form) (text-coll csr "[" "]" (seq form))
-         (map? form) (text-coll-entry csr "{" "}" (seq form))
-         (set? form) (text-coll csr "#{" "}" (seq form))
+         (seq? form) (text-coll csr "(" close-rparen (seq form))
+         (vector? form) (text-coll csr "[" close-rbracket (seq form))
+         (map? form) (text-map csr ^map form)
+         (set? form) (text-coll csr "#{" close-rbrace (seq form))
          :else (throw (IllegalArgumentException. (str (class form))))))
      (meta-value ^Object [^map m]
        (if (= (count m) 1)
@@ -138,7 +188,7 @@
        (if-some [m (meta form)]
          (-> (tf/text csr "^")
              (text-form (meta-value m))
-             (tf/text flex-space)
+             (text-flex-space)
              (text-imeta-value form))
          (text-imeta-value csr form)))
      (text-datafiable ^Cursor [^Cursor csr ^Datafiable form]
@@ -152,6 +202,31 @@
            (tf/text csr (str form))
            (text-form csr ex))))
 
+     ;; Appends command outline that is fleshed out in `format!` and
+     ;; restricted to a particular alternative view in `isolate-view`.
+     ;; Note: `alt-text` is a bit brittle, expecting the alternative
+     ;; text to be well behaved with regard to balanced `flex-start`
+     ;; and `flex-end`.
+     (text-alternate ^Cursor [^Cursor csr ^BiFunction alt-text form]
+       (let [start (.insn-count csr)
+             csr (-> csr
+                     (tf/add-printable-insn insn/insn-noop) ;cmd-mark-alternate
+                     (as-> csr (.apply alt-text csr form))
+                     (tf/add-printable-insn insn/insn-noop) ;advance-lines
+                     (tf/add-printable-insn insn/insn-noop)) ;forward-to-column
+             end (.insn-count csr)]
+         (aset (.insns csr) start (insn/mk-cmd cmd-mark-alternate (- end start)))
+         csr))
+     (text-alternates ^Cursor [^Cursor csr ^Alternates alts]
+       ;; clear pending flex-ends before entering the alternates
+       ;; block, and then at the end of every single alternate
+       (loop [csr (pop-flex-end* csr), i 0]
+         (if (< i (alength (.alt-forms alts)))
+           (let [form (aget (.alt-forms alts) i)]
+             (recur (text-alternate csr (aget (.alt-text alts) i) form)
+                    (inc i)))
+           (tf/add-printable-insn csr end-of-alternates))))
+     
      (array? ^boolean [form]
        (if (some? form)
          (.isArray (class form))
@@ -170,7 +245,7 @@
 
          (array? form)
          (recur csr (vec form))
-         
+
          :else
          (cond
            (nil? form) (tf/text csr "nil")
@@ -180,128 +255,248 @@
            (string? form) (text-string csr form)
            (char? form) (text-char csr form)
            (instance? Pattern form) (text-pattern csr form)
+           (instance? Alternates form) (text-alternates csr form)
+           (identical? empty-form form) csr
            :else (tf/text csr (str form)))))]
-
-    (def text-form text-form)
-
-    (defn text-forms ^Cursor [^Cursor csr forms]
-      (text-coll csr "" "" forms)))
+  
+    (defn text-form-into ^Cursor [^Cursor csr form]
+      ;; public version of the recursive `text-form` ensuring balanced
+      ;; `flex-start` and `flex-end` pairs.
+      (-> csr (text-form form) (pop-flex-end*)))
+  
+    (defn text-forms-into ^Cursor [^Cursor csr forms]
+      (-> (text-flex-seq* csr (seq forms) close-rempty)
+          (pop-flex-end*))))
 
 ;;; ------------------------------------------------------------------------
 
-(defn format! ^Object/1 [^Object/1 frag ^int page-width]
-  (letfn [(mk-i-remaining ^long [^int i ^int column]
-            (bit-or (bit-shift-left (long i) 32)
-                    (Integer/toUnsignedLong column)))
-          (i-of ^int [^long ir]
-            (int (unsigned-bit-shift-right ir 32)))
-          (remaining-of ^int [^long ir]
-            (int ir))
+(def alt-text-identity
+  (^BiFunction fn ^Cursor [^Cursor csr form]
+   (text-form-into csr form)))
+
+;;; An alternate form describes multiple values that share the same
+;;; space when rendered.  Which particular view is active is selected
+;;; by a post-processing step.
+;;;
+;;; Important: Alternates can not be nested!  The current
+;;; implementation puts the alternative command streams into the
+;;; cursor one after the other, and fails to reconstruct them with
+;;; another alternate inside an alternate view.
+(defn alternates [^BiFunction/1 alt-text alt-forms]
+  (let [alt-forms (to-array alt-forms)]
+    (Alternates. (or alt-text
+                     (doto (new BiFunction/1 (alength alt-forms))
+                       (java.util.Arrays/fill alt-text-identity)))
+                 alt-forms)))
+
+;;; ------------------------------------------------------------------------
+
+(defn- mk-i-pos ^long [^int i ^int pos]
+  (bit-or (bit-shift-left (long i) 32) (Integer/toUnsignedLong pos)))
+(defn- i-of ^int [^long ir]
+  (int (unsigned-bit-shift-right ir 32)))
+(defn- pos-of ^int [^long ir]
+  (int ir))
+
+(defn- flex-width-array* ^long [^int/1 awidth ^Object/1 frag ^int start]
+  (letfn [(width-alternates ^long [^int i ^int pos ^int max-pos]
+            (let [insn (aget frag i)]
+              (if (identical? end-of-alternates insn)
+                (width-to-flex-end (inc i) max-pos false)
+                (let [mark-alt ^int insn
+                      ip (width-to-flex-end (inc i) pos true)]
+                  (recur (+ i (insn/cmd-arg mark-alt)) pos
+                         (max max-pos (pos-of ip)))))))
           
-          (flex-space-in-reach? ^boolean [^int i ^int remaining]
-            (if (neg? remaining)
-              false
-              (if (< i (alength frag))
-                (let [x (aget frag i)]
-                  (cond
-                    (identical? flex-space x)
-                    true
-                    (instance? String x)
-                    (recur (inc i) (- remaining (tfi/text-width x)))
-                    :else
-                    (recur (inc i) remaining)))
-                true)))
-          (fits? ^boolean [^int i ^int remaining ^int nesting]
-            (let [x (aget frag i)]
+          (width-to-flex-end ^long [^int i ^int pos ^boolean in-alternate-view?]
+            (let [insn (aget frag i)]
               (cond
-                (neg? remaining)
-                false
+                (insn/text? insn)
+                (recur (inc i) (+ pos (insn/text-width insn))
+                       in-alternate-view?)
                 
-                (instance? String x)
-                (recur (inc i) (- remaining (tfi/text-width x)) nesting)
+                (flex-start? insn)
+                (let [ip (width-flex-group! i pos)]
+                  (recur (i-of ip) (pos-of ip) in-alternate-view?))
                 
-                (flex-start? x)
-                (recur (inc i) remaining (inc nesting))
+                (flex-end? insn)
+                (mk-i-pos (inc i) pos)
+                
+                (insn/cmd? cmd-mark-alternate insn)
+                (if in-alternate-view?
+                  (mk-i-pos i pos)
+                  (width-alternates i pos pos))
+                
+                :else (recur (inc i) pos in-alternate-view?))))
+          
+          (width-flex-group! ^long [^int i ^int pos]
+            ;; pre: looking at `marker-flex-start`
+            (assert (flex-start? (aget frag i)))
+            (let [ip (width-to-flex-end (inc i) pos false)]
+              (aset awidth i (- (pos-of ip) pos))
+              ip))]
+    
+    (width-flex-group! start 0)))
 
-                (flex-end? x)
-                (if (zero? nesting)
-                  (flex-space-in-reach? i remaining)
-                  (recur (inc i) remaining (dec nesting)))
-                    
-                :else (recur (inc i) remaining nesting))))
+;;; The returned function is called with increasing `i`, once for
+;;; every `marker-flex-start` in `frag` over the range from
+;;; `start` (inclusive) to `end` (exclusive).  The returned width does
+;;; not have to be exact: all results larger than `page-width` have
+;;; the same effect.
+(defn- mk-width-fn ^IntUnaryOperator [^int page-width
+                                      ^Object/1 frag ^int start ^int end]
+  ;; Instead of an IntUnaryOperator on an array, this could be an
+  ;; IntSupplier based on a deque of ints.  Also, there is not need to
+  ;; look ahead for more than (inc page-width) characters to meet the
+  ;; caller's needs: the result is always compared to number less than
+  ;; or equal to page-width.
+  (if (= page-width Integer/MAX_VALUE)
+    ;; pretty0: result will always be compared to a non-negative value
+    (^IntUnaryOperator fn [i] 0)               
+    (let [awidth (new int/1 end)   ;anything before `start` stays zero
+          ip (flex-width-array* awidth frag start)]
+      (assert (= (i-of ip) end))
+      #_(prn :frag (seq frag))
+      #_(prn :awidth (seq awidth))
+      (^IntUnaryOperator fn [i] (aget awidth i)))))
 
-          (inline? ^boolean [^Integer nl]
+
+(deftype AltRange [^int start ^int end ^int remaining ^int line-count])
+
+(defn- format! ^int [^IntUnaryOperator width-fn ^Object/1 frag
+                     ^int page-width ^int start]
+  ;; pre: no `skip-commands` entries in `frag`
+  (letfn [(inline? ^boolean [^Integer nl]
             (nil? nl))
           (force-inline ^Integer []
             nil)
           (newline-then ^Integer [^int column]
-            (tfi/mk-cmd tfi/end-current-line column))
+            (insn/mk-cmd insn/end-current-line column))
 
-          (to-empty! ^int [^int i]
-            (aset frag i "")
-            (inc i))
-          (to-space! ^int [^int i]
-            (aset frag i flex-space)
-            (inc i))
-          (to-newline! ^int [^int i ^Integer nl]
-            (aset frag i nl)
-            (inc i))
+          (update-alternate! ^void [^AltRange range ^int max-lc ^int min-rem]
+            (let [lines+ (- max-lc (.line-count range))
+                  column (- page-width min-rem)]
+              (aset frag (- (.end range) 2)
+                    (insn/mk-cmd insn/advance-lines lines+))
+              (aset frag (- (.end range) 1)
+                    (insn/mk-cmd insn/forward-to-column column))))
+          (max-line-count ^int [^seq ranges]
+            (reduce #(max ^int %1 (.line-count ^AltRange %2)) 0 ranges))
+          (min-remaining ^int [^int max-lc ^int remaining ^seq ranges]
+            (->> (filter #(= (.line-count ^AltRange %) max-lc) ranges)
+                 (reduce #(min ^int %1 (.remaining ^AltRange %2)) remaining)))
+          (rewrite-alternates ^long [^int i ^int remaining ^Integer nl
+                                     ^seq ranges]
+            (let [insn (aget frag i)]
+              (if (identical? end-of-alternates insn)
+                (let [max-lc (max-line-count ranges)
+                      min-rem (min-remaining max-lc remaining ranges)]
+                  (doseq [^AltRange range ranges]
+                    (update-alternate! range max-lc min-rem))
+                  (rewrite-to-flex-end (inc i) min-rem nl false))
+                (let [mark-alt ^int insn
+                      ir (rewrite-to-flex-end (inc i) remaining nl true)
+                      rem (pos-of ir)
+                      range (AltRange. i (i-of ir) rem
+                                       (insn/line-count frag i (i-of ir)))]
+                  (recur (+ i (insn/cmd-arg mark-alt)) remaining nl
+                         (cons range ranges))))))
           
           ;; `remaining` is the number of code points remaining until
           ;; `page-width`.  This is the amount of space left in the
           ;; current line until the soft limit is reached.
-          (rewrite-to-flex-end ^long [^int i ^int remaining ^Integer nl]
-            (let [x (aget frag i)]
+          (rewrite-to-flex-end ^long [^int i ^int remaining ^Integer nl
+                                      ^boolean in-alternate-view?]
+            (let [insn (aget frag i)]
               (cond
-                (identical? no-break-space x)
-                (recur (to-space! i) (dec remaining) nl)
+                (and (identical? flex-space insn) (not (inline? nl)))
+                (do (aset frag i nl) ;replace with newline plus indent
+                    (recur (inc i) (- page-width (insn/cmd-arg nl))
+                           nl in-alternate-view?))
                 
-                (and (identical? flex-space x) (not (inline? nl)))
-                (recur (to-newline! i nl)
-                       (- page-width (tfi/cmd-arg nl))
-                       nl)
+                (insn/text? insn)
+                (recur (inc i) (- remaining (insn/text-width insn))
+                       nl in-alternate-view?)
                 
-                (instance? String x)
-                (recur (inc i) (- remaining (tfi/text-width x)) nl)
-                
-                (flex-start? x)
+                (flex-start? insn)
                 (let [ir (rewrite-flex-group i remaining nl)]
-                  (recur (i-of ir) (remaining-of ir) nl))
+                  (recur (i-of ir) (pos-of ir) nl in-alternate-view?))
                 
-                (flex-end? x)
-                (mk-i-remaining (to-empty! i) remaining)
+                (flex-end? insn)
+                (mk-i-pos (inc i) remaining)
                 
-                :else (recur (inc i) remaining nl))))
+                (insn/cmd? cmd-mark-alternate insn)
+                (if in-alternate-view?
+                  (mk-i-pos i remaining)
+                  (rewrite-alternates i remaining nl nil))
+                
+                :else (recur (inc i) remaining nl in-alternate-view?))))
           
           (rewrite-flex-group ^long [^int i ^int remaining ^Integer nl]
             ;; pre: looking at `marker-flex-start`
             (assert (flex-start? (aget frag i)))
-            
-            ;; Note: There is some amount of redundant work done by
-            ;; the independent fits? tests.  Maybe reconsider this
-            ;; later?  FIXME...
-            (rewrite-to-flex-end
-             (to-empty! i) remaining
-             (cond (inline? nl) nl ;if parent fits, then this one fits as well
-                   (fits? (inc i) remaining 0) (force-inline)
-                   :else (let [column (- page-width remaining)]
-                           (newline-then column )))))]
 
-    (assert (= (aget frag 0) ""))
+            #_(prn :frag-in (seq frag))
+            #_(prn :rewrite-flex-group :i i :remaining remaining
+                   :inline-nl? (inline? nl))
+            (let [nl' (cond (inline? nl)
+                            nl ;if parent fits, then this one fits as well
+
+                            (>= remaining (.applyAsInt width-fn i))
+                            (force-inline)
+                   
+                            :else (newline-then (- page-width remaining)))]
+              #_(prn :rewrite-flex-group :inline-nl'? (inline? nl')
+                     :remaining-at-end
+                     (remaining-at-end (inc i) remaining 0 false))
+              (rewrite-to-flex-end (inc i) remaining nl' false)))]
+
+    ;; (prn)
+    ;; (prn :start start)
+    ;; (prn :frag-in (seq frag))
+    ;; (run! prn (map-indexed (insn/mk-indexed-insn-data insn-data-noopv) frag))
     (let [inline-all? (= page-width Integer/MAX_VALUE)
-          ir (rewrite-flex-group 1 page-width (if inline-all?
-                                                (force-inline)
-                                                (newline-then 0)))]
-      (assert (= (i-of ir) (alength frag)))
-      frag)))
+          nl (if inline-all?
+               (force-inline)
+               (newline-then 0))
+          ir (rewrite-flex-group start page-width nl)]
+      ;; (prn)
+      ;; (prn :frag-out (seq frag))
+      ;; (run! prn (map-indexed (insn/mk-indexed-insn-data insn-data-noopv) frag))
+      (i-of ir))))
 
-(letfn [(forms-fragment ^Object/1 [forms]
-          (-> (tf/mk-cursor)
-              (text-forms forms)
-              (tf/fragment)))]
+;;; ------------------------------------------------------------------------
+
+(defn pretty1 ^Cursor [^Cursor csr forms ^int page-width]
+  (let [start (.insn-count csr)
+        csr (text-forms-into csr forms)
+        end (.insn-count csr)
+        end* (-> (mk-width-fn page-width (.insns csr) start end)
+                 (format! (.insns csr) page-width start))]
+    (assert (= end* end))
+    csr))
+
+(defn pretty0 ^Cursor [^Cursor csr forms]
+  (pretty1 csr forms Integer/MAX_VALUE))
+
+(letfn [(skip-over-alternates ^int [^int i ^Object/1 frag]
+          (let [cmd (aget frag i)]
+            (if (identical? end-of-alternates cmd)
+              (inc i)
+              (recur (+ i (insn/cmd-arg cmd)) frag))))
+        (replay-alternate ^Cursor [^Cursor csr ^Object/1 frag ^int i ^int view]
+          (let [cmd (aget frag i), skip (insn/cmd-arg cmd)]
+            (cond
+              (identical? end-of-alternates cmd) csr
+              (zero? view) (tf/replay-fragment csr frag (+ i 1) (+ i skip))
+              :else (recur csr frag (+ i skip) (dec view)))))]
   
-  (defn pretty0-fragment ^Object/1 [forms]
-    (-> forms (forms-fragment) (format! Integer/MAX_VALUE)))
+  (defn isolate-view-into ^Cursor [^Cursor csr ^Object/1 frag ^int view]
+    (loop [csr csr, i 0]
+      (if (< i (alength frag))
+        (if (insn/cmd? cmd-mark-alternate frag i)
+          (recur (replay-alternate csr frag i view)
+                 (skip-over-alternates i frag))
+          (recur (tf/replay-insn csr (aget frag i)) (inc i)))
+        csr))))
 
-  (defn pretty1-fragment ^Object/1 [forms ^int page-width]
-    (-> forms (forms-fragment) (format! page-width))))

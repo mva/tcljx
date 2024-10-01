@@ -7,26 +7,21 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.alpha.ptest__impl
   (:require
-   [tinyclj.alpha.ptest__term :as term]
-   [tinyclj.alpha.ptest__align :as align])
+   [tcljx.alpha.ptest__style :as style]
+   [tcljx.alpha.ptest__align :as align])
   (:import
    (clojure.lang Var)
    (java.io StringWriter)
    (java.time Instant)
    (java.util ArrayList)
-   (java.util.concurrent StructuredTaskScope StructuredTaskScope$Subtask
+   (java.util.concurrent StructuredTaskScope$ShutdownOnFailure
+                         StructuredTaskScope$Subtask
                          CountDownLatch)
-   (java.util.function IntPredicate)))
+   (java.util.function Function IntPredicate)))
 
 (def ^:private run-tests-as-concurrent-tasks? true)
 (def ^:private deadline-test-var-seconds (* 1 60))
 (def ^:private deadline-namespace-seconds (* 2 60))
-
-;;; Disables all of the pretty printing machinery when false.  Highly
-;;; recommended when tinkering with the printer logic, because this
-;;; can obfuscate the output of unit tests in unpredictable ways.
-(def ^:private pretty-print-expected-actual true)
-
 
 (letfn [(nmsp-of ^String [^String spec]
           (let [i-var (.indexOf spec (int \/))]
@@ -160,20 +155,20 @@
 
 (defn- print-header [^TestContext test-ctx ^String prefix ^int line]
   (let [line-suffix (when (>= line 0)
-                      (str ":" (term/highlight (str line))))]
+                      (str ":" (style/highlight-str (str line))))]
     (println prefix (str (.var-symbol test-ctx) line-suffix))))
 
 (defn- some-output? ^boolean [^int out-start ^int out-end]
   (< out-start out-end))
 (defn- print-output ^void [^TestContext test-ctx ^int out-start ^int out-end]
   (when (some-output? out-start out-end)
-    (println (term/dim "---- output start ----"))
+    (println (style/dim-str "---- output start ----"))
     (print-lines (-> test-ctx .output (.getBuffer)) out-start out-end)
-    (println (term/dim "----- output end -----"))))
+    (println (style/dim-str "----- output end -----"))))
 
-(def ^:private header-pass (term/success "PASS"))
-(def ^:private header-fail (term/error-header " FAIL " "*FAIL*"))
-(def ^:private header-error (term/error-header " ERROR " "*ERROR*"))
+(def ^:private header-pass (style/success-str "PASS"))
+(def ^:private header-fail (style/error-header-str " FAIL " "*FAIL*"))
+(def ^:private header-error (style/error-header-str " ERROR " "*ERROR*"))
 
 (deftype IsContextImpl [^TestContext test-ctx
                         ^int line    ;negative if "between" `is` forms
@@ -193,9 +188,7 @@
                          (^Callable fn []
                           (print-header test-ctx header-fail line)
                           (print-output test-ctx out-start out-end)
-                          (if pretty-print-expected-actual
-                            (align/print-a-b msg expected actual)
-                            (align/print-cea msg expected actual))
+                          (align/print-expected-actual msg expected actual)
                           is-report-fail))))
   (outcome-pass [this]
     (let [out-end (.output-position test-ctx)]
@@ -206,6 +199,7 @@
                             (print-output test-ctx out-start out-end))
                           is-report-pass)))))
 
+;;; `TEST-CTX' provides context to `is` macros.
 (def ^:private TEST-CTX (java.lang.ScopedValue/newInstance))
 
 (defn is-context-if-selected ^IsContext [^int line] ;called from `is`
@@ -221,21 +215,21 @@
 (defn- run-test-var ^Callable [^Var var ^IntPredicate select-is?]
   (let [test-ctx (TestContext. (symbol var) select-is?
                                (StringWriter.) (ArrayList.) 0)]
-    ;; Runs the deftest function `var` with `*out*` and
-    ;; `*err` redirected to the output member of `ctx`.
-    (java.lang.ScopedValue/runWhere
-     TEST-CTX test-ctx                 ;provide context to `is` macros
-     (^Runnable fn []
-      ;; note: the unit tests of this namespace call this function
-      ;; recursively, i.e. there really must be a binding that
-      ;; establishes a nested context and restores the parent context
-      (try
-        (binding [*out* (.output test-ctx)
-                  *err* (.output test-ctx)]
-          (@var))
-        (catch Throwable t              ;any exception outside `is`
-          (let [out-pos (.output-position test-ctx)]
-            (.outcome-error (IsContextImpl. test-ctx -1 out-pos) t))))))
+    ;; Runs the deftest function `var` with `*out*` and `*err`
+    ;; redirected to the output member of `ctx`.
+    (-> (java.lang.ScopedValue/where TEST-CTX test-ctx)
+        (.run (^Runnable fn []
+               ;; note: the unit tests of this namespace call this function
+               ;; recursively, i.e. there really must be a binding that
+               ;; establishes a nested context and restores the parent context
+               (try
+                 (binding [*out* (.output test-ctx)
+                           *err* (.output test-ctx)]
+                   (@var))
+                 (catch Throwable t     ;any exception outside `is`
+                   (let [out-pos (.output-position test-ctx)
+                         oob-ctx (IsContextImpl. test-ctx -1 out-pos)]
+                     (.outcome-error oob-ctx t)))))))
     
     (let [size (.output-position test-ctx)]
       (.register-outcome test-ctx size size nil)) ;capture any remaining output
@@ -275,12 +269,15 @@
             (let [var-line-map (if (true? vars) {} vars)
                   vars (nmsp-test-vars nmsp vars)]
               (if run-tests-as-concurrent-tasks?
-                (with-open [scope (StructuredTaskScope.)]
+                (with-open [scope (StructuredTaskScope$ShutdownOnFailure.)]
                   (let [taskv (mapv #(with-fork scope binding-frame
                                        (run-var-with-pred var-line-map %))
                                     vars)]
+                    
                     (.joinUntil scope (.plusSeconds (Instant/now)
                                                     deadline-test-var-seconds))
+                    (.throwIfFailed scope (Function/identity))
+                    
                     (mapv StructuredTaskScope$Subtask/.get taskv)))
 
                 ;; alternative: sequential execution
@@ -301,7 +298,7 @@
     ;; soon as they become available.  A long running namespace blocks
     ;; the output of all following namespaces.
     (->> (if run-tests-as-concurrent-tasks?
-           (with-open [scope (StructuredTaskScope.)]
+           (with-open [scope (StructuredTaskScope$ShutdownOnFailure.)]
              (let [n (count nmspv)
                    alatch (new CountDownLatch/1 (inc n))
                    atask (new StructuredTaskScope$Subtask/1 n)]
@@ -322,6 +319,8 @@
                
                (.joinUntil scope (.plusSeconds (Instant/now)
                                                deadline-namespace-seconds))
+               (.throwIfFailed scope (Function/identity))
+               
                (mapv StructuredTaskScope$Subtask/.get atask)))
 
            ;; alternative: sequential execution

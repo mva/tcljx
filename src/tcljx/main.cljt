@@ -73,7 +73,7 @@
       
       (tf/text "column")
       (tf/forward-to-column 10) (tf/text "10")
-      (tf/forward-to-column 20) (tf/text "20")
+      (tf/forward-to-column 30) (tf/text "20")
       
       (tf/page)))
 
@@ -84,20 +84,24 @@
                        (tf/text "full line")
                        (tf/newline 4)
                        (tf/text "line without newline")
+                       (tf/advance-lines 2) (tf/text "advanced 2")
+                       (tf/advance-lines 3) (tf/text "advanced 3")
                        (tf/page))
         pp-page (-> (tf/mk-cursor)
-                    (pp/text-form '[:a 123 foobar])
+                    (pp/pretty0 '[:a 123 foobar])
                     (tf/page))]
-    #_(-> page
+    #_(-> short-page
           (tf/print-page))
-    (-> (tf/side-by-side (doto (new Object/2 3)
-                           (aset 0 page)
-                           (aset 1 pp-page)
-                           (aset 2 short-page))
-                         (doto (new int/1 3)
-                           (aset 0 2)
-                           (aset 1 34)
-                           (aset 2 66)))
+    (-> (tf/mk-cursor)
+        (tf/side-by-side-into (doto (new Object/2 3)
+                                (aset 0 page)
+                                (aset 1 pp-page)
+                                (aset 2 short-page))
+                              (doto (new int/1 3)
+                                (aset 0 2)
+                                (aset 1 34)
+                                (aset 2 66)))
+        (tf/page)
         (tf/print-page))))
 
 (defn run []

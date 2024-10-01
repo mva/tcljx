@@ -7,7 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.run-tests
   (:require
-   (tcljx.alpha ptest-test ptest__pp-test)
+   (tcljx.alpha ptest__pp-test ptest__align-test ptest-test)
    (tcljx reader-test synquote-test #_grammar-test
 
           #_invoke-test #_bootstrap-test
@@ -30,6 +30,7 @@
 (def all-namespaces
   '[tcljx.alpha.ptest-test
     tcljx.alpha.ptest__pp-test
+    tcljx.alpha.ptest__align-test
     
     tcljx.reader-test
     tcljx.synquote-test

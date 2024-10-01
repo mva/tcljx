@@ -7,7 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.wrong
   (:require [tcljx.config :as cfg]
-            [tinyclj.alpha.ptest__term :as term]
+            [tcljx.alpha.ptest__style :as style]
             [tinyclj.string :as str])
   (:import (clojure.lang Symbol IPersistentMap)))
 
@@ -104,7 +104,7 @@
 ;;     :else (str x)))
 
 ;; (defn q ^String [x]                    ;quoting a source code fragment
-;;   (let [s (str* x), s' (term/quote s)]
+;;   (let [s (str* x), s' (style/quote-str s)]
 ;;     (if (identical? s s')
 ;;       (str "`" s "`")                 ;fallback if styles are disabled
 ;;       s')))

@@ -1,0 +1,96 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.ptest__style
+  (:require [tcljx.alpha.textflow :as tf]
+            [tcljx.alpha.ptest__pp :as pp])
+  (:import (tcljx.alpha.textflow Cursor)
+           (java.util.function BiFunction)))
+
+(deftype Style [#_^boolean color-output?
+                ^int page-width
+                ^BiFunction/1 alternates-style
+                ^boolean compact-diff?
+                style-dim-fn])
+
+;; To pick up the terminal width, the shell must export COLUMNS into
+;; the program's environment.  When using make, this can be done by
+;; running "make test COLUMNS=$COLUMNS".
+;; 
+;; Additionally, this cannot pick up changes to the terminal's size
+;; after program startup.  For an ioctl based approach which may
+;; report the actual size, see
+;; https://man7.org/linux/man-pages/man4/tty_ioctl.4.htm
+(defn env-page-width ^int []
+  (let [fallback 80]
+    (if-some [columns (System/getenv "COLUMNS")]
+      (try
+        (max 8 (Integer/parseInt columns))
+        (catch NumberFormatException _
+          fallback))
+      fallback)))
+
+(defn env-color-output? ^boolean []
+  (if-some [cons (System/console)]
+    (.isTerminal cons)
+    false))
+
+(defn env-style
+  (^Style []
+   (env-style (env-page-width) (env-color-output?)))
+  (^Style [^int page-width ^boolean color-output?]
+   (if color-output?
+     (letfn [(colored-form ^Cursor [^int color ^Cursor csr form]
+               (cond-> csr
+                 (not (pp/empty-form? form))
+                 (tf/with-save-restore->
+                   (tf/foreground-4bit color)
+                   (pp/text-form-into form))))]
+       (Style. page-width
+               (doto (new BiFunction/1 2)
+                 (aset 0 (^BiFunction fn ^Cursor [^Cursor csr form]
+                          (colored-form tf/palette-red csr form)))
+                 (aset 1 (^BiFunction fn ^Cursor [^Cursor csr form]
+                          (colored-form tf/palette-blue csr form))))
+               true
+               tf/intensity-faint))
+     (Style. page-width
+             (doto (new BiFunction/1 2)
+               (aset 0 pp/alt-text-identity)
+               (aset 1 pp/alt-text-identity))
+             false
+             identity))))
+
+;;; ------------------------------------------------------------------------
+
+(defn- with-styles [txt style-fn]
+  (if (env-color-output?)
+    (-> (tf/mk-cursor)
+        (tf/with-save-restore-> (style-fn) (tf/text txt))
+        (tf/fragment)
+        (tf/str-render))
+    txt))
+(defn- with-arg [style-fn ^int arg]
+  #(style-fn % arg))
+
+(defn dim-str ^String [^String txt]
+  (with-styles txt tf/intensity-faint))
+(defn highlight-str ^String [^String txt]
+  (with-styles txt tf/intensity-bright))
+(defn quote-str ^String [^String txt]
+  (with-styles txt tf/intensity-bright))
+
+(defn error-str ^String [^String txt]
+  (with-styles txt (with-arg tf/foreground-4bit tf/palette-red)))
+(defn error-header-str ^String [^String color ^String plain]
+  (if (env-color-output?)
+    (with-styles color
+      (comp (with-arg tf/foreground-4bit tf/palette-white)
+            (with-arg tf/background-4bit tf/palette-red)))
+    plain))
+(defn success-str ^String [^String txt]
+  (with-styles txt (with-arg tf/foreground-4bit tf/palette-green)))

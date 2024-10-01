@@ -6,11 +6,11 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.alpha.textflow__ansi
-  (:require [tcljx.alpha.textflow__impl :as impl]))
+  (:require [tcljx.alpha.textflow__insn :as insn]))
 
 ;;; https://en.wikipedia.org/wiki/ANSI_escape_code#SGR_(Select_Graphic_Rendition)_parameters
 
-(def prefix-csi (str \u001b \[))
+(def csi (str \u001b \[))
 
 (letfn [(parameters
           (^StringBuilder [^StringBuilder sb ^int n]
@@ -35,77 +35,71 @@
             (parameters sb (+ offset 8) 5 arg)
             
             (#_color-mode-rgb 3)
-            (parameters sb (+ offset 8) 2 (impl/arg-red arg)
-                        (impl/arg-green arg) (impl/arg-blue arg))))
+            (parameters sb (+ offset 8) 2 (insn/arg-red arg)
+                        (insn/arg-green arg) (insn/arg-blue arg))))
         (sgr-intensity ^StringBuilder [^StringBuilder sb ^int intensity]
           (parameters sb (case intensity
                            (#_intensity-normal 0) 22
                            (#_intensity-bright 1) 1
                            (#_intensity-faint 2) 2)))
         (sgr-conceal ^StringBuilder [^StringBuilder sb ^int conceal]
-          (parameters sb (if (= conceal impl/conceal-invisible) 8 28)))
+          (parameters sb (if (= conceal insn/conceal-invisible) 8 28)))
         (sgr-flag ^StringBuilder [^StringBuilder sb ^int n-on ^int n-off
-                                  ^int enable?]
-          (parameters sb (case enable? 0 n-off 1 n-on)))
+                                  ^long mask ^long style]
+          (parameters sb (case (insn/extract style mask) 0 n-off 1 n-on)))
 
         (modified? ^boolean [^long mask ^long diff]
           (not (zero? (bit-and mask diff))))
-        (clear-difference ^long [^long diff ^long mask]
-          (bit-and-not diff mask))]
+        (clear-diff ^long [^long diff ^long mask]
+          (bit-and-not diff mask))
 
-  (defn cursor-forward ^StringBuilder [^StringBuilder sb ^int n]
-    (if (pos? n)
-      (-> sb (.append prefix-csi) (.append n) (.append \C))
-      sb))
-  
-  (defn- sgr-parameters ^StringBuilder [^StringBuilder sb ^long style ^long diff]
-    (if (zero? diff)                  ;all differences resolved?
-      sb
-      (condp modified? diff
-        impl/mask-style-foreground
-        (let [mode (impl/extract impl/mask-style-foreground-mode style)
-              color (impl/extract impl/mask-style-foreground-color style)]
-          (recur (sgr-color sb 30 mode color)
-                 style (clear-difference diff impl/mask-style-foreground)))
+        (sgr-parameters ^StringBuilder [^StringBuilder sb ^long style
+                                        ^long diff]
+          (loop [diff diff]
+            (if (zero? diff)            ;all differences resolved?
+              sb
+              (condp modified? diff
+                insn/mask-style-foreground
+                (let [mode (insn/extract style insn/mask-style-foreground-mode)
+                      color (insn/extract style insn/mask-style-foreground-color)]
+                  (sgr-color sb 30 mode color)
+                  (recur (clear-diff diff insn/mask-style-foreground)))
 
-        impl/mask-style-background
-        (let [mode (impl/extract impl/mask-style-background-mode style)
-              color (impl/extract impl/mask-style-background-color style)]
-          (recur (sgr-color sb 40 mode color)
-                 style (clear-difference diff impl/mask-style-background)))
+                insn/mask-style-background
+                (let [mode (insn/extract style insn/mask-style-background-mode)
+                      color (insn/extract style insn/mask-style-background-color)]
+                  (sgr-color sb 40 mode color)
+                  (recur (clear-diff diff insn/mask-style-background)))
+                
+                insn/mask-style-intensity
+                (let [intensity (insn/extract style insn/mask-style-intensity)]
+                  (sgr-intensity sb intensity)
+                  (recur (clear-diff diff insn/mask-style-intensity)))
 
-        (case (Long/numberOfTrailingZeros diff)
-          (#_shift-style-intensity 52 53)
-          (recur (sgr-intensity sb (impl/extract impl/mask-style-intensity style))
-                 style (clear-difference diff impl/mask-style-intensity))
+                insn/mask-style-conceal
+                (let [flag (insn/extract style insn/mask-style-conceal)]
+                  (sgr-conceal sb flag) 
+                  (recur (clear-diff diff insn/mask-style-conceal)))
 
-          (#_shift-style-underline 54)
-          (recur (sgr-flag sb 4 24 (impl/extract impl/mask-style-underline style))
-                 style (clear-difference diff impl/mask-style-underline))
+                #_else
+                (let [mask (Long/lowestOneBit diff)]
+                  (case (Long/numberOfTrailingZeros diff)
+                    (#_flag-style-underline 56) (sgr-flag sb 4 24 mask style)
+                    (#_flag-style-strikethrough 57) (sgr-flag sb 9 29 mask style)
+                    (#_flag-style-font-bold 58) (sgr-flag sb 1 22 mask style)
+                    (#_flag-style-font-italic 59) (sgr-flag sb 3 23 mask style))
+                  (recur (bit-xor diff mask)))))))
 
-          (#_shift-style-strikethrough 55)
-          (recur (sgr-flag sb 9 29 (impl/extract impl/mask-style-strikethrough style))
-                 style (clear-difference diff impl/mask-style-strikethrough))
-
-          (#_shift-style-font-bold 56)
-          (recur (sgr-flag sb 1 22 (impl/extract impl/mask-style-font-bold style))
-                 style (clear-difference diff impl/mask-style-font-bold))
-
-          (#_shift-style-font-italic 57)
-          (recur (sgr-flag sb 3 23 (impl/extract impl/mask-style-font-italic style))
-                 style (clear-difference diff impl/mask-style-font-italic))
-
-          (#_shift-style-conceal 58) ;Wikipedia: "Not widely supported"
-          (recur (sgr-conceal sb (impl/extract impl/mask-style-conceal style)) 
-                 style (clear-difference diff impl/mask-style-conceal))
-          ))))
+        (append-sgr ^StringBuilder [^StringBuilder sb ^long style ^long diff]
+          (if (= style insn/style-default)
+            (.append sb (str csi 0 \m)))
+          (-> (.append sb csi)
+              (sgr-parameters style diff)
+              (.deleteCharAt (dec (.length sb))) ;drop trailing semicolon
+              (.append \m)))]    ;and replace it with SGR's final byte
 
   (defn sgr-delta ^StringBuilder [^StringBuilder sb ^long style-0 ^long style-1]
     (let [diff (bit-xor style-0 style-1)]
-      (cond-> sb
-        (not (zero? diff))
-        (-> (.append prefix-csi)
-            (sgr-parameters style-1 diff)
-            (.deleteCharAt (dec (.length sb))) ;eliminate trailing semicolon
-            (.append \m))))))    ;and replace it with SGR's final byte
-
+      (if (zero? diff)
+        sb
+        (append-sgr sb style-1 diff)))))
