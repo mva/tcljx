@@ -14,9 +14,8 @@
    (java.io StringWriter)
    (java.time Instant)
    (java.util ArrayList)
-   (java.util.concurrent StructuredTaskScope$ShutdownOnFailure
-                         StructuredTaskScope$Subtask
-                         CountDownLatch)
+   (java.util.concurrent CountDownLatch StructuredTaskScope$Subtask
+                         StructuredTaskScope$ShutdownOnFailure)
    (java.util.function Function IntPredicate)))
 
 (def ^:private run-tests-as-concurrent-tasks? true)
@@ -248,6 +247,9 @@
              (clojure.lang.Var/resetThreadBindingFrame binding-frame#)
              ~@body))))
 
+(defn- instant-of ^Instant [^int seconds]
+  (.plusSeconds (Instant/now) seconds))
+
 (defn- run-tests* ^Report [binding-frame ^vector nmspv]
   (letfn [(nmsp-test-vars ^seq [nmsp vars] ;returns a seq of Var
             (letfn [(resolve-var [^String var]
@@ -270,14 +272,14 @@
                   vars (nmsp-test-vars nmsp vars)]
               (if run-tests-as-concurrent-tasks?
                 (with-open [scope (StructuredTaskScope$ShutdownOnFailure.)]
-                  (let [taskv (mapv #(with-fork scope binding-frame
-                                       (run-var-with-pred var-line-map %))
-                                    vars)]
-                    
-                    (.joinUntil scope (.plusSeconds (Instant/now)
-                                                    deadline-test-var-seconds))
+                  (let [taskv (try
+                                (mapv #(with-fork scope binding-frame
+                                         (run-var-with-pred var-line-map %))
+                                      vars)
+                                (finally
+                                  (->> (instant-of deadline-test-var-seconds)
+                                       (.joinUntil scope))))]
                     (.throwIfFailed scope (Function/identity))
-                    
                     (mapv StructuredTaskScope$Subtask/.get taskv)))
 
                 ;; alternative: sequential execution
@@ -301,27 +303,28 @@
            (with-open [scope (StructuredTaskScope$ShutdownOnFailure.)]
              (let [n (count nmspv)
                    alatch (new CountDownLatch/1 (inc n))
-                   atask (new StructuredTaskScope$Subtask/1 n)]
+                   asubtask (new StructuredTaskScope$Subtask/1 n)]
                (dotimes [i (alength alatch)]
                  (aset alatch i (CountDownLatch. 1)))
                (.countDown (aget alatch 0)) ;first task can print immediately
-               
-               (dotimes [i (alength atask)]
-                 (->> (with-fork scope binding-frame
-                        (let [outcome (run-nmsp (nth nmspv i))]
-                          (.await (aget alatch i))
-                          (let [report (.call outcome)]
-                            ;; only unlock next task's output if this
-                            ;; task completes successfully
-                            (.countDown (aget alatch (inc i)))
-                            report)))
-                      (aset atask i)))
-               
-               (.joinUntil scope (.plusSeconds (Instant/now)
-                                               deadline-namespace-seconds))
+                 
+               (try
+                 (dotimes [i (alength asubtask)]
+                   (->> (with-fork scope binding-frame
+                          (try
+                            (let [outcome (run-nmsp (nth nmspv i))]
+                              (.await (aget alatch i))
+                              (.call outcome))
+                            (finally
+                              ;; unlock next task's output even if
+                              ;; this task fails for the join below
+                              (.countDown (aget alatch (inc i))))))
+                        (aset asubtask i)))
+                 (finally
+                   (->> (instant-of deadline-namespace-seconds)
+                        (.joinUntil scope))))
                (.throwIfFailed scope (Function/identity))
-               
-               (mapv StructuredTaskScope$Subtask/.get atask)))
+               (mapv StructuredTaskScope$Subtask/.get asubtask)))
 
            ;; alternative: sequential execution
            (mapv #(.call (run-nmsp %)) nmspv))
