@@ -11,7 +11,7 @@
             [tcljx.reader-test :as reader-test]
 
             [tcljx.alpha.textflow :as tf]
-            [tcljx.alpha.ptest__pp :as pp]))
+            [tcljx.alpha.textflow__pp :as pp]))
 
 (def multi-style (-> (tf/mk-cursor)
                      (tf/intensity-bright)

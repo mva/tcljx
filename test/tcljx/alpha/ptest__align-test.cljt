@@ -1,7 +1,7 @@
 (ns tcljx.alpha.ptest__align-test
   (:require [tcljx.alpha.textflow :as tf]
+            [tcljx.alpha.textflow__pp :as pp]
             [tcljx.alpha.ptest__style :as style]
-            [tcljx.alpha.ptest__pp :as pp]
             [tcljx.alpha.ptest__align :refer :all]
             [tcljx.alpha.ptest :refer :all])
   (:import (tcljx.alpha.ptest__align Arr)))

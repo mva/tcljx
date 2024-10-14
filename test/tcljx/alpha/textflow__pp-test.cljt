@@ -1,6 +1,6 @@
-(ns tcljx.alpha.ptest__pp-test
+(ns tcljx.alpha.textflow__pp-test
   (:require [tcljx.alpha.textflow :as tf]
-            [tcljx.alpha.ptest__pp :as pp]
+            [tcljx.alpha.textflow__pp :as pp]
             [tcljx.alpha.ptest :refer :all]
             [tinyclj.string :as str]))
 

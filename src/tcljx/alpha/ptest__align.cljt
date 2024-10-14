@@ -7,8 +7,8 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.alpha.ptest__align
   (:require [tcljx.alpha.textflow :as tf]
-            [tcljx.alpha.ptest__style :as style]
-            [tcljx.alpha.ptest__pp :as pp])
+            [tcljx.alpha.textflow__pp :as pp]
+            [tcljx.alpha.ptest__style :as style])
   (:import (tcljx.alpha.ptest__style Style)
            (clojure.lang PersistentHashMap)
            (java.util.function BiFunction)))

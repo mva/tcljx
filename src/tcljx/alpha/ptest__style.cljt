@@ -7,7 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.alpha.ptest__style
   (:require [tcljx.alpha.textflow :as tf]
-            [tcljx.alpha.ptest__pp :as pp])
+            [tcljx.alpha.textflow__pp :as pp])
   (:import (tcljx.alpha.textflow Cursor)
            (java.util.function BiFunction)))
 

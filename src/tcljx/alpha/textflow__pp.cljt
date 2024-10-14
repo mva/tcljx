@@ -5,7 +5,7 @@
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
-(ns tcljx.alpha.ptest__pp
+(ns tcljx.alpha.textflow__pp
   (:require [tcljx.alpha.textflow :as tf]
             [tcljx.alpha.textflow__insn :as insn]
             [tinyclj.core.protocols :refer [datafy]])
