@@ -28,8 +28,9 @@
             (parameters sb (+ offset 9))
             
             (#_color-mode-palette-4bit 1)
-            (parameters sb (+ offset arg
-                              (-> arg (bit-shift-right 3) (bit-and 1) (* 60))))
+            (parameters sb (+ offset arg (-> (bit-shift-right arg 3)
+                                             (bit-and 1)
+                                             (* (- 60 8)))))
             
             (#_color-mode-palette-8bit 2)
             (parameters sb (+ offset 8) 5 arg)

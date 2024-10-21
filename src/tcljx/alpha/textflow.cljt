@@ -53,6 +53,11 @@
 ;;; A page is a normalized sequence of commands.  It is either empty,
 ;;; or sequence ending with text, followed by a `style-default`
 ;;; command, followed by a `end-current-line` command.
+;;;
+;;; This function should not be used if the instructions of `csr` are
+;;; subject to futher rewriting before rendering, because it would
+;;; clobber formatting instructions following the last piece of text.
+;;; In this case, use `fragment` instead.
 (defn page ^Object/1 [^Cursor csr]
   (letfn [(end-of-text ^int [^int i]
             (if (or (zero? i) (insn/text? (.insns csr) (dec i)))
