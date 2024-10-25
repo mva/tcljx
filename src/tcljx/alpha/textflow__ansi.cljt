@@ -86,9 +86,10 @@
                 (let [mask (Long/lowestOneBit diff)]
                   (case (Long/numberOfTrailingZeros diff)
                     (#_flag-style-underline 56) (sgr-flag sb 4 24 mask style)
-                    (#_flag-style-strikethrough 57) (sgr-flag sb 9 29 mask style)
-                    (#_flag-style-font-bold 58) (sgr-flag sb 1 22 mask style)
-                    (#_flag-style-font-italic 59) (sgr-flag sb 3 23 mask style))
+                    (#_flag-style-overline 57) (sgr-flag sb 53 55 mask style)
+                    (#_flag-style-strikethrough 58) (sgr-flag sb 9 29 mask style)
+                    (#_flag-style-font-bold 59) (sgr-flag sb 1 22 mask style)
+                    (#_flag-style-font-italic 60) (sgr-flag sb 3 23 mask style))
                   (recur (bit-xor diff mask)))))))
 
         (append-sgr ^StringBuilder [^StringBuilder sb ^long style ^long diff]

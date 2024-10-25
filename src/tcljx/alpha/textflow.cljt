@@ -183,6 +183,11 @@
      (underline csr true))
     (^Cursor [^Cursor csr ^boolean enabled?]
      (set-style-flag csr insn/flag-style-underline enabled?)))
+  (defn overline
+    (^Cursor [^Cursor csr]
+     (overline csr true))
+    (^Cursor [^Cursor csr ^boolean enabled?]
+     (set-style-flag csr insn/flag-style-overline enabled?)))
   (defn strikethrough
     (^Cursor [^Cursor csr]
      (strikethrough csr true))

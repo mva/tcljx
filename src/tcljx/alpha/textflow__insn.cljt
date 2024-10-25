@@ -16,6 +16,14 @@
 (defn text-width ^int [^String txt]
   (.codePointCount txt 0 (.length txt)))
 
+(defn text-width-of-range ^int [^Object/1 frag ^int start ^int end]
+  (loop [acc 0, i start]
+    (if (< i end)
+      (let [insn (aget frag i)]
+        (recur (cond-> acc (text? insn) (+ (text-width insn)))
+               (inc i)))
+      acc)))
+
 ;;; ------------------------------------------------------------------------
 
 (def style-default 0l)
@@ -133,8 +141,8 @@
 ;;; 2 (foreground mode), 24 (fg color)
 ;;; 2 (background mode), 24 (bg color)
 ;;; 2 (intensity), 2 (conceal)
-;;; 1 (underline), 1 (strikethrough), 1 (bold), 1 (italic)
-;;; used: 60 bits, remaining 4
+;;; 1 (underline), 1 (overline), 1 (strikethrough), 1 (bold), 1 (italic)
+;;; used: 61 bits, remaining 3
 ;;;
 ;;; Note: Two bits can be freed by folding the palette color
 ;;; modes (default, 4 bit, 8 bit) into the 24 bits of the rgb fields.
@@ -146,10 +154,11 @@
 (def shift-style-intensity 52 #_(+ shift-style-background 2 24))
 (def shift-style-conceal 54 #_(+ shift-style-intensity 2))
 (def flag-style-underline 56 #_(+ shift-style-conceal 2))
-(def flag-style-strikethrough 57 #_(+ flag-style-underline 1))
-(def flag-style-font-bold 58 #_(+ flag-style-strikethrough 1))
-(def flag-style-font-italic 59 #_(+ flag-style-font-bold 1))
-(def flag-style-unused 60 #_(+ flag-style-conceal 2))
+(def flag-style-overline 57 #_(+ flag-style-underline 1))
+(def flag-style-strikethrough 58 #_(+ flag-style-overline 1))
+(def flag-style-font-bold 59 #_(+ flag-style-strikethrough 1))
+(def flag-style-font-italic 60 #_(+ flag-style-font-bold 1))
+(def flag-style-unused 61 #_(+ flag-style-conceal 2))
 
 (let [mask-color-mode (dec (bit-shift-left 1l 2))
       mask-color-rgb (dec (bit-shift-left 1l 24))]
