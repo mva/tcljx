@@ -52,7 +52,7 @@
 
 ;;; A page is a normalized sequence of commands.  It is either empty,
 ;;; or sequence ending with text, followed by a `style-default`
-;;; command, followed by a `end-current-line` command.
+;;; command, followed by a single `advance-lines` command.
 ;;;
 ;;; This function should not be used if the instructions of `csr` are
 ;;; subject to futher rewriting before rendering, because it would
@@ -62,13 +62,28 @@
   (letfn [(end-of-text ^int [^int i]
             (if (or (zero? i) (insn/text? (.insns csr) (dec i)))
               i
-              (recur (dec i))))]
-    (let [eot (end-of-text (.insn-count csr))]
-      (if (zero? eot)
+              (recur (dec i))))
+          (advance-line-count ^int [^int start ^int end]
+            (loop [acc 0, i start]
+              (if (< i end)
+                (let [insn (aget (.insns csr) i)]
+                  (recur (cond
+                           (insn/cmd? insn/end-current-line insn)
+                           (inc acc)
+
+                           (insn/cmd? insn/advance-lines insn)
+                           (+ acc (insn/cmd-arg insn))
+
+                           :else acc)
+                         (inc i)))
+                acc)))]
+    (let [eot (end-of-text (.insn-count csr))
+          n (advance-line-count eot (.insn-count csr))]
+      (if (and (zero? eot) (zero? n))
         (new Object/1 0)
         (doto (Arrays/copyOf (.insns csr) (+ eot 2))
           (aset (+ eot 0) insn/insn-reset-style)
-          (aset (+ eot 1) insn/insn-end-current-line-0))))))
+          (aset (+ eot 1) (insn/mk-cmd insn/advance-lines (max n 1))))))))
 
 (defn page? ^boolean [^Object/1 frag]
   (or (zero? (alength frag))
