@@ -1,12 +1,24 @@
 (ns tcljx.alpha.textflow__terminal
   (:require [tcljx.alpha.textflow__termios :as termios])
-  (:import (java.lang AutoCloseable)
+  (:import (java.io OutputStream InputStream)
+           (java.lang AutoCloseable)
            (java.lang.foreign Linker Arena SymbolLookup MemorySegment
                               FunctionDescriptor ValueLayout MemoryLayout)
            (java.lang.invoke MethodHandle)))
 
-;;; see "man termios"
+;;; see "man 3 termios"
+;;; see "man 1 stty"
 ;;; see https://viewsourcecode.org/snaptoken/kilo/02.enteringRawMode.html
+;;; see https://viewsourcecode.org/snaptoken/kilo/03.rawInputAndOutput.html
+
+;;; Enabling the terminal's raw mode requires native access.  One
+;;; possible way to avoid any native calls is to bracket the program
+;;; by running "stty raw" before it starts and "stty sane" once it
+;;; completes.  Or maybe even save the terminal state upfront, then
+;;; do "stty raw", and restore the saved state after completion.  This
+;;; could be done by the program itself via ProcessBuilder, but
+;;; putting the stty calls into a shell script is probably a more sane
+;;; approach.
 
 #_
 (letfn [(clear-flags! ^int/1 [^int/1 termios ^int offset ^int clear-flags]
@@ -58,8 +70,11 @@
                 sig (if (some? resLayout)
                       (FunctionDescriptor/of resLayout argLayouts)
                       (FunctionDescriptor/ofVoid argLayouts))]
-            ;; throws java.lang.IllegalCallerException if native
-            ;; access is denied (JDK 24: --illegal-native-access=deny)
+            ;; Throws java.lang.IllegalCallerException if the JVM
+            ;; instance denies native access, e.g. when running JDK 24
+            ;; with --illegal-native-access=deny.  By default, JDK 24
+            ;; prints a warning unless the JVM instance is started
+            ;; with --enable-native-access=ALL-UNNAMED.
             (.downcallHandle linker adr sig)))
         (get-termios ^int/1 []
           (with-open [arena (Arena/ofConfined)]
@@ -103,8 +118,46 @@
           (set-termios initial-termios false)
           (newline))))))
 
+(letfn [(read-to-R ^String [^InputStream in] ;text after \[ and before \R
+          (let [sb (StringBuilder.)]
+            (loop []
+              (let [in (.read in)]
+                (if (or (= in -1) (= in (int \R)) (= in 3)) ;also exit on Ctrl-C
+                  (.toString sb)
+                  (do (when-not (or (= in 27) (= in 91)) ;skip ESC and \[
+                        (.append sb (char in)))
+                      (recur)))))))]
+
+  ;; When in raw mode: Move cursor to bottom right corner, request a
+  ;; device status report, and parse the cursor position from STDIN.
+  ;; Returns nil on error, and an array [rows, columns] otherwise.
+  (defn screen-size-via-device-status-report
+    (^int/1 []
+     (screen-size-via-device-status-report System/out System/in))
+    (^int/1 [^OutputStream out ^InputStream in]
+     ;; https://en.wikipedia.org/wiki/ANSI_escape_code#Control_Sequence_Introducer_commands
+     (.write out (-> (str "\u001b[?25l"  ;hide-cursor
+                          "\u001b[s"     ;save-cursor-position
+                          "\u001b[999C"  ;cursor-forward
+                          "\u001b[999B"  ;cursor-down
+                          "\u001b[6n"    ;device-status-report
+                          "\u001b[u"     ;restore-cursor-position
+                          "\u001b[?25h") ;show-cursor
+                     (.getBytes java.nio.charset.StandardCharsets/UTF_8)))
+     (.flush out)
+     (let [report (read-to-R in)
+           i (.indexOf report (int \;))]
+       (when (and (>= i 0) (= (.lastIndexOf report (int \;)) i))
+         (try                   ;there is exactly one semicolon at `i`
+           (doto (new int/1 2)
+             (aset 0 (Integer/parseInt report 0 i 10))
+             (aset 1 (Integer/parseInt report (inc i) (.length report) 10)))
+           (catch NumberFormatException _
+             nil)))))))
+
 (defn run []
   (with-open [rm (raw-mode)]
+    (prn :screen-size (seq (screen-size-via-device-status-report)))
     (prn :raw-mode-line-1)
     (prn :raw-mode-line-2))
   (prn :done-line-1)
