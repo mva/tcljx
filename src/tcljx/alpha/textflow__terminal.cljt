@@ -1,0 +1,114 @@
+(ns tcljx.alpha.textflow__terminal
+  (:require [tcljx.alpha.textflow__termios :as termios])
+  (:import (java.lang AutoCloseable)
+           (java.lang.foreign Linker Arena SymbolLookup MemorySegment
+                              FunctionDescriptor ValueLayout MemoryLayout)
+           (java.lang.invoke MethodHandle)))
+
+;;; see "man termios"
+;;; see https://viewsourcecode.org/snaptoken/kilo/02.enteringRawMode.html
+
+#_
+(letfn [(clear-flags! ^int/1 [^int/1 termios ^int offset ^int clear-flags]
+          (when-not (zero? (rem offset 4))
+            (throw (IllegalArgumentException.)))
+          (let [idx (quot offset 4)]
+            (aset termios idx (bit-and-not (aget termios idx) clear-flags))
+            termios))
+        (set-flags! ^int/1 [^int/1 termios ^int offset ^int set-flags]
+          (when-not (zero? (rem offset 4))
+            (throw (IllegalArgumentException.)))
+          (let [idx (quot offset 4)]
+            (aset termios idx (bit-or (aget termios idx) set-flags))
+            termios))]
+  (defn make-raw! ^int/1 [^int/1 termios]
+    ;; Also see "Raw mode" section of "man termios".  It describes
+    ;; cfmakeraw(), which clears a few more flags.  This also seems to
+    ;; mirror the "raw" option of the stty(1) command.
+    (-> termios
+        ;; BRKINT -- Send SIGINT on break condition?
+        ;; ICRNL -- Translate carriage return to newline on input.
+        ;; INPCK -- Enable input parity checking.
+        ;; ISTRIP -- Strip off eighth bit.
+        ;; IXON -- Enable XON/XOFF flow control on output.
+        (clear-flags! termios/offsetof-c_iflag (bit-or termios/BRKINT
+                                                       termios/ICRNL
+                                                       termios/INPCK
+                                                       termios/ISTRIP
+                                                       termios/IXON))
+        ;; OPOST -- Enable implementation-defined output processing.
+        ;; Note: Disabling this requires "\r\n" to start a new line.
+        (clear-flags! termios/offsetof-c_oflag termios/OPOST)
+        ;; CS8 -- Sets the character size (CS) to 8 bits per byte.
+        (set-flags! termios/offsetof-c_cflag termios/CS8)
+        ;; ECHO -- Echo input characters.
+        ;; ICANON -- Input is made available line by line.
+        ;; IEXTEN -- Enable  implementation-defined  input processing.
+        ;; ISIG -- Generate signal for INTR, QUIT, SUSP, or DSUSP.
+        (clear-flags! termios/offsetof-c_lflag (bit-or termios/ECHO
+                                                       termios/ICANON
+                                                       termios/IEXTEN
+                                                       termios/ISIG)))))
+
+(letfn [(downcall-handle ^MethodHandle [^String nm ^MemoryLayout resLayout
+                                        & ^MemoryLayout/1 argLayouts]
+          (let [linker (Linker/nativeLinker)
+                lookup (.defaultLookup linker)
+                adr (.findOrThrow lookup nm)
+                sig (if (some? resLayout)
+                      (FunctionDescriptor/of resLayout argLayouts)
+                      (FunctionDescriptor/ofVoid argLayouts))]
+            ;; throws java.lang.IllegalCallerException if native
+            ;; access is denied (JDK 24: --illegal-native-access=deny)
+            (.downcallHandle linker adr sig)))
+        (get-termios ^int/1 []
+          (with-open [arena (Arena/ofConfined)]
+            (let [mem (.allocate arena termios/sizeof-struct termios/alignof-struct)
+                  res (-> (downcall-handle "tcgetattr" ValueLayout/JAVA_INT
+                                           ValueLayout/JAVA_INT ValueLayout/ADDRESS)
+                          ^int (.invokeExact termios/STDIN_FILENO mem))]
+              (when-not (zero? res)
+                (throw (IllegalStateException. "tcgetattr failed")))
+              (.toArray mem ValueLayout/JAVA_INT))))
+        (copy-termios ^MemorySegment [^Arena arena ^int/1 termios]
+          (let [src (MemorySegment/ofArray termios)
+                mem (.allocate arena termios/sizeof-struct termios/alignof-struct)]
+            (MemorySegment/copy src 0 mem 0 termios/sizeof-struct)
+            mem))
+        (set-termios ^void [^int/1 termios ^boolean cfmakeraw?]
+          ;; From the man page: "Note that tcsetattr() returns success
+          ;; if any of the requested changes could be successfully
+          ;; carried out.  Therefore, when making multiple changes it
+          ;; may be necessary to follow this call with a further call
+          ;; to tcgetattr() to check that all changes have been
+          ;; performed successfully."
+          (with-open [arena (Arena/ofConfined)]
+            (let [mem (copy-termios arena termios)]
+              (when cfmakeraw?   ;note: cfmakeraw is BSD but not POSIX
+                (-> (downcall-handle "cfmakeraw" nil ValueLayout/ADDRESS)
+                    ^void (.invokeExact mem)))
+              (let [res (-> (downcall-handle "tcsetattr" ValueLayout/JAVA_INT
+                                             ValueLayout/JAVA_INT ValueLayout/JAVA_INT ValueLayout/ADDRESS)
+                            ^int (.invokeExact termios/STDIN_FILENO termios/TCSAFLUSH mem))]
+                (when-not (zero? res)
+                  (throw (IllegalStateException. "tcsetattr failed")))))))]
+
+  ;; `close` returns terminal to the state reported at the time of the
+  ;; initial call and prints a `newline`.  Use with `with-open`.
+  (defn raw-mode ^AutoCloseable []
+    (let [initial-termios (get-termios)]
+      (set-termios initial-termios true)
+      (reify AutoCloseable
+        (close [_]
+          (set-termios initial-termios false)
+          (newline))))))
+
+(defn run []
+  (with-open [rm (raw-mode)]
+    (prn :raw-mode-line-1)
+    (prn :raw-mode-line-2))
+  (prn :done-line-1)
+  (prn :done-line-2))
+
+(defn -main [& args]
+  (run))

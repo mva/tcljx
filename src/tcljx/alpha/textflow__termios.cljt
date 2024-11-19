@@ -1,0 +1,8 @@
+(ns tcljx.alpha.textflow__termios)
+
+(def sizeof-struct 60)
+(def alignof-struct 4)
+
+(def STDIN_FILENO 0x0)
+(def TCSAFLUSH 0x2)
+
