@@ -171,7 +171,7 @@
       (add-styling-cmd csr (+ insn/set-foreground insn/color-mode-palette-8bit)
                        (bit-and mask-8bit color)))
     (defn foreground-rgb ^Cursor [^Cursor csr ^int rgb]
-      (add-styling-cmd csr (+ insn/set-foreground insn/color-mode-default)
+      (add-styling-cmd csr (+ insn/set-foreground insn/color-mode-rgb)
                        (bit-and mask-24bit rgb)))
 
     (defn background-default ^Cursor [^Cursor csr]
@@ -183,7 +183,7 @@
       (add-styling-cmd csr (+ insn/set-background insn/color-mode-palette-8bit)
                        (bit-and mask-8bit color)))
     (defn background-rgb ^Cursor [^Cursor csr ^int rgb]
-      (add-styling-cmd csr (+ insn/set-background insn/color-mode-default)
+      (add-styling-cmd csr (+ insn/set-background insn/color-mode-rgb)
                        (bit-and mask-24bit rgb))))
 
   (defn intensity-normal ^Cursor [^Cursor csr]
