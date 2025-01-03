@@ -94,11 +94,11 @@
 
         (append-sgr ^StringBuilder [^StringBuilder sb ^long style ^long diff]
           (if (= style insn/style-default)
-            (.append sb (str csi 0 \m)))
-          (-> (.append sb csi)
-              (sgr-parameters style diff)
-              (.deleteCharAt (dec (.length sb))) ;drop trailing semicolon
-              (.append \m)))]    ;and replace it with SGR's final byte
+            (.append sb (str csi 0 \m))
+            (-> (.append sb csi)
+                (sgr-parameters style diff)
+                (.deleteCharAt (dec (.length sb))) ;drop trailing semicolon
+                (.append \m))))]    ;and replace it with SGR's final byte
 
   (defn sgr-delta ^StringBuilder [^StringBuilder sb ^long style-0 ^long style-1]
     (let [diff (bit-xor style-0 style-1)]
