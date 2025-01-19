@@ -1,6 +1,6 @@
 (ns tcljx.alpha.textflow__terminal
   (:require [tcljx.alpha.textflow__termios :as termios])
-  (:import (java.io OutputStream InputStream)
+  (:import (java.io PrintStream InputStream EOFException)
            (java.lang AutoCloseable)
            (java.lang.foreign Linker Arena SymbolLookup MemorySegment
                               FunctionDescriptor ValueLayout MemoryLayout)
@@ -62,6 +62,11 @@
                                                        termios/IEXTEN
                                                        termios/ISIG)))))
 
+(def ^:private esc \u001b)
+(def ^:private csi (str esc "["))
+(def ^:private csi-hide-cursor (str csi "?25l"))
+(def ^:private csi-show-cursor (str csi "?25h"))
+
 (letfn [(downcall-handle ^MethodHandle [^String nm ^MemoryLayout resLayout
                                         & ^MemoryLayout/1 argLayouts]
           (let [linker (Linker/nativeLinker)
@@ -78,9 +83,11 @@
             (.downcallHandle linker adr sig)))
         (get-termios ^int/1 []
           (with-open [arena (Arena/ofConfined)]
-            (let [mem (.allocate arena termios/sizeof-struct termios/alignof-struct)
+            (let [mem (.allocate arena termios/sizeof-struct
+                                 termios/alignof-struct)
                   res (-> (downcall-handle "tcgetattr" ValueLayout/JAVA_INT
-                                           ValueLayout/JAVA_INT ValueLayout/ADDRESS)
+                                           ValueLayout/JAVA_INT
+                                           ValueLayout/ADDRESS)
                           ^int (.invokeExact termios/STDIN_FILENO mem))]
               (when-not (zero? res)
                 (throw (IllegalStateException. "tcgetattr failed")))
@@ -103,57 +110,306 @@
                 (-> (downcall-handle "cfmakeraw" nil ValueLayout/ADDRESS)
                     ^void (.invokeExact mem)))
               (let [res (-> (downcall-handle "tcsetattr" ValueLayout/JAVA_INT
-                                             ValueLayout/JAVA_INT ValueLayout/JAVA_INT ValueLayout/ADDRESS)
-                            ^int (.invokeExact termios/STDIN_FILENO termios/TCSAFLUSH mem))]
+                                             ValueLayout/JAVA_INT
+                                             ValueLayout/JAVA_INT
+                                             ValueLayout/ADDRESS)
+                            ^int (.invokeExact termios/STDIN_FILENO
+                                               termios/TCSAFLUSH mem))]
                 (when-not (zero? res)
                   (throw (IllegalStateException. "tcsetattr failed")))))))]
 
   ;; `close` returns terminal to the state reported at the time of the
   ;; initial call and prints a `newline`.  Use with `with-open`.
-  (defn raw-mode ^AutoCloseable []
-    (let [initial-termios (get-termios)]
-      (set-termios initial-termios true)
-      (reify AutoCloseable
-        (close [_]
-          (set-termios initial-termios false)
-          (newline))))))
+  (defn raw-mode
+    (^AutoCloseable []
+     (raw-mode false))
+    (^AutoCloseable [^boolean hide-cursor?]
+     (let [initial-termios (get-termios)]
+       (set-termios initial-termios true)
+       (when hide-cursor?
+         (.print System/out csi-hide-cursor)
+         (.flush System/out))
+       (reify AutoCloseable
+         (close [_]
+           (set-termios initial-termios false)
+           (when hide-cursor?
+             (.print System/out csi-show-cursor)
+             (.flush System/out))
+           (newline)))))))
 
-(letfn [(read-to-R ^String [^InputStream in] ;text after \[ and before \R
-          (let [sb (StringBuilder.)]
-            (loop []
-              (let [in (.read in)]
-                (if (or (= in -1) (= in (int \R)) (= in 3)) ;also exit on Ctrl-C
-                  (.toString sb)
-                  (do (when-not (or (= in 27) (= in 91)) ;skip ESC and \[
-                        (.append sb (char in)))
-                      (recur)))))))]
+;;; ------------------------------------------------------------------------
 
-  ;; When in raw mode: Move cursor to bottom right corner, request a
-  ;; device status report, and parse the cursor position from STDIN.
-  ;; Returns nil on error, and an array [rows, columns] otherwise.
-  (defn screen-size-via-device-status-report
-    (^int/1 []
-     (screen-size-via-device-status-report System/out System/in))
-    (^int/1 [^OutputStream out ^InputStream in]
-     ;; https://en.wikipedia.org/wiki/ANSI_escape_code#Control_Sequence_Introducer_commands
-     (.write out (-> (str "\u001b[?25l"  ;hide-cursor
-                          "\u001b[s"     ;save-cursor-position
-                          "\u001b[999C"  ;cursor-forward
-                          "\u001b[999B"  ;cursor-down
-                          "\u001b[6n"    ;device-status-report
-                          "\u001b[u"     ;restore-cursor-position
-                          "\u001b[?25h") ;show-cursor
-                     (.getBytes java.nio.charset.StandardCharsets/UTF_8)))
-     (.flush out)
-     (let [report (read-to-R in)
-           i (.indexOf report (int \;))]
-       (when (and (>= i 0) (= (.lastIndexOf report (int \;)) i))
-         (try                   ;there is exactly one semicolon at `i`
-           (doto (new int/1 2)
-             (aset 0 (Integer/parseInt report 0 i 10))
-             (aset 1 (Integer/parseInt report (inc i) (.length report) 10)))
-           (catch NumberFormatException _
-             nil)))))))
+(def ^:private raw-end-of-stream "")
+
+(deftype RawInput [^String chars
+                   ^int start-csi-parameters
+                   ^int start-csi-intermediates
+                   ^int start-literal] ;(dec length) if CSI, zero otherwise
+  java.lang.Record)
+
+(defn- csi-final-byte ^char [^RawInput raw] ;pre: (csi? raw)
+  (.charAt (.chars raw) (dec (.length (.chars raw)))))
+
+(defn- csi?
+  (^boolean [^RawInput raw]
+   (pos? (.start-literal raw)))
+  (^boolean [^RawInput raw ^char final-byte]
+   (and (csi? raw) (= (csi-final-byte raw) final-byte))))
+
+(letfn [(mk-literal
+          (^RawInput [^String literal]
+           (RawInput. literal 0 0 0))
+          (^RawInput [^char/1 chars ^int n]
+           (mk-literal (String. chars 0 n))))
+        (mk-utf16-literal ^RawInput [^int cp]
+          (mk-literal (Character/toString cp)))
+        
+        (read-one ^int [^InputStream in]
+          (let [c (.read in)]
+            #_(print :read-one c (char c) "\r\n") ;printing char can hang
+            #_(flush)
+            c))
+
+        (semicolon-count ^int [^String s ^int start ^int end]
+          (loop [acc 0, i start]
+            (if (< i end)
+              (recur (+ acc (int (= (.charAt s i) \;))) (inc i))
+              acc)))
+
+        (utf8-payload-mask ^int [^int c1]
+          (condp <= c1
+            2r11110000 2r00000111
+            2r11100000 2r00001111
+            2r11000000 2r00011111
+            #_else 0))                  ;otherwise: 7 bit ASCII code
+        (utf8-code-point-bytes ^int [^int c1-mask]
+          (- 7 (Integer/bitCount c1-mask)))
+        (utf8-sequence? ^boolean [^InputStream in ^int c1]
+          (and (< 2r11000000 c1)
+               (let [c1-mask (utf8-payload-mask c1)
+                     n (utf8-code-point-bytes c1-mask)]
+                 (>= (.available in) (dec n)))))
+        (valid-code-point? ^boolean [^int x]
+          (and (< x Character/MAX_CODE_POINT)             ;0x10FFFF
+               (or (< x (int Character/MIN_SURROGATE))    ;0xD800
+                   (> x (int Character/MAX_SURROGATE))))) ;0xDFFF
+        (read-utf8-sequence ^RawInput [^InputStream in ^int c1]
+          (let [c1-mask (utf8-payload-mask c1)
+                n (utf8-code-point-bytes c1-mask)
+                a (doto (new char/1 n)
+                    (aset 0 (char c1)))]
+            (dotimes [i (dec n)]
+              (aset a (inc i) (char (read-one in))))
+            (loop [acc (bit-and c1-mask c1), i 1]
+              (if (< i n)
+                (let [cx (int (aget a i))]
+                  (if (<= 2r10000000 cx 2r10111111)
+                    (recur (-> (bit-shift-left acc 6)
+                               (bit-or (bit-and 2r00111111 cx))) (inc i))
+                    (mk-literal a n)))
+                (if (valid-code-point? acc)
+                  (mk-utf16-literal acc)
+                  (mk-literal a n))))))]
+  
+  ;; https://en.wikipedia.org/wiki/ANSI_escape_code#Control_Sequence_Introducer_commands
+  (defn read-csi-sequence ^RawInput [^InputStream in]
+    ;; pre: the `csi` sequence has been read & some character follows
+    (let [sb (StringBuilder. csi)]
+      (letfn [(accept-range ^int [^int c ^int first ^int last]
+                (if (<= first c last)   ;rejects -1 as well
+                  (do (.append sb (char c))
+                      (recur (read-one in) first last))
+                  c))]
+        (let [c (read-one in)
+              parameters (.length sb)
+              c (accept-range c 0x30 0x3f) ;(ASCII 0–9:;<=>?)
+              intermediates (.length sb)
+              c (accept-range c 0x20 0x2f) ;(ASCII space and !"#$%&'()*+,-./)
+              literal (.length sb)]
+          (when-not (neg? c)
+            (.append sb (char c)))
+          (if (<= 0x40 c 0x7e)          ;rejects -1 as well
+            (RawInput. (.toString sb) parameters intermediates literal)
+            (mk-literal (.toString sb)))))))
+
+  ;; https://en.wikipedia.org/wiki/ANSI_escape_code#Terminal_input_sequences
+  (defn read-raw ^RawInput [^InputStream in]
+    (let [c1 (read-one in)]
+      (cond
+        (neg? c1)
+        (mk-literal raw-end-of-stream)
+        
+        (= c1 (int esc))
+        (if (zero? (.available in)) ;ESC with "no character" following
+          (mk-literal (str esc))
+          (let [c2 (read-one in)]
+            (cond
+              (= c2 (int esc)) (mk-literal (str esc)) ;normalize ESC ESC
+              
+              (= c2 (int \[)) (if (zero? (.available in))
+                                (mk-literal csi) 
+                                (read-csi-sequence in))
+              
+              :else (mk-literal (str esc (char c2))))))
+
+        (utf8-sequence? in c1) (read-utf8-sequence in c1)
+        
+        :else (mk-literal (str (char c1))))))
+
+  ;; Returns nil if parsing of a number fails.  Skips optional \? at
+  ;; the beginning of parameters.  "No modifiers" is interpreted as a
+  ;; single modifier with value 1, and similarly an empty modifier
+  ;; defaults to the value 1.
+  (defn parse-csi-modifiers ^int/1 [^RawInput raw] ;pre: (csi? raw)
+    (try
+      (let [chars (.chars raw)
+            start (cond-> (.start-csi-parameters raw)
+                    (= (.charAt chars (.start-csi-parameters raw)) \?) ;exists
+                    (inc))
+            end (.start-csi-intermediates raw)
+            n (inc (semicolon-count chars start end))
+            a (new int/1 n)
+            parse-into (fn ^void [^int i ^int start ^int end]
+                         (aset a i (Integer/parseInt chars start end 10)))]
+        (loop [pos start, i 0]
+          (when (< i n)
+            (cond
+              (= pos end)
+              (do (aset a i 1) (recur pos (inc i)))
+              
+              (= (.charAt chars pos) \;)
+              (do (aset a i 1) (recur (inc pos) (inc i)))
+
+              :else
+              (let [j (.indexOf chars (int \;) pos end)]
+                (if (neg? j)
+                  (do (parse-into i pos end) (recur end (inc i)))
+                  (do (parse-into i pos j) (recur (inc j) (inc i))))))))
+        a)
+      (catch NumberFormatException _
+        nil))))
+
+;;; ------------------------------------------------------------------------
+
+(defn mk-key
+  (^int [^int key-or-code-point]
+   (bit-shift-left key-or-code-point 8))
+  (^int [^int key-or-code-point ^int flags]
+   (bit-or (mk-key key-or-code-point) flags)))
+
+(defn key-code-of ^int [^int key]
+  (bit-shift-right key 8))
+(defn modifiers-of ^int [^int key]
+  (bit-and 0xff key))
+
+(defn key-code? ^boolean [^int key-code ^int key]
+  (= key-code (key-code-of key)))
+(defn modifiers? ^boolean [^int mask ^int key]
+  (= mask (modifiers-of key)))
+
+(def code-point-backspace 0x08)         ;uc-erase-to-the-left \u232b
+(def code-point-return 0x0d)            ;uc-return-symbol \u23ce
+(def code-point-escape 0x1b) ;uc-broken-circle-with-northwest-arrow \u230b ???
+(def code-point-space 0x20)  ;uc-open-box \u2423
+(def code-point-delete 0x7f) ;uc-erase-to-the-right \u2326
+
+;;; Names and ordering follows the `GLFW_KEY_*` list at
+;;; https://www.glfw.org/docs/3.3/group__keys.html
+(def end-of-stream -1)   ;synthetic key code
+(def timeout-elapsed -2) ;synthetic key code
+(def key-right -3)       ;uc-rightwards-arrow \u2192
+(def key-left -4)        ;uc-leftwards-arrow \u2190
+(def key-down -5)        ;uc-downwards-arrow \u2193
+(def key-up -6)          ;uc-upwards-arrow \u2191
+(def key-page-up -7)     ;uc-upwards-arrow-with-double-stroke \u21de
+(def key-page-down -8)   ;uc-downwards-arrow-with-double-stroke \u21df
+(def key-home -9)        ;uc-north-west-arrow-to-corner \u21f1
+(def key-end -10)        ;uc-south-east-arrow-to-corner \u21f2
+(def key-last key-end)
+
+(def modifier-shift 1)                      ;covers left and right shift
+(def modifier-left-alt 2)
+(def modifier-control 4)
+(def modifier-meta 8)
+
+(defn read-key
+  (^int [^InputStream in]
+   (read-key in true))
+  (^int [^InputStream in ^boolean throw-on-ctrl-c?]
+   (letfn [(csi-sequence-key ^int [^RawInput raw] ;pre: (csi? raw)
+             (let [mods (parse-csi-modifiers raw)
+                   fb (csi-final-byte raw)]
+               (-> (case fb
+                     \A key-up
+                     \B key-down
+                     \C key-right
+                     \D key-left
+                     \F key-end
+                     \H key-home
+                     \~ (let [keycode (aget mods 0)]
+                          (case keycode
+                            1 key-home
+                            3 code-point-delete
+                            4 key-end
+                            5 key-page-up
+                            6 key-page-down
+                            7 key-home
+                            8 key-end
+                            #_else (throw (java.text.ParseException.
+                                           (str "unsupported keycode: "
+                                                keycode) 0))))
+                     #_else (throw (java.text.ParseException.
+                                    (str "unsupported final byte: "
+                                         (char fb)) 0)))
+                   (mk-key (dec (aget mods (dec (alength mods))))))))]
+     
+     (let [raw (read-raw in)
+           chars (.chars raw)]
+       (if (csi? raw)
+         (csi-sequence-key raw)
+         (case (.length chars)
+           0 (mk-key end-of-stream)
+           1 (let [cp (int (.charAt chars 0))]
+               (if (and (= cp 3) throw-on-ctrl-c?)
+                 (throw (EOFException. "read key Ctrl-C from input stream"))
+                 (mk-key (if (= cp code-point-delete)
+                           code-point-backspace
+                           cp))))
+           2 (if (= (.charAt chars 0) esc)
+               (mk-key (int (.charAt chars 1)) modifier-left-alt)
+               (let [high (.charAt chars 0), low (.charAt chars 1)]
+                 (assert (Character/isSurrogatePair high low))
+                 (mk-key (Character/toCodePoint high low))))
+           #_else (throw (java.text.ParseException.
+                          (str "unsupported raw input: " chars) 0))))))))
+
+;;; ------------------------------------------------------------------------
+
+;; When in raw mode: Move cursor to bottom right corner, request a
+;; device status report, and parse the cursor position from STDIN.
+;; Returns nil on error, and an array [rows, columns] otherwise.
+;; (Experimental: Use "?6n" instead of "6n" for DSR to avoid the
+;; xterm ambiguity with modifiers+F3 key mentioned in
+;; https://en.wikipedia.org/wiki/ANSI_escape_code#Terminal_input_sequences)
+(defn screen-size-via-device-status-report
+  (^int/1 []
+   (screen-size-via-device-status-report System/out System/in))
+  (^int/1 [^PrintStream out ^InputStream in]
+   ;; Note: java.lang.System/out is a PrintWriter, while by default
+   ;; clojure.core/*out* is a OutputStreamWriter wrapping System/out.
+   ;; 
+   ;; https://en.wikipedia.org/wiki/ANSI_escape_code#Control_Sequence_Introducer_commands
+   (.print out (-> (str csi "s"         ;save-cursor-position
+                        csi "999C"      ;cursor-forward
+                        csi "999B"      ;cursor-down
+                        csi "?6n"       ;device-status-report
+                        csi "u")))      ;restore-cursor-position
+   (.flush out)
+   (let [raw (read-raw in)]
+     (when (csi? raw \R)
+       (let [mods (parse-csi-modifiers raw)] ;may return nil
+         (when (>= (count mods) 2)
+           (java.util.Arrays/copyOf mods 2)))))))
 
 (defn run []
   (with-open [rm (raw-mode)]

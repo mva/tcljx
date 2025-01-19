@@ -98,7 +98,7 @@
             (-> (.append sb csi)
                 (sgr-parameters style diff)
                 (.deleteCharAt (dec (.length sb))) ;drop trailing semicolon
-                (.append \m))))]    ;and replace it with SGR's final byte
+                (.append \m))))] ;and replace it with SGR's final byte
 
   (defn sgr-delta ^StringBuilder [^StringBuilder sb ^long style-0 ^long style-1]
     (let [diff (bit-xor style-0 style-1)]

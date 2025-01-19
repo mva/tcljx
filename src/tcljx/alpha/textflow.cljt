@@ -85,9 +85,11 @@
           (aset (+ eot 0) insn/insn-reset-style)
           (aset (+ eot 1) (insn/mk-cmd insn/advance-lines (max n 1))))))))
 
+(def empty-page (new Object/1 0))
+
 (defn page? ^boolean [^Object/1 frag]
   (or (zero? (alength frag))
-      (insn/cmd? insn/end-current-line frag (dec (alength frag)))))
+      (insn/cmd? insn/advance-lines frag (dec (alength frag)))))
 
 (defn mk-cursor
   (^Cursor []
@@ -139,6 +141,8 @@
     (cond-> csr
       (not= style (.style csr))
       (add-insn+style (insn/mk-style style) style)))
+  (defn reset-style ^Cursor [^Cursor csr]
+    (with-style csr insn/style-default))
 
   (defn replay-insn ^Cursor [^Cursor csr insn]
     (cond
@@ -269,8 +273,10 @@
   
   (defn render-into
     (^StringBuilder [^StringBuilder sb ^Object/1 frag]
-     (render-into sb frag insn/style-default))
-    (^StringBuilder [^StringBuilder sb ^Object/1 frag ^long style]
+     (render-into sb frag "\n"))
+    (^StringBuilder [^StringBuilder sb ^Object/1 frag ^String nl]
+     (render-into sb frag nl insn/style-default))
+    (^StringBuilder [^StringBuilder sb ^Object/1 frag ^String nl ^long style]
      (loop [sb sb, sb-style style, style style, column 0, i 0]
        (if (< i (alength frag))
          (let [insn (aget frag i)
@@ -289,7 +295,7 @@
                (case (insn/cmd-id cmd)
                  (#_end-current-line 1)
                  (let [column' arg]
-                   (recur (-> sb (.append \newline) (.repeat " " column'))
+                   (recur (-> sb (.append nl) (.repeat " " column'))
                           sb-style style column' (inc i)))
                  
                  (#_advance-lines 2)
@@ -297,7 +303,7 @@
                  ;; up.  Stick with repeated newline.
                  (if (zero? arg)
                    (recur sb sb-style style column (inc i))
-                   (recur (.repeat sb "\n" arg) sb-style style 0 (inc i)))
+                   (recur (.repeat sb nl arg) sb-style style 0 (inc i)))
 
                  (#_forward-to-column 3)
                  (let [column' (max column arg)]
@@ -323,8 +329,10 @@
 
   (defn print-into
     (^StringBuilder [^StringBuilder sb ^Object/1 frag]
-     (print-into sb frag insn/style-default))
-    (^StringBuilder [^StringBuilder sb ^Object/1 frag ^long style]
+     (print-into sb frag "\n"))
+    (^StringBuilder [^StringBuilder sb ^Object/1 frag ^String nl]
+     (print-into sb frag nl insn/style-default))
+    (^StringBuilder [^StringBuilder sb ^Object/1 frag ^String nl ^long style]
      (loop [sb sb, style style, column 0, i 0]
        ;; only `conceal-XXX` and `conceal-spaces` are picked up from
        ;; `style`
@@ -341,13 +349,13 @@
                (case (insn/cmd-id cmd)
                  (#_end-current-line 1)
                  (let [column' arg]
-                   (recur (-> sb (.append \newline) (.repeat " " column'))
+                   (recur (-> sb (.append nl) (.repeat " " column'))
                           style column' (inc i)))
                  
                  (#_advance-lines 2)
                  (if (zero? arg)
                    (recur sb style column (inc i))
-                   (recur (.repeat sb "\n" arg) style 0 (inc i)))
+                   (recur (.repeat sb nl arg) style 0 (inc i)))
 
                  (#_forward-to-column 3)
                  (let [column' (max column arg)]

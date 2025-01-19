@@ -1,0 +1,189 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.textflow__table
+  (:require [tcljx.alpha.textflow :as tf]
+            [tcljx.alpha.textflow__insn :as tfi])
+  (:import (tcljx.alpha.textflow Cursor)
+           (java.util Arrays)))
+
+(def insn-start-cell
+  (tfi/mk-cmd tfi/no-operation (+ tfi/last-no-operation-arg 1)))
+(def insn-unit-of-space
+  (tfi/mk-cmd tfi/no-operation (+ tfi/last-no-operation-arg 2)))
+(def insn-end-cell
+  (tfi/mk-cmd tfi/no-operation (+ tfi/last-no-operation-arg 3)))
+
+(defn cell-<> ^Cursor [^Cursor csr]
+  (tf/add-printable-insn csr insn-unit-of-space))
+(defn cell-start ^Cursor [^Cursor csr]
+  (tf/add-printable-insn csr insn-start-cell))
+(defn cell-start<> ^Cursor [^Cursor csr]
+  (-> csr (cell-start) (cell-<>)))
+(defn cell-end ^Cursor [^Cursor csr]
+  (tf/add-printable-insn csr insn-end-cell))
+(defn cell-<>end ^Cursor [^Cursor csr]
+  (-> csr (cell-<>) (cell-end)))
+
+(defn text-left ^Cursor [^Cursor csr content]
+  (-> csr (cell-start) (tf/text (str content)) (cell-<>end)))
+(defn text-right ^Cursor [^Cursor csr content]
+  (-> csr (cell-start<>) (tf/text (str content)) (cell-end)))
+(defn text-center ^Cursor [^Cursor csr content]
+  (-> csr (cell-start<>) (tf/text (str content)) (cell-<>end)))
+(defn text-flush ^Cursor [^Cursor csr content]
+  (-> csr (cell-start) (tf/text (str content)) (cell-end)))
+
+#_
+(letfn [(row* [csr body]
+          `(-> ~csr
+               ~@(interleave
+                  (repeat `(tf/add-printable-insn insn-start-cell))
+                  body
+                  (repeat `(tf/add-printable-insn insn-end-cell)))
+               (tf/newline)))]
+  
+  (defmacro row-> [csr & body]
+    (row* csr body))
+  
+  (defmacro text-row-> [csr & body]
+    (row* csr (map #(list `tf/text (list `str %)) body))))
+
+(defmacro ^:private aupdate! [a idx f & args]
+  `(let [a# ~a, idx# ~idx]
+     (aset a# idx# (~f (aget a# idx#) ~@args))
+     a#))
+
+(deftype CellSummary [^int start ^int end ^int content-width ^int spacer-count]
+  ;; FIXME... Valhalla value & not null
+  java.lang.Record)
+
+(def ^:private left-of-first-column -1)
+(letfn [(end-of-row? ^boolean [insn]
+          (tfi/cmd? tfi/end-current-line insn))
+        (next-start-cell-in-row ^int [^int i ^Object/1 frag]
+          ;; post: frag[i] is either end-of-row? or insn-start-cell
+          (if (< i (alength frag))
+            (let [insn (aget frag i)]
+              (cond
+                (or (identical? insn-start-cell insn) (end-of-row? insn))
+                i
+                
+                (identical? insn-end-cell insn) ;end cell without start cell
+                (throw (IllegalStateException.))
+
+                (identical? insn-unit-of-space insn) ;space outside cell
+                (throw (IllegalStateException.))
+                
+                :else (recur (inc i) frag)))
+            (throw (IllegalStateException.)))) ;expect some end-of-row? insn
+        (cell-summary ^CellSummary [^Object/1 frag ^int start]
+          ;; pre: (identical? insn-start-cell (aget frag start))
+          (loop [width 0, spacers 0, i (inc start)]
+            (if (< i (alength frag))
+              (let [insn (aget frag i)]
+                (cond
+                  (or (end-of-row? insn)
+                      (identical? insn-start-cell insn))
+                  (throw (IllegalStateException.))
+                  
+                  (identical? insn-end-cell insn)
+                  (CellSummary. start i width spacers)
+                  
+                  (identical? insn-unit-of-space insn)
+                  (recur width (inc spacers) (inc i))
+                  
+                  (tfi/text? insn)
+                  (recur (+ width (tfi/text-width insn)) spacers (inc i))
+                    
+                  :else (recur width spacers (inc i))))
+              (throw (IllegalStateException.)))))
+        (max-column-width-of-row ^int [^int i ^Object/1 frag ^int/1 awidth]
+          ;; post: frag[result-1] is end-of-row?
+          (loop [column-idx 0, i (next-start-cell-in-row i frag)]
+            (if (end-of-row? (aget frag i))
+              (inc i)
+              (let [cs (cell-summary frag i)]
+                (aupdate! awidth column-idx max (.content-width cs))
+                (recur (inc column-idx)
+                       (next-start-cell-in-row (inc (.end cs)) frag))))))
+        ;; (count-rows ^int [^Object/1 frag]
+        ;;   (loop [acc 0, i (dec (alength frag))]
+        ;;     (if (neg? i)
+        ;;       acc
+        ;;       (recur (+ acc (int (end-of-row? (aget frag i)))) (dec i)))))
+        (column-count ^int [^int/1 awidth] ;negative element marks non-column
+          (loop [i 0]
+            (if (or (= i (alength awidth)) (neg? (aget awidth i)))
+              i
+              (recur (inc i)))))
+        (column-width-array ^int/1 [^Object/1 frag]
+          (let [awidth (doto (new int/1 16)
+                         ;; FIXME... hardcoded max number of columns
+                         (Arrays/fill -1))]
+            (loop [i 0]
+              (if (< i (alength frag))
+                (recur (max-column-width-of-row i frag awidth))
+                (Arrays/copyOf awidth (column-count awidth))))))
+
+        (rewrite-cell! ^int [^int screen-column ^Object/1 frag
+                             ^int column-width ^CellSummary cs]
+          (loop [screen-column screen-column
+                 unassigned-space (- column-width (.content-width cs))
+                 spacers (.spacer-count cs)
+                 i (inc (.start cs))]
+            (assert (>= unassigned-space 0))
+            (assert (>= spacers 0))
+            (if (< i (.end cs))
+              (let [insn (aget frag i)]
+                (cond
+                  (identical? insn-unit-of-space insn)
+                  (let [n (quot unassigned-space spacers)
+                        sc (+ screen-column n)]
+                    (aset frag i (tfi/mk-cmd tfi/forward-to-column sc))
+                    (recur sc (- unassigned-space n) (dec spacers) (inc i)))
+
+                  (tfi/text? insn)
+                  (recur (+ screen-column (tfi/text-width insn))
+                         unassigned-space spacers (inc i))
+
+                  :else (recur screen-column unassigned-space spacers (inc i))))
+              screen-column)))
+        (rewrite-row! ^int [^int start ^Object/1 frag ^int/1 awidth]
+          ;; post: frag[result-1] is end-of-row?
+          (loop [column-idx 0
+                 i (next-start-cell-in-row start frag)
+                 screen-column (tfi/text-width-of-range frag start i)]
+            #_(prn :rewrite-row
+                   :column-idx column-idx
+                   :i i
+                   :screen-column screen-column)
+            (if (end-of-row? (aget frag i))
+              (inc i)
+              (let [cs (cell-summary frag i)
+                    sc' (-> (+ screen-column
+                               (tfi/text-width-of-range frag i (.start cs)))
+                            (rewrite-cell! frag (aget awidth column-idx) cs))
+                    right-of-cell (inc (.end cs))
+                    i' (next-start-cell-in-row right-of-cell frag)
+                    w (tfi/text-width-of-range frag right-of-cell i')]
+                (recur (inc column-idx) i' (+ sc' w))))))]
+  
+  (defn print-table ^void [^Cursor csr]
+    (let [frag (tf/fragment csr)
+          awidth (column-width-array frag)]
+      ;; (prn :seq (seq (.insns csr)))
+      ;; (prn :rows (count-rows frag))
+      #_(prn :column-width (vec awidth))
+
+      (loop [i 0]
+        (when (< i (alength frag))
+          (recur (rewrite-row! i frag awidth))))
+      
+      (print (tf/str-render frag))
+      (flush)
+      )))
