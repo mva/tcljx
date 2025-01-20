@@ -122,19 +122,19 @@
   ;; initial call and prints a `newline`.  Use with `with-open`.
   (defn raw-mode
     (^AutoCloseable []
-     (raw-mode false))
-    (^AutoCloseable [^boolean hide-cursor?]
+     (raw-mode System/out false))
+    (^AutoCloseable [^PrintStream out ^boolean hide-cursor?]
      (let [initial-termios (get-termios)]
        (set-termios initial-termios true)
        (when hide-cursor?
-         (.print System/out csi-hide-cursor)
-         (.flush System/out))
+         (.print out csi-hide-cursor)
+         (.flush out))
        (reify AutoCloseable
          (close [_]
            (set-termios initial-termios false)
            (when hide-cursor?
-             (.print System/out csi-show-cursor)
-             (.flush System/out))
+             (.print out csi-show-cursor)
+             (.flush out))
            (newline)))))))
 
 ;;; ------------------------------------------------------------------------
