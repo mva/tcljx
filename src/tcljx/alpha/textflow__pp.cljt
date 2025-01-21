@@ -9,7 +9,7 @@
   (:require [tcljx.alpha.textflow :as tf]
             [tcljx.alpha.textflow__insn :as insn]
             [tinyclj.core.protocols :refer [datafy]])
-  (:import (tcljx.alpha.textflow Cursor)
+  (:import (tcljx.alpha.textflow Cursor BufferedCursor)
            (tinyclj.core.protocols Datafiable)
            (java.util Map$Entry)
            (clojure.lang IMeta)
@@ -68,6 +68,13 @@
     [(mark-flex-start ^Cursor [^Cursor csr]
        (tf/add-printable-insn csr marker-flex-start))
      
+     (position ^int [^Cursor csr]
+       (.insn-count ^BufferedCursor csr))
+     (replace-insn ^void [^BufferedCursor csr ^int pos ^Object insn]
+       (aset (.insns csr) pos insn))
+     (get-insn ^Object [^BufferedCursor csr ^int pos]
+       (aget (.insns csr) pos))
+     
      ;; Protocol: `insn-close` is followed by arbitrary many
      ;; `closing?`, `styling?`, or `suffix-comma` instructions, and
      ;; then a `flex-space` (or the end of a top-level container).
@@ -80,18 +87,17 @@
      ;; of every alternate.  The test for `suffix-comma` handles the
      ;; case of a `flex-end` following a map entry pair.
      (pop-flex-end* ^Cursor [^Cursor csr]
-       (let [insns (.insns csr)]
-         (loop [csr csr, i (dec (.insn-count csr))]
-           (let [insn (aget insns i)]
-             (cond
-               (closing? insn)
-               (recur (tf/add-printable-insn csr marker-flex-end) (dec i))
-               
-               (or (identical? suffix-comma insn) ;comma after map entry
-                   (insn/styling? insn))
-               (recur csr (dec i))
+       (loop [csr csr, i (dec (position csr))]
+         (let [insn (get-insn csr i)]
+           (cond
+             (closing? insn)
+             (recur (tf/add-printable-insn csr marker-flex-end) (dec i))
+             
+             (or (identical? suffix-comma insn) ;comma after map entry
+                 (insn/styling? insn))
+             (recur csr (dec i))
 
-               :else csr)))))
+             :else csr))))
      (text-flex-space ^Cursor [^Cursor csr]
        (-> csr (pop-flex-end*) (tf/text flex-space)))
 
@@ -208,14 +214,14 @@
      ;; text to be well behaved with regard to balanced `flex-start`
      ;; and `flex-end`.
      (text-alternate ^Cursor [^Cursor csr ^BiFunction alt-text form]
-       (let [start (.insn-count csr)
+       (let [start (position csr)
              csr (-> csr
                      (tf/add-printable-insn insn/insn-noop) ;cmd-mark-alternate
                      (as-> csr (.apply alt-text csr form))
                      (tf/add-printable-insn insn/insn-noop) ;advance-lines
                      (tf/add-printable-insn insn/insn-noop)) ;forward-to-column
-             end (.insn-count csr)]
-         (aset (.insns csr) start (insn/mk-cmd cmd-mark-alternate (- end start)))
+             end (position csr)]
+         (replace-insn csr start (insn/mk-cmd cmd-mark-alternate (- end start)))
          csr))
      (text-alternates ^Cursor [^Cursor csr ^Alternates alts]
        ;; clear pending flex-ends before entering the alternates
@@ -259,12 +265,12 @@
            (identical? empty-form form) csr
            :else (tf/text csr (str form)))))]
   
-    (defn text-form-into ^Cursor [^Cursor csr form]
+    (defn text-form-into ^BufferedCursor [^BufferedCursor csr form]
       ;; public version of the recursive `text-form` ensuring balanced
       ;; `flex-start` and `flex-end` pairs.
       (-> csr (text-form form) (pop-flex-end*)))
   
-    (defn text-forms-into ^Cursor [^Cursor csr forms]
+    (defn text-forms-into ^BufferedCursor [^BufferedCursor csr forms]
       (-> (text-flex-seq* csr (seq forms) close-rempty)
           (pop-flex-end*))))
 
@@ -467,7 +473,7 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn pretty1 ^Cursor [^Cursor csr forms ^int page-width]
+(defn pretty1 ^Cursor [^BufferedCursor csr forms ^int page-width]
   (let [start (.insn-count csr)
         csr (text-forms-into csr forms)
         end (.insn-count csr)

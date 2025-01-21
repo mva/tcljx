@@ -10,8 +10,8 @@ JAVAP=$(JAVA_BIN)javap
 JAVA_OPTS=--enable-preview -p $(TCLJC_MDIR) --add-modules tinyclj.core --enable-native-access=ALL-UNNAMED
 TCLJC_OPTS=$(JAVA_OPTS) -m tinyclj.compiler
 
-MAIN_NS=tcljx.alpha.textflow__terminal
-#MAIN_NS=tcljx.main
+#MAIN_NS=tcljx.alpha.textflow__terminal
+MAIN_NS=tcljx.main
 RUN_TESTS_NS=tcljx.run-tests
 
 compile:

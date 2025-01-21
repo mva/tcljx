@@ -1,5 +1,6 @@
 (ns tcljx.alpha.textflow__pp-test
   (:require [tcljx.alpha.textflow :as tf]
+            [tcljx.alpha.textflow__insn :as tfi]
             [tcljx.alpha.textflow__pp :as pp]
             [tcljx.alpha.ptest :refer :all]
             [tinyclj.string :as str]))
@@ -7,7 +8,7 @@
 ;;; Emit `forms` as a single long line.  Not pretty, but very simple.
 (defn pretty0-forms ^String [forms]
   (-> (StringBuilder.)
-      (tf/print-into (-> (tf/mk-cursor) (pp/pretty0 forms) (tf/fragment)))
+      (tf/print-into (-> (tf/mk-buffered) (pp/pretty0 forms)))
       (.toString)))
 (defn pretty0-form ^String [form]
   (pretty0-forms (list form)))
@@ -110,9 +111,8 @@
 
 (defn pretty1-forms ^String [^int page-width forms]
   (-> (StringBuilder.)
-      (tf/print-into (-> (tf/mk-cursor)
-                         (pp/pretty1 forms page-width)
-                         (tf/fragment)))
+      (tf/print-into (-> (tf/mk-buffered)
+                         (pp/pretty1 forms page-width)))
       (.toString)))
 (defmacro is-pr1 [exp page-width forms]
   (with-meta `(is (= ~exp (pretty1-forms ~page-width ~forms)))
@@ -176,7 +176,7 @@
 
 (letfn [(frag-linev ^vector [^Object/1 frag]
           (vec (-> (StringBuilder.)
-                   (tf/print-into frag)
+                   (tf/print-into* frag "\n" tfi/style-default)
                    (.toString)
                    (str/split #"\n"))))
         (side-by-side ^vector [^seq linev-seq]
@@ -186,10 +186,10 @@
             (apply mapv vector linev-seq)))]
   (defn view-forms ^vector [^int page-width ^int view-count forms]
     (assert (pos? view-count))
-    (let [multi-frag (-> (tf/mk-cursor)
+    (let [multi-frag (-> (tf/mk-buffered)
                          (pp/pretty1 forms page-width)
                          (tf/fragment))
-          views (map #(-> (tf/mk-cursor)
+          views (map #(-> (tf/mk-buffered)
                           (pp/isolate-view-into multi-frag ^int %)
                           (tf/fragment)
                           (frag-linev))

@@ -10,12 +10,11 @@
   (let [style (style/env-style 80 false)
         forms (aligned-form form-a form-b
                             (.compact-diff? style) (.alternates-style style))
-        multi-frag (-> (tf/mk-cursor)
+        multi-frag (-> (tf/mk-buffered)
                        (pp/pretty1 forms (.page-width style))
                        (tf/fragment))
-        str-view #(-> (tf/mk-cursor)
+        str-view #(-> (tf/mk-buffered)
                       (pp/isolate-view-into multi-frag ^int %)
-                      (tf/fragment)
                       (tf/str-render))]
     (vector (str-view 0) (str-view 1))))
 

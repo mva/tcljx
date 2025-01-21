@@ -20,6 +20,15 @@
 ;;; putting the stty calls into a shell script is probably a more sane
 ;;; approach.
 
+;;; Wikipedia: ANSI escape code
+;;; https://en.wikipedia.org/wiki/ANSI_escape_code
+;;; 
+;;; Edward Moy: XTerm Control Sequences
+;;; https://invisible-island.net/xterm/ctlseqs/ctlseqs.html
+;;; 
+;;; Edward Moy: Table of function-keys for XTerm and other Terminal Emulators
+;;; https://invisible-island.net/xterm/xterm-function-keys.html
+
 #_
 (letfn [(clear-flags! ^int/1 [^int/1 termios ^int offset ^int clear-flags]
           (when-not (zero? (rem offset 4))

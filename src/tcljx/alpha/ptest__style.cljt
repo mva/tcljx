@@ -69,9 +69,8 @@
 
 (defn- with-styles [txt style-fn]
   (if (env-color-output?)
-    (-> (tf/mk-cursor)
+    (-> (tf/mk-buffered)
         (tf/with-save-restore-> (style-fn) (tf/text txt))
-        (tf/fragment)
         (tf/str-render))
     txt))
 (defn- with-arg [style-fn ^int arg]

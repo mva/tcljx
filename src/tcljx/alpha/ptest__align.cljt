@@ -9,7 +9,8 @@
   (:require [tcljx.alpha.textflow :as tf]
             [tcljx.alpha.textflow__pp :as pp]
             [tcljx.alpha.ptest__style :as style])
-  (:import (tcljx.alpha.ptest__style Style)
+  (:import (tcljx.alpha.textflow Cursor)
+           (tcljx.alpha.ptest__style Style)
            (clojure.lang PersistentHashMap)
            (java.util.function BiFunction)))
 
@@ -291,25 +292,24 @@
 (defn print-ea-lines ^void [^String msg exp act ^Style style]
   (let [forms (aligned-form exp act
                             (.compact-diff? style) (.alternates-style style))
-        multi-frag (-> (tf/mk-cursor) (pp/pretty0 forms) (tf/fragment))
+        multi-frag (-> (tf/mk-buffered) (pp/pretty0 forms) (tf/fragment))
 
-        col-0 (-> (tf/mk-cursor) ((.style-dim-fn style))
+        col-0 (-> (tf/mk-buffered) ((.style-dim-fn style))
                   (tf/text "   cause:") (tf/newline)
                   (tf/text "expected:") (tf/newline)
-                  (tf/text "  actual:") (tf/page))
-        col-1 (-> (tf/mk-cursor)
+                  (tf/text "  actual:"))
+        col-1 (-> (tf/mk-buffered)
                   (tf/text msg) (tf/newline)
                   (pp/isolate-view-into multi-frag 0) (tf/newline)
-                  (pp/isolate-view-into multi-frag 1) (tf/page))]
+                  (pp/isolate-view-into multi-frag 1))]
     ;; use side-by-side to offset the column values in `col-1`
-    (-> (tf/mk-cursor)
-        (tf/side-by-side-into (doto (new Object/2 2)
+    (-> (tf/mk-buffered)
+        (tf/side-by-side-into (doto (new Cursor/1 2)
                                 (aset 0 col-0)
                                 (aset 1 col-1))
                               (doto (new int/1 2)
                                 (aset 0 0)
                                 (aset 1 10)))
-        (tf/page)
         (tf/print-page))))
 
 (defn print-ea-columns [^String msg a b ^Style style]
@@ -319,11 +319,12 @@
         side-by-side-width (quot (- (.page-width style) side-by-side-gap) 2)
         column-a 0
         column-b (+ side-by-side-width side-by-side-gap)
-        multi-frag (-> (tf/mk-cursor)
+        multi-frag (-> (tf/mk-buffered)
                        (pp/pretty1 forms side-by-side-width)
-                       (tf/page))]
+                       (tf/clear-style-and-line)
+                       (tf/fragment))]
 
-    (-> (tf/mk-cursor)
+    (-> (tf/mk-buffered)
         (tf/with-save-restore-> ((.style-dim-fn style)) (tf/text "cause: "))
         (tf/text msg)
         (tf/newline)
@@ -333,17 +334,14 @@
         (tf/with-save-restore-> ((.style-dim-fn style)) (tf/text "actual:"))
         (tf/newline)
 
-        (tf/side-by-side-into (doto (new Object/2 2)
-                                (aset 0 (-> (tf/mk-cursor)
-                                            (pp/isolate-view-into multi-frag 0)
-                                            (tf/page)))
-                                (aset 1 (-> (tf/mk-cursor)
-                                            (pp/isolate-view-into multi-frag 1)
-                                            (tf/page))))
+        (tf/side-by-side-into (doto (new Cursor/1 2)
+                                (aset 0 (-> (tf/mk-buffered)
+                                            (pp/isolate-view-into multi-frag 0)))
+                                (aset 1 (-> (tf/mk-buffered)
+                                            (pp/isolate-view-into multi-frag 1))))
                               (doto (new int/1 2)
                                 (aset 0 column-a)
                                 (aset 1 column-b)))
-        (tf/page)
         (tf/print-page))))
 
 (letfn [(atomic? ^boolean [x]
