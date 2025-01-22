@@ -70,7 +70,7 @@
               (insn/cmd? insn/forward-to-column insn)
               (and (zero? (insn/cmd-arg insn)) (recur (dec i)))
               (insn/text? insn)
-              (and (zero? (.length ^String insn)) (recur (dec i)))
+              (and (insn/text-empty? insn) (recur (dec i)))
               (insn/cmd? insn/skip-commands insn)
               (throw (IllegalStateException.))
               :else                ;no-operation or some style command

@@ -13,8 +13,28 @@
   (^boolean [^Object/1 frag ^int i]
    (text? (aget frag i))))
 
+(defn- count-combining ^int [^String txt]
+  (loop [acc 0, i (dec (.length txt))]
+    (if (neg? i)
+      acc
+      (recur (+ acc ;see https://en.wikipedia.org/wiki/Combining_character
+                (case (unsigned-bit-shift-right (int (.charAt txt i)) 4)
+                  ( ;; Combining Diacritical Marks
+                   0x030 0x031 0x032 0x033 0x034 0x035 0x036
+                   ;; Combining Diacritical Marks Extended
+                   0x1ab 0x1ac 0x1ad 0x1ae 0x1af
+                   ;; Combining Diacritical Marks Supplement
+                   0x1dc 0x1dd 0x1de 0x1df
+                   ;; Combining Diacritical Marks for Symbols
+                   0x20d 0x20e 0x20f
+                   ;; Combining Half Marks
+                   0xfe2) 1
+                  #_else 0))
+             (dec i)))))
 (defn text-width ^int [^String txt]
-  (.codePointCount txt 0 (.length txt)))
+  (- (.codePointCount txt 0 (.length txt)) (count-combining txt)))
+(defn text-empty? ^boolean [^String txt]
+  (zero? (.length txt)))   ;assumes no standalone combining characters
 
 (defn text-width-of-range ^int [^Object/1 frag ^int start ^int end]
   (loop [acc 0, i start]
