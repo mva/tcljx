@@ -52,7 +52,7 @@
 (definterface NamespaceContext
   (ns-str ^String [])
   (lookup-namespace ^String [^String alias])  ;nil if not found
-  (lookup-class ^Class [^symbol sym])         ;nil if not found
+  (lookup-class ^Class [^String sym])         ;nil if not found
   (lookup-global-qname ^symbol [^String nm])) ;nil if no such global
 
 ;; (def primitive-ns-str "tinyclj.lang.primitive")

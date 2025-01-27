@@ -49,7 +49,7 @@
 
 (defn- rewrite-synquote-name ^Named [^Named nm ^NamespaceContext ctx]
   (letfn [(resolve-class-name ^String [^String nm]
-            (if-some [tp (.lookup-class ctx (symbol nil nm))]
+            (if-some [tp (.lookup-class ctx nm)]
               (.getName tp)
               (when-not (neg? (.indexOf nm (int \.)))
                 nm)))

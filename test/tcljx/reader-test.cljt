@@ -111,7 +111,7 @@
   (let [ns-alias-map {"my.name.space" "my.name.space" ;required namespace
                       "space" "my.name.space"}        ;namespace alias
         ns-str (name this-namespace)
-        import-map {'Object Object}
+        import-map {"Object" Object}
         global-qname-map {"imported-var"
                           'my.name.space/remote-var}]
     (stub-nmsp-ctx ns-str ns-alias-map import-map global-qname-map)))
