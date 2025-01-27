@@ -7,7 +7,7 @@ JAVAC=$(JAVA_BIN)javac
 JAVAP=$(JAVA_BIN)javap
 
 # Note: textflow__terminal requires --enable-native-access
-JAVA_OPTS=--enable-preview -p $(TCLJC_MDIR) --add-modules tinyclj.core --enable-native-access=ALL-UNNAMED
+JAVA_OPTS=--enable-preview -p $(TCLJC_MDIR) --add-modules tinyclj.core --enable-native-access=ALL-UNNAMED -XX:+UnlockExperimentalVMOptions -XX:+UseCompactObjectHeaders
 TCLJC_OPTS=$(JAVA_OPTS) -m tinyclj.compiler
 
 #MAIN_NS=tcljx.alpha.textflow__terminal

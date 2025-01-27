@@ -101,16 +101,15 @@
         (tf/print-page))))
 
 (defn run []
-  (print-demo-page)
+  #_(print-demo-page)
   
-  #_
   (try
     (let [nmsp-ctx (reader-test/stub-nmsp-ctx "ns.pkg0" {})
           cs (slurp "../tcljc/src/tinyclj.core/tinyclj/core.cljt")
           es (time
               (reader/read-all cs nmsp-ctx))]
       (println :es (count es))
-      (dotimes [_ 10000]                ;warmup goes down to ~1.9ms
+      (dotimes [_ 10000]                ;warmup goes down to ~1.8ms
         (time
          (reader/read-all cs nmsp-ctx))))
     (catch tcljx.wrong.WrongInfo ex
