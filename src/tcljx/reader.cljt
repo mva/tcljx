@@ -17,7 +17,7 @@
            (java.util.regex Matcher)))
 
 (defn- wrong ^void [& ^Object/1 msg-parts]
-    (throw (wrong/wr-info (str/join " " msg-parts))))
+  (throw (wrong/wr-info (str/join " " msg-parts))))
 (defn- wrong-pos ^void [^int pos & ^Object/1 msg-parts]
   (throw (wrong/wr-info (str/join " " msg-parts) {:reader/position pos})))
 (defn- wrong-token ^void [^String cs ^int pos ^int end]
@@ -128,9 +128,24 @@
 ;;; ------------------------------------------------------------------------
 
 (definterface TokenParser
+  ;; The symbol being read *after* rewriting argument or gensym
+  ;; literal syntax.
   (source-symbol ^symbol [^String nmsp ^String nm])
+  
+  ;; The symbol as being seen by the reader's caller.  This is usually
+  ;; the `source-symbol`, possibly with a syntax quoted name being
+  ;; expanded to its fully qualified representation.
   (reader-symbol ^symbol [^String nmsp ^String nm])
+
+  ;; True when inside a function literal form `#(...)`.
   (fn-literal? ^boolean [])
+  
+  ;; If true, then dispatch form `#<` is silently skipped.  Only set
+  ;; when within a discard.
+  (skip-over-unreadable? ^boolean [])
+
+  ;; Returns the TokenParser instance that applies within an unquote
+  ;; form `~` or `~@`.
   (enter-unquote ^TokenParser []))
 
 (def discard-token-parser
@@ -138,6 +153,7 @@
     (source-symbol [_ nmsp nm] (symbol nmsp nm))
     (reader-symbol [this nmsp nm] (.source-symbol this nmsp nm))
     (fn-literal? [_] false)
+    (skip-over-unreadable? [_] true)
     (enter-unquote [this] this)))
 
 (def root-token-parser
@@ -145,6 +161,7 @@
     (source-symbol [_ nmsp nm] (symbol nmsp nm))
     (reader-symbol [this nmsp nm] (.source-symbol this nmsp nm))
     (fn-literal? [_] false)
+    (skip-over-unreadable? [_] false)
     (enter-unquote [this] this)))
 
 (defn- arg-literal? ^boolean [^String nmsp ^String nm]
@@ -160,6 +177,8 @@
       (.source-symbol this nmsp nm))
     (fn-literal? [_]
       true)
+    (skip-over-unreadable? [_]
+      (.skip-over-unreadable? parent))
     (enter-unquote [this]
       (.enter-unquote parent))))
 
@@ -172,11 +191,14 @@
           (sq/gensym-replacement gensym-map nm)
           (.source-symbol parent nmsp nm)))
       (reader-symbol [this nmsp nm]
-        (cond-> (.source-symbol this nmsp nm)
-          (not (or (sq/gensym-symbol? nmsp nm) (arg-literal? nmsp nm)))
-          (sq/rewrite-synquote-name nmsp-ctx)))
+        (let [sym (.source-symbol this nmsp nm)]
+          (cond-> sym
+            (and (identical? nm (name sym)) (identical? nmsp (namespace sym)))
+            (sq/rewrite-synquote-name nmsp-ctx))))
       (fn-literal? [_]
         (.fn-literal? parent))
+      (skip-over-unreadable? [_]
+        (.skip-over-unreadable? parent))
       (enter-unquote [this]
         parent))))
 
@@ -683,7 +705,7 @@
                 \' (push-list-of-prefix (inc pos) 'var)
                 \# (push-symbolic-value pos)
                 \_ (-> pos (skip-discard) (push-form-or-nothing))
-                \< (if (identical? discard-token-parser tp)
+                \< (if (.skip-over-unreadable? tp)
                      (.push cursor (+ pos 2) nil) ;ignore discarded unreadable
                      (wrong "unreadable form"))
                 #_else (wrong "unsupported dispatch:" (str "#" ch)))))

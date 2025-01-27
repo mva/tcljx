@@ -32,8 +32,8 @@
 ;;; cannot conflict with an application `gensym`, because the latter
 ;;; currently does not support a `suffix-string` like the "__auto__"
 ;;; above.  Note: There is the option to use per-input atomic counters
-;;; starting at a defined value, but this would still leave make macro
-;;; use of `gensym` non-deterministic.
+;;; starting at a defined value, but this would still leave macro use
+;;; of `gensym` non-deterministic.
 (defn gensym-replacement [agensym-map ^String nm]
   (or (get @agensym-map nm)
       (let [nm-auto (str (.substring nm 0 (dec (.length nm)))
