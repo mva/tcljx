@@ -8,13 +8,172 @@
 (ns tcljx.reader
   (:require [tcljx.config :as cfg]
             [tcljx.wrong :as wrong]
-            [tcljx.synquote :as sq]
             [tinyclj.string :as str])
   (:import (tcljx.config NamespaceContext)
            (tcljx.wrong WrongInfo)
            (tinyclj.lang Literal)
+           (clojure.lang IMapEntry IRecord Named)
            (java.util Arrays ArrayList)
            (java.util.regex Matcher)))
+
+(def ^:private sym-unquote (symbol cfg/core-lib "unquote"))
+(def ^:private sym-unquote-splicing (symbol cfg/core-lib "unquote-splicing"))
+
+(defn unquote? ^boolean [form]
+  (and (seq? form) (= sym-unquote (first form))))
+(defn unquote-splicing? ^boolean [form]
+  (and (seq? form) (= sym-unquote-splicing (first form))))
+
+(defn- mk-gensym-map []
+  (atom {}))
+
+(defn- gensym-symbol? [^String nmsp ^String nm]
+  (and (nil? nmsp) (.endsWith nm "#")))
+
+;;; Assume the compiler's `clojure.lang.RT/nextID` can be used here,
+;;; instead of the application's one.  Most of the time the two are
+;;; identical -- unless the `:platform` class loader is used, aka the
+;;; bootstrap scenario.  If they are distinct, the generated name
+;;; cannot conflict with an application `gensym`, because the latter
+;;; currently does not support a `suffix-string` like the "__auto__"
+;;; above.  Note: There is the option to use per-input atomic counters
+;;; starting at a defined value, but this would still leave macro use
+;;; of `gensym` non-deterministic.
+(defn- gensym-replacement [agensym-map ^String nm]
+  (or (get @agensym-map nm)
+      (let [nm-auto (str (.substring nm 0 (dec (.length nm)))
+                         "__" (clojure.lang.RT/nextID) "__auto__")
+            sym (symbol nil nm-auto)]
+        (swap! agensym-map assoc nm sym)
+        sym)))
+
+(defn- rewrite-synquote-name ^Named [^Named nm ^NamespaceContext ctx]
+  (letfn [(resolve-class-name ^String [^String nm]
+            (if-some [tp (.lookup-class ctx (symbol nil nm))]
+              (.getName tp)
+              (when-not (neg? (.indexOf nm (int \.)))
+                nm)))
+          (trim-last ^String [^String nm]
+            (.substring nm 0 (dec (.length nm))))
+
+          (rewrite-qualified-name ^symbol [^symbol sym]
+            (let [nm (name sym)
+                  ns-part (namespace sym)]
+              (if-some [ns-part' (and ns-part
+                                      (or (.lookup-namespace ctx ns-part)
+                                          (resolve-class-name ns-part)))]
+                (symbol ns-part' nm)
+                sym)))
+          (rewrite-name-without-nmsp ^symbol [^symbol sym]
+            (let [nm (name sym)]
+              (cond
+                (.startsWith nm ".")    ;method name and ..
+                sym
+                
+                (.endsWith nm ".")      ;shorthand for (new ...)
+                (if-some [nm' (resolve-class-name (trim-last nm))]
+                  (symbol nil (str nm' "."))
+                  sym)
+                
+                :else
+                (or (.lookup-global-qname ctx nm)
+                    (if-some [nm' (resolve-class-name nm)]
+                      (symbol nil nm')
+                      (symbol (.ns-str ctx) nm))))))]
+    
+    (cond
+      (keyword? nm) nm
+      (some? (namespace nm)) (rewrite-qualified-name nm)
+      (contains? cfg/specials nm) nm
+      :else (rewrite-name-without-nmsp nm))))
+
+;;; ------------------------------------------------------------------------
+
+;; Baseline is the method syntaxQuote() from Clojure's
+;; LispReader.java.
+
+(defn template [form]
+  (letfn
+      [(wrong [^String msg]
+         (throw (wrong/wr-info msg {}))) ;no line/column info available here
+       (q [form]
+         (list cfg/sym-quote form))
+            
+       (expand-list ^vector [xs]
+         (reduce (fn ^vector [^vector ret item]
+                   (.cons ret (cond
+                                (unquote? item) (list `list (second item))
+                                (unquote-splicing? item) (second item)
+                                :else (list `list (template item)))))
+                 [] xs))
+       (flatten-map ^vector [m]
+         (reduce (fn ^vector [^vector keyvals ^IMapEntry e]
+                   (-> keyvals (.cons (.key e)) (.cons (.val e))))
+                 [] (seq m)))
+
+       (quoted? ^boolean [x]        ;quoted form or autoquoted literal
+         ;; Assumption: values with non-constant meta are represented
+         ;; by a (with-meta ...) form in `x` and return false.
+         (if (seq? x)
+           (and (= cfg/sym-quote (first x)) (nil? (meta x)))
+           (not (symbol? x))))
+       (unwrap-quote [x]                ;pre: `(quoted? x)` is true
+         (if (seq? x) (second x) x))
+       (quoted-in-list? ^boolean [x]
+         (and (seq? x) (= `list (first x)) (nil? (nnext x)) ;list of one?
+              (quoted? (second x))))
+       (unwrap-list [x]            ;pre: `(quoted-in-list? x)` is true
+         (unwrap-quote (second x)))
+       (list-of? ^boolean [l]
+         (and (seq? l) (= (first l) `list)))
+       (concat-of [ls]
+         (if (every? list-of? ls)
+           (list* `list (mapcat rest ls))
+           (cons `concat ls)))
+       (assemble [apply-sym apply-fn xs]
+         (let [ls (expand-list xs)]
+           (if (every? quoted-in-list? ls)
+             (q (cond->> (map unwrap-list ls)
+                  (some? apply-fn) (apply apply-fn)))
+             (cond->> (list `seq (concat-of ls))
+               (some? apply-sym) (list `apply apply-sym)))))
+       
+       (encode-collection [form]
+         (cond
+           (instance? IRecord form) form
+           (map? form) (assemble `hash-map hash-map (flatten-map form))
+           (vector? form) (assemble `vector vector form)
+           (set? form) (assemble `hash-set hash-set form)
+           (or (seq? form) (list? form)) (if-some [seq (seq form)]
+                                           (assemble nil nil seq)
+                                           ())
+           :else (throw (UnsupportedOperationException.
+                         "unknown collection type"))))]
+
+      (let [tmpl (cond
+                   (symbol? form) ;also covers members of `cfg/specials`
+                   (q form)
+                   
+                   (unquote? form)
+                   (second form)
+
+                   (unquote-splicing? form)
+                   (wrong "unquote-splicing ~@ outside of list")
+
+                   (coll? form)
+                   (encode-collection form)
+
+                   ;; all other forms produced by the reader are
+                   ;; auto-quoting
+                   :else form)]
+        (if-some [m (cfg/source-meta form)]
+          (let [m-tmpl (template m)]
+            (if (and (quoted? tmpl) (quoted? m-tmpl))
+              (q (with-meta (unwrap-quote tmpl) (unwrap-quote m-tmpl)))
+              (list `with-meta tmpl m-tmpl)))
+          tmpl))))
+
+;;; ------------------------------------------------------------------------
 
 (defn- wrong ^void [& ^Object/1 msg-parts]
   (throw (wrong/wr-info (str/join " " msg-parts))))
@@ -184,17 +343,17 @@
 
 (defn- synquote-token-parser ^TokenParser [^TokenParser parent
                                            ^NamespaceContext nmsp-ctx]
-  (let [gensym-map (sq/mk-gensym-map)]
+  (let [gensym-map (mk-gensym-map)]
     (reify TokenParser
       (source-symbol [_ nmsp nm]
-        (if (sq/gensym-symbol? nmsp nm)
-          (sq/gensym-replacement gensym-map nm)
+        (if (gensym-symbol? nmsp nm)
+          (gensym-replacement gensym-map nm)
           (.source-symbol parent nmsp nm)))
       (reader-symbol [this nmsp nm]
         (let [sym (.source-symbol this nmsp nm)]
           (cond-> sym
             (and (identical? nm (name sym)) (identical? nmsp (namespace sym)))
-            (sq/rewrite-synquote-name nmsp-ctx))))
+            (rewrite-synquote-name nmsp-ctx))))
       (fn-literal? [_]
         (.fn-literal? parent))
       (skip-over-unreadable? [_]
@@ -670,15 +829,15 @@
             (let [line (.current-line cursor)
                   tp' (synquote-token-parser tp (.namespace-context cursor))
                   pos (push-form (+ pos 1) tp')
-                  x (sq/template (.pop cursor))]
+                  x (template (.pop cursor))]
               (.push cursor pos (cond-> x (seq? x) (with-line line)))))
           (push-unquote ^int [^int pos ^boolean splicing?]
             (let [line (.current-line cursor)
                   pos (push-form (+ pos (if splicing? 2 1))
                                  (.enter-unquote tp))]
               (.push cursor pos (mk-list line (if splicing?
-                                                sq/sym-unquote-splicing
-                                                sq/sym-unquote)
+                                                sym-unquote-splicing
+                                                sym-unquote)
                                          (.pop cursor)))))
           
           (push-symbolic-value ^int [^int pos]
