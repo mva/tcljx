@@ -224,7 +224,8 @@
               (#_arr-root 0 #_arr-list 1) xs
               (#_arr-vector 2) (vec xs)
               (#_arr-set 3) (set xs)
-              (#_arr-map 4) (PersistentHashMap/create (to-array xs))))
+              (#_arr-map 4) (into {} xs)
+              (#_arr-entry 5) (vec xs)))
           
           (alternates-interleaved [^Step/1 steps]
             (map (fn [^Step step]

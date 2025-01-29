@@ -23,6 +23,11 @@
           "[   :b :a]"]
          (diff-stringv [:a :b] [:b :a]))))
 
+(deftest map-form-test
+  (is (= ["[\"a\" \"b\"    ]"
+          "[        a b]"]
+         (diff-stringv ["a" "b"] ['a 'b]))))
+
 ;;; ------------------------------------------------------------------------
 
 ;; (print-ea-lines "EYEBALL TEST print-ea-lines (compact, red-blue)"
