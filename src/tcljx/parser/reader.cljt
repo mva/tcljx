@@ -898,6 +898,8 @@
                 \: (push-keyword pos)
                   
                 (\) \] \} #_eot \u0000) (+ pos bias-nothing)
+                \newline (do (.beginning-of-line fb (inc pos))
+                             (recur (inc pos)))
                 \, (recur (inc pos))
                 \; (recur (skip-comment pos))
                 #_else (if (Character/isWhitespace ch)

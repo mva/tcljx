@@ -1,0 +1,59 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.parser.error-test
+  (:require [tcljx.wrong :as wrong]
+            [tcljx.parser.namespace-test :as nst]
+            [tcljx.alpha.ptest :refer :all]
+            [tinyclj.string :as str])
+  (:import (tcljx.wrong WrongInfo)))
+
+(defn reported? ^boolean [^int line ^java.util.regex.Pattern find-regex
+                          ^vector formv]
+  (assert (every? string? formv))
+  (try
+    (nst/parse-forms-string (str/join "\n" formv))
+    (prn :reported/normal-completion)
+    false
+    
+    (catch Throwable ex
+      #_(.printStackTrace ex)
+      (let [act (and (instance? WrongInfo ex)
+                     (some? (re-find find-regex (ex-message ex)))
+                     (= line (wrong/wr-line-number ex)))]
+        (when-not act
+          (prn :reported/exception (class ex))
+          (prn :reported/message (ex-message ex))
+          (prn :reported/data (wrong/wr-data ex)))
+        act))))
+
+;;; ------------------------------------------------------------------------
+
+(deftest reader-error
+  (is (reported? 1 #"unexpected end of file"
+                 '["("]))
+  (is (reported? 2 #"unexpected end of file"
+                 '[""
+                   "("])))
+
+(deftest ns-form-error
+  (is (reported? 1 #"ns name mismatch"
+                 '["(ns nmsp.actual)"]))
+  (is (reported? 2 #"ns name mismatch"
+                 '[""
+                   "(ns nmsp.actual)"])))
+
+(deftest top-level-not-defined-error
+  (is (reported? 1 #"undefined symbol"
+                 '["not-defined"
+                   ""]))
+  (is (reported? 2 #"undefined symbol"
+                 '[""
+                   "not-defined"]))
+  (is (reported? 2 #"undefined symbol"
+                 '["(ns nmsp.expected)"
+                   "not-defined"])))

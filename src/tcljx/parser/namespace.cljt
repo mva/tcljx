@@ -185,7 +185,9 @@
                               "namespace " (wrong/q ns-sym)))))
         
         (non-namespace-form ^NamespaceBuilder [^NamespaceBuilder nmsp form]
-          (.add-form nmsp form))
+          (if (= form 'not-defined)
+            (wrong/unresolved "undefined symbol " form)
+            (.add-form nmsp form)))
         (top-level-list-form ^NamespaceBuilder [^NamespaceBuilder nmsp ^seq form]
           (wrong/with-line-context form
             (case (first form)
@@ -196,6 +198,7 @@
               #_else (non-namespace-form nmsp form))))]
   
   (defn parse-top-level-form ^NamespaceBuilder [^NamespaceBuilder nmsp form]
+    ;; pre: caller provides wrong/with-line-context for `form`
     (if (seq? form)
       (top-level-list-form nmsp form)
       (non-namespace-form nmsp form)))
@@ -203,7 +206,20 @@
   ;; Note: Does not establish error context for the file.
   (defn parse-top-level-forms ^NamespaceBuilder [^NamespaceBuilder nmsp
                                                  ^int pos ^FormBuilder fb]
-    (let [pos' (reader/push-1 pos fb (.resolver-at-point nmsp))]
-      (if (neg? pos')
-        nmsp
-        (recur (parse-top-level-form nmsp (.pop fb)) pos' fb)))))
+    (let [line-at-push (.current-line fb) ;may be followed by whitespace
+          pos' (reader/push-1 pos fb (.resolver-at-point nmsp))]
+      (letfn [(with-line-number ^Throwable [^Throwable ex form]
+                (let [line-at-end (.current-line fb)
+                      ln (cond
+                           (seq? form) (cfg/line-number form)
+                           (symbol? form) line-at-end ;any single line form
+                           :else line-at-push)]
+                  (wrong/decorate-with-line-number* ex ln)))]
+        (if (neg? pos')
+          nmsp
+          (let [form (.pop fb)]
+            (-> (try
+                  (parse-top-level-form nmsp form)
+                  (catch Throwable ex
+                    (throw (with-line-number ex form))))
+                (recur pos' fb))))))))

@@ -8,7 +8,7 @@
 (ns tcljx.run-tests
   (:require
    (tcljx.alpha textflow__pp-test ptest__align-test ptest-test)
-   (tcljx.parser reader-test namespace-test)
+   (tcljx.parser reader-test namespace-test error-test)
    
    (tcljx #_grammar-test
 
@@ -36,6 +36,7 @@
     
     tcljx.parser.reader-test
     tcljx.parser.namespace-test
+    tcljx.parser.error-test
     
     #_tcljx.grammar-test
 

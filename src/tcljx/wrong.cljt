@@ -36,6 +36,11 @@
 (defn wr-data ^IPersistentMap [ex]
   (when (instance? WrongInfo ex)
     (.data ^WrongInfo ex)))
+(defn wr-line-number ^int [ex]
+  (let [data (wr-data ex)]
+    (if-some [x (or (:form/line-number data) (:reader/line data))]
+      ^int x
+      cfg/no-line-number)))
 
 ;;; Note: core's `ex-message` and `ex-cause` work on any Throwable, so
 ;;; there is no need to duplicate the functions here.
@@ -180,22 +185,21 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn decorate-with-line-context* ^Throwable [^Throwable ex ^seq form]
+(defn decorate-with-line-number* ^Throwable [^Throwable ex ^int ln]
   (letfn [(no-class-def-found ^WrongInfo [^Throwable e]
             (let [nm (symbol nil (.replace (ex-message e) \/ \.))]
               (wr-info (str "failed to load class " (q nm)) {} e)))]
-    (let [ln (cfg/line-number form)]
-      (condp instance? ex
-        NoClassDefFoundError (-> ex (no-class-def-found) (push-line-number ln))
-        WrongInfo (-> ex (push-line-number ln))
-        #_else ex))))
+    (condp instance? ex
+      NoClassDefFoundError (-> ex (no-class-def-found) (push-line-number ln))
+      WrongInfo (-> ex (push-line-number ln))
+      #_else ex)))
 
 (defmacro with-line-context [seq-form & body]
   `(try
      #_(assert (seq? seq-form))
      ~@body
      (catch Throwable ex#
-       (throw (decorate-with-line-context* ex# ~seq-form)))))
+       (throw (decorate-with-line-number* ex# (cfg/line-number ~seq-form))))))
 
 ;; ;;; ------------------------------------------------------------------------
 
