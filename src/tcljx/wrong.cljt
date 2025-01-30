@@ -48,27 +48,27 @@
       (.setStackTrace ex* t))
     ex*))
 
-;; ;;; The compiler reports errors by throwing an WrongInfo instance.
-;; ;;; Its data map encodes information about the context of the error,
-;; ;;; while the exception's message is a free form error message.
-;; ;;;
-;; ;;; If it exists, then :form/line-number is the line number of the
-;; ;;; innermost list form "around" the point of error.
-;; ;;;
-;; ;;; If a `WrongInfo` is decorated with a ex-cause value, then it
-;; ;;; is assumed that this Throwable originates outside of the control
-;; ;;; of the compiler (e.g. during macro expansion).
-;; (defn push-line-number ^WrongInfo [^WrongInfo ex ^int ln]
-;;   (cond-> ex
-;;     (and (not= ln cfg/no-line-number)
-;;          (not (contains? (wr-data ex) :form/line-number)))
-;;     (update-wr-data assoc :form/line-number (object ln))))
+;;; The compiler reports errors by throwing an WrongInfo instance.
+;;; Its data map encodes information about the context of the error,
+;;; while the exception's message is a free form error message.
+;;;
+;;; If it exists, then :form/line-number is the line number of the
+;;; innermost list form "around" the point of error.
+;;;
+;;; If a `WrongInfo` is decorated with a ex-cause value, then it
+;;; is assumed that this Throwable originates outside of the control
+;;; of the compiler (e.g. during macro expansion).
+(defn push-line-number ^WrongInfo [^WrongInfo ex ^int ln]
+  (cond-> ex
+    (and (not= ln cfg/no-line-number)
+         (not (contains? (wr-data ex) :form/line-number)))
+    (update-wr-data assoc :form/line-number (object ln))))
 
 ;; (defn rethrow-with-line-number ^void [^WrongInfo e ^int ln]
 ;;   (throw (push-line-number e ln)))
 
-;; (defn wr-info-line-number ^WrongInfo [msg form]
-;;   (push-line-number (wr-info msg) (cfg/line-number form)))
+(defn wr-info-line-number ^WrongInfo [msg form]
+  (push-line-number (wr-info msg) (cfg/line-number form)))
 
 ;; ;;; Only assoc `k` to the exception's data if this key is not defined
 ;; ;;; yet.  With exceptions decorated from the most to the least
@@ -94,28 +94,28 @@
 ;;         (instance? tcljx.wrong.WrongInfo t) ^WrongInfo t
 ;;         :else (recur (.getCause t))))
 
-;; ;;; ------------------------------------------------------------------------
+;;; ------------------------------------------------------------------------
 
-;; (defn str* ^String [x]
-;;   (cond
-;;     (nil? x) "nil"
-;;     (class? x) (str (cfg/type-symbol x))
-;;     (string? x) (pr-str x)
-;;     :else (str x)))
+(defn str* ^String [x]
+  (cond
+    (nil? x) "nil"
+    (class? x) (str (cfg/type-symbol x))
+    (string? x) (pr-str x)
+    :else (str x)))
 
-;; (defn q ^String [x]                    ;quoting a source code fragment
-;;   (let [s (str* x), s' (style/quote-str s)]
-;;     (if (identical? s s')
-;;       (str "`" s "`")                 ;fallback if styles are disabled
-;;       s')))
+(defn q ^String [x]                    ;quoting a source code fragment
+  (let [s (str* x), s' (style/quote-str s)]
+    (if (identical? s s')
+      (str "`" s "`")                 ;fallback if styles are disabled
+      s')))
 ;; (defn q-symbol ^String [x]
 ;;   (if (symbol? x)
 ;;     (q x)
 ;;     (str x)))
 
-;; (defn got ^String [x] (str " (got: " (str* x) ")"))
+(defn got ^String [x] (str " (got: " (str* x) ")"))
 ;; (defn got-int ^String [^int i] (got (object i)))
-;; (defn got-q ^String [x] (got (q x)))
+(defn got-q ^String [x] (got (q x)))
 ;; (defn got-classes ^String [cls]
 ;;   (str " (got: " (->> (map #(.getName ^Class %) cls)
 ;;                       (sort)
@@ -123,11 +123,11 @@
 
 
 
-;; (defn syntax
-;;   ([^String msg]
-;;    (throw (wr-info msg)))
-;;   ([^String msg-prefix form]
-;;    (throw (wr-info-line-number (str msg-prefix (got-q form)) form))))
+(defn syntax
+  ([^String msg]
+   (throw (wr-info msg)))
+  ([^String msg-prefix form]
+   (throw (wr-info-line-number (str msg-prefix (got-q form)) form))))
 ;; (defn ensure-sym
 ;;   (^Symbol [form]
 ;;    (if (symbol? form)
@@ -137,16 +137,16 @@
 ;;    (if (= form exp)
 ;;      exp
 ;;      (syntax (str "expected symbol " (q exp)) form))))
-;; (defn ensure-simple-sym ^Symbol [form]
-;;   (if (and (symbol? form) (nil? (namespace form)))
-;;     form
-;;     (syntax "expect unqualified symbol" form)))
+(defn ensure-simple-sym ^symbol [form]
+  (if (and (symbol? form) (nil? (namespace form)))
+    form
+    (syntax "expect unqualified symbol" form)))
 
 
 
 
-;; (defn unresolved [^String msg-prefix sym-or-str]
-;;   (throw (wr-info (str msg-prefix (q sym-or-str)))))
+(defn unresolved [^String msg-prefix sym-or-str]
+  (throw (wr-info (str msg-prefix (q sym-or-str)))))
 ;; (defn unresolved-nmsp-sym [resolved-ns-nm ^Symbol fq-sym]
 ;;   (throw (wr-info (str "no public var " (q (name fq-sym)) " in namespace "
 ;;                        (q resolved-ns-nm)))))
@@ -161,9 +161,6 @@
 ;;     (class-not-found (ex-message ^NoClassDefFoundError x))
 ;;     (let [sym (symbol x)]               ;idempotent
 ;;       (unresolved "class not found: " sym))))
-;; (defn no-class-def-found ^WrongInfo [^NoClassDefFoundError e]
-;;   (let [nm (.replace (ex-message e) \/ \.)]
-;;     (wr-info (str "failed to load class " (q (symbol nil nm))) {} e)))
 
 
 ;; (defn file [^java.nio.file.Path rpath]
@@ -175,11 +172,30 @@
 ;;                  ^java.lang.invoke.TypeDescriptor$OfField tp]
 ;;   (throw (wr-info (str msg-prefix (got tp)))))
 
-;; (defn other
-;;   ([^String msg]
-;;    (throw (wr-info msg)))
-;;   ([^String msg form]
-;;    (throw (wr-info-line-number msg form))))
+(defn other
+  ([^String msg]
+   (throw (wr-info msg)))
+  ([^String msg form]
+   (throw (wr-info-line-number msg form))))
+
+;;; ------------------------------------------------------------------------
+
+(defn decorate-with-line-context* ^Throwable [^Throwable ex ^seq form]
+  (letfn [(no-class-def-found ^WrongInfo [^Throwable e]
+            (let [nm (symbol nil (.replace (ex-message e) \/ \.))]
+              (wr-info (str "failed to load class " (q nm)) {} e)))]
+    (let [ln (cfg/line-number form)]
+      (condp instance? ex
+        NoClassDefFoundError (-> ex (no-class-def-found) (push-line-number ln))
+        WrongInfo (-> ex (push-line-number ln))
+        #_else ex))))
+
+(defmacro with-line-context [seq-form & body]
+  `(try
+     #_(assert (seq? seq-form))
+     ~@body
+     (catch Throwable ex#
+       (throw (decorate-with-line-context* ex# ~seq-form)))))
 
 ;; ;;; ------------------------------------------------------------------------
 

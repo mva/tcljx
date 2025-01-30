@@ -1,0 +1,64 @@
+(ns tcljx.model
+  (:require [tcljx.config :as cfg]))
+
+;;; Represents the current state of globals and namespace aliases at
+;;; this point, and the set of classes defined at the JVM level at
+;;; this time.  All sets of entities include the declarations done
+;;; before this point.  `lookup-global-qname` and `lookup-namespace`
+;;; never return entities declared after this point.  Because of
+;;; concurrency, `lookup-class` may return class instances defined in
+;;; parallel or at a later point.
+(definterface Resolver
+  (ns-str ^String [])
+  (lookup-namespace ^String [^String alias])  ;nil if not found
+  (lookup-class ^Class [^String sym])         ;nil if not found
+  (lookup-global-qname ^symbol [^String nm])) ;nil if no such global
+
+(deftype ProvidedNamespace [^String ns-str]
+  java.lang.Record)
+
+(deftype Require [^String ns-str
+                  ^String alias-str     ;nil if no alias
+                  ^vector refer-strs    ;nil means all, [] means none
+                  ^map rename-strs
+                  ^vector exclude-strs
+                  ^seq error-context]
+  java.lang.Record)
+(defn required-ns-sym ^symbol [^Require require]
+  (symbol nil (.ns-str require)))
+(defn require-refer-none [^String ns-str ^seq error-context]
+  (Require. ns-str nil [] {} [] error-context))
+(defn require-refer-all [^String ns-str ^seq error-context]
+  (Require. ns-str nil nil {} [] error-context))
+(def require-core-lib-default ;applies if no :refer-clojure clause is present
+  (require-refer-all cfg/core-lib nil))
+
+;;; Compiling a Clojure namespace means to mutate the system state one
+;;; top-level form at a time.  Model this with a mutable namespace
+;;; builder that both keeps track of the lookup tables the compiler
+;;; depends on, and that collects the pieces of information that will
+;;; be written to class files.
+(definterface NamespaceBuilder
+  (ns-str ^String [])
+  (resolver-at-point ^Resolver [])
+
+  ;; Resolves and compiles the namespace names in `ns-strs`.  Returns
+  ;; an instance of `ProvidedNamespace` in the corresponding element
+  ;; of the result, or an element of value nil if the namespace name
+  ;; could not be resolved.
+  (require-namespaces ^ProvidedNamespace/1 [^String/1 ns-strs])
+  (process-require ^NamespaceBuilder [^Require require
+                                      ^ProvidedNamespace provided])
+  (process-imports ^NamespaceBuilder [^seq import-strs])
+  
+  ;; FIXME... see tcljc/emitter/namespace.cljt
+  ;; hack for dependency chain core_print.cljt
+  ;; -> MultiFn.java -> tinyclj.core fns
+  (load-file ^NamespaceBuilder [^String path-str])
+  
+  (add-form ^NamespaceBuilder [^Object form]))
+
+(defn strip-quote [x]
+  (if (and (seq? x) (= cfg/sym-quote (first x)) (nil? (nnext x)))
+    (second x)
+    x))

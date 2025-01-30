@@ -1,0 +1,235 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.parser.namespace-test
+  (:require [tcljx.model :as model]
+            (tcljx.parser [reader :as reader] [namespace :as namespace])
+            [tcljx.alpha.ptest :refer :all])
+  (:import (tcljx.wrong WrongInfo)
+           (tcljx.model NamespaceBuilder ProvidedNamespace)))
+
+(deftype NmspBuilderStub [^java.util.ArrayList forms]
+  NamespaceBuilder
+  (ns-str [_]
+    "nmsp.expected")
+  (resolver-at-point [_]
+    nil)
+  
+  (require-namespaces [_ ns-strs]
+    (let [a (new ProvidedNamespace/1 (alength ns-strs))]
+      (dotimes [i (alength a)]
+        (aset a i (ProvidedNamespace. (aget ns-strs i))))
+      a))
+  (process-require [this require provided]
+    (.add forms
+          (cond-> []
+            true
+            (conj :require (.ns-str require))
+            
+            (some? (.alias-str require))
+            (conj :as (.alias-str require))
+
+            true
+            (conj :refer (or (.refer-strs require) :all))
+            
+            true
+            (conj :rename (.rename-strs require))
+
+            (not (empty? (.exclude-strs require)))
+            (conj :exclude (.exclude-strs require))))
+    this)
+  (process-imports [this imports]
+    (when-not (empty? imports)
+      (.add forms (vec (list* :imports imports))))
+    this)
+
+  (load-file [this path-str]
+    (.add forms [:load path-str])
+    this)
+  
+  (add-form [this form]
+    (.add forms form)
+    this))
+
+(defn parse-forms-string ^vector [^String cs]
+  (let [nmsp (NmspBuilderStub. (java.util.ArrayList.))
+        fb (reader/mk-form-builder cs (.resolver-at-point nmsp))]
+    (-> nmsp
+        ^NmspBuilderStub (namespace/parse-top-level-forms 0 fb)
+        (.forms)
+        (vec))))
+(defn parse-forms ^vector [^vector formv]
+  (let [nmsp (NmspBuilderStub. (java.util.ArrayList.))]
+    (-> ^NmspBuilderStub (reduce namespace/parse-top-level-form nmsp formv)
+        (.forms)
+        (vec))))
+
+(deftest parse-forms-test
+  ;; use parse-forms-string, going through tcljx.parser.reader
+  (is (= '[]
+         (parse-forms-string "")))
+  (is (= '[(some form)]
+         (parse-forms-string "(some form)")))
+  ;; use parse-forms, relying on the host compiler's form processing
+  (is (= '[]
+         (parse-forms '[])))
+  (is (= '[(some form)]
+         (parse-forms '[(some form)]))))
+
+;;; ------------------------------------------------------------------------
+
+(deftest namespace-name-mismatch
+  ;; use parse-forms-string, going through tcljx.parser.reader
+  (is (thrown-with-msg? WrongInfo #"ns name mismatch"
+                        (parse-forms-string "(ns ns.actual)")))
+  ;; use parse-forms, relying on the host compiler's form processing
+  (is (thrown-with-msg? WrongInfo #"ns name mismatch"
+                        (parse-forms '[(ns ns.actual)]))))
+
+
+(deftest ns-require-default-core-test
+  ;; simple name
+  (is (= '[[:require "tinyclj.core" :refer :all :rename {}]
+           [:require "require.full.name" :refer [] :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require require.full.name))])))
+
+  ;; prefix syntax with zero, one, or two names
+  (is (= '[[:require "tinyclj.core" :refer :all :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require (require.full)))])))
+  (is (= '[[:require "tinyclj.core" :refer :all :rename {}]
+           [:require "require.full.name-1" :refer [] :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require (require.full name-1)))])))
+  (is (= '[[:require "tinyclj.core" :refer :all :rename {}]
+           [:require "require.full.name-1" :refer [] :rename {}]
+           [:require "require.full.name-2" :refer [] :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require (require.full name-1 name-2)))]))))
+
+(deftest ns-require-refer-clojure-none-test
+  ;; simple name
+  (is (= '[[:require "require.full.name" :refer [] :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require require.full.name)
+                          (:refer-clojure :none))])))
+  (is (= '[[:require "require.full.name" :refer [] :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:refer-clojure :none)
+                          (:require require.full.name))])))
+
+  ;; prefix syntax with zero, one, or two names
+  (is (= '[]
+         (parse-forms '[(ns nmsp.expected
+                          (:require (require.full))
+                          (:refer-clojure :none))])))
+  (is (= '[[:require "require.full.name-1" :refer [] :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require (require.full name-1))
+                          (:refer-clojure :none))])))
+  (is (= '[[:require "require.full.name-1" :refer [] :rename {}]
+           [:require "require.full.name-2" :refer [] :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require (require.full name-1 name-2))
+                          (:refer-clojure :none))]))))
+
+(deftest refer-clojure-test
+  (is (= '[[:require "tinyclj.core" :refer :all :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:refer-clojure))])))
+  
+  (is (= '[]
+         (parse-forms '[(ns nmsp.expected
+                          (:refer-clojure :none))])))
+  
+  (is (= '[[:require "tinyclj.core" :refer ["fn"] :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:refer-clojure :only [fn]))])))
+  
+  (is (= '[[:require "tinyclj.core" :refer :all :rename {} :exclude ["fn"]]]
+         (parse-forms '[(ns nmsp.expected
+                          (:refer-clojure :exclude [fn]))])))
+  
+  (is (= '[[:require "tinyclj.core" :refer :all :rename {"fn" "ccfn"}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:refer-clojure :rename {fn ccfn}))]))))
+
+
+(deftest ns-require-test
+  (is (= '[[:require "foo.bar" :refer [] :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require foo.bar)
+                          (:refer-clojure :none))])))
+  (is (= '[[:require "foo.bar" :as "bar.foo" :refer [] :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require [foo.bar :as bar.foo])
+                          (:refer-clojure :none))])))
+  
+  (is (= '[[:require "foo.bar" :refer :all :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require [foo.bar :refer :all])
+                          (:refer-clojure :none))])))
+  (is (= '[[:require "foo.bar" :refer ["a" "b"] :rename {}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require [foo.bar :refer [a b]])
+                          (:refer-clojure :none))])))
+  
+  (is (= '[[:require "foo.bar" :refer [] :rename {"a" "b"}]]
+         (parse-forms '[(ns nmsp.expected
+                          (:require [foo.bar :rename {a b}])
+                          (:refer-clojure :none))]))))
+
+(deftest ns-import-test
+  ;; imports are processed after all requires
+  (is (= [[:require "tinyclj.core" :refer :all :rename {}]
+          [:imports "foo.bar"]]
+         (parse-forms '[(ns nmsp.expected
+                          (:import foo.bar))])))
+
+  (is (= [[:imports "foo.bar"]]
+         (parse-forms '[(ns nmsp.expected
+                          (:import (foo bar))
+                          (:refer-clojure :none))])))
+  (is (= []
+         (parse-forms '[(ns nmsp.expected
+                          (:import (foo))
+                          (:refer-clojure :none))])))
+
+  ;; source code order should be preserved
+  (is (= [[:imports "foo.first" "foo.second" "bar.first" "bar.second"]]
+         (parse-forms '[(ns nmsp.expected
+                          (:import (foo first second)
+                                   (bar first second))
+                          (:refer-clojure :none))]))))
+
+(deftest require-test
+  (is (= [[:require "foo" :refer [] :rename {}]]
+         (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
+                        (require foo)])))
+  (is (= [[:require "bar" :refer [] :rename {}]]
+         (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
+                        (require 'bar)])))
+  (is (= [[:require "foo.bar" :refer ["a" "b"] :rename {}]]
+         (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
+                        (require (foo [bar :refer [a b]]))])))
+  (is (= [[:require "foo.bar" :refer ["a" "b"] :rename {}]]
+         (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
+                        (require '(foo [bar :refer [a b]]))]))))
+
+(deftest load-test
+  (is (= []
+         (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
+                        (load)])))
+  (is (= [[:load "foo"]]
+         (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
+                        (load "foo")])))
+  (is (= [[:load "foo"]
+          [:load "bar"]]
+         (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
+                        (load "foo" "bar")]))))
+

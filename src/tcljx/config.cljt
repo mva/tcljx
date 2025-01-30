@@ -49,12 +49,6 @@
                  ;; special forms that are not special in Clojure:
                  definterface* instanceof*})
 
-(definterface NamespaceContext
-  (ns-str ^String [])
-  (lookup-namespace ^String [^String alias])  ;nil if not found
-  (lookup-class ^Class [^String sym])         ;nil if not found
-  (lookup-global-qname ^symbol [^String nm])) ;nil if no such global
-
 ;; (def primitive-ns-str "tinyclj.lang.primitive")
 
 ;; (def key-force-clinit nil)
@@ -101,28 +95,28 @@
 ;;           (when (<= 1 n 9)
 ;;             n))))))
 
-;; (defn type-dimensions ^int [^Class tp]
-;;   (loop [n 0, tp tp]
-;;     (if (.isArray tp)
-;;       (recur (inc n) (.componentType tp))
-;;       n)))
+(defn type-dimensions ^int [^Class tp]
+  (loop [n 0, tp tp]
+    (if (.isArray tp)
+      (recur (inc n) (.componentType tp))
+      n)))
 
 ;; (defn array-type-of-class ^Class [^Class cl ^int array-rank]
 ;;   (if (zero? array-rank)
 ;;     cl
 ;;     (recur (.arrayType cl) (dec array-rank))))
 
-;; (defn type-symbol ^clojure.lang.Symbol [^Class tp]
-;;   (let [n (type-dimensions tp)]
-;;     (if (zero? n)
-;;       (symbol nil (.getName tp))
-;;       (symbol (loop [cl tp]
-;;                 (if (.isArray cl)
-;;                   (recur (.componentType cl))
-;;                   (.getName cl)))
-;;               (str n)))))
+(defn type-symbol ^clojure.lang.Symbol [^Class tp]
+  (let [n (type-dimensions tp)]
+    (if (zero? n)
+      (symbol nil (.getName tp))
+      (symbol (loop [cl tp]
+                (if (.isArray cl)
+                  (recur (.componentType cl))
+                  (.getName cl)))
+              (str n)))))
 
-;; ;;; ------------------------------------------------------------------------
+;;; ------------------------------------------------------------------------
 
 ;; (def source-suffix ".cljt")
 ;; (def class-suffix ".class")
@@ -248,14 +242,14 @@
 
 ;; ;;; ------------------------------------------------------------------------
 
-;; (def no-line-number 0)
-;; (defn line-number ^int [form]
-;;   (if (seq? form)
-;;     (if-some [m (.meta ^clojure.lang.IMeta form)]
-;;       (if-some [line (.valAt m :line nil)]
-;;         ^int line)
-;;       no-line-number)
-;;     no-line-number))
+(def no-line-number 0)
+(defn line-number ^int [form]
+  (if (seq? form)
+    (if-some [m (.meta ^clojure.lang.IMeta form)]
+      (if-some [line (.valAt m :line nil)]
+        ^int line)
+      no-line-number)
+    no-line-number))
 
 ;;; Return the source code meta information of `x`.  For non-empty
 ;;; list `x`, first strip :line/:column information added by the

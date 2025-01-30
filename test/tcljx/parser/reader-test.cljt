@@ -5,19 +5,19 @@
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
-(ns tcljx.reader-test
-  (:require [tcljx.reader :as reader]
+(ns tcljx.parser.reader-test
+  (:require [tcljx.parser.reader :as reader]
             [tinyclj.string :as str]
             [tcljx.alpha.ptest :refer :all])
-  (:import (tcljx.config NamespaceContext)
+  (:import (tcljx.model Resolver)
            (tcljx.wrong WrongInfo)
-           (tcljx.reader Cursor TokenParser)))
+           (tcljx.parser.reader FormBuilder TokenParser)))
 
-(deftype NamespaceContextStub [^String ns-str
-                               ^map ns-alias-map
-                               ^map import-map
-                               ^map global-qname-map]
-  tcljx.config.NamespaceContext
+(deftype ResolverStub [^String ns-str
+                       ^map ns-alias-map
+                       ^map import-map
+                       ^map global-qname-map]
+  Resolver
   (ns-str [_]
     ns-str)
   (lookup-namespace [_ alias]
@@ -27,26 +27,26 @@
   (lookup-global-qname [_ nm]
     (.valAt global-qname-map nm nil)))
 
-(defn stub-nmsp-ctx
-  (^NamespaceContext []
-   (stub-nmsp-ctx "NO_NS" {}))
-  (^NamespaceContext [^String ns-str ^map ns-alias]
-   (NamespaceContextStub. ns-str ns-alias {} {}))
-  (^NamespaceContext [^String ns-str ^map ns-alias
-                      ^map import-map ^map global-qname-map]
-   (NamespaceContextStub. ns-str ns-alias import-map global-qname-map)))
+(defn stub-resolver
+  (^Resolver []
+   (stub-resolver "NO_NS" {}))
+  (^Resolver [^String ns-str ^map ns-alias]
+   (ResolverStub. ns-str ns-alias {} {}))
+  (^Resolver [^String ns-str ^map ns-alias
+              ^map import-map ^map global-qname-map]
+   (ResolverStub. ns-str ns-alias import-map global-qname-map)))
 
 (defn read-all
   (^seq [^String cs]
-   (read-all cs (stub-nmsp-ctx)))
-  (^seq [^String cs ^NamespaceContext nmsp-ctx]
-   (seq (reader/read-all cs nmsp-ctx))))
+   (read-all cs (stub-resolver)))
+  (^seq [^String cs ^Resolver resolver]
+   (seq (reader/read-all cs resolver))))
 
 (defn read1
   ([^String cs]
-   (read1 cs (stub-nmsp-ctx)))
-  ([^String cs ^NamespaceContext nmsp-ctx] ;one form, no syntax-quote processing
-   (let [forms (reader/read-all cs nmsp-ctx)]
+   (read1 cs (stub-resolver)))
+  ([^String cs ^Resolver resolver] ;one form, no syntax-quote processing
+   (let [forms (reader/read-all cs resolver)]
      (case (alength forms)
        0 (throw (IllegalArgumentException. "no data in input"))
        1 (aget forms 0)
@@ -107,20 +107,20 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn sqs-ctx ^NamespaceContext [^symbol this-namespace]
+(defn sqs-resolver ^Resolver [^symbol this-namespace]
   (let [ns-alias-map {"my.name.space" "my.name.space" ;required namespace
                       "space" "my.name.space"}        ;namespace alias
         ns-str (name this-namespace)
         import-map {"Object" Object}
         global-qname-map {"imported-var"
                           'my.name.space/remote-var}]
-    (stub-nmsp-ctx ns-str ns-alias-map import-map global-qname-map)))
+    (stub-resolver ns-str ns-alias-map import-map global-qname-map)))
 
 (defn rdr                            ;pre: `cs` is a syntax-quote form
   ([^String cs]
    (rdr cs 'name.space))
   ([^String cs ^symbol this-namespace]
-   (read1 cs (sqs-ctx this-namespace))))
+   (read1 cs (sqs-resolver this-namespace))))
 (defn rdr-det [^String cs]
   (-> (rdr cs 'name.space) (deterministic-gensyms)))
 
@@ -465,11 +465,11 @@
         ns-alias {"alias" "aliased-namespace"
                   "known-namespace" "known-namespace"}]
     (is (= [:this-namespace/bar]
-           (read-all "::bar" (stub-nmsp-ctx ns-str ns-alias))))
+           (read-all "::bar" (stub-resolver ns-str ns-alias))))
     (is (= [:aliased-namespace/bar]
-           (read-all "::alias/bar" (stub-nmsp-ctx ns-str ns-alias))))
+           (read-all "::alias/bar" (stub-resolver ns-str ns-alias))))
     (is (= [:known-namespace/bar]
-           (read-all "::known-namespace/bar" (stub-nmsp-ctx ns-str ns-alias))))
+           (read-all "::known-namespace/bar" (stub-resolver ns-str ns-alias))))
 
     (is (thrown-with-msg? WrongInfo #"no such namespace: foo"
                           (read1 "::foo/bar")))))

@@ -7,8 +7,8 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.main
   (:require [tcljx.wrong :as wrong]
-            [tcljx.reader :as reader]
-            [tcljx.reader-test :as reader-test]
+            [tcljx.parser.reader :as reader]
+            [tcljx.parser.reader-test :as reader-test]
 
             [tcljx.alpha.textflow :as tf]
             [tcljx.alpha.textflow__pp :as pp])
@@ -104,14 +104,14 @@
   #_(print-demo-page)
   
   (try
-    (let [nmsp-ctx (reader-test/stub-nmsp-ctx "ns.pkg0" {})
+    (let [resolver (reader-test/stub-resolver "ns.pkg0" {})
           cs (slurp "../tcljc/src/tinyclj.core/tinyclj/core.cljt")
           es (time
-              (reader/read-all cs nmsp-ctx))]
+              (reader/read-all cs resolver))]
       (println :es (count es))
       (dotimes [_ 10000]                ;warmup goes down to ~1.8ms
         (time
-         (reader/read-all cs nmsp-ctx))))
+         (reader/read-all cs resolver))))
     (catch tcljx.wrong.WrongInfo ex
       (println :error (.getMessage ex))
       (println (wrong/wr-data ex))
