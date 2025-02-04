@@ -1,6 +1,6 @@
 (ns tcljx.parser.context
   (:require (tcljx [model :as model])
-            (tcljx.parser [wrong :as wrong]))
+            (tcljx.parser [meta :as meta] [wrong :as wrong]))
   (:import (tcljx.model Resolver Binding Expr ExprFactory Scope)))
 
 ;;; Some form of "cannot do this at this position" error message.
@@ -9,7 +9,23 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def parse-form Scope/.parse-form)
+(defn parse-form ^Expr [^Scope scope form]
+  (.parse-form scope form))
+
+(defn- expr-array ^Expr/1 [^Scope scope ^int n]
+  (.new-array (.expr-factory scope) n))
+
+(defn parse-forms ^Expr [^Scope scope ^seq error-context ^seq forms]
+  (let [line (meta/line-of error-context)]
+    (->> (wrong/with-line-context line
+           (let [a (expr-array scope (count forms))]
+             (loop [i 0, xs (seq forms)]
+               (when (some? xs)
+                 (aset a i (parse-form scope (first xs)))
+                 (recur (inc i) (next xs))))
+             a))
+         (.progn (.expr-factory scope))
+         (.line-number (.expr-factory scope) line))))
 
 ;;; Anything outside of a function or a class definition (that is
 ;;; definterface, deftype, reify, etc.) happens in the namespace

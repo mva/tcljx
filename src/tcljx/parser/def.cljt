@@ -5,7 +5,7 @@
   (:import
    (tcljx.model ExprFactory Expr Resolver Binding Scope)))
 
-(defn parse-def ^Expr [^Scope scope [_ nm & args] ^int line]
+(defn parse-def ^Expr [^Scope scope [_ nm & args]]
   (letfn [(aliased-def ^Binding [^symbol init]
             (if-some [bnd (context/lookup scope init)]
               (when (model/def? bnd)

@@ -20,12 +20,12 @@
     (letfn [(parse-collection-literal ^Expr [form ^map form-meta]
               (.mk-expr expr-factory form))
             
-            (parse-invocation ^Expr [op ^seq form ^int line] ;discards meta
+            (parse-invocation ^Expr [op ^seq form] ;discards meta
               (if (symbol? op)
                 (let [nm (name op), nmsp (namespace op)]
                   (if (nil? nmsp)
                     (case nm
-                      "def" (def/parse-def this form line)
+                      "def" (def/parse-def this form)
                       #_else (.mk-expr expr-factory form))
                     (.mk-expr expr-factory form)))
                 (.mk-expr expr-factory form)))
@@ -50,8 +50,10 @@
                 
                 ;; special form, macro form, or some function call variant
                 (and (seq? form) (some? (next form)))
-                (wrong/with-line-context form
-                  (parse-invocation (first form) form (meta/get-line form-meta)))
+                (let [line (meta/get-line form-meta)]
+                  (->> (wrong/with-line-context line
+                         (parse-invocation (first form) form))
+                       (.line-number expr-factory line)))
                 
                 ;; vector, map, set, or empty list
                 :else (parse-collection-literal form form-meta))

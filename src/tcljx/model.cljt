@@ -65,7 +65,10 @@
 ;;; function or to the thread parsing the non-function parts of a
 ;;; namespace.
 (definterface ExprFactory
+  (new-array ^Expr/1 [^int n])
+  (line-number ^Expr [^Integer line ^Expr value])
   (constant ^Expr [value])
+  (progn ^Expr [^Expr/1 xs])
   
   ;; `init` is nil if no intial value is provided.
   (new-def ^Expr [^String nmsp ^String nm ^Expr init])

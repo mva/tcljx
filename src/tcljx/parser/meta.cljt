@@ -1,19 +1,13 @@
 (ns tcljx.parser.meta
   (:import (clojure.lang IMeta)))
 
-(def no-line-number 0)
+(defn get-line ^Integer [^map form-meta] ;nil if no line number present
+  (when (some? form-meta)
+    (.valAt form-meta :line nil)))
 
-(defn get-line ^int [^map form-meta]
-  (if (some? form-meta)
-    (if-some [line (.valAt form-meta :line nil)]
-      ^int line
-      no-line-number)
-    no-line-number))
-
-(defn line-of ^int [form]
-  (if (instance? IMeta form)
-    (get-line (.meta ^IMeta form))
-    no-line-number))
+(defn line-of ^Integer [form]           ;nil if no line number present
+  (when (instance? IMeta form)
+    (get-line (.meta ^IMeta form))))
 
 ;;; Return the source code meta information of `x`.  For non-empty
 ;;; list `x`, first strip :line/:column information added by the

@@ -33,8 +33,17 @@
 
 (deftype ExprFactoryStub []
   ExprFactory
+  (new-array [_ n]
+    (new ExprStub/1 n))
+  (line-number [_ line value]
+    (if (some? line)
+      (ExprStub. [:line-number line (expr-data value)])
+      value))
   (constant [_ value]
     (ExprStub. [:constant value (class-data value)]))
+  (progn [_ xs]
+    (ExprStub. (reduce (comp conj expr-data) [:progn] xs)))
+  
   (new-def [_ nmsp nm init]
     (BindingStub. nmsp nm [:new-def (symbol nmsp nm) (expr-data init)]))
   (assignment [_ bnd init]
@@ -129,7 +138,7 @@
   ;; use parse-forms-string, going through tcljx.parser.reader
   (is (= '[]
          (parse-forms-string "")))
-  (is (= '[(some form)]
+  (is (= '[[:line-number 1 (some form)]]
          (parse-forms-string "(some form)")))
   ;; use parse-forms, relying on the host compiler's form processing
   (is (= '[]
