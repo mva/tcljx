@@ -7,11 +7,11 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.reader
   (:require [tcljx.config :as cfg]
-            [tcljx.wrong :as wrong]
             [tcljx.model :as model]
+            (tcljx.parser [meta :as meta] [wrong :as wrong])
             [tinyclj.string :as str])
   (:import (tcljx.model Resolver)
-           (tcljx.wrong WrongInfo)
+           (tcljx.parser.wrong WrongInfo)
            (tinyclj.lang Literal)
            (clojure.lang IMapEntry IRecord Named)
            (java.util Arrays ArrayList)
@@ -167,7 +167,7 @@
                    ;; all other forms produced by the reader are
                    ;; auto-quoting
                    :else form)]
-        (if-some [m (cfg/source-meta form)]
+        (if-some [m (meta/source-meta form)]
           (let [m-tmpl (template m)]
             (if (and (quoted? tmpl) (quoted? m-tmpl))
               (q (with-meta (unwrap-quote tmpl) (unwrap-quote m-tmpl)))

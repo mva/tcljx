@@ -1,18 +1,96 @@
 (ns tcljx.model
-  (:require [tcljx.config :as cfg]))
+  (:require (tcljx [config :as cfg])))
+
+(definterface Type
+  )
+
+(definterface Expr
+  )
+
+;;; ------------------------------------------------------------------------
+
+(definterface Binding
+  :extends [Expr]
+  (namespace ^String [])                ;non-nil for namespace def
+  (name ^String [])
+  (init ^Expr []))                      ;Binding if this is an alias
+
+(defn binding? ^boolean [^Expr x]
+  (instance? Binding x))
+(defn def? ^boolean [^Binding bnd]
+  (some? (.namespace bnd)))
+
+(defn bound-name ^symbol [^Binding bnd]
+  (symbol (.namespace bnd) (.name bnd)))
+
+;;; If `x` is a binding, then return the very first non-aliasing
+;;; binding that defines its value.  Otherwise, return nil.
+#_(defn root ^Binding [^Expr x]
+  (loop [^Binding bnd nil, x x]
+    (if (binding? x)
+      (let [bnd ^Binding x] (recur bnd (.init bnd)))
+      bnd)))
 
 ;;; Represents the current state of globals and namespace aliases at
-;;; this point, and the set of classes defined at the JVM level at
-;;; this time.  All sets of entities include the declarations done
+;;; this point, and the set of classes defined in the JVM classloader
+;;; at this time.  All sets of entities include the declarations done
 ;;; before this point.  `lookup-global-qname` and `lookup-namespace`
 ;;; never return entities declared after this point.  Because of
 ;;; concurrency, `lookup-class` may return class instances defined in
 ;;; parallel or at a later point.
 (definterface Resolver
-  (ns-str ^String [])
-  (lookup-namespace ^String [^String alias])  ;nil if not found
-  (lookup-class ^Class [^String sym])         ;nil if not found
-  (lookup-global-qname ^symbol [^String nm])) ;nil if no such global
+  (ns-str ^String [])                   ;the name of this namespace
+  (lookup-namespace ^String [^String alias]) ;nil if not found
+
+  ;; Called by the reader to replace a syntax quoted simple name with
+  ;; its namespace qualified equivalent.  Returns nil if there is no
+  ;; such global name at this point in the namespace.
+  (lookup-global-qname ^symbol [^String nm])
+  
+  (lookup-class ^Class [^String sym])   ;nil if not found
+  
+  ;; Returns the binding representing the def form for `nm` in
+  ;; namespace `nmsp`, or nil if no such binding exists.  Use nil as
+  ;; `nmsp` to refer to the current namespace.
+  (lookup-def ^Binding [^String nmsp ^String nm])
+
+  ;; Throws `wrong` when called outside of a namespace context.  That
+  ;; is, when inside of a function or a class definition like
+  ;; definterface, deftype, or reify.
+  (add-def ^Binding [^String nm ^Binding bnd]))
+
+;;; ------------------------------------------------------------------------
+
+;;; Threading: Confined to a single thread, either one parsing a
+;;; function or to the thread parsing the non-function parts of a
+;;; namespace.
+(definterface ExprFactory
+  (constant ^Expr [value])
+  
+  ;; `init` is nil if no intial value is provided.
+  (new-def ^Expr [^String nmsp ^String nm ^Expr init])
+  (assignment ^Expr [^Binding bnd ^Expr value])
+  (bound-value ^Expr [^Binding bnd])
+  
+  (mk-expr ^Expr [form]))
+
+(definterface Scope
+  (parse-form ^Expr [form])
+
+  ;; Frequency of change: very low.
+  (resolver ^Resolver [])
+
+  ;; Frequency of change: does not change at all.
+  (expr-factory ^ExprFactory [])
+
+  ;; Maps simple name string to its associated binding.  The map can
+  ;; be incomplete if a namespace `def` was parsed after creation of
+  ;; the scope instance.  In this case, a second lookup using
+  ;; `resolver` must be done to get an accurate picture of all `def`s.
+  ;; Frequency of change: moderate.
+  (bindings* ^map []))
+
+;;; ------------------------------------------------------------------------
 
 (deftype ProvidedNamespace [^String ns-str]
   java.lang.Record)
@@ -38,6 +116,9 @@
 ;;; builder that both keeps track of the lookup tables the compiler
 ;;; depends on, and that collects the pieces of information that will
 ;;; be written to class files.
+;;;
+;;; Threading: Instance is confined to the single thread that parses
+;;; the non-function parts of a namespace.
 (definterface NamespaceBuilder
   (ns-str ^String [])
   (resolver-at-point ^Resolver [])
@@ -56,9 +137,12 @@
   ;; -> MultiFn.java -> tinyclj.core fns
   (load-file ^NamespaceBuilder [^String path-str])
   
-  (add-form ^NamespaceBuilder [^Object form]))
+  ;; For a namespace's `clinit` method, add one of possibly many void
+  ;; expressions run as part the the namespace initialization
+  ;; sequence.
+  (add-initialization ^NamespaceBuilder [^Expr x])
+  
+  (initialization-scope ^Scope []))
 
-(defn strip-quote [x]
-  (if (and (seq? x) (= cfg/sym-quote (first x)) (nil? (nnext x)))
-    (second x)
-    x))
+(defn ns-sym ^symbol [^NamespaceBuilder nmsp]
+  (symbol nil (.ns-str nmsp)))

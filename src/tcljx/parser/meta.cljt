@@ -1,0 +1,37 @@
+(ns tcljx.parser.meta
+  (:import (clojure.lang IMeta)))
+
+(def no-line-number 0)
+
+(defn get-line ^int [^map form-meta]
+  (if (some? form-meta)
+    (if-some [line (.valAt form-meta :line nil)]
+      ^int line
+      no-line-number)
+    no-line-number))
+
+(defn line-of ^int [form]
+  (if (instance? IMeta form)
+    (get-line (.meta ^IMeta form))
+    no-line-number))
+
+;;; Return the source code meta information of `x`.  For non-empty
+;;; list `x`, first strip :line/:column information added by the
+;;; reader.
+(defn source-meta [x]
+  (let [m (meta x)]
+    (if (and (some? m) (seq? x) (some? (seq x)))
+      (let [m' (dissoc m :line)]
+        (when (pos? (count m'))
+          m'))
+      m)))
+
+;; ;;; Copy `form`'s :line to `x` if it has no line number of its own.
+;; (defn with-line [x form]
+;;   (let [m (meta x)]
+;;     (if (and (seq? x) (not (contains? m :line)))
+;;       (if-some [line (-> form (meta) :line)]
+;;         (with-meta x (assoc m :line line))
+;;         x)
+;;       x)))
+

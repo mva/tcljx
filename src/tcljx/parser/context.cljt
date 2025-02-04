@@ -1,0 +1,30 @@
+(ns tcljx.parser.context
+  (:require (tcljx [model :as model])
+            (tcljx.parser [wrong :as wrong]))
+  (:import (tcljx.model Resolver Binding Expr ExprFactory Scope)))
+
+;;; Some form of "cannot do this at this position" error message.
+(defn wrong [^String msg]
+  (throw (wrong/wr-info msg)))
+
+;;; ------------------------------------------------------------------------
+
+(def parse-form Scope/.parse-form)
+
+;;; Anything outside of a function or a class definition (that is
+;;; definterface, deftype, reify, etc.) happens in the namespace
+;;; context.
+;; (defn namespace? ^boolean [^Resolver rsv]
+;;   (instance? tcljx.model.NamespaceResolver rsv))
+
+;;; Returns nil if `form` does not resolve to a binding.
+(defn lookup ^Binding [^Scope scope ^symbol form]
+  (let [nm (name form)]
+    (if-some [nmsp (namespace form)]
+      ;; a qualified name always refers to a namespace-level def
+      (.lookup-def (.resolver scope) nmsp nm)
+      
+      ;; for a simple name, the assumption is that a lookup in
+      ;; `bindings*` is accurate with very high probability
+      (or (.valAt (.bindings* scope) nm nil)
+          (.lookup-def (.resolver scope) nil nm))))) ;to cover all defs

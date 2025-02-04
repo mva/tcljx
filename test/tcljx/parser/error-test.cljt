@@ -6,11 +6,11 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.error-test
-  (:require [tcljx.wrong :as wrong]
+  (:require [tcljx.parser.wrong :as wrong]
             [tcljx.parser.namespace-test :as nst]
             [tcljx.alpha.ptest :refer :all]
             [tinyclj.string :as str])
-  (:import (tcljx.wrong WrongInfo)))
+  (:import (tcljx.parser.wrong WrongInfo)))
 
 (defn reported? ^boolean [^int line ^java.util.regex.Pattern find-regex
                           ^vector formv]
@@ -21,14 +21,15 @@
     false
     
     (catch Throwable ex
-      #_(.printStackTrace ex)
       (let [act (and (instance? WrongInfo ex)
                      (some? (re-find find-regex (ex-message ex)))
                      (= line (wrong/wr-line-number ex)))]
         (when-not act
           (prn :reported/exception (class ex))
           (prn :reported/message (ex-message ex))
-          (prn :reported/data (wrong/wr-data ex)))
+          (prn :reported/data (wrong/wr-data ex))
+          ;; must wrap test runner's StringWriter in *out*
+          (.printStackTrace ex (java.io.PrintWriter. *out*)))
         act))))
 
 ;;; ------------------------------------------------------------------------

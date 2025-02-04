@@ -9,7 +9,6 @@
   (:require
    #_[tinyclj.string :as str])
   (:import
-   #_(clojure.lang Symbol)
    #_(java.lang.constant ClassDesc)
    #_(java.lang.invoke MethodHandles$Lookup)
    #_(java.net URLClassLoader URL)
@@ -86,35 +85,6 @@
              
 ;;    Thread$UncaughtExceptionHandler Thread$State
 ;;    Deprecated Override SuppressWarnings])
-
-;; (defn spec-dimensions ^int [^Symbol tp] ;zero if not name of array type
-;;   (when (some? (namespace tp))
-;;     (let [nm (name tp)]
-;;       (when (= (.length nm) 1)
-;;         (let [n (- (int (.charAt nm 0)) (int \0))]
-;;           (when (<= 1 n 9)
-;;             n))))))
-
-(defn type-dimensions ^int [^Class tp]
-  (loop [n 0, tp tp]
-    (if (.isArray tp)
-      (recur (inc n) (.componentType tp))
-      n)))
-
-;; (defn array-type-of-class ^Class [^Class cl ^int array-rank]
-;;   (if (zero? array-rank)
-;;     cl
-;;     (recur (.arrayType cl) (dec array-rank))))
-
-(defn type-symbol ^clojure.lang.Symbol [^Class tp]
-  (let [n (type-dimensions tp)]
-    (if (zero? n)
-      (symbol nil (.getName tp))
-      (symbol (loop [cl tp]
-                (if (.isArray cl)
-                  (recur (.componentType cl))
-                  (.getName cl)))
-              (str n)))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -240,36 +210,7 @@
 ;;   (let [desc (.descriptorString cd)]
 ;;     (.substring desc 1 (dec (.length desc))))) ;drop "L" and ";", but keep "/"
 
-;; ;;; ------------------------------------------------------------------------
-
-(def no-line-number 0)
-(defn line-number ^int [form]
-  (if (seq? form)
-    (if-some [m (.meta ^clojure.lang.IMeta form)]
-      (if-some [line (.valAt m :line nil)]
-        ^int line)
-      no-line-number)
-    no-line-number))
-
-;;; Return the source code meta information of `x`.  For non-empty
-;;; list `x`, first strip :line/:column information added by the
-;;; reader.
-(defn source-meta [x]
-  (let [m (meta x)]
-    (if (and (some? m) (seq? x) (some? (seq x)))
-      (let [m' (dissoc m :line)]
-        (when (pos? (count m'))
-          m'))
-      m)))
-
-;; ;;; Copy `form`'s :line to `x` if it has no line number of its own.
-;; (defn with-line [x form]
-;;   (let [m (meta x)]
-;;     (if (and (seq? x) (not (contains? m :line)))
-;;       (if-some [line (-> form (meta) :line)]
-;;         (with-meta x (assoc m :line line))
-;;         x)
-;;       x)))
+;;; ------------------------------------------------------------------------
 
 ;; ;;; Because application and compiler can live in different class
 ;; ;;; loaders with a different runtime (e.g. when bootstrapping

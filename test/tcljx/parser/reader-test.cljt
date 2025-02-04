@@ -10,7 +10,7 @@
             [tinyclj.string :as str]
             [tcljx.alpha.ptest :refer :all])
   (:import (tcljx.model Resolver)
-           (tcljx.wrong WrongInfo)
+           (tcljx.parser.wrong WrongInfo)
            (tcljx.parser.reader FormBuilder TokenParser)))
 
 (deftype ResolverStub [^String ns-str

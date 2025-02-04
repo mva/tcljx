@@ -1,0 +1,36 @@
+(ns tcljx.parser.interop)
+
+(defn get-tag [^map form-meta]
+  (when (some? form-meta)
+    ;; Note: using `valAt` is slightly more direct than IFn.invoke()
+    ;; or RT.get().
+    (.valAt form-meta :tag nil)))
+
+;; (defn spec-dimensions ^int [^Symbol tp] ;zero if not name of array type
+;;   (when (some? (namespace tp))
+;;     (let [nm (name tp)]
+;;       (when (= (.length nm) 1)
+;;         (let [n (- (int (.charAt nm 0)) (int \0))]
+;;           (when (<= 1 n 9)
+;;             n))))))
+
+(defn type-dimensions ^int [^Class tp]
+  (loop [n 0, tp tp]
+    (if (.isArray tp)
+      (recur (inc n) (.componentType tp))
+      n)))
+
+;; (defn array-type-of-class ^Class [^Class cl ^int array-rank]
+;;   (if (zero? array-rank)
+;;     cl
+;;     (recur (.arrayType cl) (dec array-rank))))
+
+(defn type-symbol ^symbol [^Class tp]
+  (let [n (type-dimensions tp)]
+    (if (zero? n)
+      (symbol nil (.getName tp))
+      (symbol (loop [cl tp]
+                (if (.isArray cl)
+                  (recur (.componentType cl))
+                  (.getName cl)))
+              (str n)))))

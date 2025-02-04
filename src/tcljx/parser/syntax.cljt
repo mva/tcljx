@@ -1,0 +1,50 @@
+(ns tcljx.parser.syntax
+  (:require (tcljx [config :as cfg])
+            (tcljx.parser [wrong :as wrong]))
+  (:refer-clojure :exclude [vector map]))
+
+(defn wrong
+  ([^String msg]
+   (throw (wrong/wr-info msg)))
+  ([^String msg-prefix form]
+   (throw (wrong/wr-info-line-number (str msg-prefix (wrong/got-q form)) form))))
+
+;;; ------------------------------------------------------------------------
+
+(defn strip-quote [x]
+  (if (and (seq? x) (= cfg/sym-quote (first x)) (nil? (nnext x)))
+    (second x)
+    x))
+
+(defn next-if-string ^seq [^seq xs]
+  (cond-> xs (string? (first xs)) (next)))
+
+(defn empty-tail ^void [^seq forms]    ;pre: `forms` is nil when empty
+  (when (some? forms)
+    (wrong "unexpected arguments at end" forms)))
+
+(defn some-first [^seq forms]          ;pre: `forms` is nil when empty
+  (if (some? forms)
+    (first forms)
+    (wrong "missing argument")))
+
+;;; ------------------------------------------------------------------------
+
+(defn simple-sym ^symbol [form]
+  (if (and (symbol? form) (nil? (namespace form)))
+    form
+    (wrong "expect unqualified symbol" form)))
+
+(defn simple-sym-str ^String [form]
+  (name (simple-sym form)))
+
+(defn vector ^vector [form]
+  (if (vector? form)
+    form
+    (wrong "expect vector" form)))
+
+(defn map ^map [form]
+  (if (map? form)
+    form
+    (wrong "expect map" form)))
+

@@ -5,8 +5,8 @@
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
-(ns tcljx.wrong
-  (:require [tcljx.config :as cfg]
+(ns tcljx.parser.wrong
+  (:require (tcljx.parser [meta :as meta] [interop :as interop])
             [tcljx.alpha.ptest__style :as style]
             [tinyclj.string :as str])
   (:import (clojure.lang Symbol IPersistentMap)))
@@ -38,9 +38,9 @@
     (.data ^WrongInfo ex)))
 (defn wr-line-number ^int [ex]
   (let [data (wr-data ex)]
-    (if-some [x (or (:form/line-number data) (:reader/line data))]
+    (if-some [x (or (:form/line-of data) (:reader/line data))]
       ^int x
-      cfg/no-line-number)))
+      meta/no-line-number)))
 
 ;;; Note: core's `ex-message` and `ex-cause` work on any Throwable, so
 ;;; there is no need to duplicate the functions here.
@@ -57,7 +57,7 @@
 ;;; Its data map encodes information about the context of the error,
 ;;; while the exception's message is a free form error message.
 ;;;
-;;; If it exists, then :form/line-number is the line number of the
+;;; If it exists, then :form/line-of is the line number of the
 ;;; innermost list form "around" the point of error.
 ;;;
 ;;; If a `WrongInfo` is decorated with a ex-cause value, then it
@@ -65,15 +65,15 @@
 ;;; of the compiler (e.g. during macro expansion).
 (defn push-line-number ^WrongInfo [^WrongInfo ex ^int ln]
   (cond-> ex
-    (and (not= ln cfg/no-line-number)
-         (not (contains? (wr-data ex) :form/line-number)))
-    (update-wr-data assoc :form/line-number (object ln))))
+    (and (not= ln meta/no-line-number)
+         (not (contains? (wr-data ex) :form/line-of)))
+    (update-wr-data assoc :form/line-of (object ln))))
 
 ;; (defn rethrow-with-line-number ^void [^WrongInfo e ^int ln]
 ;;   (throw (push-line-number e ln)))
 
 (defn wr-info-line-number ^WrongInfo [msg form]
-  (push-line-number (wr-info msg) (cfg/line-number form)))
+  (push-line-number (wr-info msg) (meta/line-of form)))
 
 ;; ;;; Only assoc `k` to the exception's data if this key is not defined
 ;; ;;; yet.  With exceptions decorated from the most to the least
@@ -104,7 +104,7 @@
 (defn str* ^String [x]
   (cond
     (nil? x) "nil"
-    (class? x) (str (cfg/type-symbol x))
+    (class? x) (str (interop/type-symbol x))
     (string? x) (pr-str x)
     :else (str x)))
 
@@ -128,11 +128,6 @@
 
 
 
-(defn syntax
-  ([^String msg]
-   (throw (wr-info msg)))
-  ([^String msg-prefix form]
-   (throw (wr-info-line-number (str msg-prefix (got-q form)) form))))
 ;; (defn ensure-sym
 ;;   (^Symbol [form]
 ;;    (if (symbol? form)
@@ -142,12 +137,6 @@
 ;;    (if (= form exp)
 ;;      exp
 ;;      (syntax (str "expected symbol " (q exp)) form))))
-(defn ensure-simple-sym ^symbol [form]
-  (if (and (symbol? form) (nil? (namespace form)))
-    form
-    (syntax "expect unqualified symbol" form)))
-
-
 
 
 (defn unresolved [^String msg-prefix sym-or-str]
@@ -158,7 +147,7 @@
 ;; (defn unresolved-interop [^String msg-prefix ^String nm ^Class opt-owner
 ;;                           ^IPersistentMap data]
 ;;   (throw (wr-info (cond-> (str msg-prefix (q (symbol nil nm)))
-;;                     (some? opt-owner) (str " in " (cfg/type-symbol opt-owner)))
+;;                     (some? opt-owner) (str " in " (interop/type-symbol opt-owner)))
 ;;                   data)))
 
 ;; (defn class-not-found [x]
@@ -199,7 +188,7 @@
      #_(assert (seq? seq-form))
      ~@body
      (catch Throwable ex#
-       (throw (decorate-with-line-number* ex# (cfg/line-number ~seq-form))))))
+       (throw (decorate-with-line-number* ex# (meta/line-of ~seq-form))))))
 
 ;; ;;; ------------------------------------------------------------------------
 

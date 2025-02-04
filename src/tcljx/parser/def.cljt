@@ -1,0 +1,34 @@
+(ns tcljx.parser.def
+  (:require
+   (tcljx [model :as model])
+   (tcljx.parser [wrong :as wrong] [syntax :as syntax] [context :as context]))
+  (:import
+   (tcljx.model ExprFactory Expr Resolver Binding Scope)))
+
+(defn parse-def ^Expr [^Scope scope [_ nm & args] ^int line]
+  (letfn [(aliased-def ^Binding [^symbol init]
+            (if-some [bnd (context/lookup scope init)]
+              (when (model/def? bnd)
+                bnd)))
+          (new-def ^Expr [^String nm ^seq init-forms]
+            ;; pre: `init-forms` is nil when empty
+            ;; post: throws `wrong` when outside namespace context
+            (let [init (first init-forms)
+                  init-x (when (some? init-forms)
+                           (or (when (symbol? init)
+                                 (aliased-def init))
+                               (context/parse-form scope init)))
+                  rsv (.resolver scope)]
+              (.add-def rsv nm (-> (.expr-factory scope) 
+                                   (.new-def (.ns-str rsv) nm init-x)))))
+          (assign-to-def ^Expr [^Binding bnd ^seq init-forms]
+            (let [init (syntax/some-first init-forms)]
+              (-> (.expr-factory scope)
+                  (.assignment bnd (context/parse-form scope init)))))]
+    
+    (let [nm (syntax/simple-sym-str nm)
+          prior-def (.lookup-def (.resolver scope) nil nm)]
+      (syntax/empty-tail (next args))
+      (if (some? prior-def)
+        (assign-to-def prior-def args)
+        (new-def nm args)))))

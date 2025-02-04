@@ -53,7 +53,7 @@ clean:
 	rm -rf "$(DEST_DIR)"/* "$(DEST_DIR)"*.* *.class textflow__termios.out hs_err_pid*.log replay_pid*.log
 
 print-line-count:
-	find src/tinyclj.compiler/tcljc -name "*.cljt" | xargs wc -l | sort -n
+	find src/tcljx -name "*.cljt" | grep -v src/tcljx/alpha/ | xargs wc -l | sort -n
 
 .PHONY: compile watch-and-compile test watch-and-test clean
 

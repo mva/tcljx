@@ -1,0 +1,9 @@
+(ns tcljx.parser.constant
+  (:require (tcljx [model :as model])
+            (tcljx.parser [wrong :as wrong]))
+  (:import (tcljx.model Scope Expr)))
+
+(defn parse-constant ^Expr [^Scope scope form]
+  ;; pre: (not (instance? IMeta form))
+  (assert (instance? Integer form))
+  (-> (.expr-factory scope) (.constant form)))

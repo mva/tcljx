@@ -1,28 +1,22 @@
 (ns tcljx.parser.namespace
-  (:require (tcljx [config :as cfg] [wrong :as wrong])
-            [tcljx.parser.reader :as reader]
+  (:require (tcljx [config :as cfg])
+            (tcljx.parser [meta :as meta] [wrong :as wrong] [reader :as reader]
+                          [syntax :as syntax] [context :as context])
             [tcljx.model :as model])
   (:import (tcljx.parser.reader FormBuilder)
            (tcljx.model NamespaceBuilder ProvidedNamespace Require)))
 
-(letfn [(simple-sym-str ^String [form]
-          (name (wrong/ensure-simple-sym form)))
-        (prefixed-nmsp-str ^String [form ^String prefix]
-          (str prefix (simple-sym-str form)))
+(letfn [(prefixed-nmsp-str ^String [form ^String prefix]
+          (str prefix (syntax/simple-sym-str form)))
         
         (second-vector ^vector [^seq xs]
-          (let [x (second xs)]
-            (if (vector? x)
-              (mapv simple-sym-str x)
-              (wrong/syntax "expect vector" x))))
+          (mapv syntax/simple-sym-str (syntax/vector (second xs))))
         (second-map ^map [^seq xs]
-          (let [x (second xs)]
-            (if (map? x)
-              (-> (reduce (fn [acc [k v]]
-                            (assoc! acc (simple-sym-str k) (simple-sym-str v)))
-                          (transient {}) x)
-                  (persistent!))
-              (wrong/syntax "expect map" x))))
+          (persistent! (reduce (fn [acc [k v]]
+                                 (assoc! acc (syntax/simple-sym-str k)
+                                         (syntax/simple-sym-str v)))
+                               (transient {})
+                               (syntax/map (second xs)))))
         
         (parse-require-spec ^Require [^String ns-str ^seq spec
                                       ^seq error-context]
@@ -30,7 +24,7 @@
                  spec (seq spec)]
             (if (some? spec)
               (case (first spec)      ;parse like hash-map then merge 
-                :as (recur (simple-sym-str (second spec)) refer rename
+                :as (recur (syntax/simple-sym-str (second spec)) refer rename
                            exclude (nnext spec))
                 :refer (recur alias (if (identical? :all (second spec))
                                       nil
@@ -40,7 +34,7 @@
                                exclude (nnext spec))
                 ::exclude (recur alias refer rename
                                  (second-vector spec) (nnext spec))
-                #_else (wrong/syntax "expect :as, :refer, or :rename"
+                #_else (syntax/wrong "expect :as, :refer, or :rename"
                                      (first spec)))
               (Require. ns-str alias refer rename exclude error-context))))
         (flatten-requires ^seq [^seq rrequires ^String prefix ^seq specs
@@ -65,13 +59,13 @@
                                           (rest spec) spec))
                       
                       :else
-                      (wrong/syntax "expect symbol, vector, or list" spec)))]
+                      (syntax/wrong "expect symbol, vector, or list" spec)))]
             (wrong/with-line-context error-context
               (reduce flatten-require rrequires specs))))
         
         (parse-refer-cljs ^Require [^seq rrefer-cljs]
           (when (some? (nnext rrefer-cljs))
-            (wrong/syntax "multiple :refer-clojure clauses"))
+            (syntax/wrong "multiple :refer-clojure clauses"))
           
           (let [refer-clj (first rrefer-cljs)]
             ;; pre: (first refer-clj) is :refer-clojure
@@ -86,7 +80,7 @@
                                     (nnext specs))
                     :rename (recur refer exclude (second-map specs)
                                    (nnext specs))
-                    #_else (wrong/syntax "expect :only, :exclude, or :rename"
+                    #_else (syntax/wrong "expect :only, :exclude, or :rename"
                                          (first specs)))
                   (Require. cfg/core-lib nil refer rename exclude
                             refer-clj))))))
@@ -127,22 +121,20 @@
                                          (rest spec) spec))
                       
                       :else
-                      (wrong/syntax "expect symbol or list" spec)))]
+                      (syntax/wrong "expect symbol or list" spec)))]
             (reduce flatten-import rimports specs)))
         
-        (matching-ns-sym? ^boolean [^NamespaceBuilder nmsp ns-sym]
-          (and (symbol? ns-sym) (= (str ns-sym) (.ns-str nmsp))))
         (ns-form ^NamespaceBuilder [^NamespaceBuilder nmsp
                                     [_ ns-sym & formr :as ^seq form]]
           ;; pre: (first form) is 'ns
-          (when-not (matching-ns-sym? nmsp ns-sym)
+          (when-not (= ns-sym (model/ns-sym nmsp))
             (wrong/other (str "ns name mismatch, expected "
-                              (wrong/q (symbol nil (.ns-str nmsp)))
-                              " but got " (wrong/q ns-sym))))
+                              (wrong/q (model/ns-sym nmsp))
+                              (wrong/got-q ns-sym))))
           (loop [^seq rrequires nil
                  ^seq rimports nil
                  ^seq rrefer-cljs nil
-                 clauses (cond-> formr (string? (first formr)) (next))]
+                 clauses (syntax/next-if-string formr)]
             (if-some [[[tag :as clause] & clauses'] clauses]
               (case tag
                 :require
@@ -158,7 +150,7 @@
                 (recur rrequires rimports (cons clause rrefer-cljs) clauses')
                 
                 #_else
-                (wrong/syntax "expect :require, :import, or :refer-clojure" tag))
+                (syntax/wrong "expect :require, :import, or :refer-clojure" tag))
               (let [requires (reverse rrequires)
                     requires (cond
                                (nil? rrefer-cljs)
@@ -170,7 +162,7 @@
                 (-> (process-requires nmsp requires)
                     (.process-imports (reverse rimports)))))))
         (require-form ^NamespaceBuilder [^NamespaceBuilder nmsp ^seq form]
-          (let [specs (map model/strip-quote (rest form))
+          (let [specs (map syntax/strip-quote (rest form))
                 rrequires (flatten-requires nil "" specs form)]
             (process-requires nmsp (reverse rrequires))))
         (load-form ^NamespaceBuilder [^NamespaceBuilder nmsp ^seq form]
@@ -179,15 +171,15 @@
                                        [_ ns-sym & formr :as ^seq form]]
           ;; pre: (first form) is 'in-ns
           (if (and (nil? formr)
-                   (matching-ns-sym? nmsp (model/strip-quote ns-sym)))
+                   (= (syntax/strip-quote ns-sym) (model/ns-sym nmsp)))
             nmsp
             (wrong/other (str "in-ns argument does not match current "
-                              "namespace " (wrong/q ns-sym)))))
+                              "namespace " (wrong/q (model/ns-sym nmsp))
+                              (wrong/got-q ns-sym)))))
         
         (non-namespace-form ^NamespaceBuilder [^NamespaceBuilder nmsp form]
-          (if (= form 'not-defined)
-            (wrong/unresolved "undefined symbol " form)
-            (.add-form nmsp form)))
+          (.add-initialization nmsp (-> (.initialization-scope nmsp)
+                                        (context/parse-form form))))
         (top-level-list-form ^NamespaceBuilder [^NamespaceBuilder nmsp ^seq form]
           (wrong/with-line-context form
             (case (first form)
@@ -211,7 +203,7 @@
       (letfn [(with-line-number ^Throwable [^Throwable ex form]
                 (let [line-at-end (.current-line fb)
                       ln (cond
-                           (seq? form) (cfg/line-number form)
+                           (seq? form) (meta/line-of form)
                            (symbol? form) line-at-end ;any single line form
                            :else line-at-push)]
                   (wrong/decorate-with-line-number* ex ln)))]
