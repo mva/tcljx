@@ -1,0 +1,86 @@
+(ns tcljx.classgen.universe
+  (:require
+   (tcljx [config :as cfg] [files :as files] [model :as model])
+   (tcljx.parser [context :as context] [form :as form] [namespace :as namespace])
+   (tcljx.classgen [loader :as loader] [classfile :as classfile]
+                   [segmgen :as segmgen] [codegen :as codegen]))
+  (:import
+   (tcljx.model Resolver NamespaceProvider ProvidedNamespace NamespaceBuilder
+                Expr CodeGenerator Scope)
+   (tcljx.classgen.loader Loader)
+   (java.nio.file Path)
+   (java.util ArrayList)
+   (java.util.concurrent ConcurrentHashMap)
+   (java.util.function Consumer)))
+
+(deftype NmspBuilderImpl [^NamespaceProvider universe
+                          ^String ns-str
+                          ^CodeGenerator code-gen
+                          ^:unsynchronized-mutable ^map globals]
+  Resolver
+  (ns-str [_]
+    ns-str)
+  (lookup-def [_ nmsp nm]
+    (if (or (nil? nmsp) (= nmsp ns-str))
+      (.valAt globals nm nil)
+      (assert false)))
+  (add-def [_ nm bnd]
+    (set! globals (assoc globals nm bnd))
+    bnd)
+  
+  NamespaceBuilder
+  (universe [_]
+    universe)
+  (process-require [this require provided]
+    this)                               ;FIXME...
+  (process-imports [this imports]
+    this)                               ;FIXME...
+
+  (load-file [this path-str]
+    (assert false))
+  
+  (process-init-form [this form]
+    (let [scope (tcljx.parser.form.ScopeImpl. code-gen this globals)]
+      (.append-namespace-init code-gen (context/parse-form scope form))
+      this))
+
+  (finish [_]
+    (.emit code-gen)
+    (ProvidedNamespace. ns-str)))
+
+;;; ------------------------------------------------------------------------
+
+(deftype UniverseBuilder [^Loader loader
+                          ^map ns-form-map
+                          ^:unsynchronized-mutable ^map known-ns]
+  NamespaceProvider
+  (require-namespaces [this ns-strs]
+    (letfn [(mk-nmsp-builder ^NamespaceBuilder [^String ns-str]
+              (let [source-file nil
+                    pkg-build (loader/mk-package-builder loader ns-str)
+                    first-segm (segmgen/mk-first-segment ns-str source-file
+                                                         pkg-build)
+                    ef (codegen/mk-code-generator first-segm)]
+                (NmspBuilderImpl. this ns-str ef {})))
+            
+      (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]
+                       (-> (reduce namespace/parse-top-level-form
+                                   (mk-nmsp-builder ns-str)
+                                   ns-forms)
+                           (NamespaceBuilder/.finish)))]
+      
+    (let [a (new ProvidedNamespace/1 (alength ns-strs))]
+      (dotimes [i (alength a)]
+        (let [ns-str (aget ns-strs i)]
+          (->> (or (known-ns ns-str)
+                   (when-some [ns-forms (ns-form-map ns-str)]
+                     (let [pr-nmsp (build-namespace ns-str ns-forms)]
+                       (set! known-ns (assoc known-ns ns-str pr-nmsp))
+                       pr-nmsp)))
+               (aset a i))))
+      a))))
+
+;;; No class files are written to disk if `dest-dir` is nil.
+(defn mk-universe ^NamespaceProvider [^map ns-form-map ^Loader loader]
+  (let [provided-ns {}]
+    (UniverseBuilder. loader ns-form-map provided-ns)))

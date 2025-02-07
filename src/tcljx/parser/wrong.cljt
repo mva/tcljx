@@ -121,7 +121,7 @@
 
 (defn got ^String [x] (str " (got: " (str* x) ")"))
 ;; (defn got-int ^String [^int i] (got (object i)))
-(defn got-q ^String [x] (got (q x)))
+(defn got-q ^String [x] (str " (got: " (q x) ")"))
 ;; (defn got-classes ^String [cls]
 ;;   (str " (got: " (->> (map #(.getName ^Class %) cls)
 ;;                       (sort)

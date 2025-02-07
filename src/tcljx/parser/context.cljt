@@ -1,7 +1,8 @@
 (ns tcljx.parser.context
   (:require (tcljx [model :as model])
             (tcljx.parser [meta :as meta] [wrong :as wrong]))
-  (:import (tcljx.model Resolver Binding Expr ExprFactory Scope)))
+  (:import (tcljx.model Resolver NamespaceBuilder Binding
+                        Expr ExprFactory Scope)))
 
 ;;; Some form of "cannot do this at this position" error message.
 (defn wrong [^String msg]
@@ -44,3 +45,9 @@
       ;; `bindings*` is accurate with very high probability
       (or (.valAt (.bindings* scope) nm nil)
           (.lookup-def (.resolver scope) nil nm))))) ;to cover all defs
+
+(defn namespace-builder ^NamespaceBuilder [^Scope scope]
+  (let [rsv (.resolver scope)]
+    (if (instance? NamespaceBuilder rsv)
+      rsv
+      (wrong "cannot def new namespace entry in this position"))))

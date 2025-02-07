@@ -7,6 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.config
   (:require
+   #_[tcljx.files :as files]
    #_[tinyclj.string :as str])
   (:import
    #_(java.lang.constant ClassDesc)
@@ -34,7 +35,7 @@
 
 (def core-lib "tinyclj.core")
 ;; (def core-lib-sym (symbol nil core-lib))
-;; (defn core-lib? ^boolean [^String ns-str] (= core-lib ns-str))
+(defn core-lib? ^boolean [^String ns-str] (= core-lib ns-str))
 
 ;;; note: the `regex-literal` symbols is spliced into the core lib's
 ;;; namespace (similar to e.g. `*ns*`) and bound to a predefined macro
@@ -88,29 +89,10 @@
 
 ;;; ------------------------------------------------------------------------
 
-;; (def source-suffix ".cljt")
-;; (def class-suffix ".class")
-
-;; (defn path-of
-;;   (^Path [^String x]
-;;    (Path/of x))
-;;   (^Path [^String x & ^String/1 more]
-;;    (Path/of x more)))
-
-;; (defn path-url ^URL [^Path p]
-;;   (-> p (.toUri) (.toURL)))
 
 ;; (defn nmsp-rpath ^Path [^String ns-str]
 ;;   (path-of (str (str/replace ns-str "." "/") source-suffix)))
 
-
-;; (defn default-project-name ^String []
-;;   (-> (path-of (System/getProperty "user.dir"))
-;;       (.getFileName)
-;;       (.toString)))
-;; (defn dest-dir ^Path [^String dir-name]
-;;   (path-of (System/getProperty "java.io.tmpdir")
-;;            (System/getProperty "user.name") "tinyclj" dir-name))
 
 ;; (defn- path-seq [^Path p ^int max-depth ^Predicate pred]
 ;;   (try
@@ -135,16 +117,6 @@
 ;; (defn- class-file? ^boolean [^Path x]
 ;;   (str/ends-with? (.toString x) class-suffix))
 
-;; (defn create-directories ^Path [^Path p]
-;;   (let [perm (-> (Set/of PosixFilePermission/OWNER_READ
-;;                          PosixFilePermission/OWNER_WRITE
-;;                          PosixFilePermission/OWNER_EXECUTE)
-;;                  (PosixFilePermissions/asFileAttribute))]
-;;     (Files/createDirectories p perm)))
-
-;; (defn package-directory ^Path [^Path dest-dir ^String ns-str]
-;;   (.resolve dest-dir (path-of (str/replace ns-str "." "/"))))
-
 ;; (defn delete-package-classes
 ;;   (^void [^Path pkg-dir]
 ;;    #_(prn :delete-package-classes (str pkg-dir "/*.class"))
@@ -164,38 +136,6 @@
 
 ;; ;;; ------------------------------------------------------------------------
 
-;; ;;; Compilation scenario "distinct runtimes".  The compiler is, for
-;; ;;; example, a Clojure application running from `getSystemClassLoader`
-;; ;;; with its own runtime.  On the other hand, the application being
-;; ;;; compiled needs to see the Tinyclj runtime, plus any additional
-;; ;;; classes imported by the application.  In this case, the
-;; ;;; application can not be based on `getSystemClassLoader`, but only
-;; ;;; on the neutral `getPlatformClassLoader`.  The Tinyclj runtime and
-;; ;;; imported application classes must be installed manually into a
-;; ;;; fresh application class loader.
-;; (defn app-class-loader ^URLClassLoader [parent class-paths]
-;;   (URLClassLoader. "tclj-app"
-;;                    (->> (map #(-> ^Path % (.toUri) (.toURL)) class-paths)
-;;                         ^URL/1 (into-array URL))
-;;                    (case parent
-;;                      :platform (ClassLoader/getPlatformClassLoader)
-;;                      :system (ClassLoader/getSystemClassLoader))))
-
-;; (defn get-rt-lookup ^MethodHandles$Lookup [^ClassLoader app-ld]
-;;   (let [cl (Class/forName "tinyclj.lang.CljCljMapper" false app-ld)
-;;         f (.getDeclaredField cl "rtLookup")]
-;;     (.get f nil)))
-
-;; (defn class-loader-instance ^URLClassLoader [^ClassLoader parent ^String name
-;;                                              source-paths]
-;;   (let [dyn-cl-class (.loadClass parent "tinyclj.lang.DynamicClassLoader")
-;;         c (.getConstructor dyn-cl-class String URL/1 ClassLoader)
-;;         urls (->> source-paths (map path-url) (distinct) (into-array URL))]
-;;     (.newInstance c name urls parent)))
-
-;; (defn dyn-class-loader ^URLClassLoader [^ClassLoader app-ld source-paths]
-;;   (class-loader-instance app-ld "tclj-dyn" source-paths))
-
 ;; (defn validate-defined-class ^Class [^Class cl]
 ;;   (let [nm (.getName cl)]
 ;;     (when-not (identical? cl (Class/forName nm false (.getClassLoader cl)))
@@ -212,10 +152,10 @@
 
 ;;; ------------------------------------------------------------------------
 
-;; ;;; Because application and compiler can live in different class
-;; ;;; loaders with a different runtime (e.g. when bootstrapping
-;; ;;; tclj-in-tclj), it is easier to duplicate munge/demunge code.  See
-;; ;;; tinyclj/lang/Compiler.java
+;;; Because application and compiler can live in different class
+;;; loaders with a different runtime (e.g. when bootstrapping
+;;; tclj-in-tclj), it is easier to duplicate munge/demunge code.  See
+;;; tinyclj/lang/Compiler.java
 
 ;; ;;; see OpenJDK classFileParser.cpp, verify_unqualified_name
 ;; (defn nm-repl ^String [^char c]

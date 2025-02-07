@@ -1,0 +1,17 @@
+(ns tcljx.classgen.classfile
+  (:require [tcljx.files :as files]
+            [tcljx.classgen.loader :as loader])
+  (:import
+   (java.lang.classfile ClassFile 
+                        #_Opcode #_TypeKind ClassBuilder #_MethodBuilder
+                        #_CodeBuilder #_Label)
+   #_(java.lang.classfile.instruction SwitchCase)
+   (java.lang.constant #_ConstantDesc ClassDesc #_MethodTypeDesc #_MethodHandleDesc
+                       #_DirectMethodHandleDesc #_DirectMethodHandleDesc$Kind
+                       #_ConstantDescs)
+   #_(java.lang.invoke MethodHandle TypeDescriptor$OfField MethodHandles$Lookup)
+   #_(java.nio.file Path Files)
+   (java.util.function #_Consumer #_Function)))
+
+(def acc-method-virtual (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_FINAL))
+(def acc-method-static (bit-or acc-method-virtual ClassFile/ACC_STATIC))

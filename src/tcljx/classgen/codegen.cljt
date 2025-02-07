@@ -1,0 +1,20 @@
+(ns tcljx.classgen.codegen
+  (:require [tcljx.model :as model]
+            (tcljx.classgen [segmgen :as segmgen]))
+  (:import (tcljx.model ExprFactory CodeGenerator)
+           (tcljx.classgen.segmgen Segment)))
+
+(deftype CodeGeneratorImpl [^:unsynchronized-mutable ^Segment current-segm
+                            ^java.util.ArrayList clinit-exprs]
+  ExprFactory
+  (append-namespace-init [this x]
+    (.add clinit-exprs x)
+    this)
+
+  CodeGenerator
+  (emit [_]
+    (segmgen/define-segment current-segm)
+    (segmgen/define-capstone current-segm)))
+
+(defn mk-code-generator ^CodeGenerator [^Segment first-segm]
+  (CodeGeneratorImpl. first-segm (java.util.ArrayList.)))

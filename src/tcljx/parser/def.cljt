@@ -18,9 +18,9 @@
                            (or (when (symbol? init)
                                  (aliased-def init))
                                (context/parse-form scope init)))
-                  rsv (.resolver scope)]
-              (.add-def rsv nm (-> (.expr-factory scope) 
-                                   (.new-def (.ns-str rsv) nm init-x)))))
+                  nmsp (context/namespace-builder scope)]
+              (.add-def nmsp nm (-> (.expr-factory scope) 
+                                    (.new-def (.ns-str nmsp) nm init-x)))))
           (assign-to-def ^Expr [^Binding bnd ^seq init-forms]
             (let [init (syntax/some-first init-forms)]
               (-> (.expr-factory scope)

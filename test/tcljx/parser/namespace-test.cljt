@@ -8,12 +8,12 @@
 (ns tcljx.parser.namespace-test
   (:require
    (tcljx [model :as model])
-   (tcljx.parser [wrong :as wrong] [reader :as reader] [namespace :as namespace]
-                 [form :as form])
+   (tcljx.parser [wrong :as wrong] [reader :as reader] [context :as context]
+                 [form :as form] [namespace :as namespace])
    [tcljx.alpha.ptest :refer :all])
   (:import
-   (tcljx.model NamespaceBuilder ProvidedNamespace Resolver Binding
-                ExprFactory Expr Scope)
+   (tcljx.model NamespaceBuilder ProvidedNamespace NamespaceProvider
+                Resolver Binding ExprFactory Expr Scope)
    (tcljx.parser.wrong WrongInfo)))
 
 (deftype ExprStub [form]
@@ -31,7 +31,7 @@
       ExprStub (.form ^ExprStub x)
       BindingStub (.form ^BindingStub x))))
 
-(deftype ExprFactoryStub []
+(deftype ExprFactoryStub [^java.util.ArrayList forms]
   ExprFactory
   (new-array [_ n]
     (new ExprStub/1 n))
@@ -51,24 +51,33 @@
   (bound-value [_ bnd]
     (ExprStub. [:bound-value (model/bound-name bnd)]))
   
+  (append-namespace-init [this x]
+    (.add forms (expr-data x))
+    this)
+  
   (mk-expr [this form]
     (if (= form 'not-defined)
       (wrong/unresolved "undefined symbol " form)
       (ExprStub. form))))
 
-(deftype NmspBuilderStub [^java.util.ArrayList forms
-                          ^Scope clinit-scope]
-  NamespaceBuilder
+(deftype NmspBuilderStub [^String ns-str
+                          ^java.util.ArrayList forms
+                          ^:unsynchronized-mutable ^map globals]
+  Resolver
   (ns-str [_]
-    "nmsp.expected")
-  (resolver-at-point [_]
-    nil)
-  
-  (require-namespaces [_ ns-strs]
-    (let [a (new ProvidedNamespace/1 (alength ns-strs))]
-      (dotimes [i (alength a)]
-        (aset a i (ProvidedNamespace. (aget ns-strs i))))
-      a))
+    ns-str)
+  (lookup-def [_ nmsp nm]
+    (if (or (nil? nmsp) (= nmsp ns-str))
+      (.valAt globals nm nil)
+      (assert false)))
+
+  NamespaceBuilder
+  (universe [_]
+    (^NamespaceProvider fn [ns-strs]
+     (let [a (new ProvidedNamespace/1 (alength ns-strs))]
+       (dotimes [i (alength a)]
+         (aset a i (ProvidedNamespace. (aget ns-strs i))))
+       a)))
   (process-require [this require provided]
     (.add forms
           (cond-> []
@@ -91,39 +100,28 @@
     (when-not (empty? imports)
       (.add forms (vec (list* :imports imports))))
     this)
+  (add-def [_ nm bnd]
+    (set! globals (assoc globals nm bnd))
+    bnd)
 
   (load-file [this path-str]
     (.add forms [:load path-str])
     this)
 
-  (add-initialization [this x]
-    (.add forms (expr-data x))
-    this)
-  (initialization-scope [_]
-    clinit-scope))
-
-(deftype NmspResolverStub [^String ns-str
-                           ^:unsynchronized-mutable ^map globals]
-  Resolver
-  (ns-str [_]
-    ns-str)
-  (lookup-def [_ nmsp nm]
-    (if (or (nil? nmsp) (= nmsp ns-str))
-      (.valAt globals nm nil)
-      (assert false)))
-  (add-def [_ nm bnd]
-    (set! globals (assoc globals nm bnd))
-    bnd))
+  (process-init-form [this form]
+    (let [ef (ExprFactoryStub. forms)
+          scope (tcljx.parser.form.ScopeImpl. ef this {})]
+      (.append-namespace-init ef (context/parse-form scope form))
+      this)))
 
 (defn mk-nmsp-builder ^NamespaceBuilder []
-  (let [ns-str "ns.expected"
+  (let [ns-str "nmsp.expected"
         forms (java.util.ArrayList.)
-        rsv (NmspResolverStub. ns-str {})
-        scope (tcljx.parser.form.ScopeImpl. (ExprFactoryStub.) rsv {})]
-    (NmspBuilderStub. forms scope)))
+        globals {}]
+    (NmspBuilderStub. ns-str forms globals)))
 (defn parse-forms-string ^vector [^String cs]
   (let [nmsp (mk-nmsp-builder)
-        fb (reader/mk-form-builder cs (.resolver-at-point nmsp))]
+        fb (reader/mk-form-builder cs nmsp)]
     (-> nmsp
         ^NmspBuilderStub (namespace/parse-top-level-forms 0 fb)
         (.forms)
@@ -301,34 +299,34 @@
 
 (deftest basic-def-test
   ;; new def with init
-  (is (= '[[:new-def ns.expected/x [:constant 1 Integer]]]
+  (is (= '[[:new-def nmsp.expected/x [:constant 1 Integer]]]
          (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
                         (def x 1)])))
 
   ;; new def without init followed by assignment
-  (is (= '[[:new-def ns.expected/x nil]
-           [:assignment ns.expected/x [:constant 1 Integer]]]
+  (is (= '[[:new-def nmsp.expected/x nil]
+           [:assignment nmsp.expected/x [:constant 1 Integer]]]
          (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
                         (def x)
                         (def x 1)])))
 
   ;; new def with init followed by an aliasing def
-  (is (= '[[:new-def ns.expected/x [:constant 1 Integer]]
-           [:new-def ns.expected/y
-            [:new-def ns.expected/x [:constant 1 Integer]]]]
+  (is (= '[[:new-def nmsp.expected/x [:constant 1 Integer]]
+           [:new-def nmsp.expected/y
+            [:new-def nmsp.expected/x [:constant 1 Integer]]]]
          (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
                         (def x 1)
                         (def y x)])))
-  (is (= '[[:new-def ns.expected/x [:constant 1 Integer]]
-           [:new-def ns.expected/y
-            [:new-def ns.expected/x [:constant 1 Integer]]]]
+  (is (= '[[:new-def nmsp.expected/x [:constant 1 Integer]]
+           [:new-def nmsp.expected/y
+            [:new-def nmsp.expected/x [:constant 1 Integer]]]]
          (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
                         (def x 1)
-                        (def y ns.expected/x)])))
+                        (def y nmsp.expected/x)])))
 
   ;; new def with init followed by a use of the def-ed name
-  (is (= '[[:new-def ns.expected/x [:constant 1 Integer]]
-           [:bound-value ns.expected/x]]
+  (is (= '[[:new-def nmsp.expected/x [:constant 1 Integer]]
+           [:bound-value nmsp.expected/x]]
          (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
                         (def x 1)
                         x]))))

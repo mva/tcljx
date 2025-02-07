@@ -1,0 +1,456 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.classgen.bootstrap
+  (:require
+   (tcljx [files :as files])
+   (tcljx.classgen [loader :as loader] [universe :as universe])
+   #_tcljx.macro                        ;for class ArrayToCpl
+   #_[tcljx.reader :as rd]
+   #_[tcljx.runtime :as rt]
+   #_[tcljx.config :as cfg]
+   #_[tcljx.wrong :as wrong]
+   #_[tcljx.javabase :as jb]
+   #_[tcljx.expr :as x]
+   #_[tcljx.context :as ctx]
+   #_[tcljx.emitter :as em]
+   #_[tcljx.compiler :as compiler]
+   #_[tcljx.predefined :as predefined]
+   #_[tcljx.emitter :as emitter]
+   #_[tcljx.main.tclj0 :as tclj0]
+   #_[tcljx.reader-test :as reader-test]
+   [tcljx.classgen.classdata :as classdata] ;only available for unit tests
+   #_[tcljx.alpha.ptest :as ptest]             ;for is
+   [tcljx.alpha.ptest__impl :as ptest__impl]   ;for get-test-context
+   #_[tcljx.classdata :as classdata])
+  (:import
+   (tcljx.classgen.loader Loader ClassBytes)
+   #_(tcljx.io BuildFiles BuildIO NmspIO NmspBuilder)
+   #_(tcljx.expr MacroRef FnMacroFn)
+   #_(clojure.lang Symbol IPersistentMap)
+   #_(java.lang.invoke MethodHandle MethodType)
+   #_(java.lang.reflect Method)
+   (java.nio.file Path)
+   #_(java.util HashMap Map List)
+   (java.util.function Consumer #_Function)))
+
+;;; FIXME... For now, the bootstrap class picks up classes of
+;;; tinyclj.rt via the platform class loader, "seeing" the classes
+;;; this application has been started with.  Change this to the
+;;; locally build module later, once some detail of tinyclj.rt changes
+;;; for tcljx, then class initialization should fail.
+(def ^:private app-ld
+  (let [
+        ;; project-name (or (System/getenv "PROJECT_DIR")
+        ;;                  (files/default-project-name))
+        ;; tcljx-mdir (files/tmp-dest-dir (str project-name ".mdir"))
+        ;; tcljx-mod-rt (.resolve tcljx-mdir (files/path-of "tinyclj-rt.jar"))
+        ]
+    (loader/app-class-loader :platform [#_tcljx-mod-rt])))
+;; (def ^:private bootstrap-ns-str "tinyclj.lang.bootstrap")
+
+;; (def floor-mod
+;;   (^FnMacroFn fn [cenv form]
+;;    (wrong/check-argc 2 form)
+;;    (cons 'java.lang.Math/floorMod (rest form))))
+;; (def inc1
+;;   (^FnMacroFn fn [cenv form]
+;;    (wrong/check-argc 1 form)
+;;    (list '+ (second form) jb/jvm-int-one)))
+;; (def dec1
+;;   (^FnMacroFn fn [cenv form]
+;;    (wrong/check-argc 1 form)
+;;    (list '- (second form) jb/jvm-int-one)))
+
+;; (defn macro-xnot [form]
+;;   (list 'tinyclj.lang.primitive/xxor form -1))
+;; (def xnot
+;;   (^FnMacroFn fn [cenv form]
+;;    (wrong/check-argc 1 form)
+;;    (macro-xnot (second form))))
+;; (defn macro-xand-not [a b]
+;;   ;; order of I2L and bit-not does not matter, because I2L
+;;   ;; replicates the most significant bit into the upper half of the
+;;   ;; long value
+;;   (list 'tinyclj.lang.primitive/xand a (macro-xnot b)))
+;; (def xand-not
+;;   (^FnMacroFn fn [cenv [_ a b :as form]]
+;;    (wrong/check-argc 2 form)
+;;    (macro-xand-not a b)))
+
+;; (defn- shifted-one [discarded-form shift-form]
+;;   (let [z (list 'tinyclj.lang.primitive/xdefault discarded-form)
+;;         o (list 'tinyclj.lang.primitive/xadd z 1)]
+;;     (list 'tinyclj.lang.primitive/xshl o shift-form)))
+;; (defn- macro-zero? [form]
+;;   (list 'tinyclj.lang.primitive/eq form (object 0)))
+;; (def xbit-clear
+;;   (^FnMacroFn fn [cenv [_ x n :as form]]
+;;    (wrong/check-argc 2 form)
+;;    (macro-xand-not x (shifted-one x n))))
+;; (def xbit-set
+;;   (^FnMacroFn fn [cenv [_ x n :as form]]
+;;    (wrong/check-argc 2 form)
+;;    (list 'tinyclj.lang.primitive/xor x (shifted-one x n))))
+;; (def xbit-flip
+;;   (^FnMacroFn fn [cenv [_ x n :as form]]
+;;    (wrong/check-argc 2 form)
+;;    (list 'tinyclj.lang.primitive/xxor x (shifted-one x n))))
+;; (def xbit-test
+;;   (^FnMacroFn fn [cenv [_ x n :as form]]
+;;    (wrong/check-argc 2 form)
+;;    (->> (list 'tinyclj.lang.primitive/xand x (shifted-one x n))
+;;         (macro-zero?)
+;;         (list 'tinyclj.lang.primitive/not))))
+
+
+;; (defn- nary-bits [op form]
+;;   (letfn [(ex [args]
+;;             (case (bounded-count 3 args)
+;;               2 (cons op args)          ;the most common case
+;;               3 (reduce #(list op %1 %2) (first args) (rest args))))]
+;;     (wrong/check-argc-min 2 form)
+;;     (ex (rest form))))
+
+;; (def xand-nary
+;;   (^FnMacroFn fn [env form]
+;;    (nary-bits 'tinyclj.lang.primitive/xand form)))
+;; (def xor-nary
+;;   (^FnMacroFn fn [env form]
+;;    (nary-bits 'tinyclj.lang.primitive/xor form)))
+;; (def xxor-nary
+;;   (^FnMacroFn fn [env form]
+;;    (nary-bits 'tinyclj.lang.primitive/xxor form)))
+;; ;; (def xand-not-nary
+;; ;;   (^FnMacroFn fn [env form]
+;; ;;    (nary-bits 'tinyclj.lang.primitive/xand-not form)))
+
+;; (def test-zero
+;;   (^FnMacroFn fn [env form]
+;;    (wrong/check-argc 1 form)
+;;    (list 'tinyclj.lang.primitive/eq (second form) 0)))
+;; (def test-pos
+;;   (^FnMacroFn fn [env form]
+;;    (wrong/check-argc 1 form)
+;;    (list 'tinyclj.lang.primitive/gt (second form) 0)))
+;; (def test-neg
+;;   (^FnMacroFn fn [env form]
+;;    (wrong/check-argc 1 form)
+;;    (list 'tinyclj.lang.primitive/lt (second form) 0)))
+;; (def test-even
+;;   (^FnMacroFn fn [env form]
+;;    (wrong/check-argc 1 form)
+;;    (list 'tinyclj.lang.primitive/eq
+;;          (list 'tinyclj.lang.primitive/xand (second form) 1) 0)))
+;; (def test-odd
+;;   (^FnMacroFn fn [env form]
+;;    (wrong/check-argc 1 form)
+;;    (list 'tinyclj.lang.primitive/not
+;;          (list 'tinyclj.lang.primitive/eq
+;;                (list 'tinyclj.lang.primitive/xand (second form) 1) 0))))
+
+;; (def test-identical
+;;   (^FnMacroFn fn [env form]
+;;    (wrong/check-argc 2 form)
+;;    (cons 'tinyclj.lang.primitive/acmpeq (rest form))))
+;; (def test-nil
+;;   (^FnMacroFn fn [env form]
+;;    (wrong/check-argc 1 form)
+;;    (list 'tinyclj.lang.primitive/acmpeq (second form) nil)))
+;; (def test-some
+;;   (^FnMacroFn fn [env form]
+;;    (wrong/check-argc 1 form)
+;;    (list 'tinyclj.lang.primitive/acmpne (second form) nil)))
+
+;; (def xaload-nary
+;;   (^FnMacroFn fn [cenv [_ & args]]
+;;    (if (< (bounded-count 3 args) 3)
+;;      (cons 'tinyclj.lang.primitive/xaload args)
+;;      (recur cenv (list* 'tinyclj.lang.primitive/aget
+;;                         (list* 'tinyclj.lang.primitive/xaload (take 2 args))
+;;                         (drop 2 args))))))
+;; (def xastore-nary
+;;   (^FnMacroFn fn [cenv [_ & args]]
+;;    (if (< (bounded-count 4 args) 4)
+;;      (cons 'tinyclj.lang.primitive/xastore args)
+;;      (list* 'tinyclj.lang.primitive/xastore
+;;             (.expand xaload-nary cenv (cons 'tinyclj.lang.primitive/aget
+;;                                             (drop-last 2 args)))
+;;             (take-last 2 args)))))
+;; (defn- put-macros ^HashMap [^HashMap m]
+;;   (letfn [(macro-ref ^MacroRef [^Symbol nm ^FnMacroFn mfn]
+;;             (x/macro-ref nm bootstrap-ns-str mfn nil nil))
+;;           (put-macro ^void [^Symbol nm ^FnMacroFn mfn]
+;;             (.put m (name nm) (macro-ref nm mfn)))
+;;           (put-alias ^void [^Symbol nm ^Symbol base]
+;;             (let [mfn (^FnMacroFn fn [env form]
+;;                        (cons base (rest form)))]
+;;               (.put m (name nm) (macro-ref nm mfn))))]
+;;     ;; reader support
+;;     (put-macro (symbol nil (name cfg/sym-regex-literal))
+;;                predefined/macro-regex-literal)
+    
+;;     ;; primitive conversion functions
+;;     (put-alias 'object 'tinyclj.lang.primitive/object)
+;;     (put-alias 'boolean 'tinyclj.lang.primitive/boolean)
+;;     (put-alias 'byte 'tinyclj.lang.primitive/byte)
+;;     (put-alias 'short 'tinyclj.lang.primitive/short)
+;;     (put-alias 'char 'tinyclj.lang.primitive/char)
+;;     (put-alias 'int 'tinyclj.lang.primitive/int)
+;;     (put-alias 'float 'tinyclj.lang.primitive/float)
+;;     (put-alias 'long 'tinyclj.lang.primitive/long)
+;;     (put-alias 'double 'tinyclj.lang.primitive/double)
+    
+;;     ;; arithmetics
+;;     (put-alias '+ 'tinyclj.lang.primitive/xadd-nary)
+;;     (put-alias '- 'tinyclj.lang.primitive/xsub-nary)
+;;     (put-alias '* 'tinyclj.lang.primitive/xmul-nary)
+;;     (put-alias '/ 'tinyclj.lang.primitive/xdiv-float-nary)
+;;     (put-alias 'quot 'tinyclj.lang.primitive/xdiv-int)
+;;     (put-alias 'rem 'tinyclj.lang.primitive/xrem)
+;;     (put-macro 'mod floor-mod)
+;;     (put-macro 'inc inc1)
+;;     (put-macro 'dec dec1)
+
+;;     ;; bitset operations
+;;     (put-macro 'bit-and xand-nary)
+;;     (put-macro 'bit-or xor-nary)
+;;     (put-macro 'bit-xor xxor-nary)
+;;     (put-macro 'bit-and-not xand-not)   ;xand-not-nary
+;;     (put-macro 'bit-not xnot)
+;;     (put-alias 'bit-shift-left 'tinyclj.lang.primitive/xshl)
+;;     (put-alias 'bit-shift-right 'tinyclj.lang.primitive/xshr)
+;;     (put-alias 'unsigned-bit-shift-right 'tinyclj.lang.primitive/xushr)
+;;     (put-macro 'bit-clear xbit-clear)
+;;     (put-macro 'bit-set xbit-set)
+;;     (put-macro 'bit-flip xbit-flip)
+;;     (put-macro 'bit-test xbit-test)
+
+;;     ;; comparisons
+;;     (put-alias '= 'tinyclj.lang.primitive/equiv-nary)
+;;     (put-alias '== 'tinyclj.lang.primitive/eq-nary)
+;;     (put-alias '< 'tinyclj.lang.primitive/lt-nary)
+;;     (put-alias '>= 'tinyclj.lang.primitive/ge-nary)
+;;     (put-alias '> 'tinyclj.lang.primitive/gt-nary)
+;;     (put-alias '<= 'tinyclj.lang.primitive/le-nary)
+;;     (put-macro 'zero? test-zero)
+;;     (put-macro 'pos? test-pos)
+;;     (put-macro 'neg? test-neg)
+;;     (put-macro 'even? test-even)
+;;     (put-macro 'odd? test-odd)
+;;     (put-macro 'identical? test-identical)
+;;     (put-macro 'nil? test-nil)
+;;     (put-macro 'some? test-some)
+    
+;;     ;; arrays
+;;     (put-alias 'alength 'tinyclj.lang.primitive/alength)
+;;     (put-macro 'aget xaload-nary)
+;;     (put-macro 'aset xastore-nary)
+;;     (put-alias 'aclone 'tinyclj.lang.primitive/array-clone)
+
+;;     ;; misc
+;;     (put-alias 'fn 'fn*) ;letfn* depends on a `fn` macro being present
+;;     (put-alias 'not 'tinyclj.lang.primitive/not)
+;;     (put-alias 'str 'tinyclj.lang.primitive/str)
+;;     (put-alias 'identity 'tinyclj.lang.primitive/identity)
+;;     (put-macro 'macroexpand-1 compiler/macroexpand-1-form)
+;;     (put-macro 'macroexpand compiler/macroexpand-form)
+;;     (put-macro 'read-string compiler/read-string-form))
+;;   m)
+
+;; (def bootstrap-globals-core (into {cfg/key-force-clinit x/expr-empty}
+;;                                   (put-macros (HashMap.))))
+
+;;; ------------------------------------------------------------------------
+
+(defn- dest-dir-for-this-test ^Path []
+  (let [nm (ptest__impl/get-test-context-name)]
+    (files/tmp-dest-dir (str "tcljx.test" "/" (namespace nm) "/" (name nm)))))
+
+(defn- ns? ^boolean [form]
+  (and (seq? form) (= (first form) 'ns)))
+
+(defn- nmsp-name-of ^String [^vector ns-forms]
+  (let [x (first ns-forms)]
+    (assert (ns? x) "first form must be (ns ...)")
+    (let [nm (second x)]
+      (assert (and (symbol? nm) (nil? (namespace nm)))
+              "ns name must be unqualified symbol")
+      (name nm))))
+
+(defn- split-at-ns ^vector [formv] ;returns vector of vectors, one for each ns
+  (loop [acc [], i 0, j 1]
+    (cond
+      (= i (count formv)) acc
+
+      (or (= (count formv) j) (ns? (nth formv j)))
+      (recur (conj acc (subvec formv i j)) j (inc j))
+      
+      :else (recur acc i (inc j)))))
+
+(defn nmsp [formv]
+  (let [dest-dir (dest-dir-for-this-test)
+        !render-to (java.util.concurrent.ConcurrentHashMap.)
+        class-sink (^Consumer fn ^void [^ClassBytes cbs]
+                    (.put !render-to
+                          (-> cbs .this-class .descriptorString)
+                          (classdata/extract (.class-bytes cbs))))
+        loader (loader/mk-loader dest-dir app-ld [] class-sink)
+        
+        ns-forms-seq (split-at-ns formv)
+        
+        ;; provided-nmsp (em/mk-provided-nmsp cfg/core-lib bootstrap-globals-core)
+        
+        ]
+    
+    (let [ns-strs (->> (map nmsp-name-of ns-forms-seq)
+                       ^String/1 (into-array String))
+          nmsps (-> (into {} (map (juxt nmsp-name-of seq) ns-forms-seq))
+                    (universe/mk-universe loader)
+                    (.require-namespaces ns-strs))]
+      (dotimes [i (alength nmsps)]
+        (assert (some? (aget nmsps i)))))
+    
+    (->> (sort-by key (seq !render-to))
+         (mapv (comp vec val)))))
+
+;;; ------------------------------------------------------------------------
+
+;; (defn ns-with-fnbody [params form]
+;;   (letfn [(no-tag? ^boolean [x]
+;;             (not (contains? (meta x) :tag)))]
+;;     ['(ns pkg.ns0)
+;;      (list 'fn* 'fnbody (cond-> params
+;;                           (no-tag? params)
+;;                           (vary-meta assoc :tag 'auto-return-type))
+;;            ;; note: some forms must be wrapped in (identity ...) 
+;;            ;; to prevent them from disappearing
+;;            form)]))
+
+;; (defn method-name [params]
+;;   (str "fnbody~" (count params)))
+
+;; (defn fn-method-body [params form]
+;;   (letfn [(matches-class? [internal-name]
+;;             (fn class-pred ^boolean [xs]
+;;               (let [x (first xs)]
+;;                 (and (seq? x)
+;;                      (= 'CLASS (first x))
+;;                      (= internal-name (nth x 3))))))
+;;           (matches-method? [mnm]
+;;             (fn method-pred ^boolean [xs]
+;;               (let [x (first xs)]
+;;                 (and (seq? x)
+;;                      (= 'METHOD (first x))
+;;                      (= mnm (nth x 2))))))
+;;           (body-as-vector [m-seq]
+;;             (if (some? m-seq)
+;;               (->> (first m-seq)        ;first method
+;;                    (rest)               ;drop method header
+;;                    (vec))               ;return as vector
+;;               '[fn-arity-method-elided]))]
+;;     (->> (nmsp (ns-with-fnbody params form))
+;;          (filter (matches-class? "pkg/ns0/_10")) ;seq of at most one class
+;;          (first)                                 ;first class or nil
+;;          (filter (matches-method? (method-name params))) ;methods for name
+;;          (seq)
+;;          (body-as-vector))))
+
+;; ;;; If `form` is optimized away completely because it can be delegated
+;; ;;; to an existing method instance, then wrap it in a ```(identity
+;; ;;; ...)``` clause.  This isn't done automatically, because the
+;; ;;; identity forces its argument to be a value, which interferes with
+;; ;;; some throw and recur patterns.
+;; (defmacro asm-expr
+;;   ([form]
+;;    `(asm-expr [] ~form))
+;;   ([params form]
+;;    `(fn-method-body '~params (object (quote ~form)))))
+
+;; (defmacro is-asm* [form exp-asm]        ;takes `exp-asm` as value
+;;   (with-meta `(ptest/is (= ~exp-asm (asm-expr ~form)))
+;;     (meta &form)))
+;; (defmacro is-asm [form exp-asm]         ;quotes `exp-asm`
+;;   (with-meta `(ptest/is (= (quote ~exp-asm) (asm-expr ~form)))
+;;     (meta &form)))
+
+;; (defmacro is-error [form exp-msg]
+;;   (with-meta `(ptest/is (ptest/thrown-with-msg? tcljx.wrong.WrongInfo ~exp-msg
+;;                                                 (asm-expr ~form)))
+;;     (meta &form)))
+
+;; ;;; ------------------------------------------------------------------------
+
+;; (defn fn-call-method [params form ^List args]
+;;   (letfn [(get-method ^Method [^Class cl ^String nm]
+;;             (let [ms (filter #(= (.getName ^Method %) nm) (.getMethods cl))]
+;;               (assert (= (count ms) 1)
+;;                       (str "found " (count ms) " matches for method name "
+;;                            nm " in class " cl))
+;;               (first ms)))]
+;;     (let [dyn-ld (cfg/dyn-class-loader app-ld [])]
+;;       (nmsp dyn-ld (ns-with-fnbody params form))
+;;       (let [cl (Class/forName (str "pkg.ns0." emitter/capstone-class-name)
+;;                               true dyn-ld)
+;;             m (get-method cl (method-name params))]
+;;         (.invoke m nil (.toArray args)))))) ;invoke static method
+
+;; (defmacro call-expr
+;;   ([form]
+;;    `(call-expr [] ~form []))
+;;   ([params form args]
+;;    ;; enforce materialization of method by wrapping in `identity`
+;;    `(fn-call-method '~params (object '(~'identity ~form)) ~args)))
+
+;; (defmacro is-class [form cl]
+;;   (with-meta `(ptest/is (= ~cl (.getClass (call-expr ~form))))
+;;     (meta &form)))
+
+;; ;;; ------------------------------------------------------------------------
+
+;; (defn str-to-form [s]
+;;   (let [forms (reader-test/read-all* (rd/mk-reader s) (reader-test/stub-ctx))]
+;;     (assert (nil? (nnext forms)) "string holds multiple forms")
+;;     (first forms)))
+
+;; (defn str-expr
+;;   ([s]
+;;    (str-expr [] s))
+;;   ([params s]
+;;    (fn-method-body params (str-to-form s))))
+
+;; ;;; ------------------------------------------------------------------------
+
+;; (defn- mt-of ^MethodType [^Class return-type ^List parameter-types]
+;;   (MethodType/methodType return-type parameter-types))
+
+;; (def array-to-cpl (tcljx.macro.ArrayToCpl. (.getClassLoader Object)))
+
+;; (defn to-compiler-mh ^MethodHandle [^ClassLoader app-ld]
+;;   (let [ccm-cl (.lookupClass rt-lookup)
+        
+;;         ccm-cld (rt/describe-constable ccm-cl)
+;;         ccm-mt (mt-of ccm-cl [Function Function])
+;;         ccm (.findStatic rt-lookup ccm-cl "create" ccm-mt)
+
+;;         mtc-mt (mt-of Object [Object])
+;;         mtc (.findVirtual rt-lookup ccm-cl "appToCpl" mtc-mt)
+;;         ^List args [nil array-to-cpl]]
+;;     (.bindTo mtc (.invokeWithArguments ccm args))))
+
+;; (def target-to-compiler-mh (to-compiler-mh app-ld))
+
+;; (defn target->compiler [x]
+;;   (let [^List args [x]]
+;;     (.invokeWithArguments target-to-compiler-mh args)))
+
+;; (defmacro data-expr
+;;   ([form]
+;;    `(data-expr [] ~form []))
+;;   ([params form args]
+;;    `(let [res# (fn-call-method '~params (object '~form) ~args)]
+;;       (target->compiler res#))))

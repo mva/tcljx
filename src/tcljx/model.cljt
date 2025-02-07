@@ -9,8 +9,7 @@
 
 ;;; ------------------------------------------------------------------------
 
-(definterface Binding
-  :extends [Expr]
+(definterface Binding :extends [Expr]
   (namespace ^String [])                ;non-nil for namespace def
   (name ^String [])
   (init ^Expr []))                      ;Binding if this is an alias
@@ -52,12 +51,7 @@
   ;; Returns the binding representing the def form for `nm` in
   ;; namespace `nmsp`, or nil if no such binding exists.  Use nil as
   ;; `nmsp` to refer to the current namespace.
-  (lookup-def ^Binding [^String nmsp ^String nm])
-
-  ;; Throws `wrong` when called outside of a namespace context.  That
-  ;; is, when inside of a function or a class definition like
-  ;; definterface, deftype, or reify.
-  (add-def ^Binding [^String nm ^Binding bnd]))
+  (lookup-def ^Binding [^String nmsp ^String nm]))
 
 ;;; ------------------------------------------------------------------------
 
@@ -74,8 +68,17 @@
   (new-def ^Expr [^String nmsp ^String nm ^Expr init])
   (assignment ^Expr [^Binding bnd ^Expr value])
   (bound-value ^Expr [^Binding bnd])
+
+  ;; For a namespace's `clinit` method, add one of possibly many void
+  ;; expressions run as part the the namespace initialization
+  ;; sequence.
+  (append-namespace-init ^void [^Expr x])
   
   (mk-expr ^Expr [form]))
+
+(definterface CodeGenerator
+  :extends [ExprFactory]
+  (emit ^void []))
 
 (definterface Scope
   (parse-form ^Expr [form])
@@ -97,6 +100,13 @@
 
 (deftype ProvidedNamespace [^String ns-str]
   java.lang.Record)
+
+(definterface NamespaceProvider
+  ;; Resolves and compiles the namespace names in `ns-strs`.  Returns
+  ;; an instance of `ProvidedNamespace` in the corresponding element
+  ;; of the result, or an element of value nil if the namespace name
+  ;; could not be resolved.
+  (require-namespaces ^ProvidedNamespace/1 [^String/1 ns-strs]))
 
 (deftype Require [^String ns-str
                   ^String alias-str     ;nil if no alias
@@ -123,29 +133,20 @@
 ;;; Threading: Instance is confined to the single thread that parses
 ;;; the non-function parts of a namespace.
 (definterface NamespaceBuilder
-  (ns-str ^String [])
-  (resolver-at-point ^Resolver [])
-
-  ;; Resolves and compiles the namespace names in `ns-strs`.  Returns
-  ;; an instance of `ProvidedNamespace` in the corresponding element
-  ;; of the result, or an element of value nil if the namespace name
-  ;; could not be resolved.
-  (require-namespaces ^ProvidedNamespace/1 [^String/1 ns-strs])
+  :extends [Resolver]
+  (universe ^NamespaceProvider [])
   (process-require ^NamespaceBuilder [^Require require
                                       ^ProvidedNamespace provided])
   (process-imports ^NamespaceBuilder [^seq import-strs])
+  (add-def ^Binding [^String nm ^Binding bnd])
   
   ;; FIXME... see tcljc/emitter/namespace.cljt
   ;; hack for dependency chain core_print.cljt
   ;; -> MultiFn.java -> tinyclj.core fns
   (load-file ^NamespaceBuilder [^String path-str])
-  
-  ;; For a namespace's `clinit` method, add one of possibly many void
-  ;; expressions run as part the the namespace initialization
-  ;; sequence.
-  (add-initialization ^NamespaceBuilder [^Expr x])
-  
-  (initialization-scope ^Scope []))
+
+  (process-init-form ^NamespaceBuilder [form])
+  (finish ^ProvidedNamespace []))
 
 (defn ns-sym ^symbol [^NamespaceBuilder nmsp]
   (symbol nil (.ns-str nmsp)))

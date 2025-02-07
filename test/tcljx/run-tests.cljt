@@ -9,6 +9,7 @@
   (:require
    (tcljx.alpha textflow__pp-test ptest__align-test ptest-test)
    (tcljx.parser reader-test namespace-test error-test)
+   (tcljx.classgen bootstrap-test)
    
    (tcljx #_grammar-test
 
@@ -38,6 +39,7 @@
     tcljx.parser.namespace-test
     tcljx.parser.error-test
     
+    tcljx.classgen.bootstrap-test
     #_tcljx.grammar-test
 
     #_tcljx.invoke-test
@@ -80,9 +82,9 @@
     #_tcljx.letfn-test
     #_tcljx.reify-test
     #_tcljx.require-test
-    #_tcljx.main-test
+    #_tcljx.main-test]
 
-    #_tcljx.rtiow-nocore-test])
+  #_tcljx.rtiow-nocore-test)
 
 (defn run []
   (run-scoped-tests all-namespaces))

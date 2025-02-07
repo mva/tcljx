@@ -206,6 +206,11 @@
     (when (.test (.select-is? test-ctx) line)
       (IsContextImpl. test-ctx line (.output-position test-ctx)))))
 
+;; Qualified name of the the executing `deftest`.
+(defn get-test-context-name ^symbol []
+  (when-some [test-ctx (.get TEST-CTX)]
+    (.var-symbol ^TestContext test-ctx)))
+
 ;;; ------------------------------------------------------------------------
 
 (defn- var-line ^Integer [^Var var] (-> var (meta) :line))

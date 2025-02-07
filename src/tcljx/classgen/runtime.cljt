@@ -1,0 +1,9 @@
+(ns tcljx.classgen.runtime
+  (:import
+   (java.lang.constant ClassDesc)))
+
+(def RT (ClassDesc/of "tinyclj.lang.RT"))
+
+#_(def ClojureRT (ClassDesc/of "clojure.lang.RT"))
+
+(def name-requires "requires~1")
