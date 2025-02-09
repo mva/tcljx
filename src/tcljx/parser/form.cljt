@@ -2,7 +2,8 @@
   (:require
    (tcljx [model :as model])
    (tcljx.parser [meta :as meta] [interop :as interop] [wrong :as wrong]
-                 [context :as context] [def :as def] [constant :as constant]))
+                 [syntax :as syntax] [context :as context] [def :as def]
+                 [constant :as constant]))
   (:import
    (tcljx.model Resolver ExprFactory Expr Scope)
    (clojure.lang IMeta)))
@@ -17,17 +18,57 @@
     #_(binding [*print-meta* #_false true]
         (prn :parse-expression form))
     
-    (letfn [(parse-collection-literal ^Expr [form ^map form-meta]
+    (letfn [(parse-args ^Expr/1 [args]
+              (let [a (.new-array expr-factory (count args))]
+                (loop [args args, i 0]
+                  (when (< i (alength a))
+                    (aset a i (.parse-form this (first args)))
+                    (recur (rest args) (inc i))))
+                a))
+            (parse-collection-literal ^Expr [form ^map form-meta]
               (.mk-expr expr-factory form))
+
+            (resolves-as-class-name ^Class [form]
+              (when (and (symbol? form)
+                         (nil? (namespace form))
+                         (nil? (context/lookup this form)))
+                (context/lookup-class this (name form))))
+            (unpack-member-args ^seq [^seq formr]
+              (if (seq? (first formr))
+                (do (syntax/empty-tail (next formr))
+                    (first formr))
+                formr))
+            (parse-dot [[_ owner & formr]]
+              (let [[member & args] (unpack-member-args formr)
+                    mnm (syntax/simple-sym-str member)]
+                (if-some [owner (resolves-as-class-name owner)]
+                  (.invoke-static-member expr-factory owner mnm
+                                         (parse-args args))
+                  (assert false))))
             
+            (wr-info-unresolved-qualified-sym ^Throwable [^symbol op]
+              (wrong/wr-info
+               (if (context/lookup-namespace this (namespace op))
+                 ;; namespace exists: def lookup must have failed
+                 (str "no public def " (wrong/q op))
+                 (str "no namespace or class " (wrong/q-namespace op)))))
             (parse-invocation ^Expr [op ^seq form] ;discards meta
               (if (symbol? op)
                 (let [nm (name op), nmsp (namespace op)]
                   (if (nil? nmsp)
                     (case nm
                       "def" (def/parse-def this form)
+                      "." (parse-dot form)
                       #_else (.mk-expr expr-factory form))
-                    (.mk-expr expr-factory form)))
+
+                    ;; `op` is qualified symbol: either a reference to
+                    ;; a namespace ref, or a static class member
+                    (if-some [bnd (context/lookup this op)]
+                      bnd
+                      (if-some [cl (context/lookup-class this nmsp)]
+                        (.invoke-static-member expr-factory cl nm
+                                               (parse-args (rest form)))
+                        (throw (wr-info-unresolved-qualified-sym op))))))
                 (.mk-expr expr-factory form)))
             
             (wrong-unresolved ^Expr [^symbol sym]
@@ -49,7 +90,7 @@
                 (symbol? form) (parse-symbol form)
                 
                 ;; special form, macro form, or some function call variant
-                (and (seq? form) (some? (next form)))
+                (and (seq? form) (some? (seq form)))
                 (let [line (meta/get-line form-meta)]
                   (->> (wrong/with-line-context line
                          (parse-invocation (first form) form))
@@ -62,3 +103,5 @@
         ;; keyword, pattern, number, character, string, boolean, nil,
         ;; or (via expansion) a class instance
         (constant/parse-constant this form)))))
+
+(def mk-scope ScopeImpl/new)

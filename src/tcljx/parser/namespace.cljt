@@ -6,6 +6,13 @@
   (:import (tcljx.parser.reader FormBuilder)
            (tcljx.model NamespaceBuilder ProvidedNamespace Require)))
 
+;;; The parser layer handles syntax (obviously), it resolves
+;;; names (managing defs and bindings in general), and it decides what
+;;; to expand (if its a macro invocation) and what to evaluate (if it
+;;; is a special form, a primitive function, an invocation, and so
+;;; on).  What it doesn't do is deriving or working with the type of
+;;; an evaluated expression.
+
 (letfn [(prefixed-nmsp-str ^String [form ^String prefix]
           (str prefix (syntax/simple-sym-str form)))
         

@@ -1,19 +1,86 @@
 (ns tcljx.classgen.codegen
-  (:require [tcljx.model :as model]
-            (tcljx.classgen [segmgen :as segmgen]))
-  (:import (tcljx.model ExprFactory CodeGenerator)
-           (tcljx.classgen.segmgen Segment)))
+  (:require
+   [tcljx.model :as model]
+   (tcljx.classgen [resolve :as resolve] [reflect :as reflect]
+                   [segmgen :as segmgen]))
+  (:import
+   (tcljx.model Expr ExprFactory CodeGenerator)
+   (tcljx.classgen.segmgen Segment)
+   (java.lang.classfile CodeBuilder)
+   (java.lang.reflect Member)
+   (java.util.function Consumer)))
+
+;;; Right now, line numbers are only written to decorate stack traces.
+;;; A bytecode instruction must emit a line number pseudo instruction
+;;; before its own opcode only if an exception may be raised during
+;;; the opcode's execution.
+(definterface Emitter
+  (emit ^void [^CodeBuilder xb ^int line]))
+
+;;; The class `expr-type` is the type of the expression after parsing
+;;; it in isolation.  Phrased differently, it is the expression's own
+;;; idea of its type disregarding the context in which it appears.
+(deftype Insn [^Emitter emitter
+               ^Class expr-type]
+  ;; FIXME... Valhalla value?
+  java.lang.Record
+  Expr)
+
+(defn emit* ^CodeBuilder [^CodeBuilder xb ^Insn/1 insns ^int line]
+  (dotimes [i (alength insns)]
+    (.emit (.emitter (aget insns i)) xb line))
+  xb)
+
+(defn- with-line-number ^Insn [^Insn insn ^int line]
+  (Insn. (^Emitter fn [xb line]
+          (.emit (.emitter insn) xb line))
+         (.expr-type insn)))
+
+(defn- invoke ^Insn [^Class owner ^Member member ^Insn/1 args]
+  (Insn. (^Emitter fn [xb line]
+          (-> (emit* xb args line)
+              (.lineNumber line)
+              (reflect/invoke-member owner member)))
+         (reflect/invoke-member-type owner member)))
+
+;;; ------------------------------------------------------------------------
+
+(defn- arg-types ^Class/1 [^Insn/1 args]
+  (let [a (new Class/1 (alength args))]
+    (dotimes [i (alength a)]
+      (aset a i (.expr-type (aget args i))))
+    a))
+
+(def ^:private empty-insns (new Insn/1 0))
 
 (deftype CodeGeneratorImpl [^:unsynchronized-mutable ^Segment current-segm
-                            ^java.util.ArrayList clinit-exprs]
+                            ^java.util.ArrayList clinit-insns]
   ExprFactory
+  (new-array [_ n]
+    (if (zero? n) empty-insns (new Insn/1 n)))
+  (line-number [_ line insn]
+    (cond-> insn (some? line) (with-line-number ^int line)))
+  
+  (invoke-static-member [_ owner mnm args]
+    (let [args ^Insn/1 args
+          ms (resolve/members false owner mnm (arg-types args))]
+      (assert (= (count ms) 1))
+      (assert (not (instance? java.lang.reflect.Field (first ms))))
+      (invoke owner (first ms) args)))
+  
   (append-namespace-init [this x]
-    (.add clinit-exprs x)
+    (.add clinit-insns x)
     this)
-
+  (mk-expr [_ form]
+    nil)
+  
   CodeGenerator
   (emit [_]
-    (segmgen/define-segment current-segm)
+    (segmgen/define-segment current-segm
+      (^Consumer fn ^void [^CodeBuilder xb]
+       (dotimes [i (.size clinit-insns)]
+         (let [insn ^Insn (.get clinit-insns i)]
+           (.emit (.emitter insn) xb 0)))))
     (segmgen/define-capstone current-segm)))
 
 (defn mk-code-generator ^CodeGenerator [^Segment first-segm]

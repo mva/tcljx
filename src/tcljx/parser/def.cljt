@@ -3,7 +3,7 @@
    (tcljx [model :as model])
    (tcljx.parser [wrong :as wrong] [syntax :as syntax] [context :as context]))
   (:import
-   (tcljx.model ExprFactory Expr Resolver Binding Scope)))
+   (tcljx.model Expr Binding Scope)))
 
 (defn parse-def ^Expr [^Scope scope [_ nm & args]]
   (letfn [(aliased-def ^Binding [^symbol init]

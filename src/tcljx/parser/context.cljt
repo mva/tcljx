@@ -16,6 +16,7 @@
 (defn- expr-array ^Expr/1 [^Scope scope ^int n]
   (.new-array (.expr-factory scope) n))
 
+#_
 (defn parse-forms ^Expr [^Scope scope ^seq error-context ^seq forms]
   (let [line (meta/line-of error-context)]
     (->> (wrong/with-line-context line
@@ -45,6 +46,14 @@
       ;; `bindings*` is accurate with very high probability
       (or (.valAt (.bindings* scope) nm nil)
           (.lookup-def (.resolver scope) nil nm))))) ;to cover all defs
+
+;;; Returns nil if `nm` does not resolve to a class name.
+(defn lookup-namespace ^String [^Scope scope ^String alias]
+  (.lookup-namespace (.resolver scope) alias))
+
+;;; Returns nil if `nm` does not resolve to a class name.
+(defn lookup-class ^Class [^Scope scope ^String nm]
+  (.lookup-class (.resolver scope) nm))
 
 (defn namespace-builder ^NamespaceBuilder [^Scope scope]
   (let [rsv (.resolver scope)]

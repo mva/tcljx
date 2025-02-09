@@ -46,7 +46,7 @@
   ;; such global name at this point in the namespace.
   (lookup-global-qname ^symbol [^String nm])
   
-  (lookup-class ^Class [^String sym])   ;nil if not found
+  (lookup-class ^Class [^String nm])    ;nil if not found
   
   ;; Returns the binding representing the def form for `nm` in
   ;; namespace `nmsp`, or nil if no such binding exists.  Use nil as
@@ -60,15 +60,26 @@
 ;;; namespace.
 (definterface ExprFactory
   (new-array ^Expr/1 [^int n])
-  (line-number ^Expr [^Integer line ^Expr value])
+  (line-number ^Expr [^Integer line ^Expr x])
   (constant ^Expr [value])
   (progn ^Expr [^Expr/1 xs])
+
+  ;; ### bindings
   
   ;; `init` is nil if no intial value is provided.
   (new-def ^Expr [^String nmsp ^String nm ^Expr init])
   (assignment ^Expr [^Binding bnd ^Expr value])
   (bound-value ^Expr [^Binding bnd])
 
+  ;; ### interop
+
+  ;; Invoke static public method or field `mnm` of class `owner`.
+  ;; Note: Invoking a field actually means to invoke the field's value
+  ;; as a function, instead of just getting its value.
+  (invoke-static-member ^Expr [^Class owner ^String mnm ^Expr/1 args])
+
+  ;; ### misc
+  
   ;; For a namespace's `clinit` method, add one of possibly many void
   ;; expressions run as part the the namespace initialization
   ;; sequence.

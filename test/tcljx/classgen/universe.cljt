@@ -16,14 +16,25 @@
 (deftype NmspBuilderImpl [^NamespaceProvider universe
                           ^String ns-str
                           ^CodeGenerator code-gen
-                          ^:unsynchronized-mutable ^map globals]
+                          ^java.lang.invoke.MethodHandles$Lookup lookup-in-pkg
+                          ^:unsynchronized-mutable ^map globals
+                          ^map known-ns
+                          ^map ns-alias
+                          ^map imports]
   Resolver
   (ns-str [_]
     ns-str)
-  (lookup-def [_ nmsp nm]
+  (lookup-namespace [_ alias]
+    (.valAt ns-alias alias nil))
+  (lookup-class [_ nm]
+    (or (.valAt imports nm nil)
+        (.resolveConstantDesc (java.lang.constant.ClassDesc/of nm)
+                              lookup-in-pkg)))
+  (lookup-def [this nmsp nm]
     (if (or (nil? nmsp) (= nmsp ns-str))
       (.valAt globals nm nil)
-      (assert false)))
+      (when-some [nmsp* (.lookup-namespace this nmsp)]
+        (-> known-ns ^map (.valAt nmsp* nil) (.valAt nm nil)))))
   (add-def [_ nm bnd]
     (set! globals (assoc globals nm bnd))
     bnd)
@@ -40,7 +51,7 @@
     (assert false))
   
   (process-init-form [this form]
-    (let [scope (tcljx.parser.form.ScopeImpl. code-gen this globals)]
+    (let [scope (form/mk-scope code-gen this globals)]
       (.append-namespace-init code-gen (context/parse-form scope form))
       this))
 
@@ -52,7 +63,9 @@
 
 (deftype UniverseBuilder [^Loader loader
                           ^map ns-form-map
-                          ^:unsynchronized-mutable ^map known-ns]
+                          ^:unsynchronized-mutable ^map known-ns
+                          ^:unsynchronized-mutable ^map ns-alias
+                          ^:unsynchronized-mutable ^map imports]
   NamespaceProvider
   (require-namespaces [this ns-strs]
     (letfn [(mk-nmsp-builder ^NamespaceBuilder [^String ns-str]
@@ -61,7 +74,8 @@
                     first-segm (segmgen/mk-first-segment ns-str source-file
                                                          pkg-build)
                     ef (codegen/mk-code-generator first-segm)]
-                (NmspBuilderImpl. this ns-str ef {})))
+                (NmspBuilderImpl. this ns-str ef (.lookup-in-pkg pkg-build)
+                                  {} known-ns ns-alias imports)))
             
       (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]
                        (-> (reduce namespace/parse-top-level-form
@@ -82,5 +96,7 @@
 
 ;;; No class files are written to disk if `dest-dir` is nil.
 (defn mk-universe ^NamespaceProvider [^map ns-form-map ^Loader loader]
-  (let [provided-ns {}]
-    (UniverseBuilder. loader ns-form-map provided-ns)))
+  (let [provided-ns {}
+        ns-alias {}
+        imports {}]
+    (UniverseBuilder. loader ns-form-map provided-ns ns-alias imports)))

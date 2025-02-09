@@ -8,6 +8,7 @@
    (tcljx.classgen.loader PackageBuilder ClassBytes)
    (java.lang.classfile ClassFile ClassBuilder CodeBuilder)
    (java.lang.constant ClassDesc ConstantDescs MethodTypeDesc)
+   (java.util ArrayList)
    (java.util.function Consumer)))
 
 (def first-segm-id 10)
@@ -17,16 +18,24 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- with-create-namespace ^ClassBuilder [^ClassBuilder cb ^String ns-str]
+(defn- with-clinit ^ClassBuilder [^ClassBuilder cb ^String create-namespace
+                                  ^Consumer clinit-handler ^String core-init]
   (.withMethodBody
    cb ConstantDescs/CLASS_INIT_NAME ConstantDescs/MTD_void
    (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_STATIC)
    (^Consumer fn ^void [^CodeBuilder xb]
-    (-> (.ldc xb ns-str)
-        (.invokestatic rt/RT "createNamespace"
-                       (MethodTypeDesc/of ConstantDescs/CD_void
-                                          ConstantDescs/CD_String))
-        (.return_)))))
+    (when (some? create-namespace)
+      (.ldc xb create-namespace)
+      (.invokestatic xb rt/RT "createNamespace"
+                     (MethodTypeDesc/of ConstantDescs/CD_void
+                                        ConstantDescs/CD_String)))
+    (.accept clinit-handler xb)
+    (when (some? core-init)
+      (.ldc xb core-init)
+      (.invokestatic xb rt/RT "markCoreInitialization"
+                     (MethodTypeDesc/of ConstantDescs/CD_void
+                                        ConstantDescs/CD_String)))
+    (.return_ xb))))
 
 (defn- with-requires ^ClassBuilder [^ClassBuilder cb ^String req-str]
   (.withMethodBody
@@ -54,13 +63,17 @@
   (^ClassDesc [^Segment segm ^int id-delta]
    (let [segm-id (+ (.segm-id segm) id-delta)]
      (ClassDesc/of (.ns-str segm) (str segment-class-prefix segm-id)))))
-(defn define-segment ^ClassBytes [^Segment segm]
-  (->> (^Consumer fn ^void [^ClassBuilder cb]
-        (-> cb
-            (with-create-namespace (.ns-str segm))))
-       (loader/build-and-write
-        (.pkg-build segm) (segment-cld segm) segment-class-flags
-        ConstantDescs/CD_Object (.source-file segm))))
+(defn define-segment ^ClassBytes [^Segment segm ^Consumer clinit-handler]
+  (let [ns-str (.ns-str segm)
+        cld (segment-cld segm)]
+    (->> (^Consumer fn ^void [^ClassBuilder cb]
+          (with-clinit cb
+            (when (= (.segm-id segm) first-segm-id) ns-str)
+            clinit-handler
+            (when (cfg/core-lib? ns-str) (str ns-str "." (.displayName cld)))))
+         (loader/build-and-write
+          (.pkg-build segm) cld segment-class-flags
+          ConstantDescs/CD_Object (.source-file segm)))))
 
 (defn- capstone-cld ^ClassDesc [^Segment segm]
   (ClassDesc/of (.ns-str segm) capstone-class-name))

@@ -1,0 +1,149 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.classgen.resolve
+  (:require
+   #_[tcljc.javabase :as jb]
+   #_[tcljc.runtime :as rt])
+  (:import
+   (java.lang.constant #_DirectMethodHandleDesc #_DirectMethodHandleDesc$Kind
+                       #_MethodHandleDesc #_ConstantDescs)
+   (java.lang.reflect Method Constructor Executable Field Member Modifier)
+   #_(java.util Arrays)))
+
+(defn same-class? ^boolean [^Class a ^Class b]
+  (identical? a b))
+
+(defn polymorphic? ^boolean [^Class cl]
+  false #_(identical? cl-polymorphic-type cl))
+
+;;; ------------------------------------------------------------------------
+
+(def flag-static 0)
+(def flag-virtual 1)
+;; (def flag-field 2)
+;; (def flag-method 3)
+;; (def flag-no-candidate-returns-nil 4)
+;; (def flag-minus-is-field 5)
+
+(def opts-virtual (bit-set 0 flag-virtual))
+(def opts-static (bit-set 0 flag-static))
+
+(let [#_#_mask-field (bit-set 0 flag-field)
+      #_#_mask-method (bit-set 0 flag-method)
+      #_#_mask-member (bit-or mask-field mask-method)]
+  #_(defn fields-only? ^boolean [^int opts]
+      (= mask-field (bit-and mask-member opts)))
+  #_(defn methods-only? ^boolean [^int opts]
+      (= mask-method (bit-and mask-member opts)))
+  (defn static-virtual-match? ^boolean [^int opts ^Member m]
+    (if (Modifier/isStatic (.getModifiers m))
+      (bit-test opts flag-static)
+      (bit-test opts flag-virtual))))
+
+;; (defn first-argument-index ^int [^int opts] ;skips receiver
+;;   (if (bit-test opts flag-virtual) 1 0))
+
+;; (defn starts-with-dot? ^boolean [^String s]
+;;   (and  (> (.length s) 1) (= (.charAt s 0) \.)))
+
+;;; Problem: class MethodHandle.PolymorphicSignature is not public
+(def ^:private ann-polymorphic-signature
+  (Class/forName "java.lang.invoke.MethodHandle$PolymorphicSignature"
+                 false (ClassLoader/getPlatformClassLoader)))
+
+(defn signature-polymorphic? ^boolean [^Executable e]
+  (and (.isVarArgs e) (.isAnnotationPresent e ann-polymorphic-signature)))
+
+;;; Returns nil for PolymorphicSignature method.
+(defn method-exact ^Method [^int opts ^Class owner ^String nm ^Class/1 atypes]
+  (letfn [(method-or-throw ^Method [^Class owner] ;throws NoSuchMethodException
+            (let [m (.getMethod owner nm atypes)] ;works for class and array
+              (when (and (static-virtual-match? opts m)
+                         (not (signature-polymorphic? m)))
+                m)))]
+    (try
+      (method-or-throw owner)
+      (catch NoSuchMethodException _
+        (when (.isInterface owner)
+          (try   ;if owner is an interface, then try again with Object
+            (method-or-throw Object)
+            (catch NoSuchMethodException _
+              nil)))))))
+
+;;; Returns nil for PolymorphicSignature constructor.
+(defn constructor-exact ^Constructor [^Class owner ^Class/1 atypes]
+  (try
+    (let [c (.getConstructor owner atypes)]
+      (when (not (signature-polymorphic? c))
+        c))
+    (catch NoSuchMethodException _
+      nil)))
+
+(defn field-exact ^Field [^int opts ^Class owner ^String nm]
+  (try
+    (let [f (.getField owner nm)]
+      (when (static-virtual-match? opts f)
+        f))
+    (catch NoSuchFieldException _
+      nil)))
+
+;;; ------------------------------------------------------------------------
+
+;;; `ptags` of nil does not constrain arity or parameter types of
+;;; constructors, methods, or virtual fields.  Returns nil if there is
+;;; no match.
+(defn members [^boolean virtual? ^Class owner ^String mnm ^Class/1 ptags]
+  (letfn [(parameters-match? ^boolean [^Class/1 ptags ^Class/1 ptypes]
+            (loop [i (dec (alength ptypes))]
+              (cond
+                (neg? i) true
+                         
+                (let [ptag (aget ptags i)]
+                  (or (same-class? ptag (aget ptypes i)) (polymorphic? ptag)))
+                (recur (dec i))
+                         
+                :else false)))
+          (matches-ptags? ^boolean [^Class/1 ptypes]
+            (or (nil? ptags)
+                (and (= (alength ptypes) (alength ptags))
+                     (parameters-match? ptags ptypes))))
+          (methods [^int opts ^String nm ^Method/1 ms]
+            (loop [acc (), i (dec (alength ms))]
+              (if (neg? i)
+                acc
+                (recur (let [m (aget ms i)]
+                         (cond-> acc
+                           (and (= nm (.getName m))
+                                (static-virtual-match? opts m)
+                                (matches-ptags? (.getParameterTypes m))
+                                (not (.isBridge m)))
+                           (conj m)))
+                       (dec i)))))
+          (constructors [^Constructor/1 cs]
+            (loop [acc (), i (dec (alength cs))]
+              (if (neg? i)
+                acc
+                (recur (let [c (aget cs i)]
+                         (cond-> acc
+                           (matches-ptags? (.getParameterTypes c))
+                           (conj c)))
+                       (dec i)))))]
+
+    (let [opts (if virtual? opts-virtual opts-static)]
+      (or (if (= mnm "new")
+            (if-some [c (when (some? ptags)
+                          (constructor-exact owner ptags))]
+              (cons c nil)
+              (seq (constructors (.getConstructors owner))))
+            (if-some [m (when (some? ptags)
+                          (method-exact opts owner mnm ptags))]
+              (cons m nil)
+              (seq (methods opts mnm (.getMethods owner)))))
+          (when (or (nil? ptags) (zero? (alength ptags)))
+            (when-some [f (field-exact opts owner mnm)]
+              (cons f nil)))))))

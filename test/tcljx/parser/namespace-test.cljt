@@ -110,7 +110,7 @@
 
   (process-init-form [this form]
     (let [ef (ExprFactoryStub. forms)
-          scope (tcljx.parser.form.ScopeImpl. ef this {})]
+          scope (form/mk-scope ef this {})]
       (.append-namespace-init ef (context/parse-form scope form))
       this)))
 

@@ -28,49 +28,49 @@
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0 (:refer-clojure :none))]))))
 
-;; (deftest static-init-test-dot
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "tinyclj/core/_10")
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "tinyclj.core")
-;;              (INVOKESTATIC RT "createNamespace"
-;;                            "(Ljava/lang/String;)V")
+(deftest static-init-test-dot
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "tinyclj/core/_10")
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "tinyclj.core")
+             (INVOKESTATIC RT "createNamespace"
+                           "(Ljava/lang/String;)V")
              
-;;              (INVOKESTATIC MethodHandles "lookup"
-;;                            "()Ljava/lang/invoke/MethodHandles$Lookup;")
-;;              (INVOKESTATIC RT "setCoreLookup"
-;;                            "(Ljava/lang/invoke/MethodHandles$Lookup;)V")
+             (INVOKESTATIC MethodHandles "lookup"
+                           "()Ljava/lang/invoke/MethodHandles$Lookup;")
+             (INVOKESTATIC RT "setCoreLookup"
+                           "(Ljava/lang/invoke/MethodHandles$Lookup;)V")
 
-;;              (LDC "tinyclj.core._10")
-;;              (INVOKESTATIC RT "markCoreInitialization" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "tinyclj/core/___" nil "tinyclj/core/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns tinyclj.core (:refer-clojure :none))
-;;                  (. tinyclj.lang.RT (setCoreLookup (. java.lang.invoke.MethodHandles (lookup))))]))))
+             (LDC "tinyclj.core._10")
+             (INVOKESTATIC RT "markCoreInitialization" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "tinyclj/core/___" nil "tinyclj/core/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "")
+             (ARETURN)]]]
+         (nmsp '[(ns tinyclj.core (:refer-clojure :none))
+                 (. tinyclj.lang.RT (setCoreLookup (. java.lang.invoke.MethodHandles (lookup))))]))))
 
-;; (deftest static-init-test-sugar
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "tinyclj/core/_10")
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "tinyclj.core")
-;;              (INVOKESTATIC RT "createNamespace"
-;;                            "(Ljava/lang/String;)V")
+(deftest static-init-test-sugar
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "tinyclj/core/_10")
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "tinyclj.core")
+             (INVOKESTATIC RT "createNamespace"
+                           "(Ljava/lang/String;)V")
              
-;;              (INVOKESTATIC MethodHandles "lookup"
-;;                            "()Ljava/lang/invoke/MethodHandles$Lookup;")
-;;              (INVOKESTATIC RT "setCoreLookup"
-;;                            "(Ljava/lang/invoke/MethodHandles$Lookup;)V")
+             (INVOKESTATIC MethodHandles "lookup"
+                           "()Ljava/lang/invoke/MethodHandles$Lookup;")
+             (INVOKESTATIC RT "setCoreLookup"
+                           "(Ljava/lang/invoke/MethodHandles$Lookup;)V")
              
-;;              (LDC "tinyclj.core._10")
-;;              (INVOKESTATIC RT "markCoreInitialization" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "tinyclj/core/___" nil "tinyclj/core/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns tinyclj.core (:refer-clojure :none))
-;;                  (tinyclj.lang.RT/setCoreLookup (java.lang.invoke.MethodHandles/lookup))]))))
+             (LDC "tinyclj.core._10")
+             (INVOKESTATIC RT "markCoreInitialization" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "tinyclj/core/___" nil "tinyclj/core/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "")
+             (ARETURN)]]]
+         (nmsp '[(ns tinyclj.core (:refer-clojure :none))
+                 (tinyclj.lang.RT/setCoreLookup (java.lang.invoke.MethodHandles/lookup))]))))
 
 ;; (deftest static-method-wrapper
 ;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")

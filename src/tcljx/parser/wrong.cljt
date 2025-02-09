@@ -9,7 +9,7 @@
   (:require (tcljx.parser [meta :as meta] [interop :as interop])
             [tcljx.alpha.ptest__style :as style]
             [tinyclj.string :as str])
-  (:import (clojure.lang Symbol IPersistentMap)))
+  (:import (clojure.lang Symbol Named)))
 
 ;;; Compilation errors raise an exception of type WrongInfo.  It
 ;;; mirrors ExceptionInfo, but does not implement IExceptionInfo.  The
@@ -18,7 +18,7 @@
 ;;; trace.
 (deftype WrongInfo [^:pass-to-super-constructor ^String message
                     ^:pass-to-super-constructor ^Throwable cause
-                    ^IPersistentMap data]
+                    ^map data]
   RuntimeException
   (toString [this]
     (str "tcljx.wrong.WrongInfo: " (.getMessage this) " " (.toString data))))
@@ -26,14 +26,14 @@
 (defn wr-info
   (^WrongInfo [^String msg]
    (wr-info msg nil))
-  (^WrongInfo [^String msg ^IPersistentMap map]
+  (^WrongInfo [^String msg ^map map]
    (wr-info msg map nil))
-  (^WrongInfo [^String msg ^IPersistentMap map ^Throwable cause]
+  (^WrongInfo [^String msg ^map map ^Throwable cause]
    #_(prn :error msg map)
    #_(.printStackTrace (Throwable.))
    (WrongInfo. msg cause (or map clojure.lang.PersistentArrayMap/EMPTY))))
 
-(defn wr-data ^IPersistentMap [ex]
+(defn wr-data ^map [ex]
   (when (instance? WrongInfo ex)
     (.data ^WrongInfo ex)))
 (defn wr-line-number ^int [ex]      ;zero if no line number is present
@@ -85,7 +85,7 @@
 ;;     (not (contains? (wr-data e) k))
 ;;     (update-wr-data assoc k v)))
 
-;; (defn assoc-dep-map ^WrongInfo [^Throwable t ^IPersistentMap dep-map]
+;; (defn assoc-dep-map ^WrongInfo [^Throwable t ^map dep-map]
 ;;   #_(.printStackTrace t)
 ;;   (-> (if (instance? WrongInfo t)
 ;;         ^WrongInfo t
@@ -114,6 +114,10 @@
     (if (identical? s s')
       (str "`" s "`")                 ;fallback if styles are disabled
       s')))
+(defn q-as-symbol ^String [x]
+  (q (if (symbol? x) x (symbol nil x))))
+(defn q-namespace ^String [^Named x]
+  (q (symbol nil (namespace x))))
 ;; (defn q-symbol ^String [x]
 ;;   (if (symbol? x)
 ;;     (q x)
@@ -146,7 +150,7 @@
 ;;   (throw (wr-info (str "no public var " (q (name fq-sym)) " in namespace "
 ;;                        (q resolved-ns-nm)))))
 ;; (defn unresolved-interop [^String msg-prefix ^String nm ^Class opt-owner
-;;                           ^IPersistentMap data]
+;;                           ^map data]
 ;;   (throw (wr-info (cond-> (str msg-prefix (q (symbol nil nm)))
 ;;                     (some? opt-owner) (str " in " (interop/type-symbol opt-owner)))
 ;;                   data)))
