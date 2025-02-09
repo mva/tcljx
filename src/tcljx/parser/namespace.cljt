@@ -14,14 +14,14 @@
 ;;; an evaluated expression.
 
 (letfn [(prefixed-nmsp-str ^String [form ^String prefix]
-          (str prefix (syntax/simple-sym-str form)))
+          (str prefix (syntax/simple-symbol-str form)))
         
         (second-vector ^vector [^seq xs]
-          (mapv syntax/simple-sym-str (syntax/vector (second xs))))
+          (mapv syntax/simple-symbol-str (syntax/vector (second xs))))
         (second-map ^map [^seq xs]
           (persistent! (reduce (fn [acc [k v]]
-                                 (assoc! acc (syntax/simple-sym-str k)
-                                         (syntax/simple-sym-str v)))
+                                 (assoc! acc (syntax/simple-symbol-str k)
+                                         (syntax/simple-symbol-str v)))
                                (transient {})
                                (syntax/map (second xs)))))
         
@@ -31,7 +31,7 @@
                  spec (seq spec)]
             (if (some? spec)
               (case (first spec)      ;parse like hash-map then merge 
-                :as (recur (syntax/simple-sym-str (second spec)) refer rename
+                :as (recur (syntax/simple-symbol-str (second spec)) refer rename
                            exclude (nnext spec))
                 :refer (recur alias (if (identical? :all (second spec))
                                       nil

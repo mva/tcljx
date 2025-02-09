@@ -29,10 +29,9 @@
               (.mk-expr expr-factory form))
 
             (resolves-as-class-name ^Class [form]
-              (when (and (symbol? form)
-                         (nil? (namespace form))
-                         (nil? (context/lookup this form)))
-                (context/lookup-class this (name form))))
+              (when (syntax/simple-symbol? form)
+                (when (nil? (context/lookup this form))
+                  (context/lookup-class this (name form)))))
             (unpack-member-args ^seq [^seq formr]
               (if (seq? (first formr))
                 (do (syntax/empty-tail (next formr))
@@ -40,7 +39,7 @@
                 formr))
             (parse-dot [[_ owner & formr]]
               (let [[member & args] (unpack-member-args formr)
-                    mnm (syntax/simple-sym-str member)]
+                    mnm (syntax/simple-symbol-str member)] ;implies owner exists
                 (if-some [owner (resolves-as-class-name owner)]
                   (.invoke-static-member expr-factory owner mnm
                                          (parse-args args))

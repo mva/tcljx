@@ -30,13 +30,16 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn simple-sym ^symbol [form]
-  (if (and (symbol? form) (nil? (namespace form)))
+(defn simple-symbol? ^boolean [form]
+  (and (symbol? form) (nil? (namespace form))))
+
+(defn simple-symbol ^symbol [form]
+  (if (simple-symbol? form)
     form
     (wrong "expect unqualified symbol" form)))
 
-(defn simple-sym-str ^String [form]
-  (name (simple-sym form)))
+(defn simple-symbol-str ^String [form]
+  (name (simple-symbol form)))
 
 (defn vector ^vector [form]
   (if (vector? form)

@@ -26,7 +26,7 @@
               (-> (.expr-factory scope)
                   (.assignment bnd (context/parse-form scope init)))))]
     
-    (let [nm (syntax/simple-sym-str nm)
+    (let [nm (syntax/simple-symbol-str nm)
           prior-def (.lookup-def (.resolver scope) nil nm)]
       (syntax/empty-tail (next args))
       (if (some? prior-def)
