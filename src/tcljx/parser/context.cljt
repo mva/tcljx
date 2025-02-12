@@ -16,7 +16,6 @@
 (defn- expr-array ^Expr/1 [^Scope scope ^int n]
   (.new-array (.expr-factory scope) n))
 
-#_
 (defn parse-forms ^Expr [^Scope scope ^seq error-context ^seq forms]
   (let [line (meta/line-of error-context)]
     (->> (wrong/with-line-context line
@@ -60,3 +59,16 @@
     (if (instance? NamespaceBuilder rsv)
       rsv
       (wrong "cannot def new namespace entry in this position"))))
+
+(defn pick-unique-name ^String [^Scope scope ^String nm]
+  (.pick-unique-name (.resolver scope) nm))
+
+;;; ------------------------------------------------------------------------
+
+(defn with-local-bindings ^Scope [^Scope scope ^Expr/1 bindings]
+  (loop [locals (transient (.bindings* scope))
+         i 0]
+    (if (< i (alength bindings))
+      (let [bnd ^Binding (model/require-entity (aget bindings i))]
+        (recur (assoc! locals (.name bnd) bnd) (inc i)))
+      (.with-bindings* scope (persistent! locals)))))

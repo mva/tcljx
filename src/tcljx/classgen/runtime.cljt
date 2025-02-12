@@ -1,6 +1,7 @@
 (ns tcljx.classgen.runtime
   (:import
-   (java.lang.constant ClassDesc MethodTypeDesc)
+   (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc ConstantDescs
+                       DirectMethodHandleDesc$Kind)
    (java.lang.reflect Method)))
 
 ;;; FIXME... Does it make sense to use java.lang.ClassValue to cache
@@ -16,9 +17,14 @@
       (aset a i (describe-class (aget atp i))))
     a))
 
+;;; ------------------------------------------------------------------------
+
 (defn mtd-of-method ^MethodTypeDesc [^Method m]
   (MethodTypeDesc/of (describe-class (.getReturnType m))
                      (describe-class* (.getParameterTypes m))))
+
+(def mtd-void-string (MethodTypeDesc/of ConstantDescs/CD_void
+                                        ConstantDescs/CD_String))
 
 ;;; ------------------------------------------------------------------------
 
@@ -26,4 +32,30 @@
 
 #_(def ClojureRT (ClassDesc/of "clojure.lang.RT"))
 
+(def ^:private clnm-ifn 'clojure.lang.IFn)
+(def ^:private clnm-abstract-fn 'tinyclj.lang.AFnMh)
+(def ^:private clnm-static-fn 'tinyclj.lang.StaticFn)
+
+(def ^:private MethodHandle ConstantDescs/CD_MethodHandle)
+(def ^:private MethodHandleArray (.arrayType MethodHandle))
+(def ^:private Lookup ConstantDescs/CD_MethodHandles_Lookup)
+
+(def ^:private Class ConstantDescs/CD_Class)
+(def ^:private String ConstantDescs/CD_String)
+
+(def ^:private BootstrapMethod (ClassDesc/of "tinyclj.lang.BootstrapMethod"))
+(def StaticFn (ClassDesc/of (name clnm-static-fn)))
+
 (def name-requires "requires~1")
+
+;;; ------------------------------------------------------------------------
+
+(defmacro ^:private mtd [rtype ptypev]
+  `(MethodTypeDesc/of ~rtype ~(with-meta ptypev {:tag 'java.util.List})))
+
+(defmacro ^:private mhd-static [[owner name] rtype ptypev]
+  `(MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
+                              ~owner ~name (mtd ~rtype ~ptypev)))
+
+(def bsm-static-fn (mhd-static [BootstrapMethod "createStaticFn"] StaticFn
+                               [Lookup String Class MethodHandleArray]))

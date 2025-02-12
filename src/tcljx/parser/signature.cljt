@@ -1,0 +1,61 @@
+(ns tcljx.parser.signature
+  (:require
+   [tcljx.model :as model]
+   (tcljx.parser [interop :as interop] [wrong :as wrong] [syntax :as syntax]))
+  (:import (tcljx.model ArityType Resolver Scope Expr)
+           (clojure.lang IMeta)))
+
+(deftype ArityTypeImpl [^Class return-type
+                        ^Class/1 parameter-types
+                        ^String/1 parameter-names]
+  java.lang.Record
+  ArityType
+  (parameter-count [_]
+    (alength parameter-types))
+  (parameter-name [_ ^int i]
+    (aget parameter-names i))
+  (parameter-type [_ ^int i]
+    (aget parameter-types i)))
+
+
+(defn get-tag [^map form-meta]
+  (when (some? form-meta)
+    ;; Note: using `valAt` is slightly more direct than IFn.invoke()
+    ;; or RT.get().
+    (.valAt form-meta :tag nil)))
+
+(defn tag-of ^symbol [^IMeta form]
+  (when-some [tag (get-tag (.meta form))]
+    (syntax/symbol tag)))
+
+(defn resolve-tag
+  (^Class [^Resolver rsv ^IMeta form]
+   (resolve-tag rsv form Object))
+  (^Class [^Resolver rsv ^IMeta form ^Class or-else]
+   (if-some [tag (tag-of form)]
+     (or (interop/lookup-type rsv tag) (wrong/class-not-found tag))
+     or-else)))
+
+(defn parse-arity-type ^ArityType [^Scope scope paramv ^seq error-context]
+  (letfn [(type-of ^Class [^IMeta form]
+            (-> (.resolver scope) (resolve-tag form)))]
+    (wrong/with-line-context error-context
+      (let [paramv (syntax/vector paramv)
+            n (count paramv)
+            ptypes (new Class/1 n)
+            pnames (new String/1 n)]
+        (assert (not= '& (nth paramv (- n 2) nil)))
+        (dotimes [i (alength ptypes)]
+          (let [param (nth paramv i)
+                psym (syntax/simple-symbol param)]
+            (aset ptypes i (type-of psym))
+            (aset pnames i (name psym))))
+        (ArityTypeImpl. (type-of ^IMeta paramv) ptypes pnames)))))
+
+(defn parameters ^Expr/1 [^Scope scope ^ArityType at]
+  (let [ef (.expr-factory scope)
+        xs (.new-array ef (.parameter-count at))]
+    (dotimes [i (alength xs)]
+      (aset xs i (.parameter ef i (.parameter-name at i)
+                             (.parameter-type at i))))
+    xs))

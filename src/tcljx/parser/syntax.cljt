@@ -1,7 +1,7 @@
 (ns tcljx.parser.syntax
   (:require (tcljx [config :as cfg])
             (tcljx.parser [wrong :as wrong]))
-  (:refer-clojure :exclude [vector map]))
+  (:refer-clojure :exclude [vector map symbol]))
 
 (defn wrong
   ([^String msg]
@@ -33,6 +33,10 @@
 (defn simple-symbol? ^boolean [form]
   (and (symbol? form) (nil? (namespace form))))
 
+(defn symbol ^symbol [form]
+  (if (symbol? form)
+    form
+    (wrong "expect symbol" form)))
 (defn simple-symbol ^symbol [form]
   (if (simple-symbol? form)
     form

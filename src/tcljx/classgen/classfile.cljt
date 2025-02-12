@@ -1,13 +1,24 @@
 (ns tcljx.classgen.classfile
   (:import
-   (java.lang.classfile ClassFile #_Opcode #_TypeKind #_ClassBuilder #_MethodBuilder
-                        #_CodeBuilder #_Label)
+   (java.lang.classfile ClassFile #_Opcode #_TypeKind ClassBuilder #_MethodBuilder
+                        CodeBuilder #_Label)
    #_(java.lang.classfile.instruction SwitchCase)
    (java.lang.constant #_ConstantDesc ClassDesc #_MethodTypeDesc #_MethodHandleDesc
                        #_DirectMethodHandleDesc #_DirectMethodHandleDesc$Kind
                        #_ConstantDescs)
    #_(java.lang.invoke MethodHandle TypeDescriptor$OfField MethodHandles$Lookup)
-   (java.util.function #_Consumer #_Function)))
+   (java.util.function Consumer #_Function)))
 
 (def acc-method-virtual (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_FINAL))
 (def acc-method-static (bit-or acc-method-virtual ClassFile/ACC_STATIC))
+
+
+(defmacro accept-> [builder handler]
+  `(let [builder# ~builder]
+     (.accept ~handler builder#)
+     builder#))
+
+(defmacro with-method-body-> [cb [method-name lookup-type-desc flags] & body]
+  `(.withMethodBody ~cb ~method-name ~lookup-type-desc ~flags
+                    (^Consumer fn ^void [^CodeBuilder xb#]
+                     (-> xb# ~@body))))

@@ -2,25 +2,34 @@
   (:require
    (tcljx [config :as cfg] [files :as files] [model :as model])
    (tcljx.parser [context :as context] [form :as form] [namespace :as namespace])
-   (tcljx.classgen [loader :as loader] [classfile :as classfile]
+   (tcljx.classgen [loader :as loader] [runtime :as rt] [classfile :as classfile]
                    [segmgen :as segmgen] [codegen :as codegen]))
   (:import
-   (tcljx.model Resolver NamespaceProvider ProvidedNamespace NamespaceBuilder
-                Expr CodeGenerator Scope)
-   (tcljx.classgen.loader Loader)
+   (tcljx.model Resolver NamespaceProvider ProvidedNamespace
+                NamespaceBuilder SegmentBuilder
+                Expr ExprFactory Scope)
+   (tcljx.classgen.loader Loader PackageBuilder)
+   (tcljx.classgen.codegen Insn)
+   (java.lang.classfile ClassBuilder CodeBuilder)
    (java.nio.file Path)
    (java.util ArrayList)
    (java.util.concurrent ConcurrentHashMap)
    (java.util.function Consumer)))
 
+(deftype ImplementationUnavailableException []
+  Exception)
+
 (deftype NmspBuilderImpl [^NamespaceProvider universe
                           ^String ns-str
-                          ^CodeGenerator code-gen
-                          ^java.lang.invoke.MethodHandles$Lookup lookup-in-pkg
+                          ^ExprFactory code-gen
+                          ^ArrayList segment-elements ;added to by `code-gen`
+                          ^PackageBuilder pkg-build
                           ^:unsynchronized-mutable ^map globals
-                          ^map known-ns
-                          ^map ns-alias
-                          ^map imports]
+                          ^:unsynchronized-mutable ^map known-ns
+                          ^:unsynchronized-mutable ^map ns-alias
+                          ^:unsynchronized-mutable ^map imports
+                          ^:unsynchronized-mutable ^String current-source-file
+                          ^:unsynchronized-mutable ^int current-segm-id]
   Resolver
   (ns-str [_]
     ns-str)
@@ -28,16 +37,17 @@
     (.valAt ns-alias alias nil))
   (lookup-class [_ nm]
     (or (.valAt imports nm nil)
-        (.resolveConstantDesc (java.lang.constant.ClassDesc/of nm)
-                              lookup-in-pkg)))
+        (when-some [cl (-> (java.lang.constant.ClassDesc/of nm)
+                           (.resolveConstantDesc (.lookup-in-pkg pkg-build)))]
+          (set! imports (assoc imports nm cl))
+          cl)))
   (lookup-def [this nmsp nm]
     (if (or (nil? nmsp) (= nmsp ns-str))
       (.valAt globals nm nil)
       (when-some [nmsp* (.lookup-namespace this nmsp)]
         (-> known-ns ^map (.valAt nmsp* nil) (.valAt nm nil)))))
-  (add-def [_ nm bnd]
-    (set! globals (assoc globals nm bnd))
-    bnd)
+  (pick-unique-name [_ dflt-nm]
+    dflt-nm)
   
   NamespaceBuilder
   (universe [_]
@@ -46,18 +56,57 @@
     this)                               ;FIXME...
   (process-imports [this imports]
     this)                               ;FIXME...
+  (add-def [_ nm bnd]
+    (set! globals (assoc globals nm bnd))
+    bnd)
 
   (load-file [this path-str]
     (assert false))
   
   (process-init-form [this form]
-    (let [scope (form/mk-scope code-gen this globals)]
-      (.append-namespace-init code-gen (context/parse-form scope form))
+    ;; This method is only called for expression forms that do not
+    ;; manipulate `known-ns` or `ns-alias`.  The `globals` at start is
+    ;; stored as part of of `scope`.
+    (let [scope (form/mk-scope code-gen this globals)
+          imports-at-start imports
+          segment-elements-at-start (.size segment-elements)
+          expr (try
+                 (context/parse-form scope form)
+                 (catch ImplementationUnavailableException _
+                   ;; flush current segment into a class file, revert
+                   ;; state, and try again to parse `form`
+                   (.commit-segment-and-revert
+                    this segment-elements-at-start
+                    (.bindings* scope) imports-at-start)
+                   (context/parse-form scope form)))]
+      (.add segment-elements expr)
       this))
 
-  (finish [_]
-    (.emit code-gen)
-    (ProvidedNamespace. ns-str)))
+  (finish [this]
+    (.commit-segment-and-revert this (.size segment-elements) globals imports)
+    (segmgen/define-capstone pkg-build current-segm-id)
+    (ProvidedNamespace. ns-str))
+
+  SegmentBuilder
+  (commit-segment-and-revert [_ end-of-segment-elements
+                              then-globals then-imports]
+    (segmgen/define-segment pkg-build current-segm-id current-source-file
+      (^Consumer fn ^void [^ClassBuilder cb]
+       (dotimes [i end-of-segment-elements]
+         (let [elem (.get segment-elements i)]
+           (when (codegen/class-element-emitter? elem)
+             (codegen/emit-class-element cb elem)))))
+      (^Consumer fn ^void [^CodeBuilder xb]
+       (dotimes [i end-of-segment-elements]
+         (let [elem (.get segment-elements i)]
+           (when (instance? Insn elem)
+             (codegen/emit-code xb elem))))))
+    
+    ;; revert back to requested state & move to next segment
+    (set! globals then-globals)
+    (set! imports then-imports)
+    (.clear segment-elements)
+    (set! current-segm-id (inc current-segm-id))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -71,32 +120,37 @@
     (letfn [(mk-nmsp-builder ^NamespaceBuilder [^String ns-str]
               (let [source-file nil
                     pkg-build (loader/mk-package-builder loader ns-str)
-                    first-segm (segmgen/mk-first-segment ns-str source-file
-                                                         pkg-build)
-                    ef (codegen/mk-code-generator first-segm)]
-                (NmspBuilderImpl. this ns-str ef (.lookup-in-pkg pkg-build)
-                                  {} known-ns ns-alias imports)))
+                    segment-elements (ArrayList.)
+                    ef (codegen/mk-code-generator
+                        segment-elements
+                        (loader/resolve-rt-class loader rt/StaticFn))
+                    globals {}]
+                (NmspBuilderImpl. this ns-str ef segment-elements pkg-build
+                                  globals known-ns ns-alias imports
+                                  source-file segmgen/first-segm-id)))
             
-      (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]
-                       (-> (reduce namespace/parse-top-level-form
-                                   (mk-nmsp-builder ns-str)
-                                   ns-forms)
-                           (NamespaceBuilder/.finish)))]
+            (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]
+              (-> (reduce namespace/parse-top-level-form
+                          (mk-nmsp-builder ns-str)
+                          ns-forms)
+                  (NamespaceBuilder/.finish)))]
       
-    (let [a (new ProvidedNamespace/1 (alength ns-strs))]
-      (dotimes [i (alength a)]
-        (let [ns-str (aget ns-strs i)]
-          (->> (or (known-ns ns-str)
-                   (when-some [ns-forms (ns-form-map ns-str)]
-                     (let [pr-nmsp (build-namespace ns-str ns-forms)]
-                       (set! known-ns (assoc known-ns ns-str pr-nmsp))
-                       pr-nmsp)))
-               (aset a i))))
-      a))))
+      (let [a (new ProvidedNamespace/1 (alength ns-strs))]
+        (dotimes [i (alength a)]
+          (let [ns-str (aget ns-strs i)]
+            (->> (or (known-ns ns-str)
+                     (when-some [ns-forms (ns-form-map ns-str)]
+                       (let [pr-nmsp (build-namespace ns-str ns-forms)]
+                         (set! known-ns (assoc known-ns ns-str pr-nmsp))
+                         pr-nmsp)))
+                 (aset a i))))
+        a))))
 
 ;;; No class files are written to disk if `dest-dir` is nil.
 (defn mk-universe ^NamespaceProvider [^map ns-form-map ^Loader loader]
-  (let [provided-ns {}
+  (let [provided-ns (reduce dissoc
+                            {cfg/core-lib (ProvidedNamespace. cfg/core-lib)}
+                            (keys ns-form-map))
         ns-alias {}
         imports {}]
     (UniverseBuilder. loader ns-form-map provided-ns ns-alias imports)))

@@ -72,33 +72,33 @@
          (nmsp '[(ns tinyclj.core (:refer-clojure :none))
                  (tinyclj.lang.RT/setCoreLookup (java.lang.invoke.MethodHandles/lookup))]))))
 
-;; (deftest static-method-wrapper
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "cons" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[STATIC . "rcons~2"
-;;                      "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "rcons~2"
-;;                      "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
-;;              ["LOCAL 0: Object seq"]
-;;              ["LOCAL 1: Object x"]
-;;              (ALOAD_1)
-;;              (ALOAD_0)
-;;              (INVOKESTATIC RT "cons" "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
-;;              (ARETURN)]
+(deftest static-method-wrapper
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "rcons~2"
+                     "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
+             ["LOCAL 0: Object seq"]
+             ["LOCAL 1: Object x"]
+             (ALOAD_1)
+             (ALOAD_0)
+             (INVOKESTATIC RT "cons" "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "cons" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "rcons~2"
+                     "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;"]]])
+             (ARETURN)]
             
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (def cons (fn* rcons ^clojure.lang.ISeq [seq x]
-;;                                 (clojure.lang.RT/cons x seq)))]))))
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def cons (fn* rcons ^clojure.lang.ISeq [seq x]
+                                (clojure.lang.RT/cons x seq)))]))))
 
 ;; (deftest static-method-wrapper-elided
 ;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")

@@ -1,0 +1,54 @@
+(ns tcljx.parser.fn
+  (:require
+   (tcljx [model :as model])
+   (tcljx.parser [wrong :as wrong] [syntax :as syntax] [context :as context]
+                 [signature :as signature]))
+  (:import
+   (tcljx.model Expr ArityType FnLiteral Scope ExprFactory)
+   (java.lang.constant DirectMethodHandleDesc)))
+
+#_(definterface ArityMethod
+  (at ^ArityType [])
+
+  ;; The "external" method and the "implementation" method differ if
+  ;; there is a bridge method mapping vararg `Object...` to variadic
+  ;; `ISeq`.
+  (load-mh-ext ^DirectMethodHandleDesc [])
+  (load-mh-impl ^DirectMethodHandleDesc []))
+
+#_(deftype ArityMethodImpl [^ArityType at
+                          ^DirectMethodHandleDesc load-mh-ext
+                          ^DirectMethodHandleDesc load-mh-impl]
+  java.lang.Record
+  ArityMethod)
+
+(deftype FnLiteralImpl [^String mangled-name
+                        ^ArityType/1 arity-types
+                        ^Expr/1 arity-bodies]
+  java.lang.Record
+  FnLiteral)
+
+;;; ------------------------------------------------------------------------
+
+(def mk-fn-literal* FnLiteralImpl/new)
+(defn mk-fn-literal ^FnLiteral [^ExprFactory ef ^String mangled-name
+                                ^ArityType at ^Expr body]
+  (mk-fn-literal* mangled-name
+                  (doto (new ArityType/1 1) (aset 0 at))
+                  (doto (.new-array ef 1) (aset 0 body))))
+
+(defn parse-arity-body ^Expr [^Scope scope ^seq error-context
+                              ^ArityType at ^seq body]
+  (let [ef (.expr-factory scope)
+        pbnds (signature/parameters scope at)]
+    (model/progn ef pbnds (-> (context/with-local-bindings scope pbnds)
+                              (context/parse-forms error-context body)))))
+
+(defn parse-fn* ^Expr [^Scope scope [_ fn-nm paramv & body :as ^seq form]]
+  (let [fn-nm (syntax/simple-symbol-str fn-nm)
+        mangled-nm (context/pick-unique-name scope fn-nm)
+        at (signature/parse-arity-type scope paramv form)
+        code (parse-arity-body scope form at body)
+        ef (.expr-factory scope)]
+    (.new-function ef (mk-fn-literal ef mangled-nm at code))))
+

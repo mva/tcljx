@@ -31,7 +31,7 @@
 ;; ;; descriptors, increasing the pressure on the constant pool.
 ;; (def enable-local-variables true)
 
-
+(def no-line-number 0)
 
 (def core-lib "tinyclj.core")
 ;; (def core-lib-sym (symbol nil core-lib))

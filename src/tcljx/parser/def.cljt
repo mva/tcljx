@@ -13,14 +13,14 @@
           (new-def ^Expr [^String nm ^seq init-forms]
             ;; pre: `init-forms` is nil when empty
             ;; post: throws `wrong` when outside namespace context
-            (let [init (first init-forms)
-                  init-x (when (some? init-forms)
-                           (or (when (symbol? init)
-                                 (aliased-def init))
-                               (context/parse-form scope init)))
-                  nmsp (context/namespace-builder scope)]
-              (.add-def nmsp nm (-> (.expr-factory scope) 
-                                    (.new-def (.ns-str nmsp) nm init-x)))))
+            (let [nmsp (context/namespace-builder scope)
+                  ef (.expr-factory scope)]
+              (if (some? init-forms)
+                (let [init (first init-forms)]
+                  (if-some [bnd (when (symbol? init) (aliased-def init))]
+                    (.new-def-alias ef nmsp nm bnd)
+                    (.new-def-init ef nmsp nm (context/parse-form scope init))))
+                (.new-def-init ef nmsp nm nil))))
           (assign-to-def ^Expr [^Binding bnd ^seq init-forms]
             (let [init (syntax/some-first init-forms)]
               (-> (.expr-factory scope)

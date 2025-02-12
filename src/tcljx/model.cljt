@@ -1,34 +1,110 @@
 (ns tcljx.model
-  (:require (tcljx [config :as cfg])))
+  (:require (tcljx [config :as cfg]))
+  (:import (java.lang.constant ConstantDescs)
+           (java.util Arrays)))
 
-(definterface Type
+#_(definterface Type
   )
 
-(definterface Expr
-  )
+;;; Right now, line numbers are only written to decorate stack traces.
+;;; A bytecode instruction must emit a line number pseudo instruction
+;;; before its own opcode only if an exception may be raised during
+;;; the opcode's execution.
+(definterface CodeEmitter
+  (emit-code ^void [^java.lang.classfile.CodeBuilder xb ^int line]))
+
+;;; A named entity on the level of the code generator that exists at
+;;; runtime.  Exposes additional operations beyond "emit code that
+;;; produces this entity's value".  The code emitted by Entity
+;;; itself (if any) usually only establishes the entity without
+;;; putting a value on the operand stack.  FIXME... Handle constant
+;;; value as Entity?  Then: "The exception are loadable constant
+;;; values, where establishing the value *does* push it onto the
+;;; stack."
+;;;
+;;; Implementation note: To ease certain code generation patterns,
+;;; identity of Entity instances is important.  Every runtime entity
+;;; should be mirrored by at most one instance of Entity during
+;;; compilation.
+(definterface Entity :extends [CodeEmitter])
+
+;;; The parser works with opaque instances of Expr exclusively.  An
+;;; Expr gives a very restricted view on whatever data the code
+;;; generator keeps around to do its job, implemented by the generator
+;;; class Insn).  In particular, Expr does not expose the expression's
+;;; type.
+(definterface Expr         ;FIXME... turn this into an abstract class?
+  ;; If this expression is backed by a runtime entity, then return it.
+  ;; Otherwise, return nil.
+  (entity ^Entity []))
+
+(def entity Expr/.entity)
+(defn require-entity ^Entity [^Expr x]
+  (java.util.Objects/requireNonNull (entity x)))
 
 ;;; ------------------------------------------------------------------------
 
-(definterface Binding :extends [Expr]
+;;; A binding represents the partial evaluation to a runtime named
+;;; entity.  Depending on the context it is used to detect aliasing of
+;;; one name to another, to identify a macro expansion form, and to
+;;; produce the bound value of the binding.
+(definterface Binding ;FIXME... change this name once picture becomes clearer
+  :extends [Entity]
   (namespace ^String [])                ;non-nil for namespace def
   (name ^String [])
-  (init ^Expr []))                      ;Binding if this is an alias
+  (init ^Expr [])                       ;Binding if this is an alias
+  (bound-value ^Expr []))
 
 (defn binding? ^boolean [^Expr x]
-  (instance? Binding x))
+  (instance? Binding (.entity x)))
 (defn def? ^boolean [^Binding bnd]
   (some? (.namespace bnd)))
 
-(defn bound-name ^symbol [^Binding bnd]
+(defn binding-name ^symbol [^Binding bnd] ;for error messages
   (symbol (.namespace bnd) (.name bnd)))
+
+
+(definterface Parameter
+  :extends [Binding]
+  (type ^Class []))
+
+;;; Description of an arity's signature.  Basically the information
+;;; encoded in an `fn` parameter vector, with the parameter names
+;;; being optional.
+(definterface ArityType
+  ;; The arity's return type.  In case of `auto-return-type`, this is
+  ;; replaced with the arity body's result type.
+  (return-type ^Class [])
+
+  ;; This is the "internal" parameter list that is used to parse and
+  ;; compile the arity.  That is, for the variadic case the last/rest
+  ;; parameter is of type `ISeq`.
+  (parameter-types ^Class/1 [])
+  (parameter-type ^Class [^int i])
+  
+  ;; Number of parameters.
+  (parameter-count ^int [])
+
+  ;; The names of the parameters if the arity is being compiled from
+  ;; source.  For an imported function this is nil.
+  (parameter-names ^String/1 [])
+  (parameter-name ^String [^int i]))
+
+(definterface FnLiteral
+  :extends [Entity]
+  (mangled-name ^String [])
+  (arity-types ^ArityType/1 [])
+  (arity-bodies ^Expr/1 []))
 
 ;;; If `x` is a binding, then return the very first non-aliasing
 ;;; binding that defines its value.  Otherwise, return nil.
 #_(defn root ^Binding [^Expr x]
-  (loop [^Binding bnd nil, x x]
-    (if (binding? x)
-      (let [bnd ^Binding x] (recur bnd (.init bnd)))
-      bnd)))
+    (loop [^Binding bnd nil, x x]
+      (if (binding? x)
+        (let [bnd ^Binding x] (recur bnd (.init bnd)))
+        bnd)))
+
+;;; ------------------------------------------------------------------------
 
 ;;; Represents the current state of globals and namespace aliases at
 ;;; this point, and the set of classes defined in the JVM classloader
@@ -45,67 +121,20 @@
   ;; its namespace qualified equivalent.  Returns nil if there is no
   ;; such global name at this point in the namespace.
   (lookup-global-qname ^symbol [^String nm])
-  
-  (lookup-class ^Class [^String nm])    ;nil if not found
+
+  ;; Look up class by alias or by name.  May cache resolved class
+  ;; names for the scope of the namespace.  Returns nil if not found.
+  (lookup-class ^Class [^String nm])
   
   ;; Returns the binding representing the def form for `nm` in
   ;; namespace `nmsp`, or nil if no such binding exists.  Use nil as
   ;; `nmsp` to refer to the current namespace.
-  (lookup-def ^Binding [^String nmsp ^String nm]))
+  (lookup-def ^Binding [^String nmsp ^String nm])
 
-;;; ------------------------------------------------------------------------
-
-;;; Threading: Confined to a single thread, either one parsing a
-;;; function or to the thread parsing the non-function parts of a
-;;; namespace.
-(definterface ExprFactory
-  (new-array ^Expr/1 [^int n])
-  (line-number ^Expr [^Integer line ^Expr x])
-  (constant ^Expr [value])
-  (progn ^Expr [^Expr/1 xs])
-
-  ;; ### bindings
-  
-  ;; `init` is nil if no intial value is provided.
-  (new-def ^Expr [^String nmsp ^String nm ^Expr init])
-  (assignment ^Expr [^Binding bnd ^Expr value])
-  (bound-value ^Expr [^Binding bnd])
-
-  ;; ### interop
-
-  ;; Invoke static public method or field `mnm` of class `owner`.
-  ;; Note: Invoking a field actually means to invoke the field's value
-  ;; as a function, instead of just getting its value.
-  (invoke-static-member ^Expr [^Class owner ^String mnm ^Expr/1 args])
-
-  ;; ### misc
-  
-  ;; For a namespace's `clinit` method, add one of possibly many void
-  ;; expressions run as part the the namespace initialization
-  ;; sequence.
-  (append-namespace-init ^void [^Expr x])
-  
-  (mk-expr ^Expr [form]))
-
-(definterface CodeGenerator
-  :extends [ExprFactory]
-  (emit ^void []))
-
-(definterface Scope
-  (parse-form ^Expr [form])
-
-  ;; Frequency of change: very low.
-  (resolver ^Resolver [])
-
-  ;; Frequency of change: does not change at all.
-  (expr-factory ^ExprFactory [])
-
-  ;; Maps simple name string to its associated binding.  The map can
-  ;; be incomplete if a namespace `def` was parsed after creation of
-  ;; the scope instance.  In this case, a second lookup using
-  ;; `resolver` must be done to get an accurate picture of all `def`s.
-  ;; Frequency of change: moderate.
-  (bindings* ^map []))
+  ;; Generates unique names for fn* and reify* instances within a
+  ;; given namespace.  `dflt-nm` of nil means function or interface
+  ;; function.
+  (pick-unique-name ^String [^String dflt-nm]))
 
 ;;; ------------------------------------------------------------------------
 
@@ -159,5 +188,74 @@
   (process-init-form ^NamespaceBuilder [form])
   (finish ^ProvidedNamespace []))
 
+(definterface SegmentBuilder
+  (commit-segment-and-revert [^int end-of-segment-elements
+                              ^map then-globals
+                              ^map then-imports]))
+
 (defn ns-sym ^symbol [^NamespaceBuilder nmsp]
   (symbol nil (.ns-str nmsp)))
+
+;;; ------------------------------------------------------------------------
+
+;;; Threading: Confined to a single thread, either one parsing a
+;;; function or to the thread parsing the non-function parts of a
+;;; namespace.
+(definterface ExprFactory
+  (new-array ^Expr/1 [^int n])
+  (empty ^Expr [])
+  (line-number ^Expr [^Integer line ^Expr x])
+  (constant ^Expr [value])
+  (progn ^Expr [^Expr/1 xs])
+
+  ;; ### bindings
+
+  ;; Adds the new binding to the namespace.  Returns an expression
+  ;; that initializes the binding with its value (if any).  Pass an
+  ;; `init` of nil if no intial value is provided.
+  (new-def-init ^Expr [^NamespaceBuilder nmsp ^String nm ^Expr init])
+  (new-def-alias ^Expr [^NamespaceBuilder nmsp ^String nm ^Binding other])
+  (assignment ^Expr [^Binding bnd ^Expr value])
+
+
+  ;; ### functions
+  (parameter ^Expr [^int param-no ^String name ^Class type])
+  (new-function ^Expr [^FnLiteral fn-literal])
+  
+  ;; ### interop
+
+  ;; Invoke static public method or field `mnm` of class `owner`.
+  ;; Note: Invoking a field actually means to invoke the field's value
+  ;; as a function, instead of just getting its value.
+  (invoke-static-member ^Expr [^Class owner ^String mnm ^Expr/1 args])
+
+  ;; ### misc
+  
+  (mk-expr ^Expr [form]))
+
+(defn progn* ^Expr [^ExprFactory ef & ^Expr/1 xs]
+  (.progn ef xs))
+(defn progn ^Expr [^ExprFactory ef ^Expr/1 statements ^Expr x]
+  (let [a (Arrays/copyOf statements (inc (alength statements)))]
+    (aset a (alength statements) x)
+    (.progn ef a)))
+
+(defn aconst-null ^Expr [^ExprFactory ef]
+  (.constant ef ConstantDescs/NULL))
+
+(definterface Scope
+  (parse-form ^Expr [form])
+
+  ;; Frequency of change: very low.
+  (resolver ^Resolver [])
+
+  ;; Frequency of change: does not change at all.
+  (expr-factory ^ExprFactory [])
+
+  ;; Maps simple name string to its associated binding.  The map can
+  ;; be incomplete if a namespace `def` was parsed after creation of
+  ;; the scope instance.  In this case, a second lookup using
+  ;; `resolver` must be done to get an accurate picture of all `def`s.
+  ;; Frequency of change: moderate.
+  (bindings* ^map [])
+  (with-bindings* ^Scope [^map bindings]))

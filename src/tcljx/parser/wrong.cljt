@@ -155,11 +155,11 @@
 ;;                     (some? opt-owner) (str " in " (interop/type-symbol opt-owner)))
 ;;                   data)))
 
-;; (defn class-not-found [x]
-;;   (if (instance? NoClassDefFoundError x)
-;;     (class-not-found (ex-message ^NoClassDefFoundError x))
-;;     (let [sym (symbol x)]               ;idempotent
-;;       (unresolved "class not found: " sym))))
+(defn class-not-found [x]
+  (if (instance? NoClassDefFoundError x)
+    (class-not-found (ex-message ^NoClassDefFoundError x))
+    (let [sym (symbol x)]               ;idempotent
+      (unresolved "class not found: " sym))))
 
 
 ;; (defn file [^java.nio.file.Path rpath]

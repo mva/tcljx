@@ -1,18 +1,6 @@
-(ns tcljx.parser.interop)
-
-(defn get-tag [^map form-meta]
-  (when (some? form-meta)
-    ;; Note: using `valAt` is slightly more direct than IFn.invoke()
-    ;; or RT.get().
-    (.valAt form-meta :tag nil)))
-
-;; (defn spec-dimensions ^int [^Symbol tp] ;zero if not name of array type
-;;   (when (some? (namespace tp))
-;;     (let [nm (name tp)]
-;;       (when (= (.length nm) 1)
-;;         (let [n (- (int (.charAt nm 0)) (int \0))]
-;;           (when (<= 1 n 9)
-;;             n))))))
+(ns tcljx.parser.interop
+  (:require [tcljx.model :as model])
+  (:import (tcljx.model Resolver)))
 
 (defn type-dimensions ^int [^Class tp]
   (loop [n 0, tp tp]
@@ -20,10 +8,10 @@
       (recur (inc n) (.componentType tp))
       n)))
 
-;; (defn array-type-of-class ^Class [^Class cl ^int array-rank]
-;;   (if (zero? array-rank)
-;;     cl
-;;     (recur (.arrayType cl) (dec array-rank))))
+(defn array-type-of-class ^Class [^Class cl ^int array-rank]
+  (if (zero? array-rank)
+    cl
+    (recur (.arrayType cl) (dec array-rank))))
 
 (defn type-symbol ^symbol [^Class tp]
   (let [n (type-dimensions tp)]
@@ -34,3 +22,17 @@
                   (recur (.componentType cl))
                   (.getName cl)))
               (str n)))))
+
+;;; Returns nil if lookup fails.
+(defn lookup-type ^Class [^Resolver rsv ^symbol tp]
+  (letfn [(spec-dimensions ^int [^String nm] ;zero if not name of array type
+            (when (= (.length nm) 1)
+              (let [n (- (int (.charAt nm 0)) (int \0))]
+                (when (<= 1 n 9)
+                  n))))]
+    (let [nm (name tp)]
+      (if-some [nmsp (namespace tp)]
+        (let [n (spec-dimensions nm)]
+          (when (pos? n)
+            (array-type-of-class (.lookup-class rsv nmsp) n)))
+        (.lookup-class rsv nm)))))

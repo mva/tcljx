@@ -1,9 +1,9 @@
 (ns tcljx.parser.form
   (:require
    (tcljx [model :as model])
-   (tcljx.parser [meta :as meta] [interop :as interop] [wrong :as wrong]
+   (tcljx.parser [meta :as meta] [wrong :as wrong] [signature :as signature]
                  [syntax :as syntax] [context :as context] [def :as def]
-                 [constant :as constant]))
+                 [fn :as fn] [constant :as constant]))
   (:import
    (tcljx.model Resolver ExprFactory Expr Scope)
    (clojure.lang IMeta)))
@@ -57,6 +57,7 @@
                   (if (nil? nmsp)
                     (case nm
                       "def" (def/parse-def this form)
+                      "fn*" (fn/parse-fn* this form)
                       "." (parse-dot form)
                       #_else (.mk-expr expr-factory form))
 
@@ -74,7 +75,7 @@
               (wrong/unresolved "undefined symbol " sym))
             (parse-symbol ^Expr [^symbol sym] ;discards meta
               (if-some [bnd (context/lookup this sym)]
-                (-> expr-factory (.bound-value bnd))
+                (.bound-value bnd)
                 (wrong-unresolved sym)))
             
             (apply-type-hint ^Expr [^Expr x form-tag] ;pre: (some? form-tag)
@@ -82,7 +83,7 @@
 
       (if (instance? IMeta form)
         (let [form-meta (.meta ^IMeta form)
-              form-tag (interop/get-tag form-meta)]
+              form-tag (signature/get-tag form-meta)]
           (-> (cond
                 ;; reference to global def, local binding, defined
                 ;; class, or instance field (when in a deftype)
@@ -101,6 +102,9 @@
         
         ;; keyword, pattern, number, character, string, boolean, nil,
         ;; or (via expansion) a class instance
-        (constant/parse-constant this form)))))
+        (constant/parse-constant this form))))
+
+  (with-bindings* [_ bindings]
+    (ScopeImpl. expr-factory resolver bindings)))
 
 (def mk-scope ScopeImpl/new)

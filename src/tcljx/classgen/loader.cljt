@@ -61,7 +61,11 @@
     (Loader. dest-dir dyn-ld (get-rt-lookup app-ld) class-sink
              (ClassHierarchyResolver/ofResourceParsing dyn-ld))))
 
-(deftype PackageBuilder [^Path pkg-dir
+(defn resolve-rt-class ^Class [^Loader loader ^ClassDesc cld]
+  (.resolveConstantDesc cld (.rt-lookup loader)))
+
+(deftype PackageBuilder [^String pkg-name
+                         ^Path pkg-dir
                          ^MethodHandles$Lookup lookup-in-pkg
                          ^Consumer class-sink
                          ^ClassHierarchyResolver chr-from-file
@@ -79,7 +83,7 @@
   (let [pkg-dir (files/prepare-package-directory (.dest-dir loader) ns-str)
         lookup-in-pkg (beachhead/mk-lookup-in-pkg (.rt-lookup loader)
                                                   (.dyn-ld loader) ns-str)]
-    (PackageBuilder. pkg-dir lookup-in-pkg (.class-sink loader)
+    (PackageBuilder. ns-str pkg-dir lookup-in-pkg (.class-sink loader)
                      (.chr-from-file loader) (ConcurrentHashMap.))))
 
 ;;; For future class building, declare that `cld` is an interface
@@ -95,74 +99,92 @@
   (.put (.chr-class-map pkg-build) cld
         (ClassHierarchyResolver$ClassHierarchyInfo/ofClass super-class)))
 
-(deftype ClassBytes [^ClassDesc this-class ^ClassDesc super-class
-                     ^byte/1 class-bytes]
+;;; ------------------------------------------------------------------------
+
+(deftype ClassBytes [^ClassDesc this-class
+                     ^ClassDesc super-class
+                     ^byte/1 class-bytes
+                     ^Class defined-class]
   java.lang.Record)
 
-(letfn [(class-file-of ^ClassFile [^ClassHierarchyResolver dyn-chr]
-          (ClassFile/of
-           java.lang.classfile.ClassFile$DeadCodeOption/KEEP_DEAD_CODE
-           (java.lang.classfile.ClassFile$ClassHierarchyResolverOption/of dyn-chr)))
+(defn- class-file-of ^ClassFile [^ClassHierarchyResolver dyn-chr]
+  (ClassFile/of
+   java.lang.classfile.ClassFile$DeadCodeOption/KEEP_DEAD_CODE
+   (java.lang.classfile.ClassFile$ClassHierarchyResolverOption/of dyn-chr)))
 
-        (with-version ^ClassBuilder [^ClassBuilder cb]
-          (let [major ClassFile/JAVA_17_VERSION
-                minor 0 #_ClassFile/PREVIEW_MINOR_VERSION]
-            (.withVersion cb major minor)))
+(defn- with-version ^ClassBuilder [^ClassBuilder cb]
+  (let [major ClassFile/JAVA_17_VERSION
+        minor 0 #_ClassFile/PREVIEW_MINOR_VERSION]
+    (.withVersion cb major minor)))
 
-        (with-source-file ^ClassBuilder [^ClassBuilder cb ^String source-file]
-          (cond-> cb
-            (some? source-file)
-            (.with (java.lang.classfile.attribute.SourceFileAttribute/of source-file))))]
+(defn- with-source-file ^ClassBuilder [^ClassBuilder cb ^String source-file]
+  (cond-> cb
+    (some? source-file)
+    (.with (java.lang.classfile.attribute.SourceFileAttribute/of source-file))))
 
-  (defn build-and-write ^ClassBytes [^PackageBuilder pkg-build
-                                     ^ClassDesc this-class ^int flags
-                                     ^ClassDesc super-class ^String source-file
-                                     ^Consumer class-builder-handler]
-    (letfn [(internal-name ^String [^ClassDesc cld]
+(defn- build ^ClassBytes [^PackageBuilder pkg-build
+                          ^ClassDesc this-class ^int flags
+                          ^ClassDesc super-class ^String source-file
+                          ^Consumer class-builder-handler]
+  (let [cbh (^Consumer fn ^void [^ClassBuilder cb]
+             (.accept class-builder-handler
+                      (-> (with-version cb)
+                          (.withFlags flags)
+                          (.withSuperclass super-class)
+                          (with-source-file source-file))))]
+    (ClassBytes. this-class super-class
+                 (.build (class-file-of pkg-build) this-class cbh) nil)))
+
+(defn- write ^ClassBytes [^ClassBytes cbs ^PackageBuilder pkg-build]
+  (when-some [pkg-dir (.pkg-dir pkg-build)]
+    (let [fnm (str (-> cbs .this-class .displayName) files/class-suffix)]
+      (with-open [w (Files/newOutputStream (.resolve pkg-dir fnm))]
+        (.write w (.class-bytes cbs)))))
+  cbs)
+
+(defn- define ^ClassBytes [^ClassBytes cbs ^PackageBuilder pkg-build]
+  (letfn [#_(internal-name ^String [^ClassDesc cld]
               (assert (not (.isArray cld)))
               (assert (not (.isPrimitive cld)))
               (let [desc (.descriptorString cld)]
                 ;; drop "L" and ";", but keep "/"
-                (.substring desc 1 (dec (.length desc)))))
-            (initialize-class ^Class [^Class cl]
-              ;; FIXME... disable this eventually? for development it
-              ;; is a valuable sanity check!
-              (let [nm (.getName cl)
-                    cl* (Class/forName nm true (.getClassLoader cl))]
-                (when-not (identical? cl cl*)
-                  (throw (IllegalStateException.
-                          (str "failed to define class " nm
-                               " over existing class from classpath"))))
-                cl))]
-      
-      (let [bs (->> (^Consumer fn ^void [^ClassBuilder cb]
-                     (.accept class-builder-handler
-                              (-> (with-version cb)
-                                  (.withFlags flags)
-                                  (.withSuperclass super-class)
-                                  (with-source-file source-file))))
-                    (.build (class-file-of pkg-build) this-class))
-            l (.lookup-in-pkg pkg-build)]
-        
-        (when-some [pkg-dir (.pkg-dir pkg-build)]
-          (let [clnm (.displayName this-class)
-                fnm (str clnm files/class-suffix)]
-            (with-open [w (Files/newOutputStream (.resolve pkg-dir fnm))]
-              (.write w bs))))
+                (.substring desc 1 (dec (.length desc)))))]
 
-        (initialize-class (.defineClass l bs))
+    (let [l (.lookup-in-pkg pkg-build)
+          cl (.defineClass l (.class-bytes cbs))
+          cbs (ClassBytes. (.this-class cbs) (.super-class cbs)
+                           (.class-bytes cbs) cl)]
+      #_                           ;FIXME... is this still true?  
+      (-> (try
+            (.defineClass l bs)
+            (catch NoClassDefFoundError _
+              ;; happens for example
+              ;; with "pkg/ns0/n2$n2-n1$n2-n1-n0" from test case
+              ;; tcljc.closure-test/nested
+              (.findClass l (.replace (internal-name this-class) "/" ".")))))
 
-        #_                             ;FIXME... is this still true?  
-        (-> (try
-              (.defineClass l bs)
-              (catch NoClassDefFoundError _
-                ;; happens for example
-                ;; with "pkg/ns0/n2$n2-n1$n2-n1-n0" from test case
-                ;; tcljc.closure-test/nested
-                (.findClass l (.replace (internal-name this-class) "/" "."))))
-            (initialize-class))
+      (when-some [sink (.class-sink pkg-build)]
+        (.accept sink cbs)
+        cbs))))
 
-        (let [cbs (ClassBytes. this-class super-class bs)]
-          (when-some [sink (.class-sink pkg-build)]
-            (.accept sink cbs)
-            cbs))))))
+(defn- initialize ^ClassBytes [^ClassBytes cbs]
+  ;; FIXME... disable this eventually? for development it is a
+  ;; valuable sanity check!
+  (let [cl (.defined-class cbs)
+        nm (.getName cl)
+        cl* (Class/forName nm true (.getClassLoader cl))]
+    (when-not (identical? cl cl*)
+      (throw (IllegalStateException.
+              (str "failed to define class " nm
+                   " over existing class from classpath"))))
+    cbs))
+
+(defn bwdi ^ClassBytes [^PackageBuilder pkg-build
+                        ^ClassDesc this-class ^int flags
+                        ^ClassDesc super-class ^String source-file
+                        ^Consumer class-builder-handler]
+  (-> (build pkg-build this-class flags super-class source-file
+             class-builder-handler)
+      (write pkg-build)
+      (define pkg-build)
+      (initialize)))
