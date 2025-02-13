@@ -23,6 +23,7 @@
                           ^String ns-str
                           ^ExprFactory code-gen
                           ^ArrayList segment-elements ;added to by `code-gen`
+                          ^ArrayList pending-functions ;added to by `code-gen`
                           ^PackageBuilder pkg-build
                           ^:unsynchronized-mutable ^map globals
                           ^:unsynchronized-mutable ^map known-ns
@@ -80,6 +81,8 @@
                     (.bindings* scope) imports-at-start)
                    (context/parse-form scope form)))]
       (.add segment-elements expr)
+      (when-not (.isEmpty pending-functions)
+        (codegen/process-functions! segment-elements pending-functions))
       this))
 
   (finish [this]
@@ -121,12 +124,14 @@
               (let [source-file nil
                     pkg-build (loader/mk-package-builder loader ns-str)
                     segment-elements (ArrayList.)
+                    pending-functions (ArrayList.)
                     ef (codegen/mk-code-generator
-                        segment-elements
+                        segment-elements pending-functions
                         (loader/resolve-rt-class loader rt/StaticFn))
                     globals {}]
-                (NmspBuilderImpl. this ns-str ef segment-elements pkg-build
-                                  globals known-ns ns-alias imports
+                (NmspBuilderImpl. this ns-str ef
+                                  segment-elements pending-functions
+                                  pkg-build globals known-ns ns-alias imports
                                   source-file segmgen/first-segm-id)))
             
             (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]

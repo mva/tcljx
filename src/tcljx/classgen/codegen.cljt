@@ -5,7 +5,7 @@
                    [resolve :as resolve] [reflect :as reflect]
                    [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import
-   (tcljx.model Expr CodeEmitter Entity Parameter ExprFactory
+   (tcljx.model Expr CodeEmitter Entity Parameter FnLiteral ExprFactory
                 NamespaceBuilder)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc)
@@ -118,6 +118,22 @@
 
 ;;; ------------------------------------------------------------------------
 
+(defn process-functions! ^void [^ArrayList segment-elements
+                                ^ArrayList pending-functions]
+  (doseq [^FnLiteral fn-literal pending-functions]
+    (.add segment-elements
+          (^ClassElementEmitter fn [cb]
+           (let [at (aget (.arity-types fn-literal) 0)
+                 body (aget (.arity-bodies fn-literal) 0)
+                 mnm (str (.mangled-name fn-literal) "~" (.parameter-count at))
+                 mtd (methodgen/mtd-of-arity-type at)]
+             (classfile/with-method-body-> cb
+               [mnm mtd classfile/acc-method-static]
+               (-> (emit-code body) (.areturn)))))))
+  (.clear pending-functions))
+
+;;; ------------------------------------------------------------------------
+
 (defn- arg-types ^Class/1 [^Insn/1 args]
   (let [a (new Class/1 (alength args))]
     (dotimes [i (alength a)]
@@ -127,6 +143,7 @@
 (def ^:private empty-insn-array (new Insn/1 0))
 
 (deftype ExprFactoryImpl [^ArrayList segment-elements ;shared with NmspBuilder
+                          ^ArrayList pending-functions ;shared with NmspBuilder
                           ^Class class-static-fn]
   ExprFactory
   (new-array [_ n]
@@ -155,15 +172,7 @@
   (parameter [_ param-no name type]
     (Insn. (ParameterImpl. param-no name type -1) Void/TYPE))
   (new-function [this fn-literal]
-    (.add segment-elements
-          (^ClassElementEmitter fn [cb]
-           (let [at (aget (.arity-types fn-literal) 0)
-                 body (aget (.arity-bodies fn-literal) 0)
-                 mnm (str (.mangled-name fn-literal) "~" (.parameter-count at))
-                 mtd (methodgen/mtd-of-arity-type at)]
-             (classfile/with-method-body-> cb
-               [mnm mtd classfile/acc-method-static]
-               (-> (emit-code body) (.areturn))))))
+    (.add pending-functions fn-literal)
     (let [owner (ClassDesc/of "pkg.ns0._10")]
       (constant class-static-fn (methodgen/static-fn-desc owner fn-literal))))
   
@@ -178,5 +187,6 @@
     nil))
 
 (defn mk-code-generator ^ExprFactory [^ArrayList segment-elements
+                                      ^ArrayList pending-functions
                                       ^Class class-static-fn]
-  (ExprFactoryImpl. segment-elements class-static-fn))
+  (ExprFactoryImpl. segment-elements pending-functions class-static-fn))
