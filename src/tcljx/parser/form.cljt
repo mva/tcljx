@@ -1,7 +1,7 @@
 (ns tcljx.parser.form
   (:require
    (tcljx [model :as model])
-   (tcljx.parser [meta :as meta] [wrong :as wrong] [signature :as signature]
+   (tcljx.parser [meta :as meta] [wrong :as wrong] [interop :as interop]
                  [syntax :as syntax] [context :as context] [def :as def]
                  [fn :as fn] [constant :as constant]))
   (:import
@@ -83,7 +83,7 @@
 
       (if (instance? IMeta form)
         (let [form-meta (.meta ^IMeta form)
-              form-tag (signature/get-tag form-meta)]
+              form-tag (interop/get-tag form-meta)]
           (-> (cond
                 ;; reference to global def, local binding, defined
                 ;; class, or instance field (when in a deftype)

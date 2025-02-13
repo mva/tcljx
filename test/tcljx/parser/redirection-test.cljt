@@ -8,7 +8,7 @@
 (ns tcljx.parser.redirection-test
   (:require
    (tcljx [model :as model])
-   (tcljx.parser [signature :as signature] [fn :as fn])
+   (tcljx.parser [interop :as interop] [fn :as fn])
    [tcljx.classgen.classdata :as classdata]
    [tcljx.alpha.ptest :refer :all]))
 
@@ -19,7 +19,7 @@
               (lookup-class [_ nm]
                 (get {"clojure.lang.ISeq" clojure.lang.ISeq
                       "clojure.lang.RT" clojure.lang.RT} nm)))
-        at (signature/parse-arity-type rsv arity-sig body-form)]
+        at (interop/parse-arity-type rsv arity-sig body-form)]
     (when-some [mhd (fn/redirection rsv at body-form)]
       (classdata/constant-desc mhd nil))))
 

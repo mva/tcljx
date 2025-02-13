@@ -6,7 +6,8 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.wrong
-  (:require (tcljx.parser [meta :as meta] [interop :as interop])
+  (:require (tcljx [type :as type])
+            (tcljx.parser [meta :as meta])
             [tcljx.alpha.ptest__style :as style]
             [tinyclj.string :as str])
   (:import (clojure.lang Symbol Named)))
@@ -105,7 +106,7 @@
 (defn str* ^String [x]
   (cond
     (nil? x) "nil"
-    (class? x) (str (interop/type-symbol x))
+    (class? x) (str (type/type-symbol x))
     (string? x) (pr-str x)
     :else (str x)))
 
@@ -152,7 +153,7 @@
 ;; (defn unresolved-interop [^String msg-prefix ^String nm ^Class opt-owner
 ;;                           ^map data]
 ;;   (throw (wr-info (cond-> (str msg-prefix (q (symbol nil nm)))
-;;                     (some? opt-owner) (str " in " (interop/type-symbol opt-owner)))
+;;                     (some? opt-owner) (str " in " (type/type-symbol opt-owner)))
 ;;                   data)))
 
 (defn class-not-found [x]

@@ -1,0 +1,22 @@
+(ns tcljx.type)
+
+(defn type-dimensions ^int [^Class tp]
+  (loop [n 0, tp tp]
+    (if (.isArray tp)
+      (recur (inc n) (.componentType tp))
+      n)))
+
+(defn array-type-of-class ^Class [^Class cl ^int array-rank]
+  (if (zero? array-rank)
+    cl
+    (recur (.arrayType cl) (dec array-rank))))
+
+(defn type-symbol ^symbol [^Class tp]
+  (let [n (type-dimensions tp)]
+    (if (zero? n)
+      (symbol nil (.getName tp))
+      (symbol (loop [cl tp]
+                (if (.isArray cl)
+                  (recur (.componentType cl))
+                  (.getName cl)))
+              (str n)))))

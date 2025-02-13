@@ -2,7 +2,7 @@
   (:require
    (tcljx [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.parser [wrong :as wrong] [syntax :as syntax] [context :as context]
-                 [signature :as signature]))
+                 [interop :as interop]))
   (:import
    (tcljx.model Expr ArityType FnLiteral Scope Resolver ExprFactory)
    (java.lang.constant MethodHandleDesc #_DirectMethodHandleDesc)))
@@ -45,7 +45,7 @@
               (loop [[arg :as args] form-args, i 0]
                 (if (< i (alength pnames))
                   (if (and (syntax/simple-symbol? arg)
-                           (nil? (signature/tag-of arg))
+                           (nil? (interop/tag-of arg))
                            (= (name arg) (aget pnames i)))
                     (recur (rest args) (inc i))
                     false)              ;does not match parameter list
@@ -63,7 +63,7 @@
     ;; many syntactically different ways to redirect to a method or
     ;; field, both static and virtual.  Every supported syntax variant
     ;; should have a matching test in tcljx.parser.redirection-test.
-    (when (and (nil? (signature/tag-of form)) (symbol? op))
+    (when (and (nil? (interop/tag-of form)) (symbol? op))
       (let [mhd (if (= op '.)
                   ;; dot form (. Classname member ...)
                   ;; dot form (. Classname (member ...))
@@ -73,7 +73,7 @@
                         (static-method cl (name member-sym) args))))
                   ;; invoke static (Classname/member ...)
                   (when-some [cl (resolves-to-class (namespace op))]
-                    (when (nil? (signature/param-tags-of op))
+                    (when (nil? (interop/param-tags-of op))
                       (static-method cl (name op) (rest form)))))]
         (when (some? mhd)
           (when (= (.invocationType mhd) (model/mtd-of-arity-type at))
@@ -99,12 +99,12 @@
 (defn parse-fn* ^Expr [^Scope scope [_ fn-nm paramv & body :as ^seq form]]
   (let [fn-nm (syntax/simple-symbol-str fn-nm)
         mangled-nm (context/pick-unique-name scope fn-nm)
-        at (signature/parse-arity-type (.resolver scope) paramv form)
-        pbnds (signature/parameter-bindings scope at)
+        at (interop/parse-arity-type (.resolver scope) paramv form)
+        pbnds (model/parameter-bindings scope at)
         code (parse-arity-body scope form pbnds body)
         redir (when (nil? (next body))
                 (let [form (first body)]
-                  (when (and (and  (seq? form)) (nil? (signature/tag-of form)))
+                  (when (and (and  (seq? form)) (nil? (interop/tag-of form)))
                     (redirection (.resolver scope) at form))))
         ef (.expr-factory scope)]
     (.new-function ef (mk-fn-literal ef mangled-nm at code redir))))

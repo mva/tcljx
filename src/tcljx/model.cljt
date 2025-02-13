@@ -276,3 +276,11 @@
   ;; Frequency of change: moderate.
   (bindings* ^map [])
   (with-bindings* ^Scope [^map bindings]))
+
+(defn parameter-bindings ^Expr/1 [^Scope scope ^ArityType at]
+  (let [ef (.expr-factory scope)
+        xs (.new-array ef (.parameter-count at))]
+    (dotimes [i (alength xs)]
+      (aset xs i (.new-parameter ef i (.parameter-name at i)
+                                 (.parameter-type at i))))
+    xs))

@@ -1,27 +1,10 @@
 (ns tcljx.parser.interop
-  (:require [tcljx.model :as model])
-  (:import (tcljx.model Resolver)))
-
-(defn type-dimensions ^int [^Class tp]
-  (loop [n 0, tp tp]
-    (if (.isArray tp)
-      (recur (inc n) (.componentType tp))
-      n)))
-
-(defn array-type-of-class ^Class [^Class cl ^int array-rank]
-  (if (zero? array-rank)
-    cl
-    (recur (.arrayType cl) (dec array-rank))))
-
-(defn type-symbol ^symbol [^Class tp]
-  (let [n (type-dimensions tp)]
-    (if (zero? n)
-      (symbol nil (.getName tp))
-      (symbol (loop [cl tp]
-                (if (.isArray cl)
-                  (recur (.componentType cl))
-                  (.getName cl)))
-              (str n)))))
+  (:require
+   (tcljx [type :as type] [model :as model])
+   (tcljx.parser [wrong :as wrong] [syntax :as syntax]))
+  (:import
+   (tcljx.model Resolver ArityType)
+   (clojure.lang IMeta)))
 
 ;;; Returns nil if lookup fails.
 (defn lookup-type ^Class [^Resolver rsv ^symbol tp]
@@ -34,5 +17,47 @@
       (if-some [nmsp (namespace tp)]
         (let [n (spec-dimensions nm)]
           (when (pos? n)
-            (array-type-of-class (.lookup-class rsv nmsp) n)))
+            (type/array-type-of-class (.lookup-class rsv nmsp) n)))
         (.lookup-class rsv nm)))))
+
+;;; ------------------------------------------------------------------------
+
+(defn get-tag [^map form-meta]
+  (when (some? form-meta)
+    ;; Note: using `valAt` is slightly more direct than IFn.invoke()
+    ;; or RT.get().
+    (.valAt form-meta :tag nil)))
+(defn tag-of ^symbol [form]
+  (when-some [tag (get-tag (meta form))]
+    (syntax/symbol tag)))
+(defn resolve-tag
+  (^Class [^Resolver rsv ^IMeta form]
+   (resolve-tag rsv form Object))
+  (^Class [^Resolver rsv ^IMeta form ^Class or-else]
+   (if-some [tag (tag-of form)]
+     (or (lookup-type rsv tag) (wrong/class-not-found tag))
+     or-else)))
+
+(defn get-param-tags [^map form-meta]
+  (when (some? form-meta)
+    (.valAt form-meta :param-tags nil)))
+(defn param-tags-of ^vector [form]
+  (when-some [ptags (get-param-tags (meta form))]
+    (syntax/vector ptags)))
+
+
+(defn parse-arity-type ^ArityType [^Resolver rsv paramv ^seq error-context]
+  (letfn [(type-of ^Class [^IMeta form]
+            (resolve-tag rsv form))]
+    (wrong/with-line-context error-context
+      (let [paramv (syntax/vector paramv)
+            n (count paramv)
+            ptypes (new Class/1 n)
+            pnames (new String/1 n)]
+        (assert (not= '& (nth paramv (- n 2) nil)))
+        (dotimes [i (alength ptypes)]
+          (let [param (nth paramv i)
+                psym (syntax/simple-symbol param)]
+            (aset ptypes i (type-of psym))
+            (aset pnames i (name psym))))
+        (tcljx.model.ArityTypeImpl. (type-of ^IMeta paramv) ptypes pnames)))))
