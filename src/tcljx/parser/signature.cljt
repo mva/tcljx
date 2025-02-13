@@ -1,33 +1,18 @@
 (ns tcljx.parser.signature
   (:require
-   [tcljx.model :as model]
+   (tcljx [model :as model] [reflect :as reflect])
    (tcljx.parser [interop :as interop] [wrong :as wrong] [syntax :as syntax]))
   (:import (tcljx.model ArityType Resolver Scope Expr)
            (clojure.lang IMeta)))
-
-(deftype ArityTypeImpl [^Class return-type
-                        ^Class/1 parameter-types
-                        ^String/1 parameter-names]
-  java.lang.Record
-  ArityType
-  (parameter-count [_]
-    (alength parameter-types))
-  (parameter-name [_ ^int i]
-    (aget parameter-names i))
-  (parameter-type [_ ^int i]
-    (aget parameter-types i)))
-
 
 (defn get-tag [^map form-meta]
   (when (some? form-meta)
     ;; Note: using `valAt` is slightly more direct than IFn.invoke()
     ;; or RT.get().
     (.valAt form-meta :tag nil)))
-
-(defn tag-of ^symbol [^IMeta form]
-  (when-some [tag (get-tag (.meta form))]
+(defn tag-of ^symbol [form]
+  (when-some [tag (get-tag (meta form))]
     (syntax/symbol tag)))
-
 (defn resolve-tag
   (^Class [^Resolver rsv ^IMeta form]
    (resolve-tag rsv form Object))
@@ -36,9 +21,17 @@
      (or (interop/lookup-type rsv tag) (wrong/class-not-found tag))
      or-else)))
 
-(defn parse-arity-type ^ArityType [^Scope scope paramv ^seq error-context]
+(defn get-param-tags [^map form-meta]
+  (when (some? form-meta)
+    (.valAt form-meta :param-tags nil)))
+(defn param-tags-of ^vector [form]
+  (when-some [ptags (get-param-tags (meta form))]
+    (syntax/vector ptags)))
+
+
+(defn parse-arity-type ^ArityType [^Resolver rsv paramv ^seq error-context]
   (letfn [(type-of ^Class [^IMeta form]
-            (-> (.resolver scope) (resolve-tag form)))]
+            (resolve-tag rsv form))]
     (wrong/with-line-context error-context
       (let [paramv (syntax/vector paramv)
             n (count paramv)
@@ -50,12 +43,12 @@
                 psym (syntax/simple-symbol param)]
             (aset ptypes i (type-of psym))
             (aset pnames i (name psym))))
-        (ArityTypeImpl. (type-of ^IMeta paramv) ptypes pnames)))))
+        (tcljx.model.ArityTypeImpl. (type-of ^IMeta paramv) ptypes pnames)))))
 
-(defn parameters ^Expr/1 [^Scope scope ^ArityType at]
+(defn parameter-bindings ^Expr/1 [^Scope scope ^ArityType at]
   (let [ef (.expr-factory scope)
         xs (.new-array ef (.parameter-count at))]
     (dotimes [i (alength xs)]
-      (aset xs i (.parameter ef i (.parameter-name at i)
-                             (.parameter-type at i))))
+      (aset xs i (.new-parameter ef i (.parameter-name at i)
+                                 (.parameter-type at i))))
     xs))

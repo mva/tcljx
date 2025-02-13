@@ -1,6 +1,6 @@
 (ns tcljx.model
-  (:require (tcljx [config :as cfg]))
-  (:import (java.lang.constant ConstantDescs)
+  (:require (tcljx [config :as cfg] [reflect :as reflect]))
+  (:import (java.lang.constant MethodHandleDesc MethodTypeDesc ConstantDescs)
            (java.util Arrays)))
 
 #_(definterface Type
@@ -90,11 +90,28 @@
   (parameter-names ^String/1 [])
   (parameter-name ^String [^int i]))
 
+(deftype ArityTypeImpl [^Class return-type
+                        ^Class/1 parameter-types
+                        ^String/1 parameter-names]
+  java.lang.Record
+  ArityType
+  (parameter-count [_]
+    (alength parameter-types))
+  (parameter-name [_ ^int i]
+    (aget parameter-names i))
+  (parameter-type [_ ^int i]
+    (aget parameter-types i)))
+
+(defn mtd-of-arity-type ^MethodTypeDesc [^ArityType at]
+  (MethodTypeDesc/of (reflect/describe-class (.return-type at))
+                     (reflect/describe-class* (.parameter-types at))))
+
 (definterface FnLiteral
   :extends [Entity]
   (mangled-name ^String [])
   (arity-types ^ArityType/1 [])
-  (arity-bodies ^Expr/1 []))
+  (arity-bodies ^Expr/1 [])
+  (arity-redirections ^MethodHandleDesc/1 []))
 
 ;;; If `x` is a binding, then return the very first non-aliasing
 ;;; binding that defines its value.  Otherwise, return nil.
@@ -219,7 +236,7 @@
 
 
   ;; ### functions
-  (parameter ^Expr [^int param-no ^String name ^Class type])
+  (new-parameter ^Expr [^int param-no ^String name ^Class type])
   (new-function ^Expr [^FnLiteral fn-literal])
   
   ;; ### interop

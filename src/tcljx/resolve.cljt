@@ -5,15 +5,9 @@
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
-(ns tcljx.classgen.resolve
-  (:require
-   #_[tcljc.javabase :as jb]
-   #_[tcljc.runtime :as rt])
+(ns tcljx.resolve
   (:import
-   (java.lang.constant #_DirectMethodHandleDesc #_DirectMethodHandleDesc$Kind
-                       #_MethodHandleDesc #_ConstantDescs)
-   (java.lang.reflect Method Constructor Executable Field Member Modifier)
-   #_(java.util Arrays)))
+   (java.lang.reflect Method Constructor Executable Field Member Modifier)))
 
 (defn same-class? ^boolean [^Class a ^Class b]
   (identical? a b))
@@ -97,7 +91,7 @@
 ;;; `ptags` of nil does not constrain arity or parameter types of
 ;;; constructors, methods, or virtual fields.  Returns nil if there is
 ;;; no match.
-(defn members [^boolean virtual? ^Class owner ^String mnm ^Class/1 ptags]
+(defn members ^seq [^boolean virtual? ^Class owner ^String mnm ^Class/1 ptags]
   (letfn [(parameters-match? ^boolean [^Class/1 ptags ^Class/1 ptypes]
             (loop [i (dec (alength ptypes))]
               (cond
@@ -147,3 +141,10 @@
           (when (or (nil? ptags) (zero? (alength ptags)))
             (when-some [f (field-exact opts owner mnm)]
               (cons f nil)))))))
+
+(defn methods ^seq [^boolean virtual? ^Class owner ^String mnm ^Class/1 ptags]
+  (filter #(instance? Method %) (members virtual? owner mnm ptags)))
+(defn method [^boolean virtual? ^Class owner ^String mnm ^Class/1 ptags]
+  (let [ms (methods virtual? owner mnm ptags)]
+    (when (nil? (next ms))
+      (first ms))))

@@ -1,27 +1,10 @@
 (ns tcljx.classgen.runtime
+  #_(:require (tcljx.classgen [reflect :as reflect]))
   (:import
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc ConstantDescs
-                       DirectMethodHandleDesc$Kind)
-   (java.lang.reflect Method)))
-
-;;; FIXME... Does it make sense to use java.lang.ClassValue to cache
-;;; generated ClassDesc values?  The cache should be wiped (or shrunk,
-;;; or replaced with empty) after each build to prevent stale classes
-;;; from piling up in its key set.  Either use a simple redefinable
-;;; def or a scoped value for the ClassValue instance.
-(defn describe-class ^ClassDesc [^Class tp]
-  (.get (.describeConstable tp)))
-(defn describe-class* ^ClassDesc/1 [^Class/1 atp]
-  (let [a (new ClassDesc/1 (alength atp))]
-    (dotimes [i (alength a)]
-      (aset a i (describe-class (aget atp i))))
-    a))
+                       DirectMethodHandleDesc$Kind)))
 
 ;;; ------------------------------------------------------------------------
-
-(defn mtd-of-method ^MethodTypeDesc [^Method m]
-  (MethodTypeDesc/of (describe-class (.getReturnType m))
-                     (describe-class* (.getParameterTypes m))))
 
 (def mtd-void-string (MethodTypeDesc/of ConstantDescs/CD_void
                                         ConstantDescs/CD_String))

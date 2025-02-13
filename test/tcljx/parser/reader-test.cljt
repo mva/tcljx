@@ -22,8 +22,8 @@
     ns-str)
   (lookup-namespace [_ alias]
     (.valAt ns-alias-map alias nil))
-  (lookup-class [_ sym]
-    (.valAt import-map sym nil))
+  (lookup-class [_ nm]
+    (.valAt import-map nm nil))
   (lookup-global-qname [_ nm]
     (.valAt global-qname-map nm nil)))
 

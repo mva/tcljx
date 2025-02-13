@@ -1,0 +1,94 @@
+(ns tcljx.reflect
+  (:import
+   (java.lang.classfile ClassFile Opcode #_TypeKind ClassBuilder #_MethodBuilder
+                        CodeBuilder #_Label)
+   (java.lang.constant #_ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
+                       DirectMethodHandleDesc DirectMethodHandleDesc$Kind
+                       ConstantDescs)
+   #_(java.lang.invoke MethodHandle TypeDescriptor$OfField MethodHandles$Lookup)
+   (java.lang.reflect Method Constructor Field Member Modifier)))
+
+;;; FIXME... Does it make sense to use java.lang.ClassValue to cache
+;;; generated ClassDesc values?  The cache should be wiped (or shrunk,
+;;; or replaced with empty) after each build to prevent stale classes
+;;; from piling up in its key set.  Either use a simple redefinable
+;;; def or a scoped value for the ClassValue instance.
+(defn describe-class ^ClassDesc [^Class tp]
+  (.get (.describeConstable tp)))
+(defn describe-class* ^ClassDesc/1 [^Class/1 atp]
+  (let [a (new ClassDesc/1 (alength atp))]
+    (dotimes [i (alength a)]
+      (aset a i (describe-class (aget atp i))))
+    a))
+
+(defn mtd-of-method ^MethodTypeDesc [^Method m]
+  (MethodTypeDesc/of (describe-class (.getReturnType m))
+                     (describe-class* (.getParameterTypes m))))
+#_(defn mtd-of-constructor ^MethodTypeDesc [^Constructor c]
+  (MethodTypeDesc/of ConstantDescs/CD_void
+                     (describe-class* (.getParameterTypes c))))
+
+;;; ------------------------------------------------------------------------
+
+(letfn [(owner-desc ^ClassDesc [^Class owner]
+          (if (.isArray owner)
+            ConstantDescs/CD_Object
+            (describe-class owner)))
+        (method-kind ^DirectMethodHandleDesc$Kind [^Method m ^Class owner]
+          (let [static? (Modifier/isStatic (.getModifiers m))]
+            (if (.isInterface owner)
+              (if static?
+                DirectMethodHandleDesc$Kind/INTERFACE_STATIC
+                DirectMethodHandleDesc$Kind/INTERFACE_VIRTUAL)
+              (if static?
+                DirectMethodHandleDesc$Kind/STATIC
+                DirectMethodHandleDesc$Kind/VIRTUAL))))
+        (field-kind ^DirectMethodHandleDesc$Kind [^Field f]
+          (let [static? (Modifier/isStatic (.getModifiers f))]
+            (if static?
+              DirectMethodHandleDesc$Kind/STATIC_GETTER
+              DirectMethodHandleDesc$Kind/GETTER)))]
+
+  (defn mhd-of-field 
+    (^DirectMethodHandleDesc [^Class owner ^Field f]
+     (MethodHandleDesc/ofField (field-kind f) (owner-desc owner) (.getName f)
+                               (describe-class (.getType f)))))
+  (defn mhd-of-method ^DirectMethodHandleDesc [^Class owner ^Method m]
+    (MethodHandleDesc/ofMethod (method-kind m owner) (owner-desc owner)
+                               (.getName m) (mtd-of-method m)))
+  (defn mhd-of-constructor ^DirectMethodHandleDesc [^Class owner ^Constructor c]
+    (MethodHandleDesc/ofConstructor (owner-desc owner)
+                                    (describe-class* (.getParameterTypes c))))
+  
+  #_(defn mhd-of-member ^DirectMethodHandleDesc [^Class owner ^Member m]
+      (condp instance? m
+        Method (mhd-of-method owner m)
+        Field (mhd-of-field owner m)
+        Constructor (mhd-of-constructor owner m))))
+
+;;; ------------------------------------------------------------------------
+
+(defn invoke-member ^CodeBuilder [^CodeBuilder xb ^Class owner ^Member member]
+  (let [cld (describe-class owner)
+        static? (Modifier/isStatic (.getModifiers member))]
+    (condp instance? member
+      Method
+      (.invoke xb (if static? Opcode/INVOKESTATIC Opcode/INVOKEVIRTUAL) cld
+               (.getName member) (mtd-of-method member) (.isInterface owner))
+      Constructor
+      (assert false)
+      #_(let [c ^Constructor member]
+          (invoke-xref flags owner argv nil
+                       (mhd-of-constructor owner c) (.isVarArgs c) false))
+      Field
+      (assert false)
+      #_(let [f ^Field member
+              nat (.nameAndTypeEntry cp nm (.getType f))]
+          (.fieldAccess xb Opcode/GETFIELD
+                        (.fieldRefEntry cp owner nat))))))
+
+(defn invoke-member-type ^Class [^Class owner ^Member member]
+  (condp instance? member
+    Method (.getReturnType ^Method member)
+    Constructor owner
+    Field (.getType ^Field member)))

@@ -1,11 +1,11 @@
 (ns tcljx.parser.fn
   (:require
-   (tcljx [model :as model])
+   (tcljx [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.parser [wrong :as wrong] [syntax :as syntax] [context :as context]
                  [signature :as signature]))
   (:import
-   (tcljx.model Expr ArityType FnLiteral Scope ExprFactory)
-   (java.lang.constant DirectMethodHandleDesc)))
+   (tcljx.model Expr ArityType FnLiteral Scope Resolver ExprFactory)
+   (java.lang.constant MethodHandleDesc #_DirectMethodHandleDesc)))
 
 #_(definterface ArityMethod
   (at ^ArityType [])
@@ -24,31 +24,88 @@
 
 (deftype FnLiteralImpl [^String mangled-name
                         ^ArityType/1 arity-types
-                        ^Expr/1 arity-bodies]
+                        ^Expr/1 arity-bodies
+                        ^MethodHandleDesc/1 arity-redirections]
   java.lang.Record
   FnLiteral)
 
 ;;; ------------------------------------------------------------------------
 
+(defn redirection ^MethodHandleDesc [^Resolver rsv ^ArityType at
+                                     [op :as ^seq form]]
+  (letfn [(resolves-to-class ^Class [^String nm]
+            (when (and (some? nm) (nil? (.lookup-namespace rsv nm)))
+              (.lookup-class rsv nm)))
+          (dot-member-args ^seq [[_ _ & [x :as xs]]]
+            (let [[member :as tail] (if (and (= (count xs) 1) (seq? x)) x xs)]
+              (when (syntax/simple-symbol? member)
+                tail)))
+          (parameters-in-sequence? ^boolean [^seq form-args]
+            (let [pnames (.parameter-names at)]
+              (loop [[arg :as args] form-args, i 0]
+                (if (< i (alength pnames))
+                  (if (and (syntax/simple-symbol? arg)
+                           (nil? (signature/tag-of arg))
+                           (= (name arg) (aget pnames i)))
+                    (recur (rest args) (inc i))
+                    false)              ;does not match parameter list
+                  ;; number of arguments matches number of parameters,
+                  ;; and no pathological duplicate argument names
+                  (and (nil? (seq args)) (= form-args (distinct form-args)))))))
+          (static-method ^MethodHandleDesc [^Class owner ^String mnm ^seq args]
+            (when (parameters-in-sequence? args)
+              (when-some [m (resolve/method false owner mnm
+                                            (.parameter-types at))]
+                ;; FIXME... varargs flag must also match the arity signature
+                (reflect/mhd-of-method owner m))))]
+
+    ;; Important: Working on the syntax level is brittle.  There are
+    ;; many syntactically different ways to redirect to a method or
+    ;; field, both static and virtual.  Every supported syntax variant
+    ;; should have a matching test in tcljx.parser.redirection-test.
+    (when (and (nil? (signature/tag-of form)) (symbol? op))
+      (let [mhd (if (= op '.)
+                  ;; dot form (. Classname member ...)
+                  ;; dot form (. Classname (member ...))
+                  (when (syntax/simple-symbol? (second form))
+                    (when-some [cl (resolves-to-class (name (second form)))]
+                      (when-some [[member-sym & args] (dot-member-args form)]
+                        (static-method cl (name member-sym) args))))
+                  ;; invoke static (Classname/member ...)
+                  (when-some [cl (resolves-to-class (namespace op))]
+                    (when (nil? (signature/param-tags-of op))
+                      (static-method cl (name op) (rest form)))))]
+        (when (some? mhd)
+          (when (= (.invocationType mhd) (model/mtd-of-arity-type at))
+            mhd))))))
+
+;;; ------------------------------------------------------------------------
+
 (def mk-fn-literal* FnLiteralImpl/new)
 (defn mk-fn-literal ^FnLiteral [^ExprFactory ef ^String mangled-name
-                                ^ArityType at ^Expr body]
+                                ^ArityType at ^Expr body
+                                ^MethodHandleDesc redirection]
   (mk-fn-literal* mangled-name
                   (doto (new ArityType/1 1) (aset 0 at))
-                  (doto (.new-array ef 1) (aset 0 body))))
+                  (doto (.new-array ef 1) (aset 0 body))
+                  (doto (new MethodHandleDesc/1 1) (aset 0 redirection))))
 
 (defn parse-arity-body ^Expr [^Scope scope ^seq error-context
-                              ^ArityType at ^seq body]
-  (let [ef (.expr-factory scope)
-        pbnds (signature/parameters scope at)]
-    (model/progn ef pbnds (-> (context/with-local-bindings scope pbnds)
-                              (context/parse-forms error-context body)))))
+                              ^Expr/1 param-bindings ^seq body]
+  (model/progn (.expr-factory scope) param-bindings
+               (-> (context/with-local-bindings scope param-bindings)
+                   (context/parse-forms error-context body))))
 
 (defn parse-fn* ^Expr [^Scope scope [_ fn-nm paramv & body :as ^seq form]]
   (let [fn-nm (syntax/simple-symbol-str fn-nm)
         mangled-nm (context/pick-unique-name scope fn-nm)
-        at (signature/parse-arity-type scope paramv form)
-        code (parse-arity-body scope form at body)
+        at (signature/parse-arity-type (.resolver scope) paramv form)
+        pbnds (signature/parameter-bindings scope at)
+        code (parse-arity-body scope form pbnds body)
+        redir (when (nil? (next body))
+                (let [form (first body)]
+                  (when (and (and  (seq? form)) (nil? (signature/tag-of form)))
+                    (redirection (.resolver scope) at form))))
         ef (.expr-factory scope)]
-    (.new-function ef (mk-fn-literal ef mangled-nm at code))))
+    (.new-function ef (mk-fn-literal ef mangled-nm at code redir))))
 

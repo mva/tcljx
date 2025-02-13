@@ -1,8 +1,8 @@
 (ns tcljx.classgen.codegen
   (:require
-   (tcljx [config :as cfg] [model :as model])
+   (tcljx [config :as cfg] [model :as model] [resolve :as resolve]
+          [reflect :as reflect])
    (tcljx.classgen [classfile :as classfile] [runtime :as rt]
-                   [resolve :as resolve] [reflect :as reflect]
                    [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import
    (tcljx.model Expr CodeEmitter Entity Parameter FnLiteral ExprFactory
@@ -94,13 +94,11 @@
 
 (deftype ParameterImpl [^int param-no ^String name ^Class type
                         ^:unsynchronized-mutable ^int slot]
-  CodeEmitter
+  Parameter
   (emit-code [this xb line]
     (set! slot (.parameterSlot xb param-no))
-    (.localVariable xb slot name
-                    (rt/describe-class type) (.startLabel xb) (.endLabel xb)))
-  
-  Parameter
+    (.localVariable xb slot name (reflect/describe-class type)
+                    (.startLabel xb) (.endLabel xb)))
   (name [_]
     name)
   (namespace [_]
@@ -111,7 +109,9 @@
     (Insn. (^CodeEmitter fn [xb line]
             (.loadLocal xb (TypeKind/from type) (.allocated-slot this)))
            type))
-
+  (type [_]
+    type)
+  
   LocalVariableSlot
   (allocated-slot [_]
     slot))
@@ -120,13 +120,14 @@
 
 (defn process-functions! ^void [^ArrayList segment-elements
                                 ^ArrayList pending-functions]
-  (doseq [^FnLiteral fn-literal pending-functions]
+  (doseq [^FnLiteral fn-literal pending-functions
+          :when (nil? (aget (.arity-redirections fn-literal) 0))]
     (.add segment-elements
           (^ClassElementEmitter fn [cb]
            (let [at (aget (.arity-types fn-literal) 0)
                  body (aget (.arity-bodies fn-literal) 0)
                  mnm (str (.mangled-name fn-literal) "~" (.parameter-count at))
-                 mtd (methodgen/mtd-of-arity-type at)]
+                 mtd (model/mtd-of-arity-type at)]
              (classfile/with-method-body-> cb
                [mnm mtd classfile/acc-method-static]
                (-> (emit-code body) (.areturn)))))))
@@ -161,7 +162,7 @@
     (let [init ^Insn init]
       (.add segment-elements
             (^ClassElementEmitter fn [cb]
-             (let [mtd (MethodTypeDesc/of (rt/describe-class (.expr-type init)))]
+             (let [mtd (MethodTypeDesc/of (reflect/describe-class (.expr-type init)))]
                (classfile/with-method-body-> cb
                  [nm mtd classfile/acc-method-static]
                  (-> (emit-code init) (.areturn))))))
@@ -169,7 +170,7 @@
   (new-def-alias [_ nmsp nm other]
     (assert false))
 
-  (parameter [_ param-no name type]
+  (new-parameter [_ param-no name type]
     (Insn. (ParameterImpl. param-no name type -1) Void/TYPE))
   (new-function [this fn-literal]
     (.add pending-functions fn-literal)

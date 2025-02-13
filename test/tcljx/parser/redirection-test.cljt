@@ -1,0 +1,54 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.parser.redirection-test
+  (:require
+   (tcljx [model :as model])
+   (tcljx.parser [signature :as signature] [fn :as fn])
+   [tcljx.classgen.classdata :as classdata]
+   [tcljx.alpha.ptest :refer :all]))
+
+(defn redir [^vector arity-sig body-form]
+  (let [rsv (reify tcljx.model.Resolver
+              (lookup-namespace [_ alias]
+                nil)
+              (lookup-class [_ nm]
+                (get {"clojure.lang.ISeq" clojure.lang.ISeq
+                      "clojure.lang.RT" clojure.lang.RT} nm)))
+        at (signature/parse-arity-type rsv arity-sig body-form)]
+    (when-some [mhd (fn/redirection rsv at body-form)]
+      (classdata/constant-desc mhd nil))))
+
+;;; ------------------------------------------------------------------------
+
+(deftest classname-slash-static-method-test
+  (is (= '[STATIC RT "cons"
+           "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;"]
+         (redir '^clojure.lang.ISeq [x seq]
+                '(clojure.lang.RT/cons x seq))))
+
+  ;; only accept syntax of immediate static call:
+  (is (nil? (redir '^clojure.lang.ISeq [x seq]
+                   '(^[Object Object] clojure.lang.RT/cons x seq))))
+  
+  ;; test type tags on call arguments or result:
+  (is (nil? (redir '^clojure.lang.ISeq [x seq]
+                   '(clojure.lang.RT/cons ^String x seq))))
+  (is (nil? (redir '^clojure.lang.ISeq [x seq]
+                   '^Object (clojure.lang.RT/cons x seq)))))
+
+(deftest dot-classname-list-static-method-test
+  (is (= '[STATIC RT "first"
+           "(Ljava/lang/Object;)Ljava/lang/Object;"]
+         (redir '[coll]
+                '(. clojure.lang.RT (first coll))))))
+
+(deftest dot-classname-inline-static-method-test
+  (is (= '[STATIC RT "first"
+           "(Ljava/lang/Object;)Ljava/lang/Object;"]
+         (redir '[coll]
+                '(. clojure.lang.RT first coll)))))

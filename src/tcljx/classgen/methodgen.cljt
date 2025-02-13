@@ -1,6 +1,6 @@
 (ns tcljx.classgen.methodgen
   (:require
-   [tcljx.model :as model]
+   (tcljx [model :as model])
    (tcljx.classgen [runtime :as rt]))
   (:import
    (tcljx.model ArityType FnLiteral)
@@ -8,16 +8,12 @@
                        ConstantDesc DirectMethodHandleDesc DynamicConstantDesc
                        ConstantDescs DirectMethodHandleDesc$Kind)))
 
-(defn mtd-of-arity-type ^MethodTypeDesc [^ArityType at]
-  (MethodTypeDesc/of (rt/describe-class (.return-type at))
-                     (rt/describe-class* (.parameter-types at))))
-
 (defn static-arity-mhd
   (^DirectMethodHandleDesc [^String method-name ^ArityType at]
    (static-arity-mhd ConstantDescs/CD_Void method-name at))
   (^DirectMethodHandleDesc [^ClassDesc owner ^String method-name ^ArityType at]
    (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
-                              owner method-name (mtd-of-arity-type at))))
+                              owner method-name (model/mtd-of-arity-type at))))
 
 (defn static-fn-desc ^DynamicConstantDesc [^ClassDesc owner
                                            ^FnLiteral fn-literal]
@@ -26,7 +22,9 @@
         mnm (.mangled-name fn-literal)]
     (dotimes [i (alength a)]
       (let [at (aget ats i)
-            method-name (str mnm "~" (.parameter-count at))]
-        (aset a i (static-arity-mhd owner method-name at))))
+            mhd (or (aget (.arity-redirections fn-literal) i)
+                    (static-arity-mhd owner (str mnm "~" (.parameter-count at))
+                                      at))]
+        (aset a i mhd)))
     (DynamicConstantDesc/ofNamed rt/bsm-static-fn ConstantDescs/DEFAULT_NAME
                                  rt/StaticFn a)))
