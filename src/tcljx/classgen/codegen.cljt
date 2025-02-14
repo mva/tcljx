@@ -1,8 +1,8 @@
 (ns tcljx.classgen.codegen
   (:require
-   (tcljx [config :as cfg] [model :as model] [resolve :as resolve]
-          [reflect :as reflect])
-   (tcljx.classgen [classfile :as classfile] [runtime :as rt]
+   (tcljx [config :as cfg] [type :as type] [model :as model]
+          [resolve :as resolve] [reflect :as reflect])
+   (tcljx.classgen [classfile :as classfile] [runtime :as rt] [adapt :as adapt]
                    [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import
    (tcljx.model Expr CodeEmitter Entity Parameter FnLiteral ExprFactory
@@ -36,48 +36,91 @@
   (entity [_]
     (when (instance? Entity emitter)
       emitter)))
+(defn- expr-type
+  (^Class [^Insn insn]
+   (.expr-type insn))
+  (^Class [^Insn/1 insns ^int i]
+   (expr-type (aget insns i))))
+(defn- logical-type ^Class [^Insn insn]
+  (type/expr-to-logical (expr-type insn)))
 
-(def empty-insn (Insn. (^CodeEmitter fn [xb line] Void/TYPE) Void/TYPE))
+(def empty-insn (Insn. (^CodeEmitter fn [xb requested-type line] Void/TYPE)
+                       type/polymorphic))
 
-(defn emit-code
-  (^CodeBuilder [^CodeBuilder xb ^Insn insn]
-   (emit-code xb insn cfg/no-line-number))
-  (^CodeBuilder [^CodeBuilder xb ^Insn insn ^int line]
-   (.emit-code (.emitter insn) xb line)
-   xb))
-(defn emit-code* ^CodeBuilder [^CodeBuilder xb ^Insn/1 insns ^int line]
-  (dotimes [i (alength insns)]
-    (emit-code xb (aget insns i) line))
-  xb)
+;;; Emit instruction to `xb` and adapt the stack operand it produces
+;;; to `requested-type`.  Returns false if the instruction returns
+;;; control to the invoking method, and true if execution continues in
+;;; this method.
+(defn emit-code?
+  (^boolean [^CodeBuilder xb ^Insn insn]
+   (emit-code? xb (logical-type insn) insn cfg/no-line-number))
+  (^boolean [^CodeBuilder xb ^Class requested-type ^Insn insn]
+   (emit-code? xb requested-type insn cfg/no-line-number))
+  (^boolean [^CodeBuilder xb ^Class requested-type ^Insn insn ^int line]
+   ;; FIXME... special case (identical? opnd-type requested-type)?
+   (-> (.emit-code* (.emitter insn) xb requested-type line)
+       (adapt/to? requested-type xb))))
+(defn emit-method-code ^void [^CodeBuilder xb ^Insn insn]
+  (emit-code? xb type/exits-method insn))
+
+(defn emit-code*?
+  (^boolean [^CodeBuilder xb ^Class requested-type ^Insn/1 insns
+             ^int line]
+   (let [end (dec (alength insns))]
+     (loop [i 0]
+       (let [insn (aget insns i)]
+         (if (< i end)
+           (if (emit-code? xb Void/TYPE insn line)
+             (recur (inc i))
+             false)
+           (emit-code? xb requested-type insn line))))))
+  (^boolean [^CodeBuilder xb ^Class/1 requested-types ^Insn/1 insns
+             ^boolean skip-receiver? ^int line]
+   (loop [i 0]
+     (if (< i (alength requested-types))
+       (if (emit-code? xb (aget requested-types i)
+                       (aget insns (+ (int skip-receiver?) i)) line)
+         (recur (inc i))
+         false)
+       true))))
 
 (defn- with-line-number ^Insn [^Insn insn ^int line]
-  (Insn. (^CodeEmitter fn [xb _]
-          (emit-code xb insn line))
-         (.expr-type insn)))
+  (Insn. (^CodeEmitter fn [xb requested-type _]
+          (when (emit-code? xb requested-type insn line)
+            requested-type))
+         (expr-type insn)))
 
-(deftype Constant [^Object value]
+(deftype Constant [^Class type ^Object value]
   CodeEmitter
-  (emit-code [_ xb line]
-    (.loadConstant xb ^ConstantDesc value)))
+  (emit-code* [_ xb requested-type line]
+    (.loadConstant xb ^ConstantDesc value)
+    type))
 (defn const? ^boolean [^Insn insn]
   (instance? Constant (.emitter insn)))
 (defn const-value ^Object [^Insn insn]  ;nil if not a constant
   (when (const? insn)
     (.value ^Constant (.emitter insn))))
 (defn- constant ^Insn [^Class tp value]
-  (Insn. (Constant. value) tp))
+  (Insn. (Constant. tp value) tp))
 
 (defn- progn ^Insn [^Insn/1 insns]
-  (Insn. (^CodeEmitter fn [xb line]
-          (emit-code* xb insns line))
-         (.expr-type (aget insns (dec (alength insns))))))
+  (Insn. (^CodeEmitter fn [xb requested-type line]
+          (when (emit-code*? xb requested-type insns line)
+            requested-type))
+         (expr-type insns (dec (alength insns)))))
 
 (defn- invoke ^Insn [^Class owner ^Member member ^Insn/1 args]
-  (Insn. (^CodeEmitter fn [xb line]
-          (-> (emit-code* xb args line)
-              (.lineNumber line)
-              (reflect/invoke-member owner member)))
-         (reflect/invoke-member-type owner member)))
+  (let [opnd-type (reflect/invoke-member-type owner member)]
+    (Insn. (^CodeEmitter fn [xb requested-type line]
+            (let [receiver? (reflect/virtual? member)]
+              (when (or (not receiver?)
+                        (emit-code? xb (aget args 0)))
+                (when (emit-code*? xb (reflect/parameter-types member) args
+                                   receiver? line)
+                  (-> (.lineNumber xb line)
+                      (reflect/invoke-member owner member)))))
+            opnd-type)
+           opnd-type)))
 
 ;;; ------------------------------------------------------------------------
 
@@ -95,10 +138,11 @@
 (deftype ParameterImpl [^int param-no ^String name ^Class type
                         ^:unsynchronized-mutable ^int slot]
   Parameter
-  (emit-code [this xb line]
+  (emit-code* [this xb requested-type line]
     (set! slot (.parameterSlot xb param-no))
     (.localVariable xb slot name (reflect/describe-class type)
-                    (.startLabel xb) (.endLabel xb)))
+                    (.startLabel xb) (.endLabel xb))
+    Void/TYPE)
   (name [_]
     name)
   (namespace [_]
@@ -106,8 +150,9 @@
   (init [_]
     nil)
   (bound-value [this]
-    (Insn. (^CodeEmitter fn [xb line]
-            (.loadLocal xb (TypeKind/from type) (.allocated-slot this)))
+    (Insn. (^CodeEmitter fn [xb requested-type line]
+            (.loadLocal xb (TypeKind/from type) (.allocated-slot this))
+            type)
            type))
   (type [_]
     type)
@@ -130,7 +175,7 @@
                  mtd (model/mtd-of-arity-type at)]
              (classfile/with-method-body-> cb
                [mnm mtd classfile/acc-method-static]
-               (-> (emit-code body) (.areturn)))))))
+               (emit-method-code body))))))
   (.clear pending-functions))
 
 ;;; ------------------------------------------------------------------------
@@ -138,7 +183,7 @@
 (defn- arg-types ^Class/1 [^Insn/1 args]
   (let [a (new Class/1 (alength args))]
     (dotimes [i (alength a)]
-      (aset a i (.expr-type (aget args i))))
+      (aset a i (expr-type args i)))
     a))
 
 (def ^:private empty-insn-array (new Insn/1 0))
@@ -162,10 +207,11 @@
     (let [init ^Insn init]
       (.add segment-elements
             (^ClassElementEmitter fn [cb]
-             (let [mtd (MethodTypeDesc/of (reflect/describe-class (.expr-type init)))]
+             (let [opnd-type (logical-type init)
+                   mtd (MethodTypeDesc/of (reflect/describe-class opnd-type))]
                (classfile/with-method-body-> cb
                  [nm mtd classfile/acc-method-static]
-                 (-> (emit-code init) (.areturn))))))
+                 (emit-method-code init)))))
       empty-insn))
   (new-def-alias [_ nmsp nm other]
     (assert false))
@@ -173,16 +219,27 @@
   (new-parameter [_ param-no name type]
     (Insn. (ParameterImpl. param-no name type -1) Void/TYPE))
   (new-function [this fn-literal]
+    ;; overwrite any auto-return-marker return types
+    (let [ats (.arity-types fn-literal)]
+      (dotimes [i (alength ats)]
+        (let [at (aget ats i)]
+          (when (type/auto-return-marker? (.return-type at))
+            (let [body (aget (.arity-bodies fn-literal) i)]
+              (aset ats i (.with-return-type at (logical-type body))))))))
+    
     (.add pending-functions fn-literal)
     (let [owner (ClassDesc/of "pkg.ns0._10")]
       (constant class-static-fn (methodgen/static-fn-desc owner fn-literal))))
   
-  (invoke-static-member [_ owner mnm args]
+  (invoke-static-member [_ invoke-member-of-field? owner mnm args]
     (let [args ^Insn/1 args
           ms (resolve/members false owner mnm (arg-types args))]
       (assert (= (count ms) 1))
-      (assert (not (instance? java.lang.reflect.Field (first ms))))
-      (invoke owner (first ms) args)))
+      (let [m (first ms)
+            insn (invoke owner m args)]
+        (if (and invoke-member-of-field? (instance? java.lang.reflect.Field m))
+          (assert false)
+          insn))))
   
   (mk-expr [_ form]
     nil))

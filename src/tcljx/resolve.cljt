@@ -6,14 +6,62 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.resolve
+  (:require
+   [tcljx.type :as type])
   (:import
    (java.lang.reflect Method Constructor Executable Field Member Modifier)))
 
-(defn same-class? ^boolean [^Class a ^Class b]
-  (identical? a b))
+(def ^:private java-base-classes    ;almost all from package java.lang
+  [Boolean Byte Character Class ClassLoader #_clojure.lang.Compiler Double
+   Enum Float InheritableThreadLocal Integer Long Math Number Object
+   Package Process ProcessBuilder Runtime RuntimePermission
+   Short StackTraceElement StrictMath String
+   #_StringBuffer StringBuilder System Thread ThreadGroup ThreadLocal
+   Throwable Void Appendable CharSequence Cloneable Comparable
+   Iterable Readable Runnable java.util.concurrent.Callable
+   BigInteger BigDecimal
+             
+   ArithmeticException ArrayIndexOutOfBoundsException
+   ArrayStoreException ClassCastException ClassNotFoundException
+   CloneNotSupportedException EnumConstantNotPresentException
+   Exception IllegalAccessException IllegalArgumentException
+   IllegalMonitorStateException IllegalStateException
+   IllegalThreadStateException IndexOutOfBoundsException
+   InstantiationException  NegativeArraySizeException
+   NoSuchFieldException NoSuchMethodException NullPointerException
+   NumberFormatException RuntimeException SecurityException
+   StringIndexOutOfBoundsException TypeNotPresentException
+   UnsupportedOperationException AbstractMethodError AssertionError
+   ClassCircularityError ClassFormatError Error
+   ExceptionInInitializerError IllegalAccessError
+   IncompatibleClassChangeError InstantiationError InternalError
+   LinkageError NoClassDefFoundError NoSuchFieldError
+   NoSuchMethodError OutOfMemoryError StackOverflowError
+   UnknownError UnsatisfiedLinkError
+   UnsupportedClassVersionError VerifyError VirtualMachineError
+             
+   Thread$UncaughtExceptionHandler Thread$State
+   Deprecated Override SuppressWarnings])
 
-(defn polymorphic? ^boolean [^Class cl]
-  false #_(identical? cl-polymorphic-type cl))
+(def predefined-imports
+  (letfn [(short-name ^String [^Class cl]
+            (let [s (.getName cl)] ;want "Thread$State" for j.l.Thread.State
+              (.substring s (inc (.lastIndexOf s (int \.))))))]
+    (let [m (java.util.HashMap.)]
+      ;; by default, import certain java.base classes using their
+      ;; short name; references using the long name are resolved on
+      ;; demand and refer to the same JVM-level class instance
+      (doseq [^Class cl java-base-classes]
+        (.put m (short-name cl) cl)
+        (.put m (.getName cl) cl))
+      
+      ;; pseudo-import of primitive types types by their lower-case Java
+      ;; name
+      (doseq [^Class cl [Void/TYPE Boolean/TYPE Byte/TYPE Short/TYPE
+                         Character/TYPE Integer/TYPE Float/TYPE
+                         Long/TYPE Double/TYPE]]
+        (.put m (.getSimpleName cl) cl))
+      (into {} m))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -98,7 +146,8 @@
                 (neg? i) true
                          
                 (let [ptag (aget ptags i)]
-                  (or (same-class? ptag (aget ptypes i)) (polymorphic? ptag)))
+                  (or (type/same? ptag (aget ptypes i))
+                      (type/polymorphic? ptag)))
                 (recur (dec i))
                          
                 :else false)))

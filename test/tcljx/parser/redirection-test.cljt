@@ -25,6 +25,7 @@
 
 ;;; ------------------------------------------------------------------------
 
+
 (deftest classname-slash-static-method-test
   (is (= '[STATIC RT "cons"
            "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;"]
@@ -39,7 +40,13 @@
   (is (nil? (redir '^clojure.lang.ISeq [x seq]
                    '(clojure.lang.RT/cons ^String x seq))))
   (is (nil? (redir '^clojure.lang.ISeq [x seq]
-                   '^Object (clojure.lang.RT/cons x seq)))))
+                   '^Object (clojure.lang.RT/cons x seq))))
+
+  ;; return type of member always matches auto-return-type:
+  (is (= '[STATIC RT "cons"
+           "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;"]
+         (redir '^auto-return-type [x seq]
+                '(clojure.lang.RT/cons x seq)))))
 
 (deftest dot-classname-list-static-method-test
   (is (= '[STATIC RT "first"

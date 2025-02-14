@@ -1,5 +1,40 @@
 (ns tcljx.type)
 
+(defn same? ^boolean [^Class a ^Class b]
+  (identical? a b))
+
+;;; Special operand type signalling that the bytecode instruction, on
+;;; completion, returns control to the invoker of this method.
+(def ^Class exits-method nil)
+(defn exits-method? ^boolean [^Class opnd-type]
+  (nil? opnd-type))
+(defn continues? ^boolean [^Class opnd-type]
+  (some? opnd-type))
+
+;;; From the point of view of Clojure there are no statements, only
+;;; expressions producing some value.  Accordingly, the Java type
+;;; `void` has no equivalent in Clojure.  Any expression "returning
+;;; void" is interpreted as returning one of nil, zero, false, or
+;;; \u0000 depending on context.
+;;; 
+;;; For this reason, reinterpret for an expression the primitive type
+;;; `void` as "can produce a value of arbitrary type depending on the
+;;; context of use".  On the JVM level, these arbitrary types include
+;;; the logical JVM type `void` and the type `nil` denoting an
+;;; instruction that does not return.
+(def polymorphic Void/TYPE)
+(defn polymorphic? ^boolean [^Class expr-type]
+  (instance? Void/TYPE expr-type))
+
+;;; Maps a Clojure expression type to the logical Java type to be used
+;;; in a class file element.  The returned value is never `void`.
+(defn expr-to-logical ^Class [^Class expr-type]
+  (if (polymorphic? expr-type)
+    Object
+    expr-type))
+
+;;; ------------------------------------------------------------------------
+
 (defn type-dimensions ^int [^Class tp]
   (loop [n 0, tp tp]
     (if (.isArray tp)
@@ -20,3 +55,9 @@
                   (recur (.componentType cl))
                   (.getName cl)))
               (str n)))))
+
+;;; ------------------------------------------------------------------------
+
+(deftype AutoReturnMarker [])
+(def auto-return-marker AutoReturnMarker)
+(defn auto-return-marker? ^boolean [^Class tp] (same? AutoReturnMarker tp))

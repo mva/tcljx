@@ -1,0 +1,22 @@
+(ns tcljx.classgen.adapt
+  (:require
+   (tcljx [type :as type]))
+  (:import
+   (java.lang.classfile CodeBuilder TypeKind)))
+
+(defn to? ^boolean [^Class opnd-type ^Class requested-type ^CodeBuilder xb]
+  (cond
+    (type/exits-method? opnd-type)
+    false         ;instruction does not return: cannot continue at all
+    
+    ;; FIXME... optimize for this "nothing to do" case?  it should be
+    ;; the most common scenario.  handle this in the caller of this
+    ;; function?
+    (identical? opnd-type requested-type)
+    (type/continues? opnd-type)
+    
+    (type/exits-method? requested-type)
+    (do (.return_ xb (TypeKind/from opnd-type)) false)
+    
+    :else (do (assert false)
+              true)))

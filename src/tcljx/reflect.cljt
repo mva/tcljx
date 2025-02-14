@@ -6,7 +6,7 @@
                        DirectMethodHandleDesc DirectMethodHandleDesc$Kind
                        ConstantDescs)
    #_(java.lang.invoke MethodHandle TypeDescriptor$OfField MethodHandles$Lookup)
-   (java.lang.reflect Method Constructor Field Member Modifier)))
+   (java.lang.reflect Method Constructor Executable Field Member Modifier)))
 
 ;;; FIXME... Does it make sense to use java.lang.ClassValue to cache
 ;;; generated ClassDesc values?  The cache should be wiped (or shrunk,
@@ -49,6 +49,13 @@
               DirectMethodHandleDesc$Kind/STATIC_GETTER
               DirectMethodHandleDesc$Kind/GETTER)))]
 
+  ;; Note: All of the `mhd-of` methods explictly take the owner class
+  ;; of the new MethodHandleDesc.  The member's declaring class cannot
+  ;; be used for this purpose: The class file must denote the class
+  ;; from which the member was resolved (i.e. where the search
+  ;; started) and not the class where the member was found (i.e. where
+  ;; the search ended).
+  
   (defn mhd-of-field 
     (^DirectMethodHandleDesc [^Class owner ^Field f]
      (MethodHandleDesc/ofField (field-kind f) (owner-desc owner) (.getName f)
@@ -68,12 +75,20 @@
 
 ;;; ------------------------------------------------------------------------
 
+(defn virtual? ^boolean [^Member member]
+  (not (Modifier/isStatic (.getModifiers member))))
+
+(defn parameter-types ^Class/1 [^Member member]
+  (if (instance? Executable member)
+    (.getParameterTypes ^Executable member)
+    (new Class/1 0)))
+
 (defn invoke-member ^CodeBuilder [^CodeBuilder xb ^Class owner ^Member member]
   (let [cld (describe-class owner)
-        static? (Modifier/isStatic (.getModifiers member))]
+        v? (virtual? member)]
     (condp instance? member
       Method
-      (.invoke xb (if static? Opcode/INVOKESTATIC Opcode/INVOKEVIRTUAL) cld
+      (.invoke xb (if v? Opcode/INVOKEVIRTUAL Opcode/INVOKESTATIC) cld
                (.getName member) (mtd-of-method member) (.isInterface owner))
       Constructor
       (assert false)
@@ -81,11 +96,8 @@
           (invoke-xref flags owner argv nil
                        (mhd-of-constructor owner c) (.isVarArgs c) false))
       Field
-      (assert false)
-      #_(let [f ^Field member
-              nat (.nameAndTypeEntry cp nm (.getType f))]
-          (.fieldAccess xb Opcode/GETFIELD
-                        (.fieldRefEntry cp owner nat))))))
+      (.fieldAccess xb (if v? Opcode/GETFIELD Opcode/GETSTATIC) cld
+                    (.getName member) (describe-class (.getType ^Field member))))))
 
 (defn invoke-member-type ^Class [^Class owner ^Member member]
   (condp instance? member

@@ -6,12 +6,20 @@
 #_(definterface Type
   )
 
+;;; Emit instruction code into the CodeBuilder instance.  Return the
+;;; logical type of the value pushed on operand stack.  This is either
+;;; the original expression type, or the value of the `requested-type`
+;;; argument.  If the returned type differs from `requested-type`,
+;;; then it is the caller's responsibility to adapt the operand value
+;;; to the latter.
+;;; 
 ;;; Right now, line numbers are only written to decorate stack traces.
 ;;; A bytecode instruction must emit a line number pseudo instruction
 ;;; before its own opcode only if an exception may be raised during
 ;;; the opcode's execution.
 (definterface CodeEmitter
-  (emit-code ^void [^java.lang.classfile.CodeBuilder xb ^int line]))
+  (emit-code* ^Class [^java.lang.classfile.CodeBuilder xb ^Class requested-type
+                      ^int line]))
 
 ;;; A named entity on the level of the code generator that exists at
 ;;; runtime.  Exposes additional operations beyond "emit code that
@@ -75,7 +83,8 @@
   ;; The arity's return type.  In case of `auto-return-type`, this is
   ;; replaced with the arity body's result type.
   (return-type ^Class [])
-
+  (with-return-type ^ArityType [^Class tp])
+  
   ;; This is the "internal" parameter list that is used to parse and
   ;; compile the arity.  That is, for the variadic case the last/rest
   ;; parameter is of type `ISeq`.
@@ -95,6 +104,8 @@
                         ^String/1 parameter-names]
   java.lang.Record
   ArityType
+  (with-return-type [_ tp]
+    (ArityTypeImpl. tp parameter-types parameter-names))
   (parameter-count [_]
     (alength parameter-types))
   (parameter-name [_ ^int i]
@@ -237,6 +248,9 @@
 
   ;; ### functions
   (new-parameter ^Expr [^int param-no ^String name ^Class type])
+
+  ;; Replaces any arity return types `auto-return-marker` with their
+  ;; corresponding body's expression type.
   (new-function ^Expr [^FnLiteral fn-literal])
   
   ;; ### interop
@@ -244,7 +258,8 @@
   ;; Invoke static public method or field `mnm` of class `owner`.
   ;; Note: Invoking a field actually means to invoke the field's value
   ;; as a function, instead of just getting its value.
-  (invoke-static-member ^Expr [^Class owner ^String mnm ^Expr/1 args])
+  (invoke-static-member ^Expr [^boolean invoke-value-of-field?
+                               ^Class owner ^String mnm ^Expr/1 args])
 
   ;; ### misc
   

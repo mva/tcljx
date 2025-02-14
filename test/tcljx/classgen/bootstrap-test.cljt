@@ -7,7 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.classgen.bootstrap-test
   (:require #_[tcljx.javabase :as jb]
-            [tcljx.classgen.bootstrap :refer [nmsp #_asm-expr #_call-expr]]
+            [tcljx.classgen.bootstrap :refer [nmsp asm-expr #_call-expr]]
             [tcljx.alpha.ptest :refer :all]))
 
 ;; (deftest in-short?-test
@@ -122,28 +122,28 @@
                                 (clojure.lang.RT/cons x seq)))]))))
 
 
-;; (deftest asm-expr-no-args
-;;   (is (= '[(GETSTATIC System "out" "Ljava/io/PrintStream;")
-;;            (ARETURN)]
-;;          (asm-expr (identity (. java.lang.System out))))))
+(deftest asm-expr-no-args
+  (is (= '[(GETSTATIC System "out" "Ljava/io/PrintStream;")
+           (ARETURN)]
+         (asm-expr (identity (. java.lang.System out))))))
 
-;; (deftest asm-expr-ref-arg-without-rtype
-;;   (is (= '[["LOCAL 0: String x"]
-;;            (ALOAD_0)
-;;            (ARETURN)]
-;;          (asm-expr [^java.lang.String x] x))))
+(deftest asm-expr-ref-arg-without-rtype
+  (is (= '[["LOCAL 0: String x"]
+           (ALOAD_0)
+           (ARETURN)]
+         (asm-expr [^java.lang.String x] x))))
 
-;; (deftest asm-expr-int-arg-without-rtype
-;;   (is (= '[["LOCAL 0: int x"]
-;;            (ILOAD_0)
-;;            (IRETURN)]
-;;          (asm-expr [^int x] x))))
+(deftest asm-expr-int-arg-without-rtype
+  (is (= '[["LOCAL 0: int x"]
+           (ILOAD_0)
+           (IRETURN)]
+         (asm-expr [^int x] x))))
 
-;; (deftest asm-expr-with-rtype-ref-arg
-;;   (is (= '[["LOCAL 0: String x"]
-;;            (ALOAD_0)
-;;            (ARETURN)]
-;;          (asm-expr ^java.lang.Object [^java.lang.String x] x))))
+(deftest asm-expr-with-rtype-ref-arg
+  (is (= '[["LOCAL 0: String x"]
+           (ALOAD_0)
+           (ARETURN)]
+         (asm-expr ^java.lang.Object [^java.lang.String x] x))))
 
 
 ;; ;;; Note: Without the identity wrapper, the function arity with the

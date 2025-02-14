@@ -41,7 +41,7 @@
               (let [[member & args] (unpack-member-args formr)
                     mnm (syntax/simple-symbol-str member)] ;implies owner exists
                 (if-some [owner (resolves-as-class-name owner)]
-                  (.invoke-static-member expr-factory owner mnm
+                  (.invoke-static-member expr-factory false owner mnm
                                          (parse-args args))
                   (assert false))))
             
@@ -55,7 +55,9 @@
               (if (symbol? op)
                 (let [nm (name op), nmsp (namespace op)]
                   (if (nil? nmsp)
-                    (case nm
+                    (case nm ;FIXME... implement identity as primitive function
+                      "identity" (.parse-form this (second form))
+                      
                       "def" (def/parse-def this form)
                       "fn*" (fn/parse-fn* this form)
                       "." (parse-dot form)
@@ -66,7 +68,7 @@
                     (if-some [bnd (context/lookup this op)]
                       bnd
                       (if-some [cl (context/lookup-class this nmsp)]
-                        (.invoke-static-member expr-factory cl nm
+                        (.invoke-static-member expr-factory true cl nm
                                                (parse-args (rest form)))
                         (throw (wr-info-unresolved-qualified-sym op))))))
                 (.mk-expr expr-factory form)))

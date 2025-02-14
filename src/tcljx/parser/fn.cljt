@@ -1,11 +1,12 @@
 (ns tcljx.parser.fn
   (:require
-   (tcljx [model :as model] [resolve :as resolve] [reflect :as reflect])
+   (tcljx [type :as type] [model :as model] [resolve :as resolve]
+          [reflect :as reflect])
    (tcljx.parser [wrong :as wrong] [syntax :as syntax] [context :as context]
                  [interop :as interop]))
   (:import
    (tcljx.model Expr ArityType FnLiteral Scope Resolver ExprFactory)
-   (java.lang.constant MethodHandleDesc #_DirectMethodHandleDesc)))
+   (java.lang.constant MethodHandleDesc ConstantDescs)))
 
 #_(definterface ArityMethod
   (at ^ArityType [])
@@ -74,9 +75,13 @@
                   ;; invoke static (Classname/member ...)
                   (when-some [cl (resolves-to-class (namespace op))]
                     (when (nil? (interop/param-tags-of op))
-                      (static-method cl (name op) (rest form)))))]
+                      (static-method cl (name op) (rest form)))))
+            auto? (type/auto-return-marker? (.return-type at))]
         (when (some? mhd)
-          (when (= (.invocationType mhd) (model/mtd-of-arity-type at))
+          (when (= (cond-> (.invocationType mhd)
+                     auto? (.changeReturnType ConstantDescs/CD_void))
+                   (cond-> (model/mtd-of-arity-type at)
+                     auto? (.changeReturnType ConstantDescs/CD_void)))
             mhd))))))
 
 ;;; ------------------------------------------------------------------------
@@ -108,4 +113,3 @@
                     (redirection (.resolver scope) at form))))
         ef (.expr-factory scope)]
     (.new-function ef (mk-fn-literal ef mangled-nm at code redir))))
-

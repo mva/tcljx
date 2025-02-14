@@ -1,6 +1,7 @@
 (ns tcljx.classgen.universe
   (:require
-   (tcljx [config :as cfg] [files :as files] [model :as model])
+   (tcljx [config :as cfg] [files :as files] [resolve :as resolve]
+          [model :as model])
    (tcljx.parser [context :as context] [form :as form] [namespace :as namespace])
    (tcljx.classgen [loader :as loader] [runtime :as rt] [classfile :as classfile]
                    [segmgen :as segmgen] [codegen :as codegen]))
@@ -103,7 +104,7 @@
        (dotimes [i end-of-segment-elements]
          (let [elem (.get segment-elements i)]
            (when (instance? Insn elem)
-             (codegen/emit-code xb elem))))))
+             (codegen/emit-code? xb elem))))))
     
     ;; revert back to requested state & move to next segment
     (set! globals then-globals)
@@ -116,8 +117,7 @@
 (deftype UniverseBuilder [^Loader loader
                           ^map ns-form-map
                           ^:unsynchronized-mutable ^map known-ns
-                          ^:unsynchronized-mutable ^map ns-alias
-                          ^:unsynchronized-mutable ^map imports]
+                          ^map ns-alias]
   NamespaceProvider
   (require-namespaces [this ns-strs]
     (letfn [(mk-nmsp-builder ^NamespaceBuilder [^String ns-str]
@@ -131,7 +131,8 @@
                     globals {}]
                 (NmspBuilderImpl. this ns-str ef
                                   segment-elements pending-functions
-                                  pkg-build globals known-ns ns-alias imports
+                                  pkg-build globals known-ns ns-alias
+                                  resolve/predefined-imports
                                   source-file segmgen/first-segm-id)))
             
             (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]
@@ -156,6 +157,5 @@
   (let [provided-ns (reduce dissoc
                             {cfg/core-lib (ProvidedNamespace. cfg/core-lib)}
                             (keys ns-form-map))
-        ns-alias {}
-        imports {}]
-    (UniverseBuilder. loader ns-form-map provided-ns ns-alias imports)))
+        ns-alias {}]
+    (UniverseBuilder. loader ns-form-map provided-ns ns-alias)))

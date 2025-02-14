@@ -30,13 +30,15 @@
 (defn tag-of ^symbol [form]
   (when-some [tag (get-tag (meta form))]
     (syntax/symbol tag)))
+(defn resolve-tag* ^Class [^Resolver rsv ^symbol tag ^Class or-else]
+  (if (some? tag)
+    (or (lookup-type rsv tag) (wrong/class-not-found tag))
+    or-else))
 (defn resolve-tag
   (^Class [^Resolver rsv ^IMeta form]
    (resolve-tag rsv form Object))
   (^Class [^Resolver rsv ^IMeta form ^Class or-else]
-   (if-some [tag (tag-of form)]
-     (or (lookup-type rsv tag) (wrong/class-not-found tag))
-     or-else)))
+   (resolve-tag* rsv (tag-of form) or-else)))
 
 (defn get-param-tags [^map form-meta]
   (when (some? form-meta)
@@ -46,18 +48,22 @@
     (syntax/vector ptags)))
 
 
+;;; If `paramv` is tagged with `auto-return-type`, then the arity's
+;;; return type is set to the temporary `auto-return-marker`.
 (defn parse-arity-type ^ArityType [^Resolver rsv paramv ^seq error-context]
-  (letfn [(type-of ^Class [^IMeta form]
-            (resolve-tag rsv form))]
-    (wrong/with-line-context error-context
-      (let [paramv (syntax/vector paramv)
-            n (count paramv)
-            ptypes (new Class/1 n)
-            pnames (new String/1 n)]
-        (assert (not= '& (nth paramv (- n 2) nil)))
-        (dotimes [i (alength ptypes)]
-          (let [param (nth paramv i)
-                psym (syntax/simple-symbol param)]
-            (aset ptypes i (type-of psym))
-            (aset pnames i (name psym))))
-        (tcljx.model.ArityTypeImpl. (type-of ^IMeta paramv) ptypes pnames)))))
+  (wrong/with-line-context error-context
+    (let [paramv (syntax/vector paramv)
+          n (count paramv)
+          ptypes (new Class/1 n)
+          pnames (new String/1 n)]
+      (assert (not= '& (nth paramv (- n 2) nil)))
+      (dotimes [i (alength ptypes)]
+        (let [param (nth paramv i)
+              psym (syntax/simple-symbol param)]
+          (aset ptypes i (resolve-tag rsv psym))
+          (aset pnames i (name psym))))
+      (let [return-tag (tag-of paramv)]
+        (-> (if (= 'auto-return-type return-tag)
+              type/auto-return-marker
+              (resolve-tag* rsv return-tag Object))
+            (tcljx.model.ArityTypeImpl. ptypes pnames))))))
