@@ -8,7 +8,8 @@
 (ns tcljx.classgen.bootstrap
   (:require
    (tcljx [files :as files])
-   (tcljx.classgen [loader :as loader] [universe :as universe])
+   (tcljx.classgen [loader :as loader] [universe :as universe]
+                   [segmgen :as segmgen])
    #_tcljx.macro                        ;for class ArrayToCpl
    #_[tcljx.reader :as rd]
    #_[tcljx.runtime :as rt]
@@ -33,9 +34,9 @@
    #_(tcljx.expr MacroRef FnMacroFn)
    #_(clojure.lang Symbol IPersistentMap)
    #_(java.lang.invoke MethodHandle MethodType)
-   #_(java.lang.reflect Method)
+   (java.lang.reflect Method)
    (java.nio.file Path)
-   #_(java.util HashMap Map List)
+   (java.util #_HashMap #_Map List)
    (java.util.function Consumer #_Function)))
 
 ;;; FIXME... For now, the bootstrap class picks up classes of
@@ -292,31 +293,34 @@
       
       :else (recur acc i (inc j)))))
 
-(defn nmsp [formv]
-  (let [dest-dir (dest-dir-for-this-test)
-        !render-to (java.util.concurrent.ConcurrentHashMap.)
-        class-sink (^Consumer fn ^void [^ClassBytes cbs]
-                    (.put !render-to
-                          (-> cbs .this-class .descriptorString)
-                          (classdata/extract (.class-bytes cbs))))
-        loader (loader/mk-loader dest-dir app-ld [] class-sink)
-        
-        ns-forms-seq (split-at-ns formv)
-        
-        ;; provided-nmsp (em/mk-provided-nmsp cfg/core-lib bootstrap-globals-core)
-        
-        ]
-    
-    (let [ns-strs (->> (map nmsp-name-of ns-forms-seq)
-                       ^String/1 (into-array String))
-          nmsps (-> (into {} (map (juxt nmsp-name-of seq) ns-forms-seq))
-                    (universe/mk-universe loader)
-                    (.require-namespaces ns-strs))]
-      (dotimes [i (alength nmsps)]
-        (assert (some? (aget nmsps i)))))
-    
-    (->> (sort-by key (seq !render-to))
-         (mapv (comp vec val)))))
+(defn nmsp
+  ([formv]
+   (nmsp (loader/dyn-class-loader app-ld []) formv))
+  ([^ClassLoader dyn-ld formv]
+   (let [dest-dir (dest-dir-for-this-test)
+         !render-to (java.util.concurrent.ConcurrentHashMap.)
+         class-sink (^Consumer fn ^void [^ClassBytes cbs]
+                     (.put !render-to
+                           (-> cbs .this-class .descriptorString)
+                           (classdata/extract (.class-bytes cbs))))
+         loader (loader/mk-loader dest-dir app-ld dyn-ld class-sink)
+         
+         ns-forms-seq (split-at-ns formv)
+         
+         ;; provided-nmsp (em/mk-provided-nmsp cfg/core-lib bootstrap-globals-core)
+         
+         ]
+     
+     (let [ns-strs (->> (map nmsp-name-of ns-forms-seq)
+                        ^String/1 (into-array String))
+           nmsps (-> (into {} (map (juxt nmsp-name-of seq) ns-forms-seq))
+                     (universe/mk-universe loader)
+                     (.require-namespaces ns-strs))]
+       (dotimes [i (alength nmsps)]
+         (assert (some? (aget nmsps i)))))
+     
+     (->> (sort-by key (seq !render-to))
+          (mapv (comp vec val))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -383,28 +387,28 @@
 ;;                                                 (asm-expr ~form)))
 ;;     (meta &form)))
 
-;; ;;; ------------------------------------------------------------------------
+;;; ------------------------------------------------------------------------
 
-;; (defn fn-call-method [params form ^List args]
-;;   (letfn [(get-method ^Method [^Class cl ^String nm]
-;;             (let [ms (filter #(= (.getName ^Method %) nm) (.getMethods cl))]
-;;               (assert (= (count ms) 1)
-;;                       (str "found " (count ms) " matches for method name "
-;;                            nm " in class " cl))
-;;               (first ms)))]
-;;     (let [dyn-ld (cfg/dyn-class-loader app-ld [])]
-;;       (nmsp dyn-ld (ns-with-fnbody params form))
-;;       (let [cl (Class/forName (str "pkg.ns0." emitter/capstone-class-name)
-;;                               true dyn-ld)
-;;             m (get-method cl (method-name params))]
-;;         (.invoke m nil (.toArray args)))))) ;invoke static method
+(defn fn-call-method [params form args]
+  (letfn [(get-method ^Method [^Class cl ^String nm]
+            (let [ms (filter #(= (.getName ^Method %) nm) (.getMethods cl))]
+              (assert (= (count ms) 1)
+                      (str "found " (count ms) " matches for method name "
+                           nm " in class " cl))
+              (first ms)))]
+    (let [dyn-ld (loader/dyn-class-loader app-ld [])]
+      (nmsp dyn-ld (ns-with-fnbody params form))
+      (let [cl (Class/forName (str "pkg.ns0." segmgen/capstone-class-name)
+                              true dyn-ld)
+            m (get-method cl (method-name params))]
+        (.invoke m nil (.toArray ^List args)))))) ;invoke static method
 
-;; (defmacro call-expr
-;;   ([form]
-;;    `(call-expr [] ~form []))
-;;   ([params form args]
-;;    ;; enforce materialization of method by wrapping in `identity`
-;;    `(fn-call-method '~params (object '(~'identity ~form)) ~args)))
+(defmacro call-expr
+  ([form]
+   `(call-expr [] ~form []))
+  ([params form args]
+   ;; enforce materialization of method by wrapping in `identity`
+   `(fn-call-method '~params (object '(~'identity ~form)) ~args)))
 
 ;; (defmacro is-class [form cl]
 ;;   (with-meta `(ptest/is (= ~cl (.getClass (call-expr ~form))))

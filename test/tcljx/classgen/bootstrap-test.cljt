@@ -7,7 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.classgen.bootstrap-test
   (:require #_[tcljx.javabase :as jb]
-            [tcljx.classgen.bootstrap :refer [nmsp asm-expr #_call-expr]]
+            [tcljx.classgen.bootstrap :refer [nmsp asm-expr call-expr]]
             [tcljx.alpha.ptest :refer :all]))
 
 ;; (deftest in-short?-test
@@ -146,9 +146,9 @@
          (asm-expr ^java.lang.Object [^java.lang.String x] x))))
 
 
-;; ;;; Note: Without the identity wrapper, the function arity with the
-;; ;;; static get is turned into direct delegation.  That is, the arity
-;; ;;; has no dedicated method implementing it, and all invocations are
-;; ;;; redirected to the static getter instead.
-;; (deftest call-expr-auto
-;;   (is (= System/out (call-expr (identity (. java.lang.System out))))))
+;;; Note: Without the identity wrapper, the function arity with the
+;;; static get is turned into direct delegation.  That is, the arity
+;;; has no dedicated method implementing it, and all invocations are
+;;; redirected to the static getter instead.
+(deftest call-expr-auto
+  (is (= System/out (call-expr (identity (. java.lang.System out))))))

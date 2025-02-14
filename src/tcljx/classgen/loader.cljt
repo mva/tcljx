@@ -35,7 +35,7 @@
         urls (->> source-paths (map files/path-url) (distinct) (into-array URL))]
     (.newInstance c name urls parent)))
 
-(defn- dyn-class-loader ^URLClassLoader [^ClassLoader app-ld source-paths]
+(defn dyn-class-loader ^URLClassLoader [^ClassLoader app-ld source-paths]
   (class-loader-instance app-ld "tclj-dyn" source-paths))
 
 (defn- get-rt-lookup ^MethodHandles$Lookup [^ClassLoader app-ld]
@@ -55,11 +55,15 @@
 ;;; written to this directory.  If a non-nil `class-sink` is provided,
 ;;; then the ClassByte instance is passed to the sink after it has
 ;;; been defined.
-(defn mk-loader ^Loader [^Path dest-dir ^ClassLoader app-ld dyn-source-paths
-                         ^Consumer class-sink]
-  (let [dyn-ld (dyn-class-loader app-ld dyn-source-paths)]
-    (Loader. dest-dir dyn-ld (get-rt-lookup app-ld) class-sink
-             (ClassHierarchyResolver/ofResourceParsing dyn-ld))))
+(defn mk-loader
+  (^Loader [^Path dest-dir ^ClassLoader app-ld]
+   (mk-loader dest-dir app-ld (dyn-class-loader app-ld [])))
+  (^Loader [^Path dest-dir ^ClassLoader app-ld ^ClassLoader dyn-ld]
+   (mk-loader dest-dir app-ld dyn-ld nil))
+  (^Loader [^Path dest-dir ^ClassLoader app-ld ^ClassLoader dyn-ld
+            ^Consumer class-sink]
+   (Loader. dest-dir dyn-ld (get-rt-lookup app-ld) class-sink
+            (ClassHierarchyResolver/ofResourceParsing dyn-ld))))
 
 (defn resolve-rt-class ^Class [^Loader loader ^ClassDesc cld]
   (.resolveConstantDesc cld (.rt-lookup loader)))
