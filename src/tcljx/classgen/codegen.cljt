@@ -5,8 +5,8 @@
    (tcljx.classgen [classfile :as classfile] [runtime :as rt] [emit :as emit]
                    [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import
-   (tcljx.data.model Expr CodeEmitter Entity Parameter Constant
-                     FnLiteral ExprFactory NamespaceBuilder)
+   (tcljx.data.model Expr Exprs ExprFactory CodeEmitter Entity Parameter Constant
+                     FnLiteral NamespaceBuilder)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc)
    (java.lang.reflect Member Constructor)
@@ -36,48 +36,49 @@
   (entity [_]
     (when (instance? Entity emitter)
       emitter)))
-(defn- expr-type
-  (^Class [^Insn insn]
-   (.expr-type insn))
-  (^Class [^Insn/1 insns ^int i]
-   (expr-type (aget insns i))))
-(defn- logical-type ^Class [^Insn insn]
-  (type/expr-to-logical (expr-type insn)))
 
 (def empty-insn (Insn. (^CodeEmitter fn [xb requested-type line] Void/TYPE)
                        type/polymorphic))
 
-;;; Emit instruction to `xb` and adapt the stack operand it produces
-;;; to `requested-type`.  Returns false if the instruction returns
-;;; control to the invoking method, and true if execution continues in
-;;; this method.
-(defn emit-code-logical? ^boolean [^CodeBuilder xb ^Insn insn]
-  (emit/more? xb (logical-type insn) insn cfg/no-line-number))
+(deftype Insns [^CodeEmitter/1 emitters ^Class/1 expr-types]
+  ;; FIXME... Valhalla value?
+  java.lang.Record
+  Exprs
+  (length [_]
+    (alength emitters))
+  (set [_ i x]
+    (aset emitters i (.emitter ^Insn x))
+    (aset expr-types i (.expr-type ^Insn x)))
+  (entity [_ i]
+    (let [ce (aget emitters i)]
+      (when (instance? Entity ce)
+        ce))))
 
-(defn emit-code*?
-  (^boolean [^CodeBuilder xb ^Class requested-type ^Insn/1 insns
-             ^int line]
-   (let [end (dec (alength insns))]
-     (loop [i 0]
-       (let [insn (aget insns i)]
-         (if (< i end)
-           (if (emit/more? xb Void/TYPE insn line)
-             (recur (inc i))
-             false)
-           (emit/more? xb requested-type insn line))))))
-  (^boolean [^CodeBuilder xb ^Class/1 requested-types ^Insn/1 insns
-             ^boolean skip-receiver? ^int line]
-   (loop [i 0]
-     (if (< i (alength requested-types))
-       (if (emit/more? xb (aget requested-types i)
-                       (aget insns (+ (int skip-receiver?) i)) line)
-         (recur (inc i))
-         false)
-       true))))
+(defn- emitter
+  (^CodeEmitter [^Insn insn]
+   (.emitter insn))
+  (^CodeEmitter [^Insns insns ^int i]
+   (aget (.emitters insns) i)))
+(defn- expr-type
+  (^Class [^Insn insn]
+   (.expr-type insn))
+  (^Class [^Insns insns ^int i]
+   (aget (.expr-types insns) i)))
+(defn- logical-type
+  (^Class [^Insn insn]
+   (type/expr-to-logical (expr-type insn)))
+  (^Class [^Insns insns ^int i]
+   (type/expr-to-logical (expr-type insns i))))
+
+(def ^:private empty-insns (Insns. (new CodeEmitter/1 0) (new Class/1 0)))
+
+
+(defn emit-code-logical? ^boolean [^CodeBuilder xb ^Insn insn]
+  (emit/more? xb (logical-type insn) (.emitter insn) cfg/no-line-number))
 
 (defn- with-line-number ^Insn [^Insn insn ^int line]
   (Insn. (^CodeEmitter fn [xb requested-type _]
-          (when (emit/more? xb requested-type insn line)
+          (when (emit/more? xb requested-type (.emitter insn) line)
             requested-type))
          (expr-type insn)))
 
@@ -90,15 +91,15 @@
                         (reflect/describe const-value)))
     type))
 
-(defn- progn ^Insn [^Insn/1 insns]
-  (if (zero? (alength insns))
+(defn- progn ^Insn [^Insns insns]
+  (if (zero? (.length insns))
     empty-insn
     (Insn. (^CodeEmitter fn [xb requested-type line]
-            (when (emit/more-of-type*? xb requested-type insns line)
+            (when (emit/more-of-type*? xb requested-type (.emitters insns) line)
               requested-type))
-           (expr-type insns (dec (alength insns))))))
+           (expr-type insns (dec (.length insns))))))
 
-(defn- invoke ^Insn [^Class owner ^Member member ^Insn receiver ^Insn/1 args]
+(defn- invoke ^Insn [^Class owner ^Member member ^Insn receiver ^Insns args]
   (let [opnd-type (reflect/invoke-member-type owner member)]
     (Insn. (^CodeEmitter fn [xb requested-type line]
             (when (instance? Constructor member)
@@ -106,7 +107,7 @@
               (-> xb (.new_ (reflect/describe-class owner)) (.dup)))
             (when (or (nil? receiver) (emit-code-logical? xb receiver))
               (when (emit/more-of-types*? xb (reflect/parameter-types member)
-                                          args line)
+                                          (.emitters args) line)
                 (-> (.lineNumber xb line)
                     (reflect/invoke-member owner member))))
             opnd-type)
@@ -160,30 +161,33 @@
     (.add segment-elements
           (^ClassElementEmitter fn [cb]
            (let [at (aget (.arity-types fn-literal) 0)
-                 body (aget (.arity-bodies fn-literal) 0)
+                 ce-body (emitter (.arity-bodies fn-literal) 0)
                  mnm (str (.mangled-name fn-literal) "~" (.parameter-count at))
                  mtd (model/mtd-of-arity-type at)]
              (classfile/with-method-body-> cb
                [mnm mtd classfile/acc-method-static]
-               (emit/method-code body))))))
+               (emit/method-code ce-body))))))
   (.clear pending-functions))
 
 ;;; ------------------------------------------------------------------------
-
-(defn- arg-types ^Class/1 [^Insn/1 args]
-  (let [a (new Class/1 (alength args))]
-    (dotimes [i (alength a)]
-      (aset a i (expr-type args i)))
-    a))
-
-(def ^:private empty-insn-array (new Insn/1 0))
 
 (deftype ExprFactoryImpl [^ArrayList segment-elements ;shared with NmspBuilder
                           ^ArrayList pending-functions ;shared with NmspBuilder
                           ^Class class-static-fn]
   ExprFactory
-  (new-array [_ n]
-    (if (zero? n) empty-insn-array (new Insn/1 n)))
+  (new-exprs [_ n]
+    (if (zero? n)
+      empty-insns
+      (Insns. (new CodeEmitter/1 n) (new Class/1 n))))
+  (exprs-of [this xs]
+    (let [insns (.new-exprs this (alength xs))]
+      (dotimes [i (alength xs)]
+        (.set insns i (aget xs i)))
+      insns))
+  (copy-of-exprs [_ xs new-length]
+    (Insns. (java.util.Arrays/copyOf (.emitters ^Insns xs) new-length)
+            (java.util.Arrays/copyOf (.expr-types ^Insns xs) new-length)))
+  
   (empty [_]
     empty-insn)
   (line-number [_ line insn]
@@ -201,7 +205,7 @@
                    mtd (MethodTypeDesc/of (reflect/describe-class opnd-type))]
                (classfile/with-method-body-> cb
                  [nm mtd classfile/acc-method-static]
-                 (emit/method-code init)))))
+                 (emit/method-code (.emitter ^Insn init))))))
       empty-insn))
   (new-def-alias [_ nmsp nm other]
     (assert false))
@@ -210,12 +214,12 @@
     (Insn. (ParameterImpl. param-no name type -1) Void/TYPE))
   (new-function [this fn-literal]
     ;; overwrite any auto-return-marker return types
-    (let [ats (.arity-types fn-literal)]
+    (let [ats (.arity-types fn-literal)
+          bodies ^Insns (.arity-bodies fn-literal)]
       (dotimes [i (alength ats)]
         (let [at (aget ats i)]
           (when (type/auto-return-marker? (.return-type at))
-            (let [body (aget (.arity-bodies fn-literal) i)]
-              (aset ats i (.with-return-type at (logical-type body))))))))
+            (aset ats i (.with-return-type at (logical-type bodies i)))))))
     
     (.add pending-functions fn-literal)
     (let [owner (ClassDesc/of "pkg.ns0._10")]
@@ -223,13 +227,13 @@
                      (methodgen/static-fn-desc owner fn-literal))))
   
   (invoke-constructor [_ owner args]
-    (let [args ^Insn/1 args
-          ms (resolve/members-by-param-tags false owner "new" (arg-types args))]
+    (let [args ^Insns args
+          ms (resolve/members-by-param-tags false owner "new" (.expr-types args))]
       (assert (= (count ms) 1))
       (invoke owner (first ms) nil args)))
   (invoke-static-member [_ invoke-member-of-field? owner mnm args]
-    (let [args ^Insn/1 args
-          ms (resolve/members-by-param-tags false owner mnm (arg-types args))]
+    (let [args ^Insns args
+          ms (resolve/members-by-param-tags false owner mnm (.expr-types args))]
       (assert (= (count ms) 1))
       (let [m (first ms)
             insn (invoke owner m nil args)]
@@ -237,9 +241,9 @@
           (assert false)
           insn))))
   (invoke-virtual-member [_ receiver mnm args]
-    (let [args ^Insn/1 args
+    (let [args ^Insns args
           owner (expr-type receiver)
-          ms (resolve/members-by-param-tags true owner mnm (arg-types args))]
+          ms (resolve/members-by-param-tags true owner mnm (.expr-types args))]
       (assert (= (count ms) 1))
       (let [m (first ms)]
         (invoke owner m receiver args))))

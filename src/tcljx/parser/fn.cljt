@@ -5,7 +5,7 @@
    (tcljx.parser [wrong :as wrong] [syntax :as syntax] [context :as context]
                  [interop :as interop]))
   (:import
-   (tcljx.data.model Expr ArityType FnLiteral Scope Resolver ExprFactory)
+   (tcljx.data.model Expr Exprs ExprFactory ArityType FnLiteral Scope Resolver)
    (java.lang.constant MethodHandleDesc ConstantDescs)))
 
 #_(definterface ArityMethod
@@ -25,7 +25,7 @@
 
 (deftype FnLiteralImpl [^String mangled-name
                         ^ArityType/1 arity-types
-                        ^Expr/1 arity-bodies
+                        ^Exprs arity-bodies
                         ^MethodHandleDesc/1 arity-redirections]
   java.lang.Record
   FnLiteral)
@@ -92,11 +92,11 @@
                                 ^MethodHandleDesc redirection]
   (mk-fn-literal* mangled-name
                   (doto (new ArityType/1 1) (aset 0 at))
-                  (doto (.new-array ef 1) (aset 0 body))
+                  (doto (.new-exprs ef 1) (.set 0 body))
                   (doto (new MethodHandleDesc/1 1) (aset 0 redirection))))
 
 (defn parse-arity-body ^Expr [^Scope scope ^seq error-context
-                              ^Expr/1 param-bindings ^seq body]
+                              ^Exprs param-bindings ^seq body]
   (model/progn (.expr-factory scope) param-bindings
                (-> (context/with-local-bindings scope param-bindings)
                    (context/parse-forms error-context body))))

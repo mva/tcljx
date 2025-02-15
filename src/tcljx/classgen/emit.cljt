@@ -2,7 +2,7 @@
   (:require
    (tcljx.data [config :as cfg] [type :as type] [model :as model]))
   (:import
-   (tcljx.data.model Expr)
+   (tcljx.data.model CodeEmitter)
    (java.lang.classfile CodeBuilder TypeKind)))
 
 (defn- to? ^boolean [^Class opnd-type ^Class requested-type ^CodeBuilder xb]
@@ -27,31 +27,31 @@
 ;;; control to the invoking method, and true if execution continues in
 ;;; this method.
 (defn more?
-  (^boolean [^CodeBuilder xb ^Class requested-type ^Expr x]
-   (more? xb requested-type x cfg/no-line-number))
-  (^boolean [^CodeBuilder xb ^Class requested-type ^Expr x ^int line]
+  (^boolean [^CodeBuilder xb ^Class requested-type ^CodeEmitter ce]
+   (more? xb requested-type ce cfg/no-line-number))
+  (^boolean [^CodeBuilder xb ^Class requested-type ^CodeEmitter ce ^int line]
    ;; FIXME... special case (identical? opnd-type requested-type)?
-   (-> (.emit-code* (.emitter x) xb requested-type line)
+   (-> (.emit-code* ce xb requested-type line)
        (to? requested-type xb))))
-(defn method-code ^void [^CodeBuilder xb ^Expr x]
-  (more? xb type/exits-method x))
+(defn method-code ^void [^CodeBuilder xb ^CodeEmitter ce]
+  (more? xb type/exits-method ce))
 
 (defn more-of-type*? ^boolean [^CodeBuilder xb ^Class requested-type
-                               ^Expr/1 xs ^int line]
-  (let [end (dec (alength xs))]
+                               ^CodeEmitter/1 ces ^int line]
+  (let [end (dec (alength ces))]
     (loop [i 0]
-      (let [x (aget xs i)]
+      (let [ce (aget ces i)]
         (if (< i end)
-          (if (more? xb Void/TYPE x line)
+          (if (more? xb Void/TYPE ce line)
             (recur (inc i))
             false)
-          (more? xb requested-type x line))))))
+          (more? xb requested-type ce line))))))
 
 (defn more-of-types*? ^boolean [^CodeBuilder xb ^Class/1 requested-types
-                                ^Expr/1 xs ^int line]
+                                ^CodeEmitter/1 ces ^int line]
   (loop [i 0]
     (if (< i (alength requested-types))
-      (if (more? xb (aget requested-types i) (aget xs i) line)
+      (if (more? xb (aget requested-types i) (aget ces i) line)
         (recur (inc i))
         false)
       true)))

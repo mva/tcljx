@@ -2,7 +2,7 @@
   (:require (tcljx.data [model :as model])
             (tcljx.parser [meta :as meta] [wrong :as wrong]))
   (:import (tcljx.data.model Resolver NamespaceBuilder Binding
-                             Expr ExprFactory Scope)))
+                             Expr Exprs ExprFactory Scope)))
 
 ;;; Some form of "cannot do this at this position" error message.
 (defn wrong [^String msg]
@@ -10,18 +10,18 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- expr-array ^Expr/1 [^Scope scope ^int n]
-  (.new-array (.expr-factory scope) n))
+(defn new-exprs ^Exprs [^Scope scope ^int n]
+  (.new-exprs (.expr-factory scope) n))
 
 (defn parse-form ^Expr [^Scope scope form]
   (.parse-form scope form))
-(defn parse-args ^Expr/1 [^Scope scope ^seq forms]
-  (let [a (expr-array scope (count forms))]
-    (loop [i 0, xs (seq forms)]
-      (when (some? xs)
-        (aset a i (parse-form scope (first xs)))
-        (recur (inc i) (next xs))))
-    a))
+(defn parse-args ^Exprs [^Scope scope ^seq forms]
+  (let [xs (new-exprs scope (count forms))]
+    (loop [i 0, forms (seq forms)]
+      (when (some? forms)
+        (.set xs i (parse-form scope (first forms)))
+        (recur (inc i) (next forms))))
+    xs))
 
 (defn parse-forms ^Expr [^Scope scope ^seq error-context ^seq forms]
   (let [line (meta/line-of error-context)]
@@ -67,10 +67,10 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn with-local-bindings ^Scope [^Scope scope ^Expr/1 bindings]
+(defn with-local-bindings ^Scope [^Scope scope ^Exprs bindings]
   (loop [locals (transient (.bindings* scope))
          i 0]
-    (if (< i (alength bindings))
-      (let [bnd ^Binding (model/require-entity (aget bindings i))]
+    (if (< i (.length bindings))
+      (let [bnd ^Binding (model/require-entity bindings i)]
         (recur (assoc! locals (.name bnd) bnd) (inc i)))
       (.with-bindings* scope (persistent! locals)))))

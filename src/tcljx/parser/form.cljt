@@ -5,7 +5,7 @@
                  [syntax :as syntax] [context :as context] [def :as def]
                  [fn :as fn] [new :as new] [constant :as constant]))
   (:import
-   (tcljx.data.model Resolver ExprFactory Expr Scope)
+   (tcljx.data.model Resolver Expr Exprs ExprFactory Scope)
    (clojure.lang IMeta)))
 
 (deftype ScopeImpl [^ExprFactory expr-factory
@@ -18,7 +18,7 @@
     #_(binding [*print-meta* #_false true]
         (prn :parse-expression form))
     
-    (letfn [(parse-args ^Expr/1 [args]
+    (letfn [(parse-args ^Exprs [args]
               (context/parse-args this args))
             (parse-collection-literal ^Expr [form ^map form-meta]
               (.mk-expr expr-factory form))

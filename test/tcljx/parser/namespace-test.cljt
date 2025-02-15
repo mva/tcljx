@@ -13,7 +13,8 @@
    [tcljx.alpha.ptest :refer :all])
   (:import
    (tcljx.data.model NamespaceBuilder ProvidedNamespace NamespaceProvider
-                     CodeEmitter Entity Binding Expr Resolver ExprFactory Scope)
+                     CodeEmitter Entity Binding Expr Exprs ExprFactory
+                     Resolver Scope)
    (tcljx.parser.wrong WrongInfo)))
 
 (deftype CodeData [form]
@@ -27,6 +28,11 @@
   (entity [_]
     (when (instance? Entity data)
       data)))
+
+(deftype ExprsStub [^Expr/1 xs]
+  Exprs
+  (length [_] (alength xs))
+  (set [_ i x] (aset xs i x)))
 
 (defn mk-code ^CodeEmitter [form]
   (CodeData. form))
@@ -55,8 +61,8 @@
 
 (deftype ExprFactoryStub [^java.util.ArrayList forms]
   ExprFactory
-  (new-array [_ n]
-    (new ExprStub/1 n))
+  (new-exprs [_ n]
+    (ExprsStub. (new ExprStub/1 n)))
   (line-number [_ line value]
     (if (some? line)
       (mk-expr [:line-number line (expr-data value)])

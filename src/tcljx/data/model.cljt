@@ -46,9 +46,22 @@
   (emitter ^CodeEmitter [])
   (entity ^Entity []))
 
-(def entity Expr/.entity)
-(defn require-entity ^Entity [^Expr x]
-  (java.util.Objects/requireNonNull (entity x)))
+(definterface Exprs
+  (length ^int [])
+  (set ^void [^int i ^Expr x])
+  (entity ^Entity [^int i]))
+
+(defn entity
+  (^Entity [^Expr x]
+   (.entity x))
+  (^Entity [^Exprs xs ^int i]
+   (.entity xs i)))
+(defn require-entity
+  (^Entity [^Expr x]
+   (java.util.Objects/requireNonNull (entity x)))
+  (^Entity [^Exprs xs ^int i]
+   (java.util.Objects/requireNonNull (entity xs i))))
+
 
 ;;; ------------------------------------------------------------------------
 
@@ -139,7 +152,7 @@
   :extends [Entity]
   (mangled-name ^String [])
   (arity-types ^ArityType/1 [])
-  (arity-bodies ^Expr/1 [])
+  (arity-bodies ^Exprs [])
   (arity-redirections ^MethodHandleDesc/1 []))
 
 ;;; If `x` is a binding, then return the very first non-aliasing
@@ -248,10 +261,13 @@
 ;;; function or to the thread parsing the non-function parts of a
 ;;; namespace.
 (definterface ExprFactory
-  (new-array ^Expr/1 [^int n])
+  (new-exprs ^Exprs [^int length])
+  (exprs-of ^Exprs [& ^Expr/1 xs])
+  (copy-of-exprs ^Exprs [^Exprs xs ^int new-length])
+  
   (empty ^Expr [])
   (line-number ^Expr [^Integer line ^Expr x])
-  (progn ^Expr [^Expr/1 xs])
+  (progn ^Expr [^Exprs xs])
   (new-constant ^Expr [^Class expr-type ^Object value])
 
   ;; ### bindings
@@ -273,25 +289,26 @@
   
   ;; ### interop
 
-  (invoke-constructor ^Expr [^Class owner ^Expr/1 args])
+  (invoke-constructor ^Expr [^Class owner ^Exprs args])
   
   ;; Invoke static public method or field `mnm` of class `owner`.
   ;; Note: Invoking a field actually means to invoke the field's value
   ;; as a function, instead of just getting its value.
   (invoke-static-member ^Expr [^boolean invoke-value-of-field?
-                               ^Class owner ^String mnm ^Expr/1 args])
-  (invoke-virtual-member ^Expr [^Expr receiver ^String mnm ^Expr/1 args])
+                               ^Class owner ^String mnm ^Exprs args])
+  (invoke-virtual-member ^Expr [^Expr receiver ^String mnm ^Exprs args])
 
   ;; ### misc
   
-  (mk-expr ^Expr [form]))
+  (mk-expr ^Expr [form]))               ;FIXME... drop this
 
 (defn progn* ^Expr [^ExprFactory ef & ^Expr/1 xs]
-  (.progn ef xs))
-(defn progn ^Expr [^ExprFactory ef ^Expr/1 statements ^Expr x]
-  (let [a (Arrays/copyOf statements (inc (alength statements)))]
-    (aset a (alength statements) x)
-    (.progn ef a)))
+  (.progn ef (.exprs-of ef xs)))
+(defn progn ^Expr [^ExprFactory ef ^Exprs statements ^Expr x]
+  (let [n (.length statements)
+        xs (.copy-of-exprs ef statements (inc n))]
+    (.set xs n x)
+    (.progn ef xs)))
 
 (defn aconst-null ^Expr [^ExprFactory ef]
   (.new-constant ef Void ConstantDescs/NULL))
@@ -313,10 +330,10 @@
   (bindings* ^map [])
   (with-bindings* ^Scope [^map bindings]))
 
-(defn parameter-bindings ^Expr/1 [^Scope scope ^ArityType at]
+(defn parameter-bindings ^Exprs [^Scope scope ^ArityType at]
   (let [ef (.expr-factory scope)
-        xs (.new-array ef (.parameter-count at))]
-    (dotimes [i (alength xs)]
-      (aset xs i (.new-parameter ef i (.parameter-name at i)
+        xs (.new-exprs ef (.parameter-count at))]
+    (dotimes [i (.length xs)]
+      (.set xs i (.new-parameter ef i (.parameter-name at i)
                                  (.parameter-type at i))))
     xs))
