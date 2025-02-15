@@ -10,21 +10,23 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn parse-form ^Expr [^Scope scope form]
-  (.parse-form scope form))
-
 (defn- expr-array ^Expr/1 [^Scope scope ^int n]
   (.new-array (.expr-factory scope) n))
+
+(defn parse-form ^Expr [^Scope scope form]
+  (.parse-form scope form))
+(defn parse-args ^Expr/1 [^Scope scope ^seq forms]
+  (let [a (expr-array scope (count forms))]
+    (loop [i 0, xs (seq forms)]
+      (when (some? xs)
+        (aset a i (parse-form scope (first xs)))
+        (recur (inc i) (next xs))))
+    a))
 
 (defn parse-forms ^Expr [^Scope scope ^seq error-context ^seq forms]
   (let [line (meta/line-of error-context)]
     (->> (wrong/with-line-context line
-           (let [a (expr-array scope (count forms))]
-             (loop [i 0, xs (seq forms)]
-               (when (some? xs)
-                 (aset a i (parse-form scope (first xs)))
-                 (recur (inc i) (next xs))))
-             a))
+           (parse-args scope forms))
          (.progn (.expr-factory scope))
          (.line-number (.expr-factory scope) line))))
 

@@ -1,0 +1,57 @@
+(ns tcljx.classgen.emit
+  (:require
+   (tcljx [config :as cfg] [type :as type] [model :as model]))
+  (:import
+   (tcljx.model Expr)
+   (java.lang.classfile CodeBuilder TypeKind)))
+
+(defn- to? ^boolean [^Class opnd-type ^Class requested-type ^CodeBuilder xb]
+  (cond
+    (type/exits-method? opnd-type)
+    false         ;instruction does not return: cannot continue at all
+    
+    ;; FIXME... optimize for this "nothing to do" case?  it should be
+    ;; the most common scenario.  handle this in the caller of this
+    ;; function?
+    (identical? opnd-type requested-type)
+    (type/continues? opnd-type)
+    
+    (type/exits-method? requested-type)
+    (do (.return_ xb (TypeKind/from opnd-type)) false)
+    
+    :else (do (assert false)
+              true)))
+
+;;; Emit instruction to `xb` and adapt the stack operand it produces
+;;; to `requested-type`.  Returns false if the instruction returns
+;;; control to the invoking method, and true if execution continues in
+;;; this method.
+(defn more?
+  (^boolean [^CodeBuilder xb ^Class requested-type ^Expr x]
+   (more? xb requested-type x cfg/no-line-number))
+  (^boolean [^CodeBuilder xb ^Class requested-type ^Expr x ^int line]
+   ;; FIXME... special case (identical? opnd-type requested-type)?
+   (-> (.emit-code* (.emitter x) xb requested-type line)
+       (to? requested-type xb))))
+(defn method-code ^void [^CodeBuilder xb ^Expr x]
+  (more? xb type/exits-method x))
+
+(defn more-of-type*? ^boolean [^CodeBuilder xb ^Class requested-type
+                               ^Expr/1 xs ^int line]
+  (let [end (dec (alength xs))]
+    (loop [i 0]
+      (let [x (aget xs i)]
+        (if (< i end)
+          (if (more? xb Void/TYPE x line)
+            (recur (inc i))
+            false)
+          (more? xb requested-type x line))))))
+
+(defn more-of-types*? ^boolean [^CodeBuilder xb ^Class/1 requested-types
+                                ^Expr/1 xs ^int line]
+  (loop [i 0]
+    (if (< i (alength requested-types))
+      (if (more? xb (aget requested-types i) (aget xs i) line)
+        (recur (inc i))
+        false)
+      true)))

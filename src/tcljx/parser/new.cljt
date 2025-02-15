@@ -1,0 +1,10 @@
+(ns tcljx.parser.new
+  (:require
+   (tcljx [model :as model])
+   (tcljx.parser [context :as context]))
+  (:import
+   (tcljx.model Expr Scope)))
+
+(defn parse-new ^Expr [^Scope scope ^Class owner form]
+  (-> (.expr-factory scope)
+      (.invoke-constructor owner (context/parse-args scope (nnext form)))))

@@ -3,7 +3,7 @@
    (tcljx [model :as model])
    (tcljx.parser [meta :as meta] [wrong :as wrong] [interop :as interop]
                  [syntax :as syntax] [context :as context] [def :as def]
-                 [fn :as fn] [constant :as constant]))
+                 [fn :as fn] [new :as new] [constant :as constant]))
   (:import
    (tcljx.model Resolver ExprFactory Expr Scope)
    (clojure.lang IMeta)))
@@ -19,19 +19,19 @@
         (prn :parse-expression form))
     
     (letfn [(parse-args ^Expr/1 [args]
-              (let [a (.new-array expr-factory (count args))]
-                (loop [args args, i 0]
-                  (when (< i (alength a))
-                    (aset a i (.parse-form this (first args)))
-                    (recur (rest args) (inc i))))
-                a))
+              (context/parse-args this args))
             (parse-collection-literal ^Expr [form ^map form-meta]
               (.mk-expr expr-factory form))
 
-            (resolves-as-class-name ^Class [form]
-              (when (syntax/simple-symbol? form)
-                (when (nil? (context/lookup this form))
-                  (context/lookup-class this (name form)))))
+            (type-expression ^Class [^Expr x form] ;nil if no type expression
+              (when-some [value (model/const-value x)]
+                (when (and (class? value) (syntax/simple-symbol? form))
+                  value)))
+            (parse-type-expression ^Class [form]
+              (let [x (.parse-form this form)]
+                (or (type-expression x form)
+                    (throw (syntax/info "expected type expression" form)))))
+            
             (unpack-member-args ^seq [^seq formr]
               (if (seq? (first formr))
                 (do (syntax/empty-tail (next formr))
@@ -39,11 +39,12 @@
                 formr))
             (parse-dot [[_ owner & formr]]
               (let [[member & args] (unpack-member-args formr)
-                    mnm (syntax/simple-symbol-str member)] ;implies owner exists
-                (if-some [owner (resolves-as-class-name owner)]
-                  (.invoke-static-member expr-factory false owner mnm
-                                         (parse-args args))
-                  (assert false))))
+                    mnm (syntax/simple-symbol-str member) ;implies owner exists
+                    owner-expr (.parse-form this owner)
+                    xs (parse-args args)]
+                (if-some [owner (type-expression owner-expr owner)]
+                  (.invoke-static-member expr-factory false owner mnm xs)
+                  (.invoke-virtual-member expr-factory owner-expr mnm xs))))
             
             (wr-info-unresolved-qualified-sym ^Throwable [^symbol op]
               (wrong/wr-info
@@ -61,6 +62,8 @@
                       "def" (def/parse-def this form)
                       "fn*" (fn/parse-fn* this form)
                       "." (parse-dot form)
+                      "new" (new/parse-new this (parse-type-expression (second form)) form)
+                      
                       #_else (.mk-expr expr-factory form))
 
                     ;; `op` is qualified symbol: either a reference to
@@ -78,7 +81,9 @@
             (parse-symbol ^Expr [^symbol sym] ;discards meta
               (if-some [bnd (context/lookup this sym)]
                 (.bound-value bnd)
-                (wrong-unresolved sym)))
+                (if-some [cl (interop/lookup-type resolver sym)]
+                  (.new-constant expr-factory Class cl)
+                  (wrong-unresolved sym))))
             
             (apply-type-hint ^Expr [^Expr x form-tag] ;pre: (some? form-tag)
               (assert false))]

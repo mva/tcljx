@@ -55,8 +55,8 @@
                   (and (nil? (seq args)) (= form-args (distinct form-args)))))))
           (static-method ^MethodHandleDesc [^Class owner ^String mnm ^seq args]
             (when (parameters-in-sequence? args)
-              (when-some [m (resolve/method false owner mnm
-                                            (.parameter-types at))]
+              (when-some [m (resolve/method-by-param-tags false owner mnm
+                                                          (.parameter-types at))]
                 ;; FIXME... varargs flag must also match the arity signature
                 (reflect/mhd-of-method owner m))))]
 

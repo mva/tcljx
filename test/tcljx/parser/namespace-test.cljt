@@ -61,10 +61,10 @@
     (if (some? line)
       (mk-expr [:line-number line (expr-data value)])
       value))
-  (constant [_ value]
-    (mk-expr [:constant value (class-data value)]))
   (progn [_ xs]
     (mk-expr (reduce (comp conj expr-data) [:progn] xs)))
+  (new-constant [_ expr-type value]
+    (mk-expr [:constant value (class-data value)]))
   
   (new-def-init [_ nmsp nm init]
     (let [ns-str (.ns-str nmsp)
@@ -94,6 +94,8 @@
   Resolver
   (ns-str [_]
     ns-str)
+  (lookup-class [_ nm]
+    nil)
   (lookup-def [_ nmsp nm]
     (if (or (nil? nmsp) (= nmsp ns-str))
       (.valAt globals nm nil)

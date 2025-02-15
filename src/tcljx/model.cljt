@@ -25,14 +25,13 @@
 ;;; runtime.  Exposes additional operations beyond "emit code that
 ;;; produces this entity's value".  The code emitted by Entity
 ;;; itself (if any) usually only establishes the entity without
-;;; putting a value on the operand stack.  FIXME... Handle constant
-;;; value as Entity?  Then: "The exception are loadable constant
-;;; values, where establishing the value *does* push it onto the
-;;; stack."
+;;; putting a value on the operand stack.  The exception are loadable
+;;; constant values, where establishing the value *does* push it onto
+;;; the stack.
 ;;;
 ;;; Implementation note: To ease certain code generation patterns,
-;;; identity of Entity instances is important.  Every runtime entity
-;;; should be mirrored by at most one instance of Entity during
+;;; identity of Entity instances is important.  A runtime entity
+;;; should be mirrored by at most one Entity instance during
 ;;; compilation.
 (definterface Entity :extends [CodeEmitter])
 
@@ -44,11 +43,30 @@
 (definterface Expr         ;FIXME... turn this into an abstract class?
   ;; If this expression is backed by a runtime entity, then return it.
   ;; Otherwise, return nil.
+  (emitter ^CodeEmitter [])
   (entity ^Entity []))
 
 (def entity Expr/.entity)
 (defn require-entity ^Entity [^Expr x]
   (java.util.Objects/requireNonNull (entity x)))
+
+;;; ------------------------------------------------------------------------
+
+;;; Constant values must be visible to the parser, because type
+;;; expression literals (for example `Classname` or `Classname/1`) are
+;;; part of the syntax of some special forms.  Constant values are
+;;; visible to the code generator to support bottom up constant
+;;; folding while building the expression tree.
+(definterface Constant
+  :extends [Entity]
+  (const-value ^Object []))             ;never nil
+
+(defn const? ^boolean [^Expr x]
+  (instance? Constant (.entity x)))
+(defn const-value ^Object [^Expr x]     ;nil if not a constant
+  (let [e (.entity x)]
+    (when (instance? Constant e)
+      (.const-value ^Constant e))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -233,8 +251,8 @@
   (new-array ^Expr/1 [^int n])
   (empty ^Expr [])
   (line-number ^Expr [^Integer line ^Expr x])
-  (constant ^Expr [value])
   (progn ^Expr [^Expr/1 xs])
+  (new-constant ^Expr [^Class expr-type ^Object value])
 
   ;; ### bindings
 
@@ -255,11 +273,14 @@
   
   ;; ### interop
 
+  (invoke-constructor ^Expr [^Class owner ^Expr/1 args])
+  
   ;; Invoke static public method or field `mnm` of class `owner`.
   ;; Note: Invoking a field actually means to invoke the field's value
   ;; as a function, instead of just getting its value.
   (invoke-static-member ^Expr [^boolean invoke-value-of-field?
                                ^Class owner ^String mnm ^Expr/1 args])
+  (invoke-virtual-member ^Expr [^Expr receiver ^String mnm ^Expr/1 args])
 
   ;; ### misc
   
@@ -273,7 +294,7 @@
     (.progn ef a)))
 
 (defn aconst-null ^Expr [^ExprFactory ef]
-  (.constant ef ConstantDescs/NULL))
+  (.new-constant ef Void ConstantDescs/NULL))
 
 (definterface Scope
   (parse-form ^Expr [form])

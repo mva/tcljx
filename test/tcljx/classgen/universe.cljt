@@ -38,11 +38,11 @@
   (lookup-namespace [_ alias]
     (.valAt ns-alias alias nil))
   (lookup-class [_ nm]
-    (or (.valAt imports nm nil)
-        (when-some [cl (-> (java.lang.constant.ClassDesc/of nm)
-                           (.resolveConstantDesc (.lookup-in-pkg pkg-build)))]
-          (set! imports (assoc imports nm cl))
-          cl)))
+    (or
+     (.valAt imports nm nil)
+     (when-some [cl (resolve/class-by-name (.lookup-in-pkg pkg-build) nm)]
+       (set! imports (assoc imports nm cl))
+       cl)))
   (lookup-def [this nmsp nm]
     (if (or (nil? nmsp) (= nmsp ns-str))
       (.valAt globals nm nil)
@@ -104,7 +104,7 @@
        (dotimes [i end-of-segment-elements]
          (let [elem (.get segment-elements i)]
            (when (instance? Insn elem)
-             (codegen/emit-code? xb elem))))))
+             (codegen/emit-code-logical? xb elem))))))
     
     ;; revert back to requested state & move to next segment
     (set! globals then-globals)

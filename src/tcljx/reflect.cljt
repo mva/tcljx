@@ -2,11 +2,14 @@
   (:import
    (java.lang.classfile ClassFile Opcode #_TypeKind ClassBuilder #_MethodBuilder
                         CodeBuilder #_Label)
-   (java.lang.constant #_ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
+   (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
                        DirectMethodHandleDesc DirectMethodHandleDesc$Kind
-                       ConstantDescs)
+                       Constable ConstantDescs)
    #_(java.lang.invoke MethodHandle TypeDescriptor$OfField MethodHandles$Lookup)
    (java.lang.reflect Method Constructor Executable Field Member Modifier)))
+
+(defn describe ^ConstantDesc [^Constable x]
+  (.get (.describeConstable x)))
 
 ;;; FIXME... Does it make sense to use java.lang.ClassValue to cache
 ;;; generated ClassDesc values?  The cache should be wiped (or shrunk,
@@ -24,7 +27,7 @@
 (defn mtd-of-method ^MethodTypeDesc [^Method m]
   (MethodTypeDesc/of (describe-class (.getReturnType m))
                      (describe-class* (.getParameterTypes m))))
-#_(defn mtd-of-constructor ^MethodTypeDesc [^Constructor c]
+(defn mtd-of-constructor ^MethodTypeDesc [^Constructor c]
   (MethodTypeDesc/of ConstantDescs/CD_void
                      (describe-class* (.getParameterTypes c))))
 
@@ -75,7 +78,7 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn virtual? ^boolean [^Member member]
+(defn virtual? ^boolean [^Member member] ;also true for constructor
   (not (Modifier/isStatic (.getModifiers member))))
 
 (defn parameter-types ^Class/1 [^Member member]
@@ -88,13 +91,15 @@
         v? (virtual? member)]
     (condp instance? member
       Method
-      (.invoke xb (if v? Opcode/INVOKEVIRTUAL Opcode/INVOKESTATIC) cld
-               (.getName member) (mtd-of-method member) (.isInterface owner))
+      (.invoke xb (if v?
+                    (if (.isInterface owner)
+                      Opcode/INVOKEINTERFACE
+                      Opcode/INVOKEVIRTUAL)
+                    Opcode/INVOKESTATIC)
+               cld (.getName member) (mtd-of-method member) (.isInterface owner))
       Constructor
-      (assert false)
-      #_(let [c ^Constructor member]
-          (invoke-xref flags owner argv nil
-                       (mhd-of-constructor owner c) (.isVarArgs c) false))
+      (.invokespecial xb cld ConstantDescs/INIT_NAME
+                      (mtd-of-constructor member))
       Field
       (.fieldAccess xb (if v? Opcode/GETFIELD Opcode/GETSTATIC) cld
                     (.getName member) (describe-class (.getType ^Field member))))))

@@ -1,9 +1,43 @@
 (ns tcljx.parser.constant
   (:require (tcljx [model :as model])
             (tcljx.parser [wrong :as wrong]))
-  (:import (tcljx.model Scope Expr)))
+  (:import (tcljx.model Scope Expr)
+           (java.lang.constant ConstantDesc)))
 
 (defn parse-constant ^Expr [^Scope scope form]
   ;; pre: (not (instance? IMeta form))
-  (assert (instance? Integer form))
-  (-> (.expr-factory scope) (.constant form)))
+  (letfn [(const-desc-tp ^Class [form]
+            (condp instance? form
+              Integer Integer/TYPE
+              Long Long/TYPE
+              Float Float/TYPE
+              Double Double/TYPE
+              String String
+              #_else (throw (IllegalArgumentException.))))
+          (comp-int-tp ^Class [form]      ;pre: form is not ConstantDesc
+            (condp instance? form
+              Byte Byte/TYPE
+              Short Short/TYPE
+              #_else (throw (IllegalArgumentException.))))]
+    (let [ef (.expr-factory scope)]
+      (cond
+        (nil? form)
+        (assert false) #_x/expr-nil-object
+        
+        (instance? ConstantDesc form)
+        (.new-constant ef (const-desc-tp form) form)
+        
+        (keyword? form)
+        (assert false) #_(compile-named form rt/clnm-keyword ctx)
+        
+        (boolean? form)
+        (assert false) #_(x/expr-boolean ^boolean form) ;enforce singletons
+        
+        (char? form)
+        (.new-constant ef Character/TYPE (object (int ^char form)))
+        
+        (number? form)
+        (.new-constant ef (comp-int-tp form) (object (.intValue ^Number form)))
+        
+        :else
+        (.new-constant ef (class form) form))))) ;Class and Pattern

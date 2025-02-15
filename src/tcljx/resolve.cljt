@@ -9,6 +9,7 @@
   (:require
    [tcljx.type :as type])
   (:import
+   (java.lang.invoke MethodHandles$Lookup)
    (java.lang.reflect Method Constructor Executable Field Member Modifier)))
 
 (def ^:private java-base-classes    ;almost all from package java.lang
@@ -62,6 +63,18 @@
                          Long/TYPE Double/TYPE]]
         (.put m (.getSimpleName cl) cl))
       (into {} m))))
+
+;;; ------------------------------------------------------------------------
+
+(defn- maybe-class-name? ^boolean [^String nm] ;format must be pkgName.className
+  (pos? (.indexOf nm (int \.))))
+
+(defn class-by-name ^Class [^MethodHandles$Lookup l ^String nm] ;nil if no match
+  (when (maybe-class-name? nm)
+    (try
+      (.resolveConstantDesc (java.lang.constant.ClassDesc/of nm) l)
+      (catch ClassNotFoundException _
+        nil))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -139,7 +152,8 @@
 ;;; `ptags` of nil does not constrain arity or parameter types of
 ;;; constructors, methods, or virtual fields.  Returns nil if there is
 ;;; no match.
-(defn members ^seq [^boolean virtual? ^Class owner ^String mnm ^Class/1 ptags]
+(defn members-by-param-tags ^seq [^boolean virtual? ^Class owner ^String mnm
+                                  ^Class/1 ptags]
   (letfn [(parameters-match? ^boolean [^Class/1 ptags ^Class/1 ptypes]
             (loop [i (dec (alength ptypes))]
               (cond
@@ -191,9 +205,13 @@
             (when-some [f (field-exact opts owner mnm)]
               (cons f nil)))))))
 
-(defn methods ^seq [^boolean virtual? ^Class owner ^String mnm ^Class/1 ptags]
-  (filter #(instance? Method %) (members virtual? owner mnm ptags)))
-(defn method [^boolean virtual? ^Class owner ^String mnm ^Class/1 ptags]
-  (let [ms (methods virtual? owner mnm ptags)]
+(defn methods-by-param-tags ^seq [^boolean virtual? ^Class owner ^String mnm
+                                  ^Class/1 ptags]
+  ;; FIXME... drop this later?
+  (filter #(instance? Method %) (members-by-param-tags virtual? owner mnm ptags)))
+(defn method-by-param-tags [^boolean virtual? ^Class owner ^String mnm
+                            ^Class/1 ptags]
+  ;; FIXME... drop this later?
+  (let [ms (methods-by-param-tags virtual? owner mnm ptags)]
     (when (nil? (next ms))
       (first ms))))

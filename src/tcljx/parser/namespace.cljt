@@ -41,8 +41,8 @@
                                exclude (nnext spec))
                 ::exclude (recur alias refer rename
                                  (second-vector spec) (nnext spec))
-                #_else (syntax/wrong "expect :as, :refer, or :rename"
-                                     (first spec)))
+                #_else (throw (syntax/info "expect :as, :refer, or :rename"
+                                           (first spec))))
               (Require. ns-str alias refer rename exclude error-context))))
         (flatten-requires ^seq [^seq rrequires ^String prefix ^seq specs
                                 ^seq error-context]
@@ -66,13 +66,13 @@
                                           (rest spec) spec))
                       
                       :else
-                      (syntax/wrong "expect symbol, vector, or list" spec)))]
+                      (throw (syntax/info "expect symbol, vector, or list" spec))))]
             (wrong/with-line-context error-context
               (reduce flatten-require rrequires specs))))
         
         (parse-refer-cljs ^Require [^seq rrefer-cljs]
           (when (some? (nnext rrefer-cljs))
-            (syntax/wrong "multiple :refer-clojure clauses"))
+            (throw (syntax/info "multiple :refer-clojure clauses")))
           
           (let [refer-clj (first rrefer-cljs)]
             ;; pre: (first refer-clj) is :refer-clojure
@@ -87,8 +87,8 @@
                                     (nnext specs))
                     :rename (recur refer exclude (second-map specs)
                                    (nnext specs))
-                    #_else (syntax/wrong "expect :only, :exclude, or :rename"
-                                         (first specs)))
+                    #_else (throw (syntax/info "expect :only, :exclude, or :rename"
+                                                (first specs))))
                   (Require. cfg/core-lib nil refer rename exclude
                             refer-clj))))))
 
@@ -128,7 +128,7 @@
                                          (rest spec) spec))
                       
                       :else
-                      (syntax/wrong "expect symbol or list" spec)))]
+                      (throw (syntax/info "expect symbol or list" spec))))]
             (reduce flatten-import rimports specs)))
         
         (ns-form ^NamespaceBuilder [^NamespaceBuilder nmsp
@@ -157,7 +157,7 @@
                 (recur rrequires rimports (cons clause rrefer-cljs) clauses')
                 
                 #_else
-                (syntax/wrong "expect :require, :import, or :refer-clojure" tag))
+                (throw (syntax/info "expect :require, :import, or :refer-clojure" tag)))
               (let [requires (reverse rrequires)
                     requires (cond
                                (nil? rrefer-cljs)

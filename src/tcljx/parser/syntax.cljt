@@ -3,11 +3,11 @@
             (tcljx.parser [wrong :as wrong]))
   (:refer-clojure :exclude [vector map symbol]))
 
-(defn wrong
-  ([^String msg]
-   (throw (wrong/wr-info msg)))
-  ([^String msg-prefix form]
-   (throw (wrong/wr-info-line-number (str msg-prefix (wrong/got-q form)) form))))
+(defn info
+  (^Throwable [^String msg]
+   (wrong/wr-info msg))
+  (^Throwable [^String msg-prefix form]
+   (wrong/wr-info-line-number (str msg-prefix (wrong/got-q form)) form)))
 
 ;;; ------------------------------------------------------------------------
 
@@ -21,12 +21,12 @@
 
 (defn empty-tail ^void [^seq forms]    ;pre: `forms` is nil when empty
   (when (some? forms)
-    (wrong "unexpected arguments at end" forms)))
+    (throw (info "unexpected arguments at end" forms))))
 
 (defn some-first [^seq forms]          ;pre: `forms` is nil when empty
   (if (some? forms)
     (first forms)
-    (wrong "missing argument")))
+    (throw (info "missing argument"))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -36,11 +36,11 @@
 (defn symbol ^symbol [form]
   (if (symbol? form)
     form
-    (wrong "expect symbol" form)))
+    (throw (info "expect symbol" form))))
 (defn simple-symbol ^symbol [form]
   (if (simple-symbol? form)
     form
-    (wrong "expect unqualified symbol" form)))
+    (throw (info "expect unqualified symbol" form))))
 
 (defn simple-symbol-str ^String [form]
   (name (simple-symbol form)))
@@ -48,10 +48,10 @@
 (defn vector ^vector [form]
   (if (vector? form)
     form
-    (wrong "expect vector" form)))
+    (throw (info "expect vector" form))))
 
 (defn map ^map [form]
   (if (map? form)
     form
-    (wrong "expect map" form)))
+    (throw (info "expect map" form))))
 
