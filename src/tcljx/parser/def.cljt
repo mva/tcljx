@@ -1,9 +1,9 @@
 (ns tcljx.parser.def
   (:require
-   (tcljx [model :as model])
+   (tcljx.data [model :as model])
    (tcljx.parser [wrong :as wrong] [syntax :as syntax] [context :as context]))
   (:import
-   (tcljx.model Expr Binding Scope)))
+   (tcljx.data.model Expr Binding Scope)))
 
 (defn parse-def ^Expr [^Scope scope [_ nm & args]]
   (letfn [(aliased-def ^Binding [^symbol init]

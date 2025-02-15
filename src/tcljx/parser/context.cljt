@@ -1,8 +1,8 @@
 (ns tcljx.parser.context
-  (:require (tcljx [model :as model])
+  (:require (tcljx.data [model :as model])
             (tcljx.parser [meta :as meta] [wrong :as wrong]))
-  (:import (tcljx.model Resolver NamespaceBuilder Binding
-                        Expr ExprFactory Scope)))
+  (:import (tcljx.data.model Resolver NamespaceBuilder Binding
+                             Expr ExprFactory Scope)))
 
 ;;; Some form of "cannot do this at this position" error message.
 (defn wrong [^String msg]

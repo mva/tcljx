@@ -1,4 +1,4 @@
-(ns tcljx.type)
+(ns tcljx.data.type)
 
 (defn same? ^boolean [^Class a ^Class b]
   (identical? a b))

@@ -1,11 +1,11 @@
 (ns tcljx.parser.fn
   (:require
-   (tcljx [type :as type] [model :as model] [resolve :as resolve]
-          [reflect :as reflect])
+   (tcljx.data [type :as type] [model :as model] [resolve :as resolve]
+               [reflect :as reflect])
    (tcljx.parser [wrong :as wrong] [syntax :as syntax] [context :as context]
                  [interop :as interop]))
   (:import
-   (tcljx.model Expr ArityType FnLiteral Scope Resolver ExprFactory)
+   (tcljx.data.model Expr ArityType FnLiteral Scope Resolver ExprFactory)
    (java.lang.constant MethodHandleDesc ConstantDescs)))
 
 #_(definterface ArityMethod

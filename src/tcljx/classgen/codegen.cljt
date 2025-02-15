@@ -1,12 +1,12 @@
 (ns tcljx.classgen.codegen
   (:require
-   (tcljx [config :as cfg] [type :as type] [model :as model]
-          [resolve :as resolve] [reflect :as reflect])
+   (tcljx.data [config :as cfg] [type :as type] [model :as model]
+               [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen [classfile :as classfile] [runtime :as rt] [emit :as emit]
                    [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import
-   (tcljx.model Expr CodeEmitter Entity Parameter Constant
-                FnLiteral ExprFactory NamespaceBuilder)
+   (tcljx.data.model Expr CodeEmitter Entity Parameter Constant
+                     FnLiteral ExprFactory NamespaceBuilder)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc)
    (java.lang.reflect Member Constructor)

@@ -1,9 +1,9 @@
 (ns tcljx.parser.interop
   (:require
-   (tcljx [type :as type] [model :as model])
+   (tcljx.data [type :as type] [model :as model])
    (tcljx.parser [wrong :as wrong] [syntax :as syntax]))
   (:import
-   (tcljx.model Resolver ArityType)
+   (tcljx.data.model Resolver ArityType ArityTypeImpl)
    (clojure.lang IMeta)))
 
 ;;; Returns nil if lookup fails.
@@ -66,4 +66,4 @@
         (-> (if (= 'auto-return-type return-tag)
               type/auto-return-marker
               (resolve-tag* rsv return-tag Object))
-            (tcljx.model.ArityTypeImpl. ptypes pnames))))))
+            (ArityTypeImpl. ptypes pnames))))))

@@ -7,13 +7,15 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.redirection-test
   (:require
-   (tcljx [model :as model])
+   (tcljx.data [model :as model])
    (tcljx.parser [interop :as interop] [fn :as fn])
    [tcljx.classgen.classdata :as classdata]
-   [tcljx.alpha.ptest :refer :all]))
+   [tcljx.alpha.ptest :refer :all])
+  (:import
+   (tcljx.data.model Resolver)))
 
 (defn redir [^vector arity-sig body-form]
-  (let [rsv (reify tcljx.model.Resolver
+  (let [rsv (reify Resolver
               (lookup-namespace [_ alias]
                 nil)
               (lookup-class [_ nm]

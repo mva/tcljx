@@ -1,5 +1,5 @@
-(ns tcljx.model
-  (:require (tcljx [config :as cfg] [reflect :as reflect]))
+(ns tcljx.data.model
+  (:require (tcljx.data [config :as cfg] [reflect :as reflect]))
   (:import (java.lang.constant MethodHandleDesc MethodTypeDesc ConstantDescs)
            (java.util Arrays)))
 

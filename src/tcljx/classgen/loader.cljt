@@ -1,6 +1,6 @@
 (ns tcljx.classgen.loader
   (:require
-   [tcljx.files :as files]
+   (tcljx.data [files :as files])
    [tcljx.classgen.beachhead :as beachhead])
   (:import
    (java.lang.classfile ClassFile ClassBuilder ClassHierarchyResolver

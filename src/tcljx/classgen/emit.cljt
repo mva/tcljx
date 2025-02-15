@@ -1,8 +1,8 @@
 (ns tcljx.classgen.emit
   (:require
-   (tcljx [config :as cfg] [type :as type] [model :as model]))
+   (tcljx.data [config :as cfg] [type :as type] [model :as model]))
   (:import
-   (tcljx.model Expr)
+   (tcljx.data.model Expr)
    (java.lang.classfile CodeBuilder TypeKind)))
 
 (defn- to? ^boolean [^Class opnd-type ^Class requested-type ^CodeBuilder xb]

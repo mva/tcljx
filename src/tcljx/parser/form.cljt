@@ -1,11 +1,11 @@
 (ns tcljx.parser.form
   (:require
-   (tcljx [model :as model])
+   (tcljx.data [model :as model])
    (tcljx.parser [meta :as meta] [wrong :as wrong] [interop :as interop]
                  [syntax :as syntax] [context :as context] [def :as def]
                  [fn :as fn] [new :as new] [constant :as constant]))
   (:import
-   (tcljx.model Resolver ExprFactory Expr Scope)
+   (tcljx.data.model Resolver ExprFactory Expr Scope)
    (clojure.lang IMeta)))
 
 (deftype ScopeImpl [^ExprFactory expr-factory

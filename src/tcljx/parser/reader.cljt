@@ -6,11 +6,10 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.reader
-  (:require [tcljx.config :as cfg]
-            [tcljx.model :as model]
+  (:require (tcljx.data [config :as cfg] [model :as model])
             (tcljx.parser [meta :as meta] [wrong :as wrong])
             [tinyclj.string :as str])
-  (:import (tcljx.model Resolver)
+  (:import (tcljx.data.model Resolver)
            (tcljx.parser.wrong WrongInfo)
            (tinyclj.lang Literal)
            (clojure.lang IMapEntry IRecord Named)

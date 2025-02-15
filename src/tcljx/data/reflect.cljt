@@ -1,4 +1,4 @@
-(ns tcljx.reflect
+(ns tcljx.data.reflect
   (:import
    (java.lang.classfile ClassFile Opcode #_TypeKind ClassBuilder #_MethodBuilder
                         CodeBuilder #_Label)

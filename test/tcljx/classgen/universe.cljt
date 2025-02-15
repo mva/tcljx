@@ -1,14 +1,14 @@
 (ns tcljx.classgen.universe
   (:require
-   (tcljx [config :as cfg] [files :as files] [resolve :as resolve]
-          [model :as model])
+   (tcljx.data [config :as cfg] [files :as files] [resolve :as resolve]
+               [model :as model])
    (tcljx.parser [context :as context] [form :as form] [namespace :as namespace])
    (tcljx.classgen [loader :as loader] [runtime :as rt] [classfile :as classfile]
                    [segmgen :as segmgen] [codegen :as codegen]))
   (:import
-   (tcljx.model Resolver NamespaceProvider ProvidedNamespace
-                NamespaceBuilder SegmentBuilder
-                Expr ExprFactory Scope)
+   (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
+                     NamespaceBuilder SegmentBuilder
+                     Expr ExprFactory Scope)
    (tcljx.classgen.loader Loader PackageBuilder)
    (tcljx.classgen.codegen Insn)
    (java.lang.classfile ClassBuilder CodeBuilder)

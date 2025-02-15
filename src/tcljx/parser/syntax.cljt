@@ -1,5 +1,5 @@
 (ns tcljx.parser.syntax
-  (:require (tcljx [config :as cfg])
+  (:require (tcljx.data [config :as cfg])
             (tcljx.parser [wrong :as wrong]))
   (:refer-clojure :exclude [vector map symbol]))
 

@@ -5,9 +5,9 @@
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
-(ns tcljx.resolve
+(ns tcljx.data.resolve
   (:require
-   [tcljx.type :as type])
+   (tcljx.data [type :as type]))
   (:import
    (java.lang.invoke MethodHandles$Lookup)
    (java.lang.reflect Method Constructor Executable Field Member Modifier)))

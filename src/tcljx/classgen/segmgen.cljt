@@ -1,6 +1,6 @@
 (ns tcljx.classgen.segmgen
   (:require
-   (tcljx [config :as cfg] [files :as files])
+   (tcljx.data [config :as cfg] [files :as files])
    (tcljx.classgen [runtime :as rt] [loader :as loader]
                    [classfile :as classfile])
    [tinyclj.string :as str])

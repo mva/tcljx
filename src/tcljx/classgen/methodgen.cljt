@@ -1,9 +1,9 @@
 (ns tcljx.classgen.methodgen
   (:require
-   (tcljx [model :as model])
+   (tcljx.data [model :as model])
    (tcljx.classgen [runtime :as rt]))
   (:import
-   (tcljx.model ArityType FnLiteral)
+   (tcljx.data.model ArityType FnLiteral)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDesc DirectMethodHandleDesc DynamicConstantDesc
                        ConstantDescs DirectMethodHandleDesc$Kind)))
