@@ -261,13 +261,12 @@
 ;;; function or to the thread parsing the non-function parts of a
 ;;; namespace.
 (definterface ExprFactory
-  (new-exprs ^Exprs [^int length])
-  (exprs-of ^Exprs [& ^Expr/1 xs])
   (empty-expr ^Expr [])
+  (new-exprs ^Exprs [^int length])
+  (progn-expr ^Expr [^Exprs xs ^Expr x])
   
   (line-number ^Expr [^Integer line ^Expr x])
   (new-constant ^Expr [^Class expr-type ^Object value])
-  (progn-expr ^Expr [^Exprs xs ^Expr x])
 
   ;; ### bindings
 
@@ -303,6 +302,12 @@
 
 (defn aconst-null ^Expr [^ExprFactory ef]
   (.new-constant ef Void ConstantDescs/NULL))
+
+(defn exprs-of ^Exprs [^ExprFactory ef & ^Expr/1 xs*]
+  (let [xs (.new-exprs ef (alength xs*))]
+    (dotimes [i (.length xs)]
+      (.set xs i (aget xs* i)))
+    xs))
 
 (definterface Scope
   (parse-form ^Expr [form])

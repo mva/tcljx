@@ -175,17 +175,12 @@
                           ^ArrayList pending-functions ;shared with NmspBuilder
                           ^Class class-static-fn]
   ExprFactory
+  (empty-expr [_]
+    empty-insn)
   (new-exprs [_ n]
     (if (zero? n)
       empty-insns
       (Insns. (new CodeEmitter/1 n) (new Class/1 n))))
-  (exprs-of [this xs]
-    (let [insns (.new-exprs this (alength xs))]
-      (dotimes [i (alength xs)]
-        (.set insns i (aget xs i)))
-      insns))
-  (empty-expr [_]
-    empty-insn)
   (progn-expr [_ xs x]
     (if (zero? (.length xs)) x (progn xs x)))
   
