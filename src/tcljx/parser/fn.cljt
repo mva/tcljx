@@ -97,9 +97,9 @@
 
 (defn parse-arity-body ^Expr [^Scope scope ^seq error-context
                               ^Exprs param-bindings ^seq body]
-  (model/progn (.expr-factory scope) param-bindings
+  (.progn-expr (.expr-factory scope) param-bindings
                (-> (context/with-local-bindings scope param-bindings)
-                   (context/parse-forms error-context body))))
+                   (context/parse-progn error-context body))))
 
 (defn parse-fn* ^Expr [^Scope scope [_ fn-nm paramv & body :as ^seq form]]
   (let [fn-nm (syntax/simple-symbol-str fn-nm)

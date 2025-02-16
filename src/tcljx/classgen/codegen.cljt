@@ -91,13 +91,13 @@
                         (reflect/describe const-value)))
     type))
 
-(defn- progn ^Insn [^Insns insns]
-  (if (zero? (.length insns))
-    empty-insn
+(defn- progn ^Insn [^Insns insns ^Insn insn] ;`insns` should not be empty
+  (let [ces (.emitters insns), ce (.emitter insn)]
     (Insn. (^CodeEmitter fn [xb requested-type line]
-            (when (emit/more-of-type*? xb requested-type (.emitters insns) line)
-              requested-type))
-           (expr-type insns (dec (.length insns))))))
+            (when (emit/more-of-type*? xb Void/TYPE ces line)
+              (when (emit/more? xb requested-type ce line)
+                requested-type)))
+           (expr-type insn))))
 
 (defn- invoke ^Insn [^Class owner ^Member member ^Insn receiver ^Insns args]
   (let [opnd-type (reflect/invoke-member-type owner member)]
@@ -184,16 +184,13 @@
       (dotimes [i (alength xs)]
         (.set insns i (aget xs i)))
       insns))
-  (copy-of-exprs [_ xs new-length]
-    (Insns. (java.util.Arrays/copyOf (.emitters ^Insns xs) new-length)
-            (java.util.Arrays/copyOf (.expr-types ^Insns xs) new-length)))
-  
-  (empty [_]
+  (empty-expr [_]
     empty-insn)
+  (progn-expr [_ xs x]
+    (if (zero? (.length xs)) x (progn xs x)))
+  
   (line-number [_ line insn]
     (cond-> insn (some? line) (with-line-number ^int line)))
-  (progn [_ xs]
-    (progn xs))
   (new-constant [_ expr-type value]
     (Insn. (ConstantImpl. expr-type value) expr-type))
   

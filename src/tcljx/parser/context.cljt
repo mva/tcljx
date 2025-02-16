@@ -23,12 +23,24 @@
         (recur (inc i) (next forms))))
     xs))
 
-(defn parse-forms ^Expr [^Scope scope ^seq error-context ^seq forms]
-  (let [line (meta/line-of error-context)]
-    (->> (wrong/with-line-context line
-           (parse-args scope forms))
-         (.progn (.expr-factory scope))
-         (.line-number (.expr-factory scope) line))))
+(defn- parse-progn* ^Expr [^Scope scope ^seq forms] ;pre: `forms` is nil if empty
+  (if (some? forms)
+    (let [n (count forms), xs (new-exprs scope (dec n))]
+      (loop [i 0, forms forms]
+        (let [x (parse-form scope (first forms))]
+          (if (< i (.length xs))
+            (do (.set xs i x)
+                (recur (inc i) (rest forms)))
+            (.progn-expr (.expr-factory scope) xs x)))))
+    (.empty-expr (.expr-factory scope))))
+(defn parse-progn
+  (^Expr [^Scope scope ^seq forms]
+   (parse-progn* scope (seq forms)))
+  (^Expr [^Scope scope ^seq error-context ^seq forms]
+   (let [line (meta/line-of error-context)]
+     (->> (wrong/with-line-context line
+            (parse-progn* scope (seq forms)))
+          (.line-number (.expr-factory scope) line)))))
 
 ;;; Anything outside of a function or a class definition (that is
 ;;; definterface, deftype, reify, etc.) happens in the namespace

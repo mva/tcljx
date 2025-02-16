@@ -263,12 +263,11 @@
 (definterface ExprFactory
   (new-exprs ^Exprs [^int length])
   (exprs-of ^Exprs [& ^Expr/1 xs])
-  (copy-of-exprs ^Exprs [^Exprs xs ^int new-length])
+  (empty-expr ^Expr [])
   
-  (empty ^Expr [])
   (line-number ^Expr [^Integer line ^Expr x])
-  (progn ^Expr [^Exprs xs])
   (new-constant ^Expr [^Class expr-type ^Object value])
+  (progn-expr ^Expr [^Exprs xs ^Expr x])
 
   ;; ### bindings
 
@@ -301,14 +300,6 @@
   ;; ### misc
   
   (mk-expr ^Expr [form]))               ;FIXME... drop this
-
-(defn progn* ^Expr [^ExprFactory ef & ^Expr/1 xs]
-  (.progn ef (.exprs-of ef xs)))
-(defn progn ^Expr [^ExprFactory ef ^Exprs statements ^Expr x]
-  (let [n (.length statements)
-        xs (.copy-of-exprs ef statements (inc n))]
-    (.set xs n x)
-    (.progn ef xs)))
 
 (defn aconst-null ^Expr [^ExprFactory ef]
   (.new-constant ef Void ConstantDescs/NULL))

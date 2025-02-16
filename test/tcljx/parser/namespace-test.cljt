@@ -67,8 +67,9 @@
     (if (some? line)
       (mk-expr [:line-number line (expr-data value)])
       value))
-  (progn [_ xs]
-    (mk-expr (reduce (comp conj expr-data) [:progn] xs)))
+  (progn-expr [_ xs x]
+    (mk-expr (-> (reduce (comp conj expr-data) [:progn] xs)
+                 (conj (expr-data x)))))
   (new-constant [_ expr-type value]
     (mk-expr [:constant value (class-data value)]))
   
