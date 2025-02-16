@@ -7,6 +7,7 @@
   (:import
    (tcljx.data.model Expr Exprs ExprFactory CodeEmitter Entity Parameter Constant
                      FnLiteral NamespaceBuilder)
+   (tcljx.data.resolve Match)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc)
    (java.lang.reflect Member Constructor)
@@ -222,12 +223,12 @@
     (let [args ^Insns args
           ms (resolve/members-by-param-tags false owner "new" (.expr-types args))]
       (assert (= (count ms) 1))
-      (invoke owner (first ms) nil args)))
+      (invoke owner (.member ^Match (first ms)) nil args)))
   (invoke-static-member [_ invoke-member-of-field? owner mnm args]
     (let [args ^Insns args
-          ms (resolve/members-by-param-tags false owner mnm (.expr-types args))]
+          ms (resolve/members-by-param-tags true owner mnm (.expr-types args))]
       (assert (= (count ms) 1))
-      (let [m (first ms)
+      (let [m (.member ^Match (first ms))
             insn (invoke owner m nil args)]
         (if (and invoke-member-of-field? (instance? java.lang.reflect.Field m))
           (assert false)
@@ -235,9 +236,9 @@
   (invoke-virtual-member [_ receiver mnm args]
     (let [args ^Insns args
           owner (expr-type receiver)
-          ms (resolve/members-by-param-tags true owner mnm (.expr-types args))]
+          ms (resolve/members-by-param-tags false owner mnm (.expr-types args))]
       (assert (= (count ms) 1))
-      (let [m (first ms)]
+      (let [m (.member ^Match (first ms))]
         (invoke owner m receiver args))))
   
   (mk-expr [_ form]

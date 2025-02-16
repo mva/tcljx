@@ -78,15 +78,23 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def flag-static 0)
-(def flag-virtual 1)
+(def invoke-standard 0)        ;regular invocation
+(def invoke-tail-into-array 1) ;invoke packs tail arguments into array
+(def invoke-polymorphic-tail 2)       ;tails arguments are polymorphic
+
+(deftype Match [^Member member          ;method, field, or constructor
+                ^Class/1 parameter-types ;excluding any receiver
+                ^int invocation-mode])
+
+#_(def flag-static 0)
+#_(def flag-virtual 1)
 ;; (def flag-field 2)
 ;; (def flag-method 3)
 ;; (def flag-no-candidate-returns-nil 4)
 ;; (def flag-minus-is-field 5)
 
-(def opts-virtual (bit-set 0 flag-virtual))
-(def opts-static (bit-set 0 flag-static))
+#_(def opts-virtual (bit-set 0 flag-virtual))
+#_(def opts-static (bit-set 0 flag-static))
 
 (let [#_#_mask-field (bit-set 0 flag-field)
       #_#_mask-method (bit-set 0 flag-method)
@@ -95,7 +103,7 @@
       (= mask-field (bit-and mask-member opts)))
   #_(defn methods-only? ^boolean [^int opts]
       (= mask-method (bit-and mask-member opts)))
-  (defn static-virtual-match? ^boolean [^int opts ^Member m]
+  #_(defn static-virtual-match? ^boolean [^int opts ^Member m]
     (if (Modifier/isStatic (.getModifiers m))
       (bit-test opts flag-static)
       (bit-test opts flag-virtual))))
@@ -111,18 +119,28 @@
   (Class/forName "java.lang.invoke.MethodHandle$PolymorphicSignature"
                  false (ClassLoader/getPlatformClassLoader)))
 
-(defn signature-polymorphic? ^boolean [^Executable e]
-  (and (.isVarArgs e) (.isAnnotationPresent e ann-polymorphic-signature)))
+(defn static-member?
+  (^boolean [^Member m]
+   (Modifier/isStatic (.getModifiers m)))
+  (^boolean [^boolean static? ^Member m]
+   (= (static-member? m) static?)))
 
-;;; Returns `acc` for PolymorphicSignature method.
-(defn method-exact ^seq [^seq acc ^int opts ^Class owner ^String nm
+(defn- cons-executable-candidate ^seq [^Executable e ^seq acc]
+  (cons (Match. e (.getParameterTypes e)
+                (if (.isVarArgs e)
+                  (if (.isAnnotationPresent e ann-polymorphic-signature)
+                    invoke-polymorphic-tail
+                    invoke-tail-into-array) ;preliminary, subject to arg types
+                  invoke-standard))
+        acc))
+
+(defn method-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm
                          ^Class/1 atypes]
   (letfn [(method-or-throw ^seq [^Class owner] ;throws NoSuchMethodException
             (let [m (.getMethod owner nm atypes)] ;works for class and array
               (cond->> acc
-                (and (static-virtual-match? opts m)
-                     (not (signature-polymorphic? m)))
-                (cons m))))]
+                (static-member? static? m)
+                (cons-executable-candidate m))))]
     (try
       (method-or-throw owner)
       (catch NoSuchMethodException _
@@ -133,18 +151,42 @@
           (catch NoSuchMethodException _
             acc))))))
 
+(defn method-candidates ^seq [^seq acc ^boolean static? ^String nm ^Method/1 ms]
+  (loop [acc acc, i (dec (alength ms))]
+    (if (neg? i)
+      acc
+      (recur (let [m (aget ms i)]
+               (cond->> acc
+                 (and (= nm (.getName m))
+                      (static-member? static? m)
+                      (not (.isBridge m)))
+                 (cons-executable-candidate m)))
+             (dec i)))))
+
+
 ;;; Returns `acc` for PolymorphicSignature constructor.
 (defn constructor-exact ^seq [^seq acc ^Class owner ^Class/1 atypes]
   (try
     (let [c (.getConstructor owner atypes)]
-      (cond->> acc (not (signature-polymorphic? c)) (cons c)))
+      (cons-executable-candidate c acc))
     (catch NoSuchMethodException _
       acc)))
 
-(defn field-exact ^seq [^seq acc ^int opts ^Class owner ^String nm]
+(defn constructor-candidates ^seq [^seq acc ^Constructor/1 cs]
+  (loop [acc acc, i (dec (alength cs))]
+    (if (neg? i)
+      acc
+      (recur (cons-executable-candidate (aget cs i) acc) (dec i)))))
+
+
+(def ^:private empty-parameter-types (new Class/1 0))
+(defn- cons-field-candidate ^seq [^Field f ^seq acc]
+  (cons (Match. f empty-parameter-types invoke-standard) acc))
+
+(defn field-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm]
   (try
     (let [f (.getField owner nm)]
-      (cond->> acc (static-virtual-match? opts f) (cons f)))
+      (cond->> acc (static-member? static? f) (cons-field-candidate f)))
     (catch NoSuchFieldException _
       acc)))
 
@@ -153,61 +195,50 @@
 ;;; `ptags` of nil does not constrain arity or parameter types of
 ;;; constructors, methods, or virtual fields.  Returns nil if there is
 ;;; no match.
-(defn members-by-param-tags ^seq [^boolean virtual? ^Class owner ^String mnm
+(defn members-by-param-tags ^seq [^boolean static? ^Class owner ^String mnm
                                   ^Class/1 ptags]
-  (letfn [(parameters-match? ^boolean [^Class/1 ptags ^Class/1 ptypes]
-            (loop [i (dec (alength ptypes))]
-              (cond
-                (neg? i) true
-                         
-                (let [ptag (aget ptags i)]
-                  (or (type/same? ptag (aget ptypes i))
-                      (type/polymorphic? ptag)))
-                (recur (dec i))
-                         
-                :else false)))
-          (matches-ptags? ^boolean [^Class/1 ptypes]
-            (or (nil? ptags)
-                (and (= (alength ptypes) (alength ptags))
-                     (parameters-match? ptags ptypes))))
-          (methods ^seq [^seq acc ^int opts ^String nm ^Method/1 ms]
-            (loop [acc acc, i (dec (alength ms))]
-              (if (neg? i)
-                acc
-                (recur (let [m (aget ms i)]
-                         (cond->> acc
-                           (and (= nm (.getName m))
-                                (static-virtual-match? opts m)
-                                (matches-ptags? (.getParameterTypes m))
-                                (not (.isBridge m)))
-                           (cons m)))
-                       (dec i)))))
-          (constructors ^seq [^seq acc ^Constructor/1 cs]
-            (loop [acc acc, i (dec (alength cs))]
-              (if (neg? i)
-                acc
-                (recur (let [c (aget cs i)]
-                         (cond->> acc
-                           (matches-ptags? (.getParameterTypes c))
-                           (cons c)))
-                       (dec i)))))]
+  (letfn [(matches-ptags? ^boolean [^Match candidate] ;pre: (some? ptags)
+            (let [ptypes (.parameter-types candidate)]
+              (and (= (alength ptypes) (alength ptags))
+                   (loop [i (dec (alength ptypes))]
+                     (cond
+                       (neg? i) true
+                       
+                       (let [ptag (aget ptags i)]
+                         (or (type/same? ptag (aget ptypes i))
+                             (type/polymorphic? ptag)))
+                       (recur (dec i))
+                       
+                       :else false)))))
+          (filter-by-ptags* ^seq [^seq acc ^seq candidates] ;pre: (some? ptags)
+            (if (nil? candidates)
+              acc
+              (let [candidate (first candidates)]
+                (recur (cond->> acc (matches-ptags? candidate) (cons candidate))
+                       (next candidates)))))
+          (filter-by-ptags ^seq [^seq acc ^seq candidates]
+            (if (nil? ptags)
+              candidates
+              (filter-by-ptags* acc (seq candidates))))]
 
-    (let [opts (if virtual? opts-virtual opts-static)]
-      (or (if (= mnm "new")
-            (or (when (some? ptags) (constructor-exact nil owner ptags))
-                (constructors nil (.getConstructors owner)))
-            (or (when (some? ptags) (method-exact nil opts owner mnm ptags))
-                (methods nil opts mnm (.getMethods owner))))
-          (when (or (nil? ptags) (zero? (alength ptags)))
-            (field-exact nil opts owner mnm))))))
+    (or (if (= mnm "new")
+          (or (when (some? ptags) (constructor-exact nil owner ptags))
+              (->> (constructor-candidates nil (.getConstructors owner))
+                   (filter-by-ptags nil)))
+          (or (when (some? ptags) (method-exact nil static? owner mnm ptags))
+              (->> (method-candidates nil static? mnm (.getMethods owner))
+                   (filter-by-ptags nil))))
+        (when (or (nil? ptags) (zero? (alength ptags)))
+          (field-exact nil static? owner mnm)))))
 
-(defn methods-by-param-tags ^seq [^boolean virtual? ^Class owner ^String mnm
+(defn methods-by-param-tags ^seq [^boolean static? ^Class owner ^String mnm
                                   ^Class/1 ptags]
   ;; FIXME... drop this later?
-  (filter #(instance? Method %) (members-by-param-tags virtual? owner mnm ptags)))
-(defn method-by-param-tags ^Method [^boolean virtual? ^Class owner ^String mnm
-                                    ^Class/1 ptags]
+  (->> (members-by-param-tags static? owner mnm ptags)
+       (filter #(instance? Method (.member ^Match %)))))
+(defn method-by-param-tags ^Match [^boolean static? ^Class owner ^String mnm
+                                   ^Class/1 ptags]
   ;; FIXME... drop this later?
-  (let [ms (methods-by-param-tags virtual? owner mnm ptags)]
+  (let [ms (methods-by-param-tags static? owner mnm ptags)]
     (when (nil? (next ms))
       (first ms))))
