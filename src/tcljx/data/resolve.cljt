@@ -12,6 +12,15 @@
    (java.lang.invoke MethodHandles$Lookup)
    (java.lang.reflect Method Constructor Executable Field Member Modifier)))
 
+  ;; Third party Java libraries cannot have a static method called
+  ;; `new`, because in Java `new` is a keyword and not an identifier.
+  ;; Clojure's deftype does not support static methods at all.  Taking
+  ;; this into account, there is little downside to having the dot
+  ;; form supporting `new` as symbolic constructor name as well.  So
+  ;; all of Classname/new, (Classname/new ...) and (. Classname new
+  ;; ...) are supported.
+(def constructor-name "new")
+
 (def ^:private java-base-classes    ;almost all from package java.lang
   [Boolean Byte Character Class ClassLoader #_clojure.lang.Compiler Double
    Enum Float InheritableThreadLocal Integer Long Math Number Object
@@ -78,13 +87,24 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def invoke-standard 0)        ;regular invocation
-(def invoke-tail-into-array 1) ;invoke packs tail arguments into array
-(def invoke-polymorphic-tail 2)       ;tails arguments are polymorphic
+(def invoke-polymorphic -1) ;tails arguments & return type are polymorphic
+(def invoke-standard 0)     ;regular invocation
+(def invoke-tail-into-array 1)         ;pack tail arguments into array
 
 (deftype Match [^Member member          ;method, field, or constructor
                 ^Class/1 parameter-types ;excluding any receiver
-                ^int invocation-mode])
+                ^Class return-type
+                ^int invocation-mode]
+  java.lang.Record)
+
+(defn parameter-count ^int [^Match m]
+  (alength (.parameter-types m)))
+(defn end-of-fixed-parameters ^int [^Match m]
+  (- (parameter-count m) (bit-and (.invocation-mode m) 1)))
+(defn varargs-parameter-type ^Class [^Match m] ;nil if invoke-standard
+  (when (not= (.invocation-mode m) invoke-standard)
+    (aget (.parameter-types m) (end-of-fixed-parameters m))))
+
 
 #_(def flag-static 0)
 #_(def flag-virtual 1)
@@ -125,14 +145,24 @@
   (^boolean [^boolean static? ^Member m]
    (= (static-member? m) static?)))
 
-(defn- cons-executable-candidate ^seq [^Executable e ^seq acc]
-  (cons (Match. e (.getParameterTypes e)
-                (if (.isVarArgs e)
-                  (if (.isAnnotationPresent e ann-polymorphic-signature)
-                    invoke-polymorphic-tail
-                    invoke-tail-into-array) ;preliminary, subject to arg types
-                  invoke-standard))
-        acc))
+(defn- cons-executable-exact ^seq [^Executable e ^Class return-type
+                                   ^seq acc]
+  (cond->> acc
+    (or (not (.isVarArgs e))
+        (not (.isAnnotationPresent e ann-polymorphic-signature)))
+    (cons (Match. e (.getParameterTypes e) return-type invoke-standard))))
+
+(defn- cons-executable-candidate ^seq [^Executable e ^Class return-type
+                                       ^seq acc]
+  (let [mode (if (.isVarArgs e)
+               (if (.isAnnotationPresent e ann-polymorphic-signature)
+                 invoke-polymorphic
+                 invoke-tail-into-array) ;preliminary, subject to arg types
+               invoke-standard)
+        rt (if (= mode invoke-polymorphic)
+             type/polymorphic ;polymorphic return determined by context
+             return-type)]
+    (cons (Match. e (.getParameterTypes e) rt mode) acc)))
 
 (defn method-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm
                          ^Class/1 atypes]
@@ -140,7 +170,7 @@
             (let [m (.getMethod owner nm atypes)] ;works for class and array
               (cond->> acc
                 (static-member? static? m)
-                (cons-executable-candidate m))))]
+                (cons-executable-exact m (.getReturnType m)))))]
     (try
       (method-or-throw owner)
       (catch NoSuchMethodException _
@@ -160,7 +190,7 @@
                  (and (= nm (.getName m))
                       (static-member? static? m)
                       (not (.isBridge m)))
-                 (cons-executable-candidate m)))
+                 (cons-executable-candidate m (.getReturnType m))))
              (dec i)))))
 
 
@@ -168,27 +198,45 @@
 (defn constructor-exact ^seq [^seq acc ^Class owner ^Class/1 atypes]
   (try
     (let [c (.getConstructor owner atypes)]
-      (cons-executable-candidate c acc))
+      (cons-executable-exact c owner acc))
     (catch NoSuchMethodException _
       acc)))
 
-(defn constructor-candidates ^seq [^seq acc ^Constructor/1 cs]
+(defn constructor-candidates ^seq [^seq acc ^Class owner ^Constructor/1 cs]
   (loop [acc acc, i (dec (alength cs))]
     (if (neg? i)
       acc
-      (recur (cons-executable-candidate (aget cs i) acc) (dec i)))))
+      (recur (cons-executable-candidate (aget cs i) owner acc) (dec i)))))
 
 
-(def ^:private empty-parameter-types (new Class/1 0))
+(def empty-class-array (new Class/1 0))
 (defn- cons-field-candidate ^seq [^Field f ^seq acc]
-  (cons (Match. f empty-parameter-types invoke-standard) acc))
+  (cons (Match. f empty-class-array (.getType f) invoke-standard) acc))
 
-(defn field-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm]
+(defn field-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm
+                        ^Class/1 atypes]
   (try
     (let [f (.getField owner nm)]
-      (cond->> acc (static-member? static? f) (cons-field-candidate f)))
+      (cond->> acc
+        (and (static-member? static? f) (zero? (alength atypes)))
+        (cons-field-candidate f)))
     (catch NoSuchFieldException _
       acc)))
+
+
+(defn member-exact ^seq [^seq acc ^boolean static? ^Class owner ^String mnm
+                         ^Class/1 exact-types]
+  (if (some? exact-types)
+    (or (if (= mnm constructor-name)
+          (constructor-exact acc owner exact-types)
+          (method-exact acc static? owner mnm exact-types))
+        (field-exact acc static? owner mnm exact-types))
+    (field-exact acc static? owner mnm empty-class-array)))
+
+(defn member-candidates ^seq [^seq acc ^boolean static? ^Class owner ^String mnm]
+  (if (= mnm constructor-name)
+    (constructor-candidates acc owner (.getConstructors owner))
+    (method-candidates acc static? mnm (.getMethods owner))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -221,15 +269,8 @@
               candidates
               (filter-by-ptags* acc (seq candidates))))]
 
-    (or (if (= mnm "new")
-          (or (when (some? ptags) (constructor-exact nil owner ptags))
-              (->> (constructor-candidates nil (.getConstructors owner))
-                   (filter-by-ptags nil)))
-          (or (when (some? ptags) (method-exact nil static? owner mnm ptags))
-              (->> (method-candidates nil static? mnm (.getMethods owner))
-                   (filter-by-ptags nil))))
-        (when (or (nil? ptags) (zero? (alength ptags)))
-          (field-exact nil static? owner mnm)))))
+    (or (member-exact nil static? owner mnm ptags)
+        (filter-by-ptags nil (member-candidates nil static? owner mnm)))))
 
 (defn methods-by-param-tags ^seq [^boolean static? ^Class owner ^String mnm
                                   ^Class/1 ptags]
@@ -242,3 +283,95 @@
   (let [ms (methods-by-param-tags static? owner mnm ptags)]
     (when (nil? (next ms))
       (first ms))))
+
+;;; ------------------------------------------------------------------------
+
+(defn- cons-atypes-match ^seq [^Class/1 atypes ^Match candidate ^seq acc]
+  (letfn [(argument-compatible? ^boolean [^Class ptype ^Class atype]
+            (type/assignable-from? ptype atype))
+          (fixed-arguments-compatible? ^boolean [^Class/1 ptypes ^int end]
+            (loop [i 0]
+              (cond
+                (>= i end)
+                true
+                (argument-compatible? (aget ptypes i) (aget atypes i))
+                (recur (inc i))
+                :else
+                false)))
+          (var-arguments-compatible? ^boolean [^Class va-ptype ^int start]
+            (let [va-type (.getComponentType va-ptype)]
+              (loop [i start]
+                #_(prn :va-type va-type :i i)
+                (cond
+                  (>= i (alength atypes))
+                  true
+                  (argument-compatible? va-type (aget atypes i))
+                  (recur (inc i))
+                  :else
+                  false))))
+          (as-invoke-standard ^Match [^Match candidate]
+            (Match. (.member candidate) (.parameter-types candidate)
+                    (.return-type candidate) invoke-standard))]
+    
+    (let [ptypes (.parameter-types candidate)
+          an (alength atypes)
+          fixed (end-of-fixed-parameters candidate)]
+      (if (and (<= fixed an) (fixed-arguments-compatible? ptypes fixed))
+        (cond
+          (= fixed an)           ;fixed parameters cover all arguments
+          (cons candidate acc)
+
+          (= (.invocation-mode candidate) invoke-standard)
+          acc       ;parameter/argument count mismatch but not varargs
+          
+          (and (= (inc fixed) an)     ;directly pass array to varargs?
+               (argument-compatible? (aget ptypes fixed)
+                                     (aget atypes fixed)))
+          (cons (as-invoke-standard candidate) acc)
+
+          (let [varargs-type (varargs-parameter-type candidate)]
+            (or (= invoke-polymorphic (.invocation-mode candidate))
+                (var-arguments-compatible? varargs-type fixed)))
+          (cons candidate acc)
+
+          :else acc)
+        acc))))
+
+(letfn [#_(parameter-count-match? ^boolean [^Match as ^Match e]
+            (let [n-p (parameter-count e)
+                  n-a (parameter-count as)]
+              (or (= n-p n-a)
+                  (and (not= (.invocation-mode e) invoke-standard)
+                       (>= n-a (dec n-p))))))
+        (compatible-args? ^boolean [^Match as ^Match e]
+          (and #_(parameter-count-match? as e)
+               (some? (cons-atypes-match (.parameter-types as) e nil))))]
+  
+  (defn- filter-dominators [es]
+    (letfn [(dominates-all? ^boolean [^Match e]
+              (every? #(compatible-args? e %) es))]
+      (if (next es) ;nothing to do if there are less than two elements
+        (or (seq (filter dominates-all? es)) es)
+        es)))
+  
+  (defn- dominating-matches ^seq [^seq ms]
+    (letfn [(dominates-all? ^boolean [^Match m]
+              (every? #(compatible-args? m %) ms))]
+      (if (next ms) ;nothing to do if there are less than two elements
+        (or (seq (filter dominates-all? ms)) ms)
+        ms))))
+
+;;; ------------------------------------------------------------------------
+
+(defn members-by-arg-types ^seq [^boolean static? ^Class owner ^String mnm
+                                 ^Class/1 atypes]
+  (letfn [(filter-by-atypes ^seq [^seq acc ^seq candidates]
+            (if (nil? candidates)
+              acc
+              (recur (cons-atypes-match atypes (first candidates) acc)
+                     (next candidates))))]
+    
+    (or (member-exact nil static? owner mnm atypes)
+        (->> (member-candidates nil static? owner mnm)
+             (filter-by-atypes nil)
+             (dominating-matches)))))

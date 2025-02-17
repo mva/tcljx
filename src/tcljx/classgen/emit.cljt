@@ -1,57 +1,93 @@
 (ns tcljx.classgen.emit
   (:require
-   (tcljx.data [config :as cfg] [type :as type] [model :as model]))
+   (tcljx.data [config :as cfg] [type :as type] [model :as model]
+               [reflect :as reflect])
+   (tcljx.classgen [classfile :as classfile]))
   (:import
+   (tcljx.data.type Wrapper)
    (tcljx.data.model CodeEmitter)
    (java.lang.classfile CodeBuilder TypeKind)))
 
-(defn- to? ^boolean [^Class opnd-type ^Class requested-type ^CodeBuilder xb]
-  (cond
-    (type/exits-method? opnd-type)
-    false         ;instruction does not return: cannot continue at all
-    
-    ;; FIXME... optimize for this "nothing to do" case?  it should be
-    ;; the most common scenario.  handle this in the caller of this
-    ;; function?
-    (identical? opnd-type requested-type)
-    (type/continues? opnd-type)
-    
-    (type/exits-method? requested-type)
-    (do (.return_ xb (TypeKind/from opnd-type)) false)
-    
-    :else (do (assert false)
-              true)))
+(defn- adapt-to? ^boolean [^Class opnd-type ^Class requested-type ^CodeBuilder xb]
+  (letfn [(indirect-unbox ^void [^Wrapper wopnd ^Wrapper wrequested]
+            ;; pre: `wopnd` denotes a reference type
+            ;; pre: `wrequested` denotes a non-void primitive type
+            (let [box-type (.class-reference wrequested)]
+              #_(prn :wopnd wopnd :wrequested wrequested)
+              (when-not (adapt-to? opnd-type box-type xb)
+                (throw (IllegalStateException.)))
+              (classfile/accept-> xb (.convert-from wrequested)
+                                  (type/of box-type))))]
+    (cond
+      (type/exits-method? opnd-type)
+      false       ;instruction does not return: cannot continue at all
+      
+      ;; FIXME... optimize for this "nothing to do" case?  it should be
+      ;; the most common scenario.  handle this in the caller of this
+      ;; function?
+      (identical? opnd-type requested-type)
+      (type/continues? opnd-type)
+      
+      (type/exits-method? requested-type)
+      (do (.return_ xb (TypeKind/from opnd-type)) false)
+
+      (.isAssignableFrom requested-type opnd-type)
+      true
+
+      (not (or (.isPrimitive opnd-type) (.isPrimitive requested-type)))
+      (do
+        #_(prn :opnd-type opnd-type :requested-type requested-type)
+        #_(.printStackTrace (Throwable.) (java.io.PrintWriter. *out*))
+        (.checkcast xb (reflect/describe-class requested-type))
+        true)
+      
+      :else (let [wopnd (type/of opnd-type)
+                  wrequested (type/of requested-type)]
+              #_(prn :wopnd wopnd)
+              #_(prn :wrequested wrequested)
+              (if (and (not (type/same? Void/TYPE requested-type))
+                       (.isPrimitive requested-type)
+                       (not (.isPrimitive opnd-type)))
+                (indirect-unbox wopnd wrequested)
+                (classfile/accept-> xb (.convert-from wrequested) wopnd))
+              true))))
 
 ;;; Emit instruction to `xb` and adapt the stack operand it produces
 ;;; to `requested-type`.  Returns false if the instruction returns
 ;;; control to the invoking method, and true if execution continues in
 ;;; this method.
-(defn more?
-  (^boolean [^CodeBuilder xb ^Class requested-type ^CodeEmitter ce]
-   (more? xb requested-type ce cfg/no-line-number))
-  (^boolean [^CodeBuilder xb ^Class requested-type ^CodeEmitter ce ^int line]
-   ;; FIXME... special case (identical? opnd-type requested-type)?
-   (-> (.emit-code* ce xb requested-type line)
-       (to? requested-type xb))))
+(defn more? ^boolean [^CodeBuilder xb ^int line ^Class requested-type
+                      ^CodeEmitter ce]
+  ;; FIXME... special case (identical? opnd-type requested-type)?
+  (let [opnd-type (.emit-code* ce xb requested-type line)]
+    (if (and (type/poly-reference? opnd-type)
+             (not (.isPrimitive requested-type))
+             (model/const-null? ce))
+      true ;elide redundant checkcast of ACONST_NULL to reference type
+      (adapt-to? opnd-type requested-type xb))))
 (defn method-code ^void [^CodeBuilder xb ^CodeEmitter ce]
-  (more? xb type/exits-method ce))
+  (more? xb cfg/no-line-number type/exits-method ce))
 
-(defn more-of-type*? ^boolean [^CodeBuilder xb ^Class requested-type
-                               ^CodeEmitter/1 ces ^int line]
+(defn more-of-type*? ^boolean [^CodeBuilder xb ^int line ^Class requested-type
+                               ^CodeEmitter/1 ces]
   (let [end (dec (alength ces))]
     (loop [i 0]
       (let [ce (aget ces i)]
         (if (< i end)
-          (if (more? xb Void/TYPE ce line)
+          (if (more? xb line Void/TYPE ce)
             (recur (inc i))
             false)
-          (more? xb requested-type ce line))))))
+          (more? xb line requested-type ce))))))
 
-(defn more-of-types*? ^boolean [^CodeBuilder xb ^Class/1 requested-types
-                                ^CodeEmitter/1 ces ^int line]
-  (loop [i 0]
-    (if (< i (alength requested-types))
-      (if (more? xb (aget requested-types i) (aget ces i) line)
-        (recur (inc i))
-        false)
-      true)))
+(defn more-of-types*?
+  (^boolean [^CodeBuilder xb ^int line ^Class/1 requested-types
+             ^CodeEmitter/1 ces]
+   (more-of-types*? xb line requested-types ces 0 (alength requested-types)))
+  (^boolean [^CodeBuilder xb ^int line ^Class/1 requested-types
+             ^CodeEmitter/1 ces ^int start ^int end]
+   (loop [i start]
+     (if (< i end)
+       (if (more? xb line (aget requested-types i) (aget ces i))
+         (recur (inc i))
+         false)
+       true))))

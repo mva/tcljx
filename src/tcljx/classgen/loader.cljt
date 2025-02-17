@@ -1,7 +1,7 @@
 (ns tcljx.classgen.loader
   (:require
    (tcljx.data [files :as files])
-   [tcljx.classgen.beachhead :as beachhead])
+   (tcljx.classgen [beachhead :as beachhead] [classfile :as classfile]))
   (:import
    (java.lang.classfile ClassFile ClassBuilder ClassHierarchyResolver
                         ClassHierarchyResolver$ClassHierarchyInfo)
@@ -131,11 +131,11 @@
                           ^ClassDesc super-class ^String source-file
                           ^Consumer class-builder-handler]
   (let [cbh (^Consumer fn ^void [^ClassBuilder cb]
-             (.accept class-builder-handler
-                      (-> (with-version cb)
-                          (.withFlags flags)
-                          (.withSuperclass super-class)
-                          (with-source-file source-file))))]
+             (classfile/accept-> (-> (with-version cb)
+                                     (.withFlags flags)
+                                     (.withSuperclass super-class)
+                                     (with-source-file source-file))
+                                 class-builder-handler))]
     (ClassBytes. this-class super-class
                  (.build (class-file-of pkg-build) this-class cbh) nil)))
 

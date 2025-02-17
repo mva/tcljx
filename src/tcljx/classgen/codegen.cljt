@@ -2,6 +2,7 @@
   (:require
    (tcljx.data [config :as cfg] [type :as type] [model :as model]
                [resolve :as resolve] [reflect :as reflect])
+   (tcljx.parser [wrong :as wrong])
    (tcljx.classgen [classfile :as classfile] [runtime :as rt] [emit :as emit]
                    [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import
@@ -9,8 +10,8 @@
                      FnLiteral NamespaceBuilder)
    (tcljx.data.resolve Match)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
-   (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc)
-   (java.lang.reflect Member Constructor)
+   (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)
+   (java.lang.reflect Member Constructor Field)
    (java.util ArrayList)
    (java.util.function Consumer)))
 
@@ -38,15 +39,27 @@
     (when (instance? Entity emitter)
       emitter)))
 
-(def empty-insn (Insn. (^CodeEmitter fn [xb requested-type line] Void/TYPE)
+(def insn-empty (Insn. (^CodeEmitter fn [xb requested-type line] Void/TYPE)
                        type/polymorphic))
 
+;;; Compilation centers around arrays of types and arrays of code
+;;; emitters.  For a sequence of forms, the parser vie ExprFactory
+;;; creates an instance of Insns: an array of code emitters and the
+;;; array with the emitters' (context free) expression types.  Using
+;;; method invocation as a generic example, the expression types are
+;;; then matched against JVM level parameter types to which they will
+;;; be passed.  This is the second kind of array of types, the
+;;; requested JVM level operand types.  When producing the bytecode
+;;; instructions, each of the emitters is called and, if necessary,
+;;; its operand type is adjusted to match the requested operand type.
 (deftype Insns [^CodeEmitter/1 emitters ^Class/1 expr-types]
   ;; FIXME... Valhalla value?
   java.lang.Record
   Exprs
   (length [_]
     (alength emitters))
+  (empty? [_]
+    (zero? (alength emitters)))
   (set [_ i x]
     (aset emitters i (.emitter ^Insn x))
     (aset expr-types i (.expr-type ^Insn x)))
@@ -55,7 +68,7 @@
       (when (instance? Entity ce)
         ce))))
 
-(defn- emitter
+(defn emitter
   (^CodeEmitter [^Insn insn]
    (.emitter insn))
   (^CodeEmitter [^Insns insns ^int i]
@@ -75,11 +88,11 @@
 
 
 (defn emit-code-logical? ^boolean [^CodeBuilder xb ^Insn insn]
-  (emit/more? xb (logical-type insn) (.emitter insn) cfg/no-line-number))
+  (emit/more? xb cfg/no-line-number (logical-type insn) (.emitter insn)))
 
 (defn- with-line-number ^Insn [^Insn insn ^int line]
   (Insn. (^CodeEmitter fn [xb requested-type _]
-          (when (emit/more? xb requested-type (.emitter insn) line)
+          (when (emit/more? xb line requested-type (.emitter insn))
             requested-type))
          (expr-type insn)))
 
@@ -92,27 +105,79 @@
                         (reflect/describe const-value)))
     type))
 
+(def insn-null (Insn. (ConstantImpl. type/poly-reference ConstantDescs/NULL)
+                      type/poly-reference))
+(def insn-true (Insn. (ConstantImpl. Boolean/TYPE 1)
+                      Boolean/TYPE))
+(def insn-false (Insn. (ConstantImpl. Boolean/TYPE 0)
+                       Boolean/TYPE))
+
 (defn- progn ^Insn [^Insns insns ^Insn insn] ;`insns` should not be empty
   (let [ces (.emitters insns), ce (.emitter insn)]
     (Insn. (^CodeEmitter fn [xb requested-type line]
-            (when (emit/more-of-type*? xb Void/TYPE ces line)
-              (when (emit/more? xb requested-type ce line)
+            (when (emit/more-of-type*? xb line Void/TYPE ces)
+              (when (emit/more? xb line requested-type ce)
                 requested-type)))
            (expr-type insn))))
 
-(defn- invoke ^Insn [^Class owner ^Member member ^Insn receiver ^Insns args]
-  (let [opnd-type (reflect/invoke-member-type owner member)]
-    (Insn. (^CodeEmitter fn [xb requested-type line]
-            (when (instance? Constructor member)
-              ;; new-dup-dance when create a new instance of `owner`
-              (-> xb (.new_ (reflect/describe-class owner)) (.dup)))
-            (when (or (nil? receiver) (emit-code-logical? xb receiver))
-              (when (emit/more-of-types*? xb (reflect/parameter-types member)
-                                          (.emitters args) line)
-                (-> (.lineNumber xb line)
-                    (reflect/invoke-member owner member))))
-            opnd-type)
-           opnd-type)))
+(defn- identity ^Insn [^Class expr-type ^CodeEmitter ce]
+  (Insn. (^CodeEmitter fn [xb requested-type line]
+            (when (emit/more? xb line expr-type ce)
+              expr-type))
+           expr-type))
+
+(defn- emit-new-array ^CodeBuilder [^CodeBuilder xb ^Class component-type
+                                    ^int length]
+  (.loadConstant xb length)
+  (if (.isPrimitive component-type)
+    (.newarray xb (TypeKind/from component-type))
+    (.anewarray xb (reflect/describe-class component-type))))
+
+(defn- emit-array-of-more? ^boolean [^CodeBuilder xb ^Class component-type
+                                     ^CodeEmitter/1 ces ^int start]
+  (let [end (alength ces)
+        component-tk (TypeKind/from component-type)]
+    (emit-new-array xb component-type (- end start))
+    (loop [i start]
+      (if (< i end)
+        (if (-> (.dup xb)
+                (.loadConstant (- i start))
+                (emit/more? cfg/no-line-number component-type (aget ces i)))
+          (do (.arrayStore xb component-tk) (recur (inc i)))
+          false)
+        true))))
+
+(defn- invoke ^Insn [^Class owner ^Match m ^Insn receiver ^Insns args]
+  (-> (^CodeEmitter fn [xb requested-type line]
+       (letfn [(emit-varargs? ^boolean [^Class varargs-tp ^int start]
+                 (if (= (.invocation-mode m) resolve/invoke-tail-into-array)
+                   (emit-array-of-more? xb (.getComponentType varargs-tp)
+                                        (.emitters args) start)
+                   (assert false)))]
+         
+         ;; new-dup-dance when creating a new instance of `owner`
+         (when (instance? Constructor (.member m))
+           (-> xb (.new_ (reflect/describe-class owner)) (.dup)))
+
+         ;; instance field or method require receiver argument
+         (when (or (nil? receiver)
+                   (emit-code-logical? xb receiver))
+
+           ;; all fixed (i.e. non-vararg) arguments
+           (let [fixed (resolve/end-of-fixed-parameters m)]
+             (when (emit/more-of-types*? xb line (.parameter-types m)
+                                         (.emitters args) 0 fixed)
+
+               ;; optionally: all vararg arguments
+               (let [varargs-tp (resolve/varargs-parameter-type m)]
+                 (when (or (nil? varargs-tp)
+                           (emit-varargs? varargs-tp fixed))
+
+                   ;; the actual invoke instruction
+                   (-> (.lineNumber xb line)
+                       (reflect/invoke-member owner (.member m))))))))
+         (.return-type m)))
+      (Insn. (.return-type m))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -172,12 +237,29 @@
 
 ;;; ------------------------------------------------------------------------
 
+(defn- pick-match ^Match [^seq ms]
+  (when (nil? (next ms))
+    (first ms)))
+
+(defn- info-unresolved-member ^Throwable [^seq ms ^Class owner ^String mnm
+                                          ^Insns args ^String label]
+  ;; label is one of "static", "virtual", or "constructor"
+  (let [entity (str label (when (not= label "constructor")
+                            (if (.empty? args) " member" " method")))
+        mnm (cond->> mnm (= label "virtual") (str "."))
+        member (wrong/q-as-symbol owner mnm)]
+    (wrong/wr-info (if (nil? (seq ms))
+                     (str "no " entity " matching " member)
+                     (str "multiple " entity "s matching " member)))))
+
+;;; ------------------------------------------------------------------------
+
 (deftype ExprFactoryImpl [^ArrayList segment-elements ;shared with NmspBuilder
                           ^ArrayList pending-functions ;shared with NmspBuilder
                           ^Class class-static-fn]
   ExprFactory
   (empty-expr [_]
-    empty-insn)
+    insn-empty)
   (new-exprs [_ n]
     (if (zero? n)
       empty-insns
@@ -186,9 +268,20 @@
     (if (zero? (.length xs)) x (progn xs x)))
   
   (line-number [_ line insn]
-    (cond-> insn (some? line) (with-line-number ^int line)))
+    (cond-> insn ;preserve visibility of constant `insn` by not wrapping it
+      (and (some? line) (not (model/const? insn)))
+      (with-line-number ^int line)))
   (new-constant [_ expr-type value]
-    (Insn. (ConstantImpl. expr-type value) expr-type))
+    #_(prn :new-constant expr-type value)
+    (java.util.Objects/requireNonNull value)
+    (cond
+      (identical? ConstantDescs/NULL value)
+      insn-null
+      
+      (type/same? Boolean/TYPE expr-type)
+      (if ^boolean value insn-true insn-false) ;enforce singletons
+      
+      :else (Insn. (ConstantImpl. expr-type value) expr-type)))
   
   (new-def-init [_ nmsp nm init]
     (let [init ^Insn init]
@@ -199,20 +292,27 @@
                (classfile/with-method-body-> cb
                  [nm mtd classfile/acc-method-static]
                  (emit/method-code (.emitter ^Insn init))))))
-      empty-insn))
+      insn-empty))
   (new-def-alias [_ nmsp nm other]
     (assert false))
 
   (new-parameter [_ param-no name type]
     (Insn. (ParameterImpl. param-no name type -1) Void/TYPE))
   (new-function [this fn-literal]
-    ;; overwrite any auto-return-marker return types
+    ;; overwrite any auto-return-marker return types and adjust their
+    ;; body Insn to match the new type
     (let [ats (.arity-types fn-literal)
           bodies ^Insns (.arity-bodies fn-literal)]
       (dotimes [i (alength ats)]
         (let [at (aget ats i)]
           (when (type/auto-return-marker? (.return-type at))
-            (aset ats i (.with-return-type at (logical-type bodies i)))))))
+            (let [body-tp (logical-type bodies i)
+                  logical-tp (if (type/polymorphic? body-tp)
+                               Void/TYPE
+                               body-tp)
+                  body-emitter (emitter bodies i)]
+              (aset ats i (.with-return-type at logical-tp))
+              (.set bodies i (identity logical-tp body-emitter)))))))
     
     (.add pending-functions fn-literal)
     (let [owner (ClassDesc/of "pkg.ns0._10")]
@@ -221,25 +321,39 @@
   
   (invoke-constructor [_ owner args]
     (let [args ^Insns args
-          ms (resolve/members-by-param-tags false owner "new" (.expr-types args))]
-      (assert (= (count ms) 1))
-      (invoke owner (.member ^Match (first ms)) nil args)))
-  (invoke-static-member [_ invoke-member-of-field? owner mnm args]
+          mnm resolve/constructor-name
+          ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
+      (if-some [m (pick-match ms)]
+        (invoke owner m nil args)
+        (throw (info-unresolved-member ms owner mnm args "constructor")))))
+  (invoke-static-member [_ invoke-member-if-field? owner mnm args]
     (let [args ^Insns args
-          ms (resolve/members-by-param-tags true owner mnm (.expr-types args))]
-      (assert (= (count ms) 1))
-      (let [m (.member ^Match (first ms))
-            insn (invoke owner m nil args)]
-        (if (and invoke-member-of-field? (instance? java.lang.reflect.Field m))
-          (assert false)
-          insn))))
+          ms (resolve/members-by-arg-types true owner mnm (.expr-types args))]
+      ;; (prn :et (seq (.expr-types args)))
+      ;; (prn :ms (seq ms))
+      ;; (prn :invoke-member-if-field? invoke-member-if-field?)
+      (if-some [m (pick-match ms)]
+        (let [insn (invoke owner m nil args)]
+          (if (and invoke-member-if-field? (instance? Field (.member m)))
+            (assert false "not yet implemented")
+            insn))
+        (throw (info-unresolved-member ms owner mnm args "static")))))
   (invoke-virtual-member [_ receiver mnm args]
     (let [args ^Insns args
           owner (expr-type receiver)
-          ms (resolve/members-by-param-tags false owner mnm (.expr-types args))]
-      (assert (= (count ms) 1))
-      (let [m (.member ^Match (first ms))]
-        (invoke owner m receiver args))))
+          ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
+      #_(prn :et (seq (.expr-types args)))
+      #_(prn :ms (seq ms))
+      (if-some [m (pick-match ms)]
+        (invoke owner m receiver args)
+        (throw (info-unresolved-member ms owner mnm args "virtual")))))
+
+  (get-static-field [_ owner mnm]
+    (let [args empty-insns
+          ms (resolve/field-exact nil true owner mnm resolve/empty-class-array)]
+      (if-some [m (pick-match ms)]
+        (invoke owner m nil args)
+        (throw (info-unresolved-member ms owner mnm args "static")))))
   
   (mk-expr [_ form]
     (throw (UnsupportedOperationException. (str form)))))

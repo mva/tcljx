@@ -54,7 +54,7 @@
   (let [ns-str (.pkg-name pkg-build)
         cld (segment-cld pkg-build segm-id)
         cbh (^Consumer fn ^void [^ClassBuilder cb]
-             (.accept class-builder-handler cb)
+             (classfile/accept-> cb class-builder-handler)
              (with-clinit cb
                (when (= segm-id first-segm-id)
                  ns-str)

@@ -7,18 +7,17 @@
    (clojure.lang IMeta)))
 
 ;;; Returns nil if lookup fails.
-(defn lookup-type ^Class [^Resolver rsv ^symbol tp]
-  (letfn [(spec-dimensions ^int [^String nm] ;zero if not name of array type
-            (when (= (.length nm) 1)
-              (let [n (- (int (.charAt nm 0)) (int \0))]
-                (when (<= 1 n 9)
-                  n))))]
-    (let [nm (name tp)]
-      (if-some [nmsp (namespace tp)]
-        (let [n (spec-dimensions nm)]
-          (when (pos? n)
-            (type/array-type-of-class (.lookup-class rsv nmsp) n)))
-        (.lookup-class rsv nm)))))
+(defn lookup-type
+  (^Class [^Resolver rsv ^symbol tp]
+   (let [nm (name tp)]
+     (if-some [nmsp (namespace tp)]
+       (lookup-type rsv (.lookup-class rsv nmsp) nm)
+       (.lookup-class rsv nm))))
+  (^Class [^Resolver rsv ^Class nmsp ^String nm] ;nil if `nmsp` is nil
+   (when (and (some? nmsp) (= (.length nm) 1))
+     (let [n (- (int (.charAt nm 0)) (int \0))]
+       (when (<= 1 n 9)
+         (type/array-type-of-class nmsp n))))))
 
 ;;; ------------------------------------------------------------------------
 

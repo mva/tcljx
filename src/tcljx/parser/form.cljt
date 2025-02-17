@@ -78,12 +78,19 @@
             
             (wrong-unresolved ^Expr [^symbol sym]
               (wrong/unresolved "undefined symbol " sym))
+            (parse-class-qualified-symbol ^Expr [^Class nmsp ^String nm]
+              (if-some [tp (interop/lookup-type resolver nmsp nm)]
+                (.new-constant expr-factory Class tp)
+                (.get-static-field expr-factory nmsp nm)))
             (parse-symbol ^Expr [^symbol sym] ;discards meta
               (if-some [bnd (context/lookup this sym)]
                 (.bound-value bnd)
-                (if-some [cl (interop/lookup-type resolver sym)]
-                  (.new-constant expr-factory Class cl)
-                  (wrong-unresolved sym))))
+                (or (if-some [nmsp (namespace sym)]
+                      (when-some [cl (.lookup-class resolver nmsp)]
+                        (parse-class-qualified-symbol cl (name sym)))
+                      (when-some [cl (.lookup-class resolver (name sym))]
+                        (.new-constant expr-factory Class cl)))
+                    (wrong-unresolved sym))))
             
             (apply-type-hint ^Expr [^Expr x form-tag] ;pre: (some? form-tag)
               (assert false))]

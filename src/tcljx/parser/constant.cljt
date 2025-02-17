@@ -1,8 +1,8 @@
 (ns tcljx.parser.constant
-  (:require (tcljx.data [model :as model])
+  (:require (tcljx.data [type :as type] [model :as model])
             (tcljx.parser [wrong :as wrong]))
   (:import (tcljx.data.model Scope Expr)
-           (java.lang.constant ConstantDesc)))
+           (java.lang.constant ConstantDesc ConstantDescs)))
 
 (defn parse-constant ^Expr [^Scope scope form]
   ;; pre: (not (instance? IMeta form))
@@ -22,7 +22,7 @@
     (let [ef (.expr-factory scope)]
       (cond
         (nil? form)
-        (assert false) #_x/expr-nil-object
+        (.new-constant ef type/poly-reference ConstantDescs/NULL)
         
         (instance? ConstantDesc form)
         (.new-constant ef (const-desc-tp form) form)
@@ -31,7 +31,7 @@
         (assert false) #_(compile-named form rt/clnm-keyword ctx)
         
         (boolean? form)
-        (assert false) #_(x/expr-boolean ^boolean form) ;enforce singletons
+        (.new-constant ef Boolean/TYPE form)
         
         (char? form)
         (.new-constant ef Character/TYPE (object (int ^char form)))

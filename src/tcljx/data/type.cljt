@@ -1,10 +1,24 @@
-(ns tcljx.data.type)
+(ns tcljx.data.type
+  (:require (tcljx.data [reflect :as reflect]))
+  (:import (java.lang.classfile CodeBuilder TypeKind)
+           (java.lang.constant ClassDesc ConstantDescs MethodTypeDesc)
+           (java.util.function BiConsumer)))
 
 (defn same? ^boolean [^Class a ^Class b]
   (identical? a b))
 
-;;; Special operand type signalling that the bytecode instruction, on
-;;; completion, returns control to the invoker of this method.
+;;; The special operand type `exits-method` signals that a bytecode
+;;; instruction on completion returns control to the invoker of the
+;;; current method.  The instructions in question are `athrow` and all
+;;; variants of `return`.  `athrow` can appear anywhere in a program
+;;; where an expression is expected.  The `return` instructions are
+;;; synthetic and placed by the compiler.
+;;; 
+;;; No instructions must be emitted after an instruction reports
+;;; operand type `exits-method`, because (lacking a jump) it would be
+;;; dead code and rejected by the JVM verifier.  In practice this
+;;; means that if control stops on the bytecode level, then the
+;;; emitter must stop producing instructions as well.
 (def ^Class exits-method nil)
 (defn exits-method? ^boolean [^Class opnd-type]
   (nil? opnd-type))
@@ -24,12 +38,18 @@
 ;;; instruction that does not return.
 (def polymorphic Void/TYPE)
 (defn polymorphic? ^boolean [^Class expr-type]
-  (instance? Void/TYPE expr-type))
+  (identical? Void/TYPE expr-type))
+
+;;; The type of the special reference `nil`.  Also known
+;;; as "null_ptr".
+(def poly-reference Void)
+(defn poly-reference? ^boolean [^Class expr-type]
+  (identical? Void expr-type))
 
 ;;; Maps a Clojure expression type to the logical Java type to be used
 ;;; in a class file element.  The returned value is never `void`.
 (defn expr-to-logical ^Class [^Class expr-type]
-  (if (polymorphic? expr-type)
+  (if (or (polymorphic? expr-type) #_(poly-reference? expr-type))
     Object
     expr-type))
 
@@ -61,3 +81,334 @@
 (deftype AutoReturnMarker [])
 (def auto-return-marker AutoReturnMarker)
 (defn auto-return-marker? ^boolean [^Class tp] (same? AutoReturnMarker tp))
+
+;;; ------------------------------------------------------------------------
+
+(deftype Wrapper [^Class class-primitive
+                  ^Class class-reference
+                  ;; ^Expr default-value
+                  ^int numeric-order
+                  ^int newarray-code ;-1 for void and -2 for reference
+                  ^boolean computational-int?
+                  ^BiConsumer convert-from
+                  ;; ^DirectMethodHandleDesc unboxing-mhd
+                  ;; ^TypeConversion primitive-to
+                  ;; ^TypeConversion unbox-exact-to
+                  ;; ^TypeConversion box-of
+                  ;; ^TypeConversion reference-to
+                  ]
+  java.lang.Record)
+
+(letfn [#_(to-upper ^TypeConversion [^TypeConversion tc]
+            (^TypeConversion fn [arg]
+             (or (.adapt tc arg)
+                 (.adapt tc (.adapt primitive-to-int arg)))))
+        #_(to-lower ^TypeConversion [^Class to-tp ^Opcode opc]
+            (^TypeConversion fn [arg]
+             (if (x/type? to-tp arg)
+               arg
+               (xf/conv to-tp (.adapt primitive-to-int arg) opc))))
+        
+        (wrapper ^Wrapper [^Class class-primitive
+                           ^Class class-reference
+                           ^int numeric-order
+                           ^boolean computational-int?
+                           ^BiConsumer convert-to
+                           ;; ^TypeConversion primitive-to
+                           ;; ^DirectMethodHandleDesc unboxing-mhd
+                           ;; ^DirectMethodHandleDesc boxing-mhd
+                           ;; ^DirectMethodHandleDesc converting-mhd
+                           ]
+          (Wrapper. class-primitive class-reference
+                    #_(if (jb/same-class? jb/boolean class-primitive)
+                        x/expr-false
+                        (.adapt primitive-to x/expr-zero-int))
+                    numeric-order
+                    (.newarrayCode (TypeKind/from class-primitive))
+                    computational-int? convert-to
+                    #_unboxing-mhd #_primitive-to
+                    #_(^TypeConversion fn [arg]
+                       (x/invoke-xref (x/flags-of arg) class-primitive [arg]
+                                      unboxing-mhd))
+                    #_(^TypeConversion fn [arg]
+                       (x/invoke-xref (x/flags-of arg) class-reference [arg]
+                                      boxing-mhd))
+                    #_(^TypeConversion fn [arg]
+                       (x/invoke-xref (x/flags-of arg) class-primitive [arg]
+                                      (if (x/type? class-reference arg)
+                                        unboxing-mhd
+                                        converting-mhd)))))]
+  (def int
+    (wrapper Integer/TYPE Integer 3 true
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (case (.newarray-code from)
+                #_reference -2
+                (.invokevirtual xb ConstantDescs/CD_Integer "intValue"
+                                (MethodTypeDesc/of ConstantDescs/CD_int))
+                
+                #_void -1 (-> xb .iconst_0)
+                #_T_BOOLEAN 4 nil
+                #_T_CHAR 5 nil
+                #_T_FLOAT 6 (-> xb .f2i)
+                #_T_DOUBLE 7 (-> xb .d2i)
+                (#_T_BYTE 8 #_T_SHORT 9 #_T_INT 10) nil
+                #_T_LONG 11 (-> xb .l2i)))
+             #_primitive-to-int
+             #_(rt/mhd-virtual [ConstantDescs/CD_Integer "intValue"]
+                               ConstantDescs/CD_int [])
+             #_(rt/mhd-static [ConstantDescs/CD_Integer "valueOf"]
+                              ConstantDescs/CD_Integer [ConstantDescs/CD_int])
+             #_(rt/mhd-static [rt/ClojureRT "intCast"] ConstantDescs/CD_int
+                              [ConstantDescs/CD_Object])))
+  (def long
+    (wrapper Long/TYPE Long 2 false
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (case (.newarray-code from)
+                #_reference -2
+                (.invokevirtual xb ConstantDescs/CD_Long "longValue"
+                                (MethodTypeDesc/of ConstantDescs/CD_long))
+                
+                #_void -1 (-> xb .lconst_0)
+                #_T_BOOLEAN 4 nil
+                #_T_CHAR 5 nil
+                #_T_FLOAT 6 (-> xb .f2l)
+                #_T_DOUBLE 7 (-> xb .d2l)
+                (#_T_BYTE 8 #_T_SHORT 9 #_T_INT 10) (-> xb .i2l)
+                #_T_LONG 11 nil))
+             #_(to-upper (^TypeConversion fn [arg]
+                          (condp jb/same-class? (x/type arg)
+                            Integer/TYPE (xf/conv jb/long arg Opcode/I2L)
+                            Long/TYPE arg
+                            Float/TYPE (xf/conv jb/long arg Opcode/F2L)
+                            Double/TYPE (xf/conv jb/long arg Opcode/D2L)
+                            #_else nil)))
+             #_(rt/mhd-virtual [ConstantDescs/CD_Long "longValue"]
+                               ConstantDescs/CD_long [])
+             #_(rt/mhd-static [ConstantDescs/CD_Long "valueOf"]
+                              ConstantDescs/CD_Long [ConstantDescs/CD_long])
+             #_(rt/mhd-static [rt/ClojureRT "longCast"] ConstantDescs/CD_long
+                              [ConstantDescs/CD_Object])))
+  (def boolean
+    (wrapper Boolean/TYPE Boolean -1 true
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (assert false))
+             #_nil  ;conversion to boolean is not a thing for Java/JVM
+             #_(rt/mhd-virtual [ConstantDescs/CD_Boolean "booleanValue"]
+                               ConstantDescs/CD_boolean [])
+             #_(rt/mhd-static [ConstantDescs/CD_Boolean "valueOf"]
+                              ConstantDescs/CD_Boolean [ConstantDescs/CD_boolean])
+             #_(rt/mhd-static [rt/ClojureRT "booleanCast"] ConstantDescs/CD_boolean
+                              [ConstantDescs/CD_Object])))
+  (def short
+    (wrapper Short/TYPE Short 4 true
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (assert false))
+             #_(to-lower jb/short Opcode/I2S)
+             #_(rt/mhd-virtual [ConstantDescs/CD_Short "shortValue"]
+                               ConstantDescs/CD_short [])
+             #_(rt/mhd-static [ConstantDescs/CD_Short "valueOf"]
+                              ConstantDescs/CD_Short [ConstantDescs/CD_short])
+             #_(rt/mhd-static [rt/ClojureRT "shortCast"] ConstantDescs/CD_short
+                              [ConstantDescs/CD_Object])))
+  (def byte
+    (wrapper Byte/TYPE Byte 5 true
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (assert false))
+             #_(to-lower jb/byte Opcode/I2B)
+             #_(rt/mhd-virtual [ConstantDescs/CD_Byte "byteValue"]
+                               ConstantDescs/CD_byte [])
+             #_(rt/mhd-static [ConstantDescs/CD_Byte "valueOf"]
+                              ConstantDescs/CD_Byte [ConstantDescs/CD_byte])
+             #_(rt/mhd-static [rt/ClojureRT "byteCast"] ConstantDescs/CD_byte
+                              [ConstantDescs/CD_Object])))
+  (def char
+    (wrapper Character/TYPE Character -1 true ;not numeric in Clojure
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (assert false))
+             #_(to-lower jb/char Opcode/I2C)
+             #_(rt/mhd-virtual [ConstantDescs/CD_Character "charValue"]
+                               ConstantDescs/CD_char [])
+             #_(rt/mhd-static [ConstantDescs/CD_Character "valueOf"]
+                              ConstantDescs/CD_Character [ConstantDescs/CD_char])
+             #_(rt/mhd-static [rt/ClojureRT "charCast"] ConstantDescs/CD_char
+                              [ConstantDescs/CD_Object])))
+  (def float
+    (wrapper Float/TYPE Float 1 false
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (assert false))
+             #_(to-upper (^TypeConversion fn [arg]
+                          (condp jb/same-class? (x/type arg)
+                            Integer/TYPE (xf/conv jb/float arg Opcode/I2F)
+                            Long/TYPE (xf/conv jb/float arg Opcode/L2F)
+                            Float/TYPE arg
+                            Double/TYPE (xf/conv jb/float arg Opcode/D2F)
+                            #_else nil)))
+             #_(rt/mhd-virtual [ConstantDescs/CD_Float "floatValue"]
+                               ConstantDescs/CD_float [])
+             #_(rt/mhd-static [ConstantDescs/CD_Float "valueOf"]
+                              ConstantDescs/CD_Float [ConstantDescs/CD_float])
+             #_(rt/mhd-static [rt/ClojureRT "floatCast"] ConstantDescs/CD_float
+                              [ConstantDescs/CD_Object])))
+  (def double
+    (wrapper Double/TYPE Double 0 false
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (case (.newarray-code from)
+                #_reference -2
+                (.invokevirtual xb ConstantDescs/CD_Double "doubleValue"
+                                (MethodTypeDesc/of ConstantDescs/CD_double))
+                
+                #_void -1 (-> xb .dconst_0)
+                #_T_BOOLEAN 4 nil
+                #_T_CHAR 5 nil
+                #_T_FLOAT 6 (-> xb .f2d)
+                #_T_DOUBLE 7 nil
+                (#_T_BYTE 8 #_T_SHORT 9 #_T_INT 10) (-> xb .i2d)
+                #_T_LONG 11 nil))
+             #_(to-upper (^TypeConversion fn [arg]
+                          (condp jb/same-class? (x/type arg)
+                            Integer/TYPE (xf/conv jb/double arg Opcode/I2D)
+                            Long/TYPE (xf/conv jb/double arg Opcode/L2D)
+                            Float/TYPE (xf/conv jb/double arg Opcode/F2D)
+                            Double/TYPE arg
+                            #_else nil)))
+             #_(rt/mhd-virtual [ConstantDescs/CD_Double "doubleValue"]
+                               ConstantDescs/CD_double [])
+             #_(rt/mhd-static [ConstantDescs/CD_Double "valueOf"]
+                              ConstantDescs/CD_Double [ConstantDescs/CD_double])
+             #_(rt/mhd-static [rt/ClojureRT "doubleCast"] ConstantDescs/CD_double
+                              [ConstantDescs/CD_Object])))
+  
+  (def void
+    (let [#_#_discard-result (^TypeConversion fn [arg] (pop arg))]
+      (Wrapper. Void/TYPE nil #_x/expr-empty -1 -1 false
+                (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+                 (case (.newarray-code from)
+                   #_void -1 nil
+                   (#_T_DOUBLE 7 #_T_LONG 11) (-> xb .pop2)
+                   #_else (-> xb .pop)))
+                #_nil                   ;no class-reference Void
+                #_discard-result        ;primitive-to
+                #_nil                   ;unbox-to
+                #_(^TypeConversion fn [arg] x/expr-nil-object) ;box-of
+                #_discard-result)))     ;reference-to
+  
+  #_(def logical ;Clojure's rules for logically true or false expressions
+      (Wrapper. (.class-primitive boolean)
+                (.class-reference boolean)
+                #_x/expr-false
+                (.numeric-order boolean)
+                (.computational-int? boolean)
+                (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+                 (assert false))
+                #_(.unboxing-mhd boolean)
+                #_(^TypeConversion fn [arg]
+                   (condp jb/same-class? (x/type arg)
+                     jb/boolean arg ;identity if `arg` is primitive boolean
+                     jb/void x/expr-false ;void is false
+                     #_else x/expr-true)) ;all other primitive types are true
+                #_(.unbox-exact-to boolean)
+                #_(.box-of boolean)
+                #_(^TypeConversion fn [arg]
+                   (if (and (not (x/const-value? arg))
+                            (.isAssignableFrom (x/type arg) Boolean))
+                     (.adapt (.reference-to boolean) arg)
+                     ;; any reference that is a non-Boolean subtype of Object:
+                     (xf/acmp arg x/expr-nil-object cf/ne))))))
+
+;;; True if `atype` widens to numeric type `ptype`.
+(defn widens-from-numeric? ^boolean [^Wrapper ptype ^Wrapper atype]
+  (>= (.numeric-order atype) (.numeric-order ptype) (.numeric-order double)))
+
+(letfn [(of* ^Wrapper [^Class cl ^Wrapper of-reference]
+          (if (.isPrimitive cl)
+            (condp identical? cl 
+              Integer/TYPE int
+              Long/TYPE long
+              Boolean/TYPE boolean
+              Short/TYPE short
+              Byte/TYPE byte
+              Character/TYPE char
+              Float/TYPE float
+              Double/TYPE double
+              Void/TYPE void)
+            of-reference))]
+
+  (def generic-reference
+    (Wrapper. Object nil #_x/expr-nil-object -1 -2 false
+              (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+               (case (.newarray-code from)
+                 #_reference -2
+                 nil
+                 #_void -1
+                 (-> xb .aconst_null)
+                 #_else
+                 (let [ptype (reflect/describe-class (.class-reference from))
+                       atype (reflect/describe-class (.class-primitive from))
+                       mtd (MethodTypeDesc/of ptype atype)]
+                   (.invokestatic xb ptype "valueOf" mtd))))
+              #_nil
+              #_(^TypeConversion fn [arg] ;primitive-to
+                 (.adapt (.box-of (of* (x/type arg) nil)) arg))
+              #_nil                     ;unbox-to
+              #_nil                     ;box-of
+              #_tc-identity))           ;reference-to
+
+  (defn of ^Wrapper [^Class cl]
+    (of* cl generic-reference))
+  #_(defn of-expr ^Wrapper [^Expr x]
+      (of* (x/type x) generic-reference))
+  
+  #_(defn of-descriptor ^Wrapper [^TypeDescriptor$OfField tpd]
+      (case (.charAt (.descriptorString tpd) 0)
+        \L generic-reference
+        \I int
+        \J long
+        \Z boolean
+        \S short
+        \B byte
+        \C char
+        \F float
+        \D double
+        \V void))
+  
+  #_(defn primitive? ^boolean [^Wrapper tp]
+      (not (identical? generic-reference tp)))
+  
+  #_(defn checkcast-and-unbox-to ^Expr [^Wrapper tp ^Expr arg]
+      (.adapt (.unbox-exact-to tp) (xf/checkcast arg (.class-reference tp))))
+
+  #_(defn default-value-of ^Expr [^Class tp]
+      (if (jb/reference? tp)
+        (x/const tp nil)
+        (.default-value (of* tp nil)))))
+
+;;; Is an argument of type `atype` assignable to a parameter of type
+;;; `ptype`?  This predicate works on the level Clojure expression
+;;; types, which differ from the Java and JVM type system.  The other
+;;; part of the equation is implemented by `emit/adapt-to`.  If an
+;;; expression of `atype` is classified as assignable, then `adapt-to`
+;;; must adjust its JVM level operand type to match `ptype`.
+(defn assignable-from? ^boolean [^Class ptype ^Class atype]
+  #_(prn :assignable-from? ptype atype)
+  (letfn [(from-primitive? ^boolean [^Wrapper awrapper]
+            ;; pre: `awrapper` denotes a non-void primitive type
+            (or
+             ;; widening numeric type conversion?
+             (widens-from-numeric? (of ptype) awrapper)
+             ;; auto-boxing the argument
+             (.isAssignableFrom ptype (.class-reference awrapper))))]
+    (or (.isAssignableFrom ptype atype)
+        ;; here holds: (not (identical? ptype atype))
+        
+        (if (.isPrimitive atype)
+          (or (polymorphic? atype) (from-primitive? (of atype)))
+
+          ;; here holds: atype is a reference type and ptype is not
+          ;; isAssignableFrom atype
+          (or (.isAssignableFrom atype ptype)
+              (if (.isPrimitive ptype)
+                ;; auto-unboxing the non-Void reference argument
+                (and (not (poly-reference? atype))
+                     (assignable-from? (.class-reference (of ptype)) atype))
+                ;; parameter is of reference type and argument is nil
+                (poly-reference? atype)))))))

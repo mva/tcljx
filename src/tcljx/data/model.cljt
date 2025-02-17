@@ -48,6 +48,7 @@
 
 (definterface Exprs
   (length ^int [])
+  (empty? ^boolean [])
   (set ^void [^int i ^Expr x])
   (entity ^Entity [^int i]))
 
@@ -80,6 +81,9 @@
   (let [e (.entity x)]
     (when (instance? Constant e)
       (.const-value ^Constant e))))
+(defn const-null? ^boolean [^CodeEmitter ce]
+  (and (instance? Constant ce)
+       (identical? ConstantDescs/NULL (.const-value ^Constant ce))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -294,8 +298,11 @@
   ;; as a function, instead of just getting its value.
   (invoke-static-member ^Expr [^boolean invoke-value-of-field?
                                ^Class owner ^String mnm ^Exprs args])
+  
   (invoke-virtual-member ^Expr [^Expr receiver ^String mnm ^Exprs args])
 
+  (get-static-field ^Expr [^Class owner ^String mnm])
+  
   ;; ### misc
   
   (mk-expr ^Expr [form]))               ;FIXME... drop this

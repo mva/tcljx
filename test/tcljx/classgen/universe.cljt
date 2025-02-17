@@ -4,7 +4,7 @@
                [model :as model])
    (tcljx.parser [context :as context] [form :as form] [namespace :as namespace])
    (tcljx.classgen [loader :as loader] [runtime :as rt] [classfile :as classfile]
-                   [segmgen :as segmgen] [codegen :as codegen]))
+                   [segmgen :as segmgen] [codegen :as codegen] [emit :as emit]))
   (:import
    (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
                      NamespaceBuilder SegmentBuilder
@@ -101,10 +101,13 @@
            (when (codegen/class-element-emitter? elem)
              (codegen/emit-class-element cb elem)))))
       (^Consumer fn ^void [^CodeBuilder xb]
-       (dotimes [i end-of-segment-elements]
-         (let [elem (.get segment-elements i)]
-           (when (instance? Insn elem)
-             (codegen/emit-code-logical? xb elem))))))
+       (loop [i 0]
+         (when (< i end-of-segment-elements)
+           (let [elem (.get segment-elements i)]
+             (when (and (instance? Insn elem)
+                        (emit/more? xb cfg/no-line-number Void/TYPE
+                                    (codegen/emitter elem)))
+               (recur (inc i))))))))
     
     ;; revert back to requested state & move to next segment
     (set! globals then-globals)

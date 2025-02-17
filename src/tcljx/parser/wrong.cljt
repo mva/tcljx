@@ -115,8 +115,11 @@
     (if (identical? s s')
       (str "`" s "`")                 ;fallback if styles are disabled
       s')))
-(defn q-as-symbol ^String [x]
-  (q (if (symbol? x) x (symbol nil x))))
+(defn q-as-symbol
+  (^String [x]
+   (q (if (symbol? x) x (symbol nil x))))
+  (^String [^Class cl ^String member-name]
+   (q (symbol (.getName cl) member-name))))
 (defn q-namespace ^String [^Named x]
   (q (symbol nil (namespace x))))
 ;; (defn q-symbol ^String [x]

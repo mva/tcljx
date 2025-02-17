@@ -13,10 +13,15 @@
 (def acc-method-static (bit-or acc-method-virtual ClassFile/ACC_STATIC))
 
 
-(defmacro accept-> [builder handler]
-  `(let [builder# ~builder]
-     (.accept ~handler builder#)
-     builder#))
+(defmacro accept->
+  ([builder handler]
+   (if (symbol? builder)
+     (list 'do (list '.accept handler builder) builder)
+     `(let [builder# ~builder] (.accept ~handler builder#) builder#)))
+  ([builder handler arg]
+   (if  (symbol? builder)
+     (list 'do (list '.accept handler builder arg) builder)
+     `(let [builder# ~builder] (.accept ~handler builder# ~arg) builder#))))
 
 (defmacro with-method-body-> [cb [method-name lookup-type-desc flags] & body]
   `(.withMethodBody ~cb ~method-name ~lookup-type-desc ~flags
