@@ -8,7 +8,7 @@
 (ns tcljx.classgen.invoke-test
   (:require [tcljx.classgen.bootstrap :refer [asm-expr]]
             [tcljx.alpha.ptest :refer :all])
-  (:import (tcljx.parser.wrong WrongInfo)))
+  (:import (tcljx.data.wrong WrongInfo)))
 
 ;;; Note: Some of the tests below may need an (identity ...) wrapper
 ;;; eventually.

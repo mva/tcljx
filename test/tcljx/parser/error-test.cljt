@@ -6,11 +6,11 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.error-test
-  (:require [tcljx.parser.wrong :as wrong]
+  (:require [tcljx.data.wrong :as wrong]
             [tcljx.parser.namespace-test :as nst]
             [tcljx.alpha.ptest :refer :all]
             [tinyclj.string :as str])
-  (:import (tcljx.parser.wrong WrongInfo)))
+  (:import (tcljx.data.wrong WrongInfo)))
 
 (defn reported? ^boolean [^int line ^java.util.regex.Pattern find-regex
                           ^vector formv]

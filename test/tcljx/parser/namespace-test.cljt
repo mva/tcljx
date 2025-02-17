@@ -7,15 +7,15 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.namespace-test
   (:require
-   (tcljx.data [model :as model])
-   (tcljx.parser [wrong :as wrong] [reader :as reader] [context :as context]
+   (tcljx.data [wrong :as wrong] [model :as model])
+   (tcljx.parser [reader :as reader] [context :as context]
                  [form :as form] [namespace :as namespace])
    [tcljx.alpha.ptest :refer :all])
   (:import
    (tcljx.data.model NamespaceBuilder ProvidedNamespace NamespaceProvider
                      CodeEmitter Entity Binding Expr Exprs ExprFactory
                      Resolver Scope)
-   (tcljx.parser.wrong WrongInfo)))
+   (tcljx.data.wrong WrongInfo)))
 
 (deftype CodeData [form]
   java.lang.Record

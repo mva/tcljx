@@ -1,8 +1,7 @@
 (ns tcljx.classgen.codegen
   (:require
-   (tcljx.data [config :as cfg] [type :as type] [model :as model]
-               [resolve :as resolve] [reflect :as reflect])
-   (tcljx.parser [wrong :as wrong])
+   (tcljx.data [config :as cfg] [wrong :as wrong] [type :as type]
+               [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen [classfile :as classfile] [runtime :as rt] [emit :as emit]
                    [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import

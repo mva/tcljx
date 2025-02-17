@@ -1,6 +1,5 @@
 (ns tcljx.parser.context
-  (:require (tcljx.data [model :as model])
-            (tcljx.parser [meta :as meta] [wrong :as wrong]))
+  (:require (tcljx.data [meta :as meta] [wrong :as wrong] [model :as model]))
   (:import (tcljx.data.model Resolver NamespaceBuilder Binding
                              Expr Exprs ExprFactory Scope)))
 

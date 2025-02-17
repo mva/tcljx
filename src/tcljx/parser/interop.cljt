@@ -1,7 +1,7 @@
 (ns tcljx.parser.interop
   (:require
-   (tcljx.data [type :as type] [model :as model])
-   (tcljx.parser [wrong :as wrong] [syntax :as syntax]))
+   (tcljx.data [wrong :as wrong] [type :as type] [model :as model])
+   (tcljx.parser [syntax :as syntax]))
   (:import
    (tcljx.data.model Resolver ArityType ArityTypeImpl)
    (clojure.lang IMeta)))

@@ -1,8 +1,8 @@
 (ns tcljx.parser.fn
   (:require
-   (tcljx.data [type :as type] [model :as model] [resolve :as resolve]
-               [reflect :as reflect])
-   (tcljx.parser [wrong :as wrong] [syntax :as syntax] [context :as context]
+   (tcljx.data [wrong :as wrong] [type :as type] [model :as model]
+               [resolve :as resolve] [reflect :as reflect])
+   (tcljx.parser [syntax :as syntax] [context :as context]
                  [interop :as interop]))
   (:import
    (tcljx.data.model Expr Exprs ExprFactory ArityType FnLiteral Scope Resolver)

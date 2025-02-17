@@ -5,9 +5,8 @@
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
-(ns tcljx.parser.wrong
-  (:require (tcljx.data [type :as type])
-            (tcljx.parser [meta :as meta])
+(ns tcljx.data.wrong
+  (:require (tcljx.data [meta :as meta] [type :as type])
             [tcljx.alpha.ptest__style :as style]
             [tinyclj.string :as str])
   (:import (clojure.lang Symbol Named)))

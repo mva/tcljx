@@ -1,6 +1,5 @@
 (ns tcljx.parser.constant
-  (:require (tcljx.data [type :as type] [model :as model])
-            (tcljx.parser [wrong :as wrong]))
+  (:require (tcljx.data [wrong :as wrong] [type :as type] [model :as model]))
   (:import (tcljx.data.model Scope Expr)
            (java.lang.constant ConstantDesc ConstantDescs)))
 

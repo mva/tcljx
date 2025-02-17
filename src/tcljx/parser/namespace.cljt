@@ -1,6 +1,7 @@
 (ns tcljx.parser.namespace
-  (:require (tcljx.data [config :as cfg] [model :as model])
-            (tcljx.parser [meta :as meta] [wrong :as wrong] [reader :as reader]
+  (:require (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
+                        [model :as model])
+            (tcljx.parser [reader :as reader]
                           [syntax :as syntax] [context :as context]))
   (:import (tcljx.parser.reader FormBuilder)
            (tcljx.data.model NamespaceBuilder ProvidedNamespace Require)))

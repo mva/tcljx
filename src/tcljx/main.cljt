@@ -6,7 +6,7 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.main
-  (:require [tcljx.parser.wrong :as wrong]
+  (:require [tcljx.data.wrong :as wrong]
             [tcljx.parser.reader :as reader]
             [tcljx.parser.reader-test :as reader-test]
 
@@ -112,7 +112,7 @@
       (dotimes [_ 10000]                ;warmup goes down to ~1.8ms
         (time
          (reader/read-all cs resolver))))
-    (catch tcljx.parser.wrong.WrongInfo ex
+    (catch tcljx.data.wrong.WrongInfo ex
       (println :error (.getMessage ex))
       (println (wrong/wr-data ex))
       (.printStackTrace ex))))

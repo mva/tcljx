@@ -1,4 +1,4 @@
-(ns tcljx.parser.meta
+(ns tcljx.data.meta
   (:import (clojure.lang IMeta)))
 
 (defn get-line ^Integer [^map form-meta] ;nil if no line number present
