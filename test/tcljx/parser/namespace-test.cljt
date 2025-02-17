@@ -20,7 +20,7 @@
 (deftype CodeData [form]
   java.lang.Record
   CodeEmitter
-  (emit-code* [_ xb requested-type line]
+  (emit-opnd* [_ xb requested-type line]
     (throw (UnsupportedOperationException.))))
 
 (deftype ExprStub [^CodeEmitter data]
@@ -44,7 +44,7 @@
 (deftype BindingStub [^String namespace ^String name form]
   java.lang.Record
   CodeEmitter
-  (emit-code* [_ xb requested-type line]
+  (emit-opnd* [_ xb requested-type line]
     (throw (UnsupportedOperationException.)))
   Binding
   (bound-value [this]

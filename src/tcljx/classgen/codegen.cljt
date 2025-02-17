@@ -87,19 +87,19 @@
 (def ^:private empty-insns (Insns. (new CodeEmitter/1 0) (new Class/1 0)))
 
 
-(defn emit-code-logical? ^boolean [^CodeBuilder xb ^Insn insn]
-  (emit/more? xb cfg/no-line-number (logical-type insn) (.emitter insn)))
+(defn emit-opnd-logical ^CodeBuilder [^CodeBuilder xb ^Insn insn]
+  (emit/opnd xb cfg/no-line-number (logical-type insn) (.emitter insn)))
 
 (defn- with-line-number ^Insn [^Insn insn ^int line]
-  (Insn. (^CodeEmitter fn [xb requested-type _]
-          (when (emit/more? xb line requested-type (.emitter insn))
+  (Insn. (^CodeEmitter fn [xb _ requested-type]
+          (when (emit/opnd xb line requested-type (.emitter insn))
             requested-type))
          (expr-type insn)))
 
 (deftype ConstantImpl [^Class type ^Object const-value]
   java.lang.Record
   Constant
-  (emit-code* [_ xb requested-type line]
+  (emit-opnd* [_ xb line requested-type]
     (.loadConstant xb (if (instance? ConstantDesc const-value)
                         ^ConstantDesc const-value
                         (reflect/describe const-value)))
@@ -114,17 +114,18 @@
 
 (defn- progn ^Insn [^Insns insns ^Insn insn] ;`insns` should not be empty
   (let [ces (.emitters insns), ce (.emitter insn)]
-    (Insn. (^CodeEmitter fn [xb requested-type line]
-            (when (emit/more-of-type*? xb line Void/TYPE ces)
-              (when (emit/more? xb line requested-type ce)
-                requested-type)))
+    (Insn. (^CodeEmitter fn [xb line requested-type]
+            (when (some-> xb
+                          (emit/opnds-of-type line Void/TYPE ces)
+                          (emit/opnd line requested-type ce))
+              requested-type))
            (expr-type insn))))
 
 (defn- identity ^Insn [^Class expr-type ^CodeEmitter ce]
-  (Insn. (^CodeEmitter fn [xb requested-type line]
-            (when (emit/more? xb line expr-type ce)
-              expr-type))
-           expr-type))
+  (Insn. (^CodeEmitter fn [xb line requested-type]
+          (when (emit/opnd xb line expr-type ce)
+            expr-type))
+         expr-type))
 
 (defn- emit-new-array ^CodeBuilder [^CodeBuilder xb ^Class component-type
                                     ^int length]
@@ -133,49 +134,47 @@
     (.newarray xb (TypeKind/from component-type))
     (.anewarray xb (reflect/describe-class component-type))))
 
-(defn- emit-array-of-more? ^boolean [^CodeBuilder xb ^Class component-type
-                                     ^CodeEmitter/1 ces ^int start]
+(defn- emit-array-of-more? ^CodeBuilder [^CodeBuilder xb ^Class component-type
+                                         ^CodeEmitter/1 ces ^int start]
   (let [end (alength ces)
         component-tk (TypeKind/from component-type)]
     (emit-new-array xb component-type (- end start))
     (loop [i start]
       (if (< i end)
-        (if (-> (.dup xb)
-                (.loadConstant (- i start))
-                (emit/more? cfg/no-line-number component-type (aget ces i)))
-          (do (.arrayStore xb component-tk) (recur (inc i)))
-          false)
-        true))))
+        (when (some->
+               (-> (.dup xb)
+                   (.loadConstant (- i start))
+                   (emit/opnd cfg/no-line-number component-type (aget ces i)))
+               (.arrayStore component-tk))
+          (recur (inc i)))
+        xb))))
 
 (defn- invoke ^Insn [^Class owner ^Match m ^Insn receiver ^Insns args]
-  (-> (^CodeEmitter fn [xb requested-type line]
-       (letfn [(emit-varargs? ^boolean [^Class varargs-tp ^int start]
+  (-> (^CodeEmitter fn [xb line requested-type]
+       (letfn [(emit-varargs? ^CodeBuilder [^CodeBuilder xb ^Class varargs-tp
+                                            ^int start]
                  (if (= (.invocation-mode m) resolve/invoke-tail-into-array)
                    (emit-array-of-more? xb (.getComponentType varargs-tp)
                                         (.emitters args) start)
                    (assert false)))]
-         
-         ;; new-dup-dance when creating a new instance of `owner`
-         (when (instance? Constructor (.member m))
-           (-> xb (.new_ (reflect/describe-class owner)) (.dup)))
-
-         ;; instance field or method require receiver argument
-         (when (or (nil? receiver)
-                   (emit-code-logical? xb receiver))
-
-           ;; all fixed (i.e. non-vararg) arguments
-           (let [fixed (resolve/end-of-fixed-parameters m)]
-             (when (emit/more-of-types*? xb line (.parameter-types m)
-                                         (.emitters args) 0 fixed)
-
-               ;; optionally: all vararg arguments
-               (let [varargs-tp (resolve/varargs-parameter-type m)]
-                 (when (or (nil? varargs-tp)
-                           (emit-varargs? varargs-tp fixed))
-
-                   ;; the actual invoke instruction
-                   (-> (.lineNumber xb line)
-                       (reflect/invoke-member owner (.member m))))))))
+         (let [fixed (resolve/end-of-fixed-parameters m)
+               varargs-tp (resolve/varargs-parameter-type m)]
+           (some->
+            xb
+            ;; new-dup-dance when creating a new instance of `owner`
+            (cond-> (instance? Constructor (.member m))
+              (-> (.new_ (reflect/describe-class owner)) (.dup)))
+            ;; instance field or method require receiver argument
+            (cond-> (some? receiver)
+              (emit-opnd-logical receiver))
+            ;; all fixed (i.e. non-vararg) arguments
+            (emit/typed-opnds line (.parameter-types m)
+                                  (.emitters args) 0 fixed)
+            ;; optionally: all vararg arguments
+            (cond-> (some? varargs-tp)
+              (emit-varargs? varargs-tp fixed))
+            ;; the actual invoke instruction
+            (-> (.lineNumber line) (reflect/invoke-member owner (.member m)))))
          (.return-type m)))
       (Insn. (.return-type m))))
 
@@ -183,9 +182,9 @@
 
 ;;; Helper function for the local variable protocol.  When a method's
 ;;; code attribute is produced, the Binding is established first: its
-;;; `emit-code` sets a private mutable field to the allocated slot
+;;; `emit-opnd` sets a private mutable field to the allocated slot
 ;;; value.  The binding's `bound-value` method returns an Insn whose
-;;; own `emit-code` closes over the Binding instance (not the mutable
+;;; own `emit-opnd` closes over the Binding instance (not the mutable
 ;;; slot value in the mutable field!), allowing it to retrieve the
 ;;; previously stored value via `allocated-slot`.  Initializiation
 ;;; should set the undefined slot value to -1.
@@ -195,7 +194,7 @@
 (deftype ParameterImpl [^int param-no ^String name ^Class type
                         ^:unsynchronized-mutable ^int slot]
   Parameter
-  (emit-code* [this xb requested-type line]
+  (emit-opnd* [this xb line requested-type]
     (set! slot (.parameterSlot xb param-no))
     (.localVariable xb slot name (reflect/describe-class type)
                     (.startLabel xb) (.endLabel xb))
@@ -207,7 +206,7 @@
   (init [_]
     nil)
   (bound-value [this]
-    (Insn. (^CodeEmitter fn [xb requested-type line]
+    (Insn. (^CodeEmitter fn [xb line requested-type]
             (.loadLocal xb (TypeKind/from type) (.allocated-slot this))
             type)
            type))
@@ -232,7 +231,7 @@
                  mtd (model/mtd-of-arity-type at)]
              (classfile/with-method-body-> cb
                [mnm mtd classfile/acc-method-static]
-               (emit/method-code ce-body))))))
+               (emit/method-return ce-body))))))
   (.clear pending-functions))
 
 ;;; ------------------------------------------------------------------------
@@ -291,7 +290,7 @@
                    mtd (MethodTypeDesc/of (reflect/describe-class opnd-type))]
                (classfile/with-method-body-> cb
                  [nm mtd classfile/acc-method-static]
-                 (emit/method-code (.emitter ^Insn init))))))
+                 (emit/method-return (.emitter ^Insn init))))))
       insn-empty))
   (new-def-alias [_ nmsp nm other]
     (assert false))

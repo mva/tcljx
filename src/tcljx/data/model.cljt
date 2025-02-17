@@ -7,19 +7,20 @@
   )
 
 ;;; Emit instruction code into the CodeBuilder instance.  Return the
-;;; logical type of the value pushed on operand stack.  This is either
-;;; the original expression type, or the value of the `requested-type`
-;;; argument.  If the returned type differs from `requested-type`,
-;;; then it is the caller's responsibility to adapt the operand value
-;;; to the latter.
+;;; logical type of the value pushed onto operand stack.  This is
+;;; either the original expression type baked into the emitter, or the
+;;; value it takes in the argument `requested-type`.  If the operand
+;;; type returned by the emitter differs from `requested-type`, then
+;;; it is the caller's responsibility to adapt the operand value to
+;;; the type it requires.
 ;;; 
 ;;; Right now, line numbers are only written to decorate stack traces.
 ;;; A bytecode instruction must emit a line number pseudo instruction
 ;;; before its own opcode only if an exception may be raised during
 ;;; the opcode's execution.
 (definterface CodeEmitter
-  (emit-code* ^Class [^java.lang.classfile.CodeBuilder xb ^Class requested-type
-                      ^int line]))
+  (emit-opnd* ^Class [^java.lang.classfile.CodeBuilder xb ^int line
+                      ^Class requested-type]))
 
 ;;; A named entity on the level of the code generator that exists at
 ;;; runtime.  Exposes additional operations beyond "emit code that

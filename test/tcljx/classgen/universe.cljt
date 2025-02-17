@@ -102,12 +102,13 @@
              (codegen/emit-class-element cb elem)))))
       (^Consumer fn ^void [^CodeBuilder xb]
        (loop [i 0]
-         (when (< i end-of-segment-elements)
+         (if (< i end-of-segment-elements)
            (let [elem (.get segment-elements i)]
-             (when (and (instance? Insn elem)
-                        (emit/more? xb cfg/no-line-number Void/TYPE
-                                    (codegen/emitter elem)))
-               (recur (inc i))))))))
+             (when (or (not (instance? Insn elem))
+                       (some? (emit/opnd xb cfg/no-line-number Void/TYPE
+                                         (codegen/emitter elem))))
+               (recur (inc i))))
+           xb))))
     
     ;; revert back to requested state & move to next segment
     (set! globals then-globals)

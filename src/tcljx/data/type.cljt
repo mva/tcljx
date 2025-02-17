@@ -84,6 +84,9 @@
 
 ;;; ------------------------------------------------------------------------
 
+;;; Note: `convert-from` does not get any line number information.
+;;; Therefore the conversions functions must only emit bytecode that
+;;; cannot throw.
 (deftype Wrapper [^Class class-primitive
                   ^Class class-reference
                   ;; ^Expr default-value
@@ -374,9 +377,6 @@
   #_(defn primitive? ^boolean [^Wrapper tp]
       (not (identical? generic-reference tp)))
   
-  #_(defn checkcast-and-unbox-to ^Expr [^Wrapper tp ^Expr arg]
-      (.adapt (.unbox-exact-to tp) (xf/checkcast arg (.class-reference tp))))
-
   #_(defn default-value-of ^Expr [^Class tp]
       (if (jb/reference? tp)
         (x/const tp nil)
