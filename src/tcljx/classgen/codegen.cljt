@@ -104,7 +104,7 @@
                         (reflect/describe const-value)))
     type))
 
-(def insn-null (Insn. (ConstantImpl. type/poly-reference ConstantDescs/NULL)
+(def insn-null (Insn. (ConstantImpl. Object ConstantDescs/NULL)
                       type/poly-reference))
 (def insn-true (Insn. (ConstantImpl. Boolean/TYPE 1)
                       Boolean/TYPE))

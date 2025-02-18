@@ -6,38 +6,8 @@
   (:import
    (tcljx.data.type Wrapper)
    (tcljx.data.model CodeEmitter)
-   (java.lang.classfile CodeBuilder TypeKind)))
-
-(defn- adapt-to ^void [^CodeBuilder xb ^int line
-                       ^Class opnd-type ^Class requested-type]
-  (assert (type/continues? opnd-type))      ;FIXME... drop
-  (assert (type/continues? requested-type)) ;FIXME... drop
-  
-  (letfn [(indirect-unbox ^void [^Wrapper wopnd ^Wrapper wrequested]
-            ;; pre: `wopnd` denotes a reference type
-            ;; pre: `wrequested` denotes a non-void primitive type
-            (let [box-type (.class-reference wrequested)]
-              #_(prn :wopnd wopnd :wrequested wrequested)
-              (adapt-to xb line opnd-type box-type)
-              (classfile/accept-> xb (.convert-from wrequested)
-                                  (type/of box-type))))]
-    (cond
-      (.isAssignableFrom requested-type opnd-type)
-      nil
-
-      (not (or (.isPrimitive opnd-type) (.isPrimitive requested-type)))
-      (-> (.lineNumber xb line)
-          (.checkcast (reflect/describe-class requested-type)))
-      
-      :else (let [wopnd (type/of opnd-type)
-                  wrequested (type/of requested-type)]
-              #_(prn :wopnd wopnd)
-              #_(prn :wrequested wrequested)
-              (if (and (not (type/same? Void/TYPE requested-type))
-                       (.isPrimitive requested-type)
-                       (not (.isPrimitive opnd-type)))
-                (indirect-unbox wopnd wrequested)
-                (classfile/accept-> xb (.convert-from wrequested) wopnd))))))
+   (java.lang.classfile CodeBuilder TypeKind)
+   (java.lang.constant MethodTypeDesc)))
 
 ;;; Emit instruction to `xb` and adapt the stack operand it produces
 ;;; to `requested-type`.  Returns nil if the instruction returns
@@ -45,27 +15,88 @@
 ;;; this method.
 (defn opnd ^CodeBuilder [^CodeBuilder xb ^int line ^Class requested-type
                          ^CodeEmitter ce]
-  ;; pre: (some? xb)
-  (let [on-stack-type (.emit-opnd* ce xb line requested-type)]
-    (cond
-      (and (type/poly-reference? on-stack-type) ;Void is on the stack
-           (not (.isPrimitive requested-type)) ;a reference type is requested
-           (model/const-null? ce))      ;ACONST_NULL was just emitted
-      xb   ;elide redundant checkcast of ACONST_NULL to reference type
+  (letfn [(return-from-method ^CodeBuilder [^CodeBuilder xb ^Class opnd-type]
+            (.return_ xb (TypeKind/from opnd-type))
+            nil)
+          (pop-operand ^CodeBuilder [^CodeBuilder xb ^Class opnd-type]
+            ;; pre: `opnd-type` is not Void/TYPE
+            (if (or (identical? Long/TYPE opnd-type)
+                    (identical? Double/TYPE opnd-type))
+              (-> xb .pop2)
+              (-> xb .pop)))
+          
+          (unbox-reference ^CodeBuilder [^CodeBuilder xb
+                                         ^Class requested-type
+                                         ^Class opnd-type]
+            ;; pre: (.isPrimitive requested-type)
+            (let [box-type (.class-reference (type/of requested-type))
+                  mtd (MethodTypeDesc/of (reflect/describe-class requested-type))]
+              (-> (cast-from-reference xb box-type opnd-type)
+                  (.lineNumber line)
+                  (.invokevirtual (reflect/describe-class box-type)
+                                  (str (.getSimpleName requested-type) "Value")
+                                  mtd))))
+          (cast-from-reference ^CodeBuilder [^CodeBuilder xb
+                                             ^Class requested-type
+                                             ^Class opnd-type]
+            ;; pre: `opnd-type` is reference type
+            ;; pre: `opnd-type` is not Void/TYPE
+            ;; pre: `requested-type` is not void
+            (cond
+              (.isPrimitive requested-type)
+              (unbox-reference xb requested-type opnd-type)
 
-      (type/exits-method? on-stack-type)
-      nil       ;instruction does not return: cannot continue at all
-      
-      ;; FIXME... optimize for this "nothing to do" case?  it should be
-      ;; the most common scenario.  handle this in the caller of this
-      ;; function?
-      (identical? on-stack-type requested-type)
-      (when (type/continues? on-stack-type) xb)
-      
-      (type/exits-method? requested-type)
-      (do (.return_ xb (TypeKind/from on-stack-type)) nil)
+              (or (.isAssignableFrom requested-type opnd-type)
+                  (model/const-null? ce))
+              xb
+              
+              :else (-> (.lineNumber xb line)
+                        (.checkcast (reflect/describe-class requested-type)))))
 
-      :else (do (adapt-to xb line on-stack-type requested-type) xb))))
+          (box-primitive ^CodeBuilder [^CodeBuilder xb
+                                       ^Class requested-type
+                                       ^Class opnd-type]
+            ;; pre: (.isPrimitive opnd-type) but it is not void
+            (let [box-type (.class-reference (type/of opnd-type))
+                  cd-box (reflect/describe-class box-type)
+                  mtd (MethodTypeDesc/of cd-box (reflect/describe-class opnd-type))]
+              (-> (.invokestatic xb cd-box "valueOf" mtd)
+                  (cast-from-reference requested-type box-type))))
+          (convert-from-primitive ^CodeBuilder [^CodeBuilder xb
+                                                ^Class requested-type
+                                                ^Class opnd-type]
+            ;; pre: `opnd-type` is primitive type including void
+            ;; pre: `requested-type` is not void
+            (cond
+              (.isPrimitive requested-type)
+              (classfile/accept-> xb (.convert-from (type/of requested-type))
+                                  (type/of opnd-type))
+              ;; here holds: requested type is reference
+              
+              (identical? Void/TYPE opnd-type)
+              (-> xb .aconst_null)
+              
+              :else
+              (box-primitive xb requested-type opnd-type)))]
+    
+    ;; pre: (some? xb)
+    (when-some [on-stack-type (.emit-opnd* ce xb line requested-type)]
+      ;; here holds: (not (type/exits-method? on-stack-type))
+      (cond
+        (identical? on-stack-type requested-type)
+        xb      ;here holds: (not (type/exits-method? requested-type))
+        
+        (type/exits-method? requested-type)
+        (return-from-method xb on-stack-type)
+
+        (identical? Void/TYPE requested-type)
+        (pop-operand xb on-stack-type) ;here `on-stack-type` is not void
+        ;; here holds: this function leaves an operand on the stack
+
+        (.isPrimitive on-stack-type)
+        (convert-from-primitive xb requested-type on-stack-type)
+        
+        :else (cast-from-reference xb requested-type on-stack-type)))))
 (defn method-return ^CodeBuilder [^CodeBuilder xb ^CodeEmitter ce]
   (opnd xb cfg/no-line-number type/exits-method ce))
 
