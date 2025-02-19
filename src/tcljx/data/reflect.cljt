@@ -103,10 +103,3 @@
       Field
       (.fieldAccess xb (if v? Opcode/GETFIELD Opcode/GETSTATIC) cld
                     (.getName member) (describe-class (.getType ^Field member))))))
-
-#_
-(defn invoke-member-type ^Class [^Class owner ^Member member]
-  (condp instance? member
-    Method (.getReturnType ^Method member)
-    Constructor owner
-    Field (.getType ^Field member)))

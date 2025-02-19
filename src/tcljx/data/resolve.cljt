@@ -95,14 +95,16 @@
 (def invoke-standard 0)     ;regular invocation
 (def invoke-tail-into-array 1)         ;pack tail arguments into array
 
-(deftype Match [^Member member          ;method, field, or constructor
+(deftype Match [^Class owner            ;where the search started
+                ^Member member          ;method, field, or constructor
                 ^Class/1 parameter-types ;excluding any receiver
                 ^Class return-type
                 ^int invocation-mode]
   java.lang.Record)
 
 (defn- with-invocation-mode ^Match [^Match m ^int invocation-mode]
-  (Match. (.member m) (.parameter-types m) (.return-type m) invocation-mode))
+  (Match. (.owner m) (.member m) (.parameter-types m) (.return-type m)
+          invocation-mode))
 
 (defn parameter-count ^int [^Match m]
   (alength (.parameter-types m)))
@@ -152,15 +154,15 @@
   (^boolean [^boolean static? ^Member m]
    (= (static-member? m) static?)))
 
-(defn- cons-executable-exact ^seq [^Executable e ^Class return-type
+(defn- cons-executable-exact ^seq [^Class owner ^Executable e ^Class return-type
                                    ^seq acc]
   (cond->> acc
     (or (not (.isVarArgs e))
         (not (.isAnnotationPresent e ann-polymorphic-signature)))
-    (cons (Match. e (.getParameterTypes e) return-type invoke-standard))))
+    (cons (Match. owner e (.getParameterTypes e) return-type invoke-standard))))
 
-(defn- cons-executable-candidate ^seq [^Executable e ^Class return-type
-                                       ^seq acc]
+(defn- cons-executable-candidate ^seq [^Class owner ^Executable e
+                                       ^Class return-type ^seq acc]
   (let [mode (if (.isVarArgs e)
                (if (.isAnnotationPresent e ann-polymorphic-signature)
                  invoke-polymorphic
@@ -169,7 +171,7 @@
         rt (if (= mode invoke-polymorphic)
              type/polymorphic ;polymorphic return determined by context
              return-type)]
-    (cons (Match. e (.getParameterTypes e) rt mode) acc)))
+    (cons (Match. owner e (.getParameterTypes e) rt mode) acc)))
 
 (defn method-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm
                          ^Class/1 atypes]
@@ -177,7 +179,7 @@
             (let [m (.getMethod owner nm atypes)] ;works for class and array
               (cond->> acc
                 (static-member? static? m)
-                (cons-executable-exact m (.getReturnType m)))))]
+                (cons-executable-exact owner m (.getReturnType m)))))]
     (try
       (method-or-throw owner)
       (catch NoSuchMethodException _
@@ -188,37 +190,40 @@
           (catch NoSuchMethodException _
             acc))))))
 
-(defn method-candidates ^seq [^seq acc ^boolean static? ^String nm ^Method/1 ms]
-  (loop [acc acc, i (dec (alength ms))]
-    (if (neg? i)
-      acc
-      (recur (let [m (aget ms i)]
-               (cond->> acc
-                 (and (= nm (.getName m))
-                      (static-member? static? m)
-                      (not (.isBridge m)))
-                 (cons-executable-candidate m (.getReturnType m))))
-             (dec i)))))
+(defn method-candidates ^seq [^seq acc ^boolean static? ^Class owner ^String nm]
+  (let [ms (.getMethods owner)]
+    (loop [acc acc, i (dec (alength ms))]
+      (if (neg? i)
+        acc
+        (recur (let [m (aget ms i)]
+                 (cond->> acc
+                   (and (= nm (.getName m))
+                        (static-member? static? m)
+                        (not (.isBridge m)))
+                   (cons-executable-candidate owner m (.getReturnType m))))
+               (dec i))))))
 
 
 ;;; Returns `acc` for PolymorphicSignature constructor.
 (defn constructor-exact ^seq [^seq acc ^Class owner ^Class/1 atypes]
   (try
     (let [c (.getConstructor owner atypes)]
-      (cons-executable-exact c owner acc))
+      (cons-executable-exact owner c owner acc))
     (catch NoSuchMethodException _
       acc)))
 
-(defn constructor-candidates ^seq [^seq acc ^Class owner ^Constructor/1 cs]
-  (loop [acc acc, i (dec (alength cs))]
-    (if (neg? i)
-      acc
-      (recur (cons-executable-candidate (aget cs i) owner acc) (dec i)))))
+(defn constructor-candidates ^seq [^seq acc ^Class owner]
+  (let [cs (.getConstructors owner)]
+    (loop [acc acc, i (dec (alength cs))]
+      (if (neg? i)
+        acc
+        (recur (cons-executable-candidate owner (aget cs i) owner acc)
+               (dec i))))))
 
 
 (def empty-class-array (new Class/1 0))
-(defn- cons-field-candidate ^seq [^Field f ^seq acc]
-  (cons (Match. f empty-class-array (.getType f) invoke-standard) acc))
+(defn- cons-field-candidate ^seq [^Class owner ^Field f ^seq acc]
+  (cons (Match. owner f empty-class-array (.getType f) invoke-standard) acc))
 
 (defn field-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm
                         ^Class/1 atypes]
@@ -226,7 +231,7 @@
     (let [f (.getField owner nm)]
       (cond->> acc
         (and (static-member? static? f) (zero? (alength atypes)))
-        (cons-field-candidate f)))
+        (cons-field-candidate owner f)))
     (catch NoSuchFieldException _
       acc)))
 
@@ -242,8 +247,8 @@
 
 (defn member-candidates ^seq [^seq acc ^boolean static? ^Class owner ^String mnm]
   (if (= mnm constructor-name)
-    (constructor-candidates acc owner (.getConstructors owner))
-    (method-candidates acc static? mnm (.getMethods owner))))
+    (constructor-candidates acc owner)
+    (method-candidates acc static? owner mnm)))
 
 ;;; ------------------------------------------------------------------------
 

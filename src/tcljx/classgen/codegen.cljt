@@ -9,7 +9,6 @@
    (tcljx.data.model Expr Exprs ExprFactory CodeEmitter Entity Parameter Constant
                      FnLiteral NamespaceBuilder)
    (tcljx.data.resolve Match)
-   (tinyclj.lang Literal)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)
    (java.lang.reflect Member Constructor Field)
@@ -153,7 +152,7 @@
           (recur (inc i)))
         xb))))
 
-(defn- invoke ^Insn [^Class owner ^Match m ^Insn receiver ^Insns args]
+(defn- invoke ^Insn [^Match m ^Insn receiver ^Insns args]
   (-> (^CodeEmitter fn [xb line requested-type]
        (letfn [(emit-varargs? ^CodeBuilder [^CodeBuilder xb ^Class varargs-tp
                                             ^int start]
@@ -167,7 +166,7 @@
             xb
             ;; new-dup-dance when creating a new instance of `owner`
             (cond-> (instance? Constructor (.member m))
-              (-> (.new_ (reflect/describe-class owner)) (.dup)))
+              (-> (.new_ (reflect/describe-class (.owner m))) (.dup)))
             ;; instance field or method require receiver argument
             (cond-> (some? receiver)
               (emit-opnd-logical receiver))
@@ -178,7 +177,8 @@
             (cond-> (some? varargs-tp)
               (emit-varargs? varargs-tp fixed))
             ;; the actual invoke instruction
-            (-> (.lineNumber line) (reflect/invoke-member owner (.member m)))))
+            (-> (.lineNumber line)
+                (reflect/invoke-member (.owner m) (.member m)))))
          (.return-type m)))
       (Insn. (.return-type m))))
 
@@ -240,9 +240,10 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- pick-match ^Match [^seq ms]
+(defn- invoke-single-match ^Insn [^seq ms ^Insn receiver ^Insns args]
   (when (nil? (next ms))
-    (first ms)))
+    (when-some [m (first ms)]
+      (invoke m receiver args))))
 
 (defn- info-unresolved-member ^Throwable [^seq ms ^Class owner ^String mnm
                                           ^Insns args ^String label]
@@ -318,25 +319,25 @@
                      (if (constants? args)
                        (let [x (vec (as-typed-constants args))]
                          (.new-constant this type/vector x))
-                       (invoke Literal resolve/literal-vector nil args))))
+                       (invoke resolve/literal-vector nil args))))
   (new-map [this opt-meta args]
     (.attach-meta-to this opt-meta
                      (if (constants? args)
                        (let [x (apply array-map (as-typed-constants args))]
                          (.new-constant this type/map x))
-                       (invoke Literal resolve/literal-map nil args))))
+                       (invoke resolve/literal-map nil args))))
   (new-set [this opt-meta args]
     (.attach-meta-to this opt-meta
                      (if (constants? args)
                        (let [x (set (as-typed-constants args))]
                          (.new-constant this type/set x))
-                       (invoke Literal resolve/literal-set nil args))))
+                       (invoke resolve/literal-set nil args))))
   (new-list [this opt-meta args]
     (.attach-meta-to this opt-meta
                      (if (constants? args)
                        (let [x (or (seq (as-typed-constants args)) ())]
                          (.new-constant this type/list x))
-                       (invoke Literal resolve/literal-list nil args))))
+                       (invoke resolve/literal-list nil args))))
   
   (new-def-init [_ nmsp nm init]
     (let [init ^Insn init]
@@ -374,37 +375,34 @@
     (let [args ^Insns args
           mnm resolve/constructor-name
           ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
-      (if-some [m (pick-match ms)]
-        (invoke owner m nil args)
-        (throw (info-unresolved-member ms owner mnm args "constructor")))))
+      (or (invoke-single-match ms nil args)
+          (throw (info-unresolved-member ms owner mnm args "constructor")))))
   (invoke-static-member [_ invoke-member-if-field? owner mnm args]
     (let [args ^Insns args
           ms (resolve/members-by-arg-types true owner mnm (.expr-types args))]
       ;; (prn :et (seq (.expr-types args)))
       ;; (prn :ms (seq ms))
       ;; (prn :invoke-member-if-field? invoke-member-if-field?)
-      (if-some [m (pick-match ms)]
-        (let [insn (invoke owner m nil args)]
-          (if (and invoke-member-if-field? (instance? Field (.member m)))
-            (assert false "not yet implemented")
-            insn))
-        (throw (info-unresolved-member ms owner mnm args "static")))))
+      (or (when-some [insn (invoke-single-match ms nil args)]
+            (if (and invoke-member-if-field?
+                     (instance? Field (.member ^Match (first ms))))
+              (assert false "not yet implemented")
+              insn))
+          (throw (info-unresolved-member ms owner mnm args "static")))))
   (invoke-virtual-member [_ receiver mnm args]
     (let [args ^Insns args
           owner (expr-type receiver)
           ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
       #_(prn :et (seq (.expr-types args)))
       #_(prn :ms (seq ms))
-      (if-some [m (pick-match ms)]
-        (invoke owner m receiver args)
-        (throw (info-unresolved-member ms owner mnm args "virtual")))))
+      (or (invoke-single-match ms receiver args)
+          (throw (info-unresolved-member ms owner mnm args "virtual")))))
 
   (get-static-field [_ owner mnm]
     (let [args empty-insns
           ms (resolve/field-exact nil true owner mnm resolve/empty-class-array)]
-      (if-some [m (pick-match ms)]
-        (invoke owner m nil args)
-        (throw (info-unresolved-member ms owner mnm args "static")))))
+      (or (invoke-single-match ms nil args)
+          (throw (info-unresolved-member ms owner mnm args "static")))))
   
   (mk-expr [_ form]
     (throw (UnsupportedOperationException. (str form)))))
