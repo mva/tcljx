@@ -76,12 +76,20 @@
   :extends [Entity]
   (const-value ^Object []))             ;never nil
 
-(defn const? ^boolean [^Expr x]
-  (instance? Constant (.entity x)))
-(defn const-value ^Object [^Expr x]     ;nil if not a constant
-  (let [e (.entity x)]
-    (when (instance? Constant e)
-      (.const-value ^Constant e))))
+(defn const?
+  (^boolean [^Expr x]
+   (instance? Constant (.entity x)))
+  (^boolean [^Exprs xs ^int i]
+   (instance? Constant (.entity xs i))))
+(defn const-value
+  (^Object [^Expr x]                    ;nil if `x` is not a Constant
+   (let [e (.entity x)]
+     (when (instance? Constant e)
+       (.const-value ^Constant e))))
+  (^Object [^Exprs xs ^int i]        ;nil if `xs[i]` is not a Constant
+   (let [e (.entity xs i)]
+     (when (instance? Constant e)
+       (.const-value ^Constant e)))))
 (defn const-null? ^boolean [^CodeEmitter ce]
   (and (instance? Constant ce)
        (identical? ConstantDescs/NULL (.const-value ^Constant ce))))
@@ -269,10 +277,28 @@
   (empty-expr ^Expr [])
   (new-exprs ^Exprs [^int length])
   (progn-expr ^Expr [^Exprs xs ^Expr x])
-  
   (line-number ^Expr [^Integer line ^Expr x])
+
+  ;; Create an expression denoting the constant `value` of type
+  ;; `expr-type`.  For the most part, there is a one-to-one
+  ;; correspondence between the primitive (when possible) class of
+  ;; `value` and `expr-type`.  The literal `nil` is represented by
+  ;; ConstantDescs/NULL with a type of type/polymorphic.
+  ;; "Computationally int" constants (boolean, char, byte, short) are
+  ;; represented by instances of Integer. and their `expr-type` is
+  ;; Boolean/TYPE, Character/TYPE, and so on.  A wide range of types
+  ;; is accepted for `value`: instances of ConstantDesc, instances of
+  ;; Constable, and structured values provided by Clojure (symbol,
+  ;; keyword, vector, and so on).
   (new-constant ^Expr [^Class expr-type ^Object value])
 
+  ;; These methods return a constant expression when possible:
+  (attach-meta-to ^Expr [^Expr opt-meta ^Expr arg])
+  (new-vector ^Expr [^Expr opt-meta ^Exprs args])
+  (new-map ^Expr [^Expr opt-meta ^Exprs args])
+  (new-set ^Expr [^Expr opt-meta ^Exprs args])
+  (new-list ^Expr [^Expr opt-meta ^Exprs args])
+  
   ;; ### bindings
 
   ;; Adds the new binding to the namespace.  Returns an expression

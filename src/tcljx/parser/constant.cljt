@@ -1,42 +1,63 @@
 (ns tcljx.parser.constant
-  (:require (tcljx.data [wrong :as wrong] [type :as type] [model :as model]))
-  (:import (tcljx.data.model Scope Expr)
-           (java.lang.constant ConstantDesc ConstantDescs)))
+  (:require
+   (tcljx.data [wrong :as wrong] [type :as type] [model :as model]
+               [reflect :as reflect] [resolve :as resolve]))
+  (:import
+   (tcljx.data.model Scope Expr)
+   (java.lang.constant ConstantDesc ConstantDescs)
+   (java.util.regex Pattern PatternSyntaxException)))
 
+;;; Given a primitive type's box class, return the primitive type.
+;;; Also returns String for String, and nil for all other classes.
+(defn primitive-type-of [^Class tp]
+  (condp identical? tp
+    ;; instances of ConstantDesc
+    Integer Integer/TYPE
+    Long Long/TYPE
+    Float Float/TYPE
+    Double Double/TYPE
+    String String
+    ;; not numeric and not ConstantDesc
+    Boolean Boolean/TYPE
+    Character Character/TYPE
+    ;; numeric but not ConstantDesc
+    Byte Byte/TYPE
+    Short Short/TYPE
+    #_else nil))
+
+;;; Note: This function caters for a superset of the form types that
+;;; are produced by the reader.  It additionally accepts common values
+;;; that may be injected via macros, like Class or Byte.
 (defn parse-constant ^Expr [^Scope scope form]
   ;; pre: (not (instance? IMeta form))
-  (letfn [(const-desc-tp ^Class [form]
-            (condp instance? form
-              Integer Integer/TYPE
-              Long Long/TYPE
-              Float Float/TYPE
-              Double Double/TYPE
-              String String
-              #_else (throw (IllegalArgumentException.))))
-          (comp-int-tp ^Class [form]      ;pre: form is not ConstantDesc
-            (condp instance? form
-              Byte Byte/TYPE
-              Short Short/TYPE
-              #_else (throw (IllegalArgumentException.))))]
-    (let [ef (.expr-factory scope)]
-      (cond
-        (nil? form)
-        (.new-constant ef type/poly-reference ConstantDescs/NULL)
-        
-        (instance? ConstantDesc form)
-        (.new-constant ef (const-desc-tp form) form)
-        
-        (keyword? form)
-        (assert false) #_(compile-named form rt/clnm-keyword ctx)
-        
-        (boolean? form)
-        (.new-constant ef Boolean/TYPE form)
-        
-        (char? form)
-        (.new-constant ef Character/TYPE (object (int ^char form)))
-        
-        (number? form)
-        (.new-constant ef (comp-int-tp form) (object (.intValue ^Number form)))
-        
-        :else
-        (.new-constant ef (class form) form))))) ;Class and Pattern
+  (let [ef (.expr-factory scope)]
+    (cond
+      (nil? form)
+      (.new-constant ef type/poly-reference ConstantDescs/NULL)
+      
+      (instance? ConstantDesc form)
+      (.new-constant ef (primitive-type-of (.getClass form)) form)
+      
+      (keyword? form)
+      (.new-constant ef type/keyword form)
+      
+      (boolean? form)
+      (.new-constant ef Boolean/TYPE (int ^boolean form))
+      
+      (char? form)
+      (.new-constant ef Character/TYPE (int ^char form))
+      
+      (number? form)       ;any non-ClassDesc number: Byte and Short
+      (.new-constant ef (primitive-type-of (.getClass form))
+                     (.intValue ^Number form))
+      
+      :else
+      ;; Class and Pattern, using the *reference* object's class as
+      ;; type (anything Constable works as well during emit)
+      (.new-constant ef (class form) form))))
+
+(defn regex-literal ^Expr [^Scope scope ^String pattern]
+  (try
+    (.new-constant (.expr-factory scope) Pattern (Pattern/compile pattern))
+    (catch PatternSyntaxException e
+      (throw (wrong/wr-info (str "invalid regex " (wrong/q pattern)) {} e)))))

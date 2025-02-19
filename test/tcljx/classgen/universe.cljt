@@ -40,7 +40,7 @@
   (lookup-class [_ nm]
     (or
      (.valAt imports nm nil)
-     (when-some [cl (resolve/class-by-name (.lookup-in-pkg pkg-build) nm)]
+     (when-some [cl (resolve/class-for-name (.lookup-in-pkg pkg-build) nm)]
        (set! imports (assoc imports nm cl))
        cl)))
   (lookup-def [this nmsp nm]
@@ -130,8 +130,7 @@
                     segment-elements (ArrayList.)
                     pending-functions (ArrayList.)
                     ef (codegen/mk-code-generator
-                        segment-elements pending-functions
-                        (loader/resolve-rt-class loader rt/StaticFn))
+                        segment-elements pending-functions)
                     globals {}]
                 (NmspBuilderImpl. this ns-str ef
                                   segment-elements pending-functions

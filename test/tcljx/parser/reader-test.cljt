@@ -6,7 +6,8 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.reader-test
-  (:require [tcljx.parser.reader :as reader]
+  (:require [tcljx.data.resolve :as resolve] ;for predefined imports
+            [tcljx.parser.reader :as reader]
             [tinyclj.string :as str]
             [tcljx.alpha.ptest :refer :all])
   (:import (tcljx.data.model Resolver)
@@ -31,7 +32,7 @@
   (^Resolver []
    (stub-resolver "NO_NS" {}))
   (^Resolver [^String ns-str ^map ns-alias]
-   (ResolverStub. ns-str ns-alias {} {}))
+   (ResolverStub. ns-str ns-alias resolve/predefined-imports {}))
   (^Resolver [^String ns-str ^map ns-alias
               ^map import-map ^map global-qname-map]
    (ResolverStub. ns-str ns-alias import-map global-qname-map)))

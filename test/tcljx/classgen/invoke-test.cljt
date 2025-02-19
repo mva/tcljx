@@ -6,8 +6,9 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.classgen.invoke-test
-  (:require [tcljx.classgen.bootstrap :refer [asm-expr]]
-            [tcljx.alpha.ptest :refer :all])
+  (:require
+   [tcljx.classgen.bootstrap :refer [asm-expr]]
+   [tcljx.alpha.ptest :refer :all])
   (:import (tcljx.data.wrong WrongInfo)))
 
 ;;; Note: Some of the tests below may need an (identity ...) wrapper

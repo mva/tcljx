@@ -1,0 +1,90 @@
+(ns tcljx.classgen.constgen
+  (:require
+   (tcljx.data [meta :as meta] [reflect :as reflect])
+   (tcljx.classgen [runtime :as rt]))
+  (:import
+   (clojure.lang Named IMeta)
+   (java.lang.classfile CodeBuilder)
+   (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry
+                                     ConstantDynamicEntry)
+   (java.lang.constant ClassDesc ConstantDesc DirectMethodHandleDesc
+                       Constable ConstantDescs)
+   (java.util List)
+   (java.util.regex Pattern)))
+
+;;; Note: Accurate types of non-int but "computationally int" values
+;;; must be represented via DynamicConstantDesc entries in `c`.
+(defn loadable-entry ^LoadableConstantEntry [^ConstantPoolBuilder cpb ^Object c]
+  (letfn [(type-desc-meta ^ClassDesc [^Object c]
+            (cond
+              (symbol? c) rt/symbol
+              (seq? c) rt/list
+              (vector? c) rt/vector
+              (map? c) rt/map
+              (set? c) rt/set
+              :else (throw (IllegalArgumentException. (str (class c))))))
+          (cde-quote ^ConstantDynamicEntry [^String fnm ^ClassDesc tp bs-args]
+            (let [bsm (.bsmEntry cpb (.methodHandleEntry cpb rt/bsm-quote)
+                                 ^java.util.List bs-args)
+                  nat (.nameAndTypeEntry cpb fnm tp)]
+              (.constantDynamicEntry cpb bsm nat)))
+          
+          (cde-named ^ConstantDynamicEntry [^String fnm ^ClassDesc tp ^Named c]
+            (let [nm-entry (.stringEntry cpb (name c))]
+              (cde-quote fnm tp (if-some [nmsp (namespace c)]
+                                  [(.stringEntry cpb nmsp) nm-entry]
+                                  [nm-entry]))))
+          (cde-pattern ^ConstantDynamicEntry [^Pattern c]
+            (cde-quote "re-pattern" rt/pattern
+                       [(.stringEntry cpb (.pattern c))]))
+          (cde-coll ^ConstantDynamicEntry [^DirectMethodHandleDesc mhd ^seq cs]
+            (cde-quote (.methodName mhd) (-> mhd .invocationType .returnType)
+                       (for [c cs] (loadable-entry cpb c))))
+          
+          (entry-imeta ^ConstantDynamicEntry [^Object c]
+            (cond
+              (symbol? c) (cde-named "symbol" rt/symbol c)
+              (seq? c) (cde-coll rt/mhd-list c)
+              (vector? c) (cde-coll rt/mhd-vector (tinyclj.core/seq c))
+              (map? c) (cde-coll rt/mhd-map (mapcat identity c))
+              (set? c) (cde-coll rt/mhd-set (tinyclj.core/seq c))
+              :else (throw (IllegalArgumentException. (str (class c))))))
+          (entry-nometa ^LoadableConstantEntry [^Object c]
+            ;; describe `c` ignoring its meta value
+            (cond
+              (nil? c) (recur ConstantDescs/NULL) ;guard against nil in coll
+              (instance? ConstantDesc c) (.loadableConstantEntry cpb c)
+              (instance? Constable c) (recur (reflect/describe c))
+              (keyword? c) (cde-named "keyword" rt/keyword c)
+              (instance? IMeta c) (entry-imeta c)
+              (instance? Pattern c) (cde-pattern c)
+              :else (throw (IllegalArgumentException. (str (class c))))))]
+    
+    (if-some [m (meta/source-meta c)]
+      ;; (instance? IMeta c) is implied by (some? m)
+      (let [bs-args ^List [(entry-imeta c) (loadable-entry cpb m)]
+            bsm (.bsmEntry cpb (.methodHandleEntry cpb rt/bsm-quote) bs-args)
+            nat (.nameAndTypeEntry cpb "with-meta" (type-desc-meta c))]
+        (.constantDynamicEntry cpb bsm nat))
+      (entry-nometa c))))
+
+;;; Convert the entity `value` into something that can be loaded as a
+;;; constant, then emit the LDC instruction (or something equivalent)
+;;; for it.
+(defn load ^CodeBuilder [^CodeBuilder xb ^Object value]
+  (if (instance? ConstantDesc value)
+    (.loadConstant xb ^ConstantDesc value)
+    (let [ldbl (loadable-entry (.constantPool xb) value)]
+      (.ldc xb ldbl)) ))
+
+;;; Embed accurate type information for a non-int but "computationally
+;;; int" value by materializing its DynamicConstantDesc description.
+(defn apply-expr-type [^Class expr-type ^Object value]
+  (if (and (instance? Integer value) (not (identical? Integer/TYPE expr-type)))
+    (reflect/describe (let [x ^int value]
+                        (condp identical? expr-type
+                          Boolean/TYPE (object (not= x 0))
+                          Byte/TYPE (object (byte x))
+                          Short/TYPE (object (short x))
+                          Character/TYPE (object (char x)))))
+    value))

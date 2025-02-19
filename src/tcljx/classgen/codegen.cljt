@@ -3,11 +3,13 @@
    (tcljx.data [config :as cfg] [wrong :as wrong] [type :as type]
                [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen [classfile :as classfile] [runtime :as rt] [emit :as emit]
-                   [segmgen :as segmgen] [methodgen :as methodgen]))
+                   [segmgen :as segmgen] [constgen :as constgen]
+                   [methodgen :as methodgen]))
   (:import
    (tcljx.data.model Expr Exprs ExprFactory CodeEmitter Entity Parameter Constant
                      FnLiteral NamespaceBuilder)
    (tcljx.data.resolve Match)
+   (tinyclj.lang Literal)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)
    (java.lang.reflect Member Constructor Field)
@@ -99,9 +101,7 @@
   java.lang.Record
   Constant
   (emit-opnd* [_ xb line requested-type]
-    (.loadConstant xb (if (instance? ConstantDesc const-value)
-                        ^ConstantDesc const-value
-                        (reflect/describe const-value)))
+    (constgen/load xb const-value)
     type))
 
 (def insn-null (Insn. (ConstantImpl. Object ConstantDescs/NULL)
@@ -120,11 +120,16 @@
               requested-type))
            (expr-type insn))))
 
-(defn- identity ^Insn [^Class expr-type ^CodeEmitter ce]
-  (Insn. (^CodeEmitter fn [xb line requested-type]
-          (when (emit/opnd xb line expr-type ce)
-            expr-type))
-         expr-type))
+(defn- identity
+  (^Insn [^Class new-type ^Insn insn]
+   (if (identical? new-type (.expr-type insn))
+     insn
+     (Insn. (^CodeEmitter fn [xb line requested-type]
+             (when (emit/opnd xb line new-type (.emitter insn))
+               new-type))
+            new-type)))
+  (^Insn [^Class new-type ^Insns insns ^int i]
+   (identity new-type (Insn. (emitter insns i) (expr-type insns i)))))
 
 (defn- emit-new-array ^CodeBuilder [^CodeBuilder xb ^Class component-type
                                     ^int length]
@@ -252,9 +257,31 @@
 
 ;;; ------------------------------------------------------------------------
 
+(defn- constants? ^boolean [^Insns insns]
+  (loop [i (dec (.length insns))]
+    (cond (neg? i) true
+          (model/const? insns i) (recur (dec i))
+          :else false)))
+(defn- as-typed-constants ^Object/1 [^Insns insns]
+  (let [a (new Object/1 (.length insns))]
+    (dotimes [i (.length insns)]
+      (aset a i (constgen/apply-expr-type (expr-type insns i)
+                                          (model/const-value insns i))))
+    a))
+
+;;; ------------------------------------------------------------------------
+
+;;; Note: To save work, this code generator assumes that it can use
+;;; types available at compile time to refer to runtime types of the
+;;; compiled application.  For example, it uses tinyclj.lang.StaticFn
+;;; as expression type, instead of the type (currently of the same
+;;; name) used by the application to hold a static function instance.
+;;; Likewise for symbols, keywords, vectors, and so on.  This works
+;;; only as long as compiler and application agree on the names of
+;;; their runtime classes.
 (deftype ExprFactoryImpl [^ArrayList segment-elements ;shared with NmspBuilder
                           ^ArrayList pending-functions ;shared with NmspBuilder
-                          ^Class class-static-fn]
+                          ]
   ExprFactory
   (empty-expr [_]
     insn-empty)
@@ -271,15 +298,45 @@
       (with-line-number ^int line)))
   (new-constant [_ expr-type value]
     #_(prn :new-constant expr-type value)
+    (java.util.Objects/requireNonNull expr-type)
     (java.util.Objects/requireNonNull value)
     (cond
       (identical? ConstantDescs/NULL value)
-      insn-null
+      insn-null                         ;enforce singleton
       
       (type/same? Boolean/TYPE expr-type)
-      (if ^boolean value insn-true insn-false) ;enforce singletons
+      (if (zero? ^int value) insn-false insn-true) ;enforce singletons
       
       :else (Insn. (ConstantImpl. expr-type value) expr-type)))
+
+  (attach-meta-to [_ opt-meta arg]
+    (if (nil? opt-meta)
+      arg
+      (assert false)))
+  (new-vector [this opt-meta args]
+    (.attach-meta-to this opt-meta
+                     (if (constants? args)
+                       (let [x (vec (as-typed-constants args))]
+                         (.new-constant this type/vector x))
+                       (invoke Literal resolve/literal-vector nil args))))
+  (new-map [this opt-meta args]
+    (.attach-meta-to this opt-meta
+                     (if (constants? args)
+                       (let [x (apply array-map (as-typed-constants args))]
+                         (.new-constant this type/map x))
+                       (invoke Literal resolve/literal-map nil args))))
+  (new-set [this opt-meta args]
+    (.attach-meta-to this opt-meta
+                     (if (constants? args)
+                       (let [x (set (as-typed-constants args))]
+                         (.new-constant this type/set x))
+                       (invoke Literal resolve/literal-set nil args))))
+  (new-list [this opt-meta args]
+    (.attach-meta-to this opt-meta
+                     (if (constants? args)
+                       (let [x (or (seq (as-typed-constants args)) ())]
+                         (.new-constant this type/list x))
+                       (invoke Literal resolve/literal-list nil args))))
   
   (new-def-init [_ nmsp nm init]
     (let [init ^Insn init]
@@ -304,17 +361,13 @@
       (dotimes [i (alength ats)]
         (let [at (aget ats i)]
           (when (type/auto-return-marker? (.return-type at))
-            (let [body-tp (logical-type bodies i)
-                  logical-tp (if (type/polymorphic? body-tp)
-                               Void/TYPE
-                               body-tp)
-                  body-emitter (emitter bodies i)]
+            (let [logical-tp (logical-type bodies i)]
               (aset ats i (.with-return-type at logical-tp))
-              (.set bodies i (identity logical-tp body-emitter)))))))
+              (.set bodies i (identity logical-tp bodies i)))))))
     
     (.add pending-functions fn-literal)
     (let [owner (ClassDesc/of "pkg.ns0._10")]
-      (.new-constant this class-static-fn
+      (.new-constant this tinyclj.lang.StaticFn
                      (methodgen/static-fn-desc owner fn-literal))))
   
   (invoke-constructor [_ owner args]
@@ -357,6 +410,5 @@
     (throw (UnsupportedOperationException. (str form)))))
 
 (defn mk-code-generator ^ExprFactory [^ArrayList segment-elements
-                                      ^ArrayList pending-functions
-                                      ^Class class-static-fn]
-  (ExprFactoryImpl. segment-elements pending-functions class-static-fn))
+                                      ^ArrayList pending-functions]
+  (ExprFactoryImpl. segment-elements pending-functions))

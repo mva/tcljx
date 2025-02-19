@@ -2,7 +2,8 @@
   #_(:require (tcljx.classgen [reflect :as reflect]))
   (:import
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc ConstantDescs
-                       DirectMethodHandleDesc$Kind)))
+                       DirectMethodHandleDesc$Kind))
+  (:refer-clojure :exclude [symbol vector map set list]))
 
 ;;; ------------------------------------------------------------------------
 
@@ -23,6 +24,8 @@
 (def ^:private MethodHandleArray (.arrayType MethodHandle))
 (def ^:private Lookup ConstantDescs/CD_MethodHandles_Lookup)
 
+(def ^:private Object ConstantDescs/CD_Object)
+(def ^:private ObjectArray (.arrayType Object))
 (def ^:private Class ConstantDescs/CD_Class)
 (def ^:private String ConstantDescs/CD_String)
 
@@ -40,5 +43,36 @@
   `(MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
                               ~owner ~name (mtd ~rtype ~ptypev)))
 
+(def bsm-quote (mhd-static [BootstrapMethod "quote"] Object
+                           [Lookup String Class ObjectArray]))
 (def bsm-static-fn (mhd-static [BootstrapMethod "createStaticFn"] StaticFn
                                [Lookup String Class MethodHandleArray]))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private clnm-symbol 'clojure.lang.Symbol)
+(def ^:private clnm-keyword 'clojure.lang.Keyword)
+(def ^:private clnm-vector 'clojure.lang.IPersistentVector)
+(def ^:private clnm-map 'clojure.lang.IPersistentMap)
+(def ^:private clnm-set 'clojure.lang.IPersistentSet)
+(def ^:private clnm-list 'clojure.lang.IPersistentList)
+(def ^:private clnm-seq 'clojure.lang.ISeq)
+(def ^:private clnm-iobj 'clojure.lang.IObj)
+
+(def symbol (ClassDesc/of (name clnm-symbol)))
+(def keyword (ClassDesc/of (name clnm-keyword)))
+(def vector (ClassDesc/of (name clnm-vector)))
+(def map (ClassDesc/of (name clnm-map)))
+(def set (ClassDesc/of (name clnm-set)))
+(def list (ClassDesc/of (name clnm-list)))
+(def ^:private seq (ClassDesc/of (name clnm-seq)))
+(def pattern (ClassDesc/of "java.util.regex.Pattern"))
+(def ^:private iobj (ClassDesc/of (name clnm-iobj)))
+
+;;; used for coll-literal implementation (e.g. as part of compile-quote):
+(def ^:private Literal (ClassDesc/of "tinyclj.lang.Literal"))
+(def mhd-with-meta (mhd-static [Literal "with_meta"] iobj [iobj map]))
+(def mhd-vector (mhd-static [Literal "vector"] vector [ObjectArray]))
+(def mhd-map (mhd-static [Literal "map"] map [ObjectArray]))
+(def mhd-set (mhd-static [Literal "set"] set [ObjectArray]))
+(def mhd-list (mhd-static [Literal "list"] list [ObjectArray]))

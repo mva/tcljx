@@ -1,6 +1,7 @@
 (ns tcljx.data.type
   (:import (java.lang.classfile CodeBuilder TypeKind)
-           (java.util.function BiConsumer)))
+           (java.util.function BiConsumer))
+  (:refer-clojure :exclude [symbol keyword vector map set list]))
 
 (defn same? ^boolean [^Class a ^Class b]
   (identical? a b))
@@ -67,12 +68,12 @@
 (defn type-symbol ^symbol [^Class tp]
   (let [n (type-dimensions tp)]
     (if (zero? n)
-      (symbol nil (.getName tp))
-      (symbol (loop [cl tp]
-                (if (.isArray cl)
-                  (recur (.componentType cl))
-                  (.getName cl)))
-              (str n)))))
+      (tinyclj.core/symbol nil (.getName tp))
+      (tinyclj.core/symbol (loop [cl tp]
+                             (if (.isArray cl)
+                               (recur (.componentType cl))
+                               (.getName cl)))
+                           (str n)))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -376,3 +377,12 @@
                 (primitive-from-reference? (of ptype))
                 ;; parameter is of reference type and argument is nil
                 (poly-reference? atype)))))))
+
+;;; ------------------------------------------------------------------------
+
+(def symbol clojure.lang.Symbol)
+(def keyword clojure.lang.Keyword)
+(def vector clojure.lang.IPersistentVector)
+(def map clojure.lang.IPersistentMap)
+(def set clojure.lang.IPersistentSet)
+(def list clojure.lang.IPersistentList)

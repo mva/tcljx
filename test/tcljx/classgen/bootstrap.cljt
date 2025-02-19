@@ -23,10 +23,10 @@
    #_[tcljx.predefined :as predefined]
    #_[tcljx.emitter :as emitter]
    #_[tcljx.main.tclj0 :as tclj0]
-   #_[tcljx.reader-test :as reader-test]
+   [tcljx.parser.reader-test :as reader-test]
    [tcljx.classgen.classdata :as classdata] ;only available for unit tests
-   #_[tcljx.alpha.ptest :as ptest]             ;for is
-   [tcljx.alpha.ptest__impl :as ptest__impl]   ;for get-test-context
+   [tcljx.alpha.ptest :as ptest]            ;for is
+   [tcljx.alpha.ptest__impl :as ptest__impl] ;for get-test-context
    #_[tcljx.classdata :as classdata])
   (:import
    (tcljx.classgen.loader Loader ClassBytes)
@@ -375,12 +375,12 @@
   ([params form]
    `(fn-method-body '~params (object (quote ~form)))))
 
-;; (defmacro is-asm* [form exp-asm]        ;takes `exp-asm` as value
-;;   (with-meta `(ptest/is (= ~exp-asm (asm-expr ~form)))
-;;     (meta &form)))
-;; (defmacro is-asm [form exp-asm]         ;quotes `exp-asm`
-;;   (with-meta `(ptest/is (= (quote ~exp-asm) (asm-expr ~form)))
-;;     (meta &form)))
+(defmacro is-asm* [form exp-asm]        ;takes `exp-asm` as value
+  (with-meta `(ptest/is (= ~exp-asm (asm-expr ~form)))
+    (meta &form)))
+(defmacro is-asm [form exp-asm]         ;quotes `exp-asm`
+  (with-meta `(ptest/is (= (quote ~exp-asm) (asm-expr ~form)))
+    (meta &form)))
 
 ;; (defmacro is-error [form exp-msg]
 ;;   (with-meta `(ptest/is (ptest/thrown-with-msg? tcljx.wrong.WrongInfo ~exp-msg
@@ -414,20 +414,15 @@
 ;;   (with-meta `(ptest/is (= ~cl (.getClass (call-expr ~form))))
 ;;     (meta &form)))
 
-;; ;;; ------------------------------------------------------------------------
+;;; ------------------------------------------------------------------------
 
-;; (defn str-to-form [s]
-;;   (let [forms (reader-test/read-all* (rd/mk-reader s) (reader-test/stub-ctx))]
-;;     (assert (nil? (nnext forms)) "string holds multiple forms")
-;;     (first forms)))
+(defn str-expr
+  ([s]
+   (str-expr [] s))
+  ([params s]
+   (fn-method-body params (reader-test/read1 s))))
 
-;; (defn str-expr
-;;   ([s]
-;;    (str-expr [] s))
-;;   ([params s]
-;;    (fn-method-body params (str-to-form s))))
-
-;; ;;; ------------------------------------------------------------------------
+;;; ------------------------------------------------------------------------
 
 ;; (defn- mt-of ^MethodType [^Class return-type ^List parameter-types]
 ;;   (MethodType/methodType return-type parameter-types))

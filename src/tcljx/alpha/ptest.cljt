@@ -32,6 +32,7 @@
                (.outcome-fail ~ctx "unexpected exception message"
                               (object re#) m#)))))
      (catch Throwable t#
+       #_(.printStackTrace t# (java.io.PrintWriter. *out*))
        (.outcome-fail ~ctx "unexpected exception type"
                       ~class (class t#)))))
 

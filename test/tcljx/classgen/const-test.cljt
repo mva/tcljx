@@ -1,0 +1,270 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.classgen.const-test
+  (:require
+   [tcljx.classgen.bootstrap :refer [asm-expr call-expr str-expr is-asm]]
+   [tcljx.alpha.ptest :refer :all]))
+
+(defmacro is-str-asm [form exp-asm]
+  (with-meta `(is (= (quote ~exp-asm) (str-expr ~form)))
+    (meta &form)))
+
+(defmacro is-identity [form]
+  (with-meta `(is (java.util.Objects/equals (object ~form) (call-expr ~form)))
+    (meta &form)))
+
+
+(deftest int-constant-test
+  (is-asm 0 [(ICONST_0) (IRETURN)])
+  (is-asm 5 [(ICONST_5) (IRETURN)])
+  (is-asm 6 [(BIPUSH 6) (IRETURN)])
+  (is-asm 127 [(BIPUSH 127) (IRETURN)])
+  (is-asm 128 [(SIPUSH 128) (IRETURN)])
+  (is-asm 32767 [(SIPUSH 32767) (IRETURN)])
+  (is-asm 32768 [(LDC 32768) (IRETURN)])
+  (is-asm 2147483647 [(LDC 2147483647) (IRETURN)])
+
+  (is-asm -1 [(ICONST_M1) (IRETURN)])
+  (is-asm -2 [(BIPUSH -2) (IRETURN)])
+  (is-asm -128 [(BIPUSH -128) (IRETURN)])
+  (is-asm -129 [(SIPUSH -129) (IRETURN)])
+  (is-asm -32768 [(SIPUSH -32768) (IRETURN)])
+  (is-asm -32769 [(LDC -32769) (IRETURN)])
+  (is-asm -2147483648 [(LDC -2147483648) (IRETURN)])
+  
+  (is-identity 0)
+  (is-identity 128)
+  (is-identity 32768)
+  (is-identity -1)
+  (is-identity -2)
+  (is-identity -129)
+  (is-identity -32769))
+
+(deftest long-constant-test
+  (is-asm 2147483648l [(LDC2_W 2147483648l) (LRETURN)])
+  (is-asm 9223372036854775807l [(LDC2_W 9223372036854775807l) (LRETURN)])
+
+  (is-asm -2147483649l [(LDC2_W -2147483649l) (LRETURN)])
+  (is-asm -9223372036854775808l [(LDC2_W -9223372036854775808l) (LRETURN)])
+  
+  (is-identity 9223372036854775807l)
+  (is-identity -9223372036854775808l))
+
+(deftest char-constant-test
+  (is-asm \A [(BIPUSH 65) (IRETURN)])
+  
+  (is-identity \A))
+
+(deftest ldc-shorthand-test
+  (is-asm -1 [(ICONST_M1) (IRETURN)])
+  (is-asm 0 [(ICONST_0) (IRETURN)])
+  (is-asm 1 [(ICONST_1) (IRETURN)])
+  (is-asm 2 [(ICONST_2) (IRETURN)])
+  (is-asm 3 [(ICONST_3) (IRETURN)])
+  (is-asm 4 [(ICONST_4) (IRETURN)])
+  (is-asm 5 [(ICONST_5) (IRETURN)])
+
+  (is-asm 0.0 [(DCONST_0) (DRETURN)])
+  (is-asm 1.0 [(DCONST_1) (DRETURN)])
+  (is-asm -0.0 [(LDC2_W -0.0) (DRETURN)]) ;preserve -0.0
+  
+  (is-asm nil [(ACONST_NULL) (ARETURN)])
+  (is-asm false [(ICONST_0) (IRETURN)])
+  (is-asm true [(ICONST_1) (IRETURN)]))
+
+;; Note: Integer float (f/F) and long (l/L) suffix is not supported by
+;; Clojure.  With this addition, the reader enforces Float and Long
+;; instances (small integers without suffix are returned as Integer,
+;; and floating point numbers as Double).
+(deftest ldc-shorthand-suffix-test
+  (is-str-asm "0l" [(LCONST_0) (LRETURN)])
+  (is-str-asm "1l" [(LCONST_1) (LRETURN)])
+  
+  (is-str-asm "0.0f" [(FCONST_0) (FRETURN)])
+  (is-str-asm "1.0f" [(FCONST_1) (FRETURN)])
+  (is-str-asm "2.0f" [(FCONST_2) (FRETURN)])
+  (is-str-asm "-0.0f" [(LDC -0.0) (FRETURN)])) ;preserve -0.0
+
+(deftest ldc-reference-test
+  (is-asm "" [(LDC "") (ARETURN)])
+  (is-asm "foo" [(LDC "foo") (ARETURN)])
+  (is-asm Object [(LDC Object) (ARETURN)]))
+
+(deftest ldc-pattern-test
+  (is-str-asm
+   "#\"foo\""
+   [(LDC [:bsm-quote "re-pattern" "Ljava/util/regex/Pattern;" ["foo"]])
+    (ARETURN)])
+
+  (is (thrown-with-msg? tcljx.data.wrong.WrongInfo #"invalid regex"
+                        (str-expr "#\"[\""))))
+
+(deftest empty-collection-test
+  (is-asm []
+          [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;" []])
+           (ARETURN)])
+  (is-asm {}
+          [(LDC [:bsm-quote "map" "Lclojure/lang/IPersistentMap;" []])
+           (ARETURN)])
+  (is-asm #{}
+          [(LDC [:bsm-quote "set" "Lclojure/lang/IPersistentSet;" []])
+           (ARETURN)])
+  (is-asm ()
+          [(LDC [:bsm-quote "list" "Lclojure/lang/IPersistentList;" []])
+           (ARETURN)]))
+
+(deftest collection-value-test
+  (is (= [] (call-expr [])))
+  (is (= {} (call-expr {})))
+  (is (= #{} (call-expr #{})))
+  (is (= () (call-expr ()))))
+
+(deftest primitive-list-test
+  ;; (tinyclj.lang.primitive/list) is another way to write ()
+  (is (= '[(LDC [:bsm-quote "list" "Lclojure/lang/IPersistentList;" []])
+           (ARETURN)]
+         (asm-expr (tinyclj.lang.primitive/list))))
+  ;; (tinyclj.lang.primitive/list "foo") is list equivalent of ["foo"]
+  (is (= '[(LDC [:bsm-quote "list" "Lclojure/lang/IPersistentList;" ["foo"]])
+           (ARETURN)]
+         (asm-expr (tinyclj.lang.primitive/list "foo")))))
+
+(deftest constant-pool-literal-test
+  (is-asm [0] [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                     [0]])
+               (ARETURN)])
+  (is-asm [0.0] [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                       [0.0]])
+                 (ARETURN)])
+  (is-asm [nil] [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                       [[:bsm-null "_" "Ljava/lang/Object;" []]]]) (ARETURN)])
+  (is-asm [true] [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                        [[:bsm-get-static-final "TRUE" "Ljava/lang/Boolean;" [Boolean]]]])
+                  (ARETURN)])
+  (is-asm [false] [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                         [[:bsm-get-static-final "FALSE" "Ljava/lang/Boolean;" [Boolean]]]])
+                   (ARETURN)])
+  (is-asm [\a] [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                      [[:bsm-explicit-cast "_" "C" [97]]]])
+                (ARETURN)]))
+
+(deftest constant-pool-conv-test
+  ;; note: representation of long/float does not show actual type
+  (is-asm [(long 0)]
+          [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;" [0]])
+           (ARETURN)])
+  (is-asm [(float 0.0)]
+          [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;" [0.0]])
+           (ARETURN)])
+
+  (is-asm [false]
+          [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                 [[:bsm-get-static-final "FALSE" "Ljava/lang/Boolean;" [Boolean]]]])
+           (ARETURN)])
+  (is-asm [(char 0)]
+          [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                 [[:bsm-explicit-cast "_" "C" [0]]]])
+           (ARETURN)])
+  (is-asm [(byte 0)]
+          [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                 [[:bsm-explicit-cast "_" "B" [0]]]])
+           (ARETURN)])
+  (is-asm [(short 0)]
+          [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                 [[:bsm-explicit-cast "_" "S" [0]]]])
+           (ARETURN)]))
+
+(deftest dynamic-ints
+  (is (= '[(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                 [-2 -1 0 1 2 3 4 5 6]])
+           (ARETURN)]
+         (asm-expr [(int -2)
+                    (int -1) (int 0) (int 1) (int 2) (int 3) (int 4) (int 5)
+                    (int 6)]))))
+
+(deftest dynamic-longs
+  (is (= '[(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                 [-1 0 1 2]])
+           (ARETURN)]
+         (asm-expr [(long -1)
+                    (long 0) (long 1)
+                    (long 2)]))))
+
+(deftest dynamic-floats
+  (is (= '[(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                 [-1.0 0.0 1.0 2.0 3.0]])
+           (ARETURN)]
+         (asm-expr [(float -1)
+                    (float 0) (float 1) (float 2)
+                    (float 3)]))))
+
+(deftest dynamic-doubles
+  (is (= '[(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                 [-1.0 0.0 1.0 2.0]])
+           (ARETURN)]
+         (asm-expr [(double -1)
+                    (double 0) (double 1)
+                    (double 2)]))))
+
+(deftest collecting-vararg-type
+  ;; constants carry their own type in the constant pool, i.e. the
+  ;; method arguments passed to the bootstrap method are of type
+  ;; string
+  (is (= '[(LDC [:bsm-quote "set" "Lclojure/lang/IPersistentSet;"
+                 ["foo" "bar"]])
+           (ARETURN)]
+         (asm-expr #{"foo" "bar"})))
+
+  ;; the invoked method handle's arguments are coerced to the
+  ;; component type of the collecting array
+  (is (= '[["LOCAL 0: String foo"]
+           ["LOCAL 1: String bar"]
+           (ICONST_2)
+           (ANEWARRAY "Object[]")
+           (DUP)
+           (ICONST_0)
+           (ALOAD_1)
+           (AASTORE)
+           (DUP)
+           (ICONST_1)
+           (ALOAD_0)
+           (AASTORE)
+           (INVOKESTATIC Literal "set"
+                         "([Ljava/lang/Object;)Lclojure/lang/IPersistentSet;")
+           (ARETURN)]
+         (asm-expr [^String foo ^String bar]
+                   #{foo bar}))))
+
+(deftest class-symbols
+  (is (= '[(LDC Object)
+           (ARETURN)]
+         (asm-expr java.lang.Object)))
+  (is (= '[(LDC "Object[]")
+           (ARETURN)]
+         (asm-expr java.lang.Object/1)))
+
+  ;; regular quote
+  (is (= '[(LDC [:bsm-quote "list" "Lclojure/lang/IPersistentList;"
+                 [[:bsm-quote "symbol" "Lclojure/lang/Symbol;"
+                   ["java.lang.Object" "1"]]]])
+           (ARETURN)]
+         (asm-expr '(java.lang.Object/1))))
+
+  ;; syntax quote
+  (is (= '[(LDC [:bsm-quote "symbol" "Lclojure/lang/Symbol;"
+                 ["java.lang.Object"]])
+           (ARETURN)]
+         (str-expr "`java.lang.Object")))
+  (is (= '[(LDC [:bsm-quote "symbol" "Lclojure/lang/Symbol;"
+                 ["java.lang.Object" "1"]])
+           (ARETURN)]
+         (str-expr "`java.lang.Object/1")))
+  (is (= '[(LDC [:bsm-quote "symbol" "Lclojure/lang/Symbol;"
+                 ["java.lang.Object" "1"]])
+           (ARETURN)]
+         (str-expr "`Object/1"))))

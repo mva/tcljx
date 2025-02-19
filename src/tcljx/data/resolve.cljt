@@ -9,6 +9,7 @@
   (:require
    (tcljx.data [type :as type]))
   (:import
+   (java.lang.constant ClassDesc)
    (java.lang.invoke MethodHandles$Lookup)
    (java.lang.reflect Method Constructor Executable Field Member Modifier)))
 
@@ -78,12 +79,15 @@
 (defn- maybe-class-name? ^boolean [^String nm] ;format must be pkgName.className
   (pos? (.indexOf nm (int \.))))
 
-(defn class-by-name ^Class [^MethodHandles$Lookup l ^String nm] ;nil if no match
+;; nil if no match
+(defn class-for-desc ^Class [^MethodHandles$Lookup l ^ClassDesc cld]
+  (try
+    (.resolveConstantDesc cld l)
+    (catch ClassNotFoundException _
+      nil)))
+(defn class-for-name ^Class [^MethodHandles$Lookup l ^String nm]
   (when (maybe-class-name? nm)
-    (try
-      (.resolveConstantDesc (java.lang.constant.ClassDesc/of nm) l)
-      (catch ClassNotFoundException _
-        nil))))
+    (class-for-desc l (ClassDesc/of nm))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -96,6 +100,9 @@
                 ^Class return-type
                 ^int invocation-mode]
   java.lang.Record)
+
+(defn- with-invocation-mode ^Match [^Match m ^int invocation-mode]
+  (Match. (.member m) (.parameter-types m) (.return-type m) invocation-mode))
 
 (defn parameter-count ^int [^Match m]
   (alength (.parameter-types m)))
@@ -308,10 +315,7 @@
                   (argument-compatible? va-type (aget atypes i))
                   (recur (inc i))
                   :else
-                  false))))
-          (as-invoke-standard ^Match [^Match candidate]
-            (Match. (.member candidate) (.parameter-types candidate)
-                    (.return-type candidate) invoke-standard))]
+                  false))))]
     
     (let [ptypes (.parameter-types candidate)
           an (alength atypes)
@@ -327,7 +331,7 @@
           (and (= (inc fixed) an)     ;directly pass array to varargs?
                (argument-compatible? (aget ptypes fixed)
                                      (aget atypes fixed)))
-          (cons (as-invoke-standard candidate) acc)
+          (cons (with-invocation-mode candidate invoke-standard) acc)
 
           (let [varargs-type (varargs-parameter-type candidate)]
             (or (= invoke-polymorphic (.invocation-mode candidate))
@@ -375,3 +379,17 @@
         (->> (member-candidates nil static? owner mnm)
              (filter-by-atypes nil)
              (dominating-matches)))))
+
+;;; ------------------------------------------------------------------------
+
+(letfn [(find-factory ^Match [^Class return-type ^String method-name]
+          (let [atypes (doto (new Class/1 1) (aset 0 Object/1))
+                ;; match excatly on varargs array type, and then
+                ;; adjust invocation mode of the returned match
+                ms (method-exact nil true tinyclj.lang.Literal
+                                 method-name atypes)]
+            (with-invocation-mode (first ms) invoke-tail-into-array)))]
+  (def literal-vector (find-factory type/vector "vector"))
+  (def literal-map (find-factory type/map "map"))
+  (def literal-set (find-factory type/map "set"))
+  (def literal-list (find-factory type/list "list")))
