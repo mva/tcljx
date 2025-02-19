@@ -45,7 +45,13 @@ run-jfr: compile
 # var.  Only call this after compile, possibly while one of the
 # watch-and-xxx targets is running.
 test:
-	$(JAVA) $(JAVA_OPTS) -cp $(DEST_DIR) $(RUN_TESTS_NS).___
+# This variant is for the compiler's unit tests.  It avoids a single
+# shared tinyclj.rt/tinyclj.lang.RT whose markCoreInitialization() is
+# first called from tinyclj.core/tinyclj.core._10.<clinit> and then
+# again in the running tests from tclj-dyn//tinyclj.core._10.<clinit>
+	$(JAVA) -cp ../bootstrap-tcljc/tinyclj.rt:../bootstrap-tcljc/tinyclj.core:$(DEST_DIR) $(RUN_TESTS_NS).___
+# This variant works for regular applications:
+#	$(JAVA) $(JAVA_OPTS) -cp $(DEST_DIR) $(RUN_TESTS_NS).___
 watch-and-test:
 	$(JAVA) $(TCLJC_OPTS) --watch $(RUN_TESTS_NS)/run
 
