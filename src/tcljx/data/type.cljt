@@ -74,6 +74,21 @@
 
 ;;; ------------------------------------------------------------------------
 
+(defn- aload-astore-delta ^int [^Class tp]
+  (if (.isPrimitive tp)
+    ;; numbering follows xa(load|store), with the exception of boolean and void
+    (condp identical? tp 
+      Integer/TYPE #_int 0     ;iaload and iastore
+      Long/TYPE #_long 1       ;laload and lastore
+      Float/TYPE #_float 2     ;faload and fastore
+      Double/TYPE #_double 3   ;daload and dastore
+      Boolean/TYPE #_boolean 8 ;reference is assigned a delta of 4 below
+      Byte/TYPE #_byte 5       ;baload and bastore
+      Character/TYPE #_char 6  ;caload and castore
+      Short/TYPE #_short 7     ;saload and sastore
+      Void/TYPE #_void -1)     ;arbitrary, pick negative for now
+    #_reference 4))                     ;aaload and aastore
+
 ;;; Note: `convert-from` does not get any line number information.
 ;;; Therefore the conversion functions must only emit bytecodes that
 ;;; cannot throw.  Conversion from void produces the zero value of the
@@ -84,8 +99,7 @@
                   ;; ^Expr default-value
                   ^int numeric-order
 
-                  ;; FIXME... replace newarray-code with aload-astore-delta?
-                  ^int newarray-code    ;-1 for void
+                  ^int aload-opcd       ;-1 for void
                   ^boolean computational-int?
                   ^BiConsumer convert-from
                   ;; ^DirectMethodHandleDesc unboxing-mhd
@@ -112,7 +126,7 @@
                         x/expr-false
                         (.adapt primitive-to x/expr-zero-int))
                     numeric-order
-                    (.newarrayCode (TypeKind/from class-primitive))
+                    (aload-astore-delta class-primitive)
                     computational-int? convert-to
                     #_unboxing-mhd #_primitive-to
                     #_(^TypeConversion fn [arg]
@@ -129,11 +143,11 @@
   (def int
     (wrapper Integer/TYPE Integer Integer/TYPE 3 true
              (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.newarray-code from)
-                #_T_FLOAT 6 (-> xb .f2i)
-                #_T_DOUBLE 7 (-> xb .d2i)
-                (#_T_BOOLEAN 4 #_T_CHAR 5 #_T_BYTE 8 #_T_SHORT 9 #_T_INT 10) nil
-                #_T_LONG 11 (-> xb .l2i)
+              (case (.aload-opcd from)
+                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 8) nil
+                #_long 1 (-> xb .l2i)
+                #_float 2 (-> xb .f2i)
+                #_double 3 (-> xb .d2i)
                 #_else_void (-> xb .iconst_0)))
              #_primitive-to-int
              #_(rt/mhd-virtual [ConstantDescs/CD_Integer "intValue"]
@@ -145,11 +159,11 @@
   (def long
     (wrapper Long/TYPE Long Long/TYPE 2 false
              (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.newarray-code from)
-                #_T_FLOAT 6 (-> xb .f2l)
-                #_T_DOUBLE 7 (-> xb .d2l)
-                (#_T_BOOLEAN 4 #_T_CHAR 5 #_T_BYTE 8 #_T_SHORT 9 #_T_INT 10) (-> xb .i2l)
-                #_T_LONG 11 nil
+              (case (.aload-opcd from)
+                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 8) (-> xb .i2l)
+                #_long 1 nil
+                #_float 2 (-> xb .f2l)
+                #_double 3 (-> xb .d2l)
                 #_else_void (-> xb .lconst_0)))
              #_(to-upper (^TypeConversion fn [arg]
                           (condp jb/same-class? (x/type arg)
@@ -169,12 +183,12 @@
              (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
               (letfn [#_(mask-int ^CodeBuilder [^CodeBuilder xb]
                           (-> xb (.iconst_1) (.iand)))]
-                (case (.newarray-code from)
-                  #_T_BOOLEAN 4 nil
-                  ;; #_T_FLOAT 6 (-> xb .f2i (mask-int))
-                  ;; #_T_DOUBLE 7 (-> xb .d2i (mask-int))
-                  ;; (#_T_CHAR 5 #_T_BYTE 8 #_T_SHORT 9 #_T_INT 10) (-> xb (mask-int))
-                  ;; #_T_LONG 11 (-> xb .l2i (mask-int))
+                (case (.aload-opcd from)
+                  #_boolean 8 nil
+                  ;; #_float 2 (-> xb .f2i (mask-int))
+                  ;; #_double 3 (-> xb .d2i (mask-int))
+                  ;; (#_char 6 #_byte 5 #_short 7 #_int 0) (-> xb (mask-int))
+                  ;; #_long 1 (-> xb .l2i (mask-int))
                   #_else_void (-> xb .iconst_0))))
              #_nil  ;conversion to boolean is not a thing for Java/JVM
              #_(rt/mhd-virtual [ConstantDescs/CD_Boolean "booleanValue"]
@@ -186,12 +200,12 @@
   (def short
     (wrapper Short/TYPE Short Integer/TYPE 4 true
              (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.newarray-code from)
-                #_T_FLOAT 6 (-> xb .f2i .i2s)
-                #_T_DOUBLE 7 (-> xb .d2i .i2s)
-                (#_T_CHAR 5 #_T_INT 10) (-> xb .i2s)
-                (#_T_BOOLEAN 4 #_T_BYTE 8 #_T_SHORT 9) nil
-                #_T_LONG 11 (-> xb .l2i .i2s)
+              (case (.aload-opcd from)
+                (#_int 0 #_char 6) (-> xb .i2s)
+                #_long 1 (-> xb .l2i .i2s)
+                #_float 2 (-> xb .f2i .i2s)
+                #_double 3 (-> xb .d2i .i2s)
+                (#_byte 5 #_short 7 #_boolean 8) nil
                 #_else_void (-> xb .iconst_0)))
              #_(to-lower jb/short Opcode/I2S)
              #_(rt/mhd-virtual [ConstantDescs/CD_Short "shortValue"]
@@ -203,12 +217,12 @@
   (def byte
     (wrapper Byte/TYPE Byte Integer/TYPE 5 true
              (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.newarray-code from)
-                #_T_FLOAT 6 (-> xb .f2i .i2b)
-                #_T_DOUBLE 7 (-> xb .d2i .i2b)
-                (#_T_CHAR 5 #_T_SHORT 9 #_T_INT 10) (-> xb .i2b)
-                (#_T_BOOLEAN 4 #_T_BYTE 8) nil
-                #_T_LONG 11 (-> xb .l2i .i2b)
+              (case (.aload-opcd from)
+                (#_int 0 #_char 6 #_short 7) (-> xb .i2b)
+                #_long 1 (-> xb .l2i .i2b)
+                #_float 2 (-> xb .f2i .i2b)
+                #_double 3 (-> xb .d2i .i2b)
+                (#_byte 5 #_boolean 8) nil
                 #_else_void (-> xb .iconst_0)))
              #_(to-lower jb/byte Opcode/I2B)
              #_(rt/mhd-virtual [ConstantDescs/CD_Byte "byteValue"]
@@ -220,12 +234,12 @@
   (def char
     (wrapper Character/TYPE Character Integer/TYPE -1 true ;not numeric in Clojure
              (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.newarray-code from)
-                #_T_CHAR 5 nil
-                #_T_FLOAT 6 (-> xb .f2i .i2c)
-                #_T_DOUBLE 7 (-> xb .d2i .i2c)
-                (#_T_BOOLEAN 4 #_T_BYTE 8 #_T_SHORT 9 #_T_INT 10) (-> xb .i2c)
-                #_T_LONG 11 (-> xb .l2i .i2c)
+              (case (.aload-opcd from)
+                (#_int 0 #_byte 5 #_short 7 #_boolean 8) (-> xb .i2c)
+                #_long 1 (-> xb .l2i .i2c)
+                #_float 2 (-> xb .f2i .i2c)
+                #_double 3 (-> xb .d2i .i2c)
+                #_char 6 nil
                 #_else_void (-> xb .iconst_0)))
              #_(to-lower jb/char Opcode/I2C)
              #_(rt/mhd-virtual [ConstantDescs/CD_Character "charValue"]
@@ -237,11 +251,11 @@
   (def float
     (wrapper Float/TYPE Float Float/TYPE 1 false
              (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.newarray-code from)
-                #_T_FLOAT 6 nil
-                #_T_DOUBLE 7 (-> xb .d2f)
-                (#_T_BOOLEAN 4 #_T_CHAR 5 #_T_BYTE 8 #_T_SHORT 9 #_T_INT 10) (-> xb .i2f)
-                #_T_LONG 11 (-> xb .l2f)
+              (case (.aload-opcd from)
+                #_long 1 (-> xb .l2f)
+                #_float 2 nil
+                #_double 3 (-> xb .d2f)
+                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 8) (-> xb .i2f)
                 #_else_void (-> xb .fconst_0)))
              #_(to-upper (^TypeConversion fn [arg]
                           (condp jb/same-class? (x/type arg)
@@ -259,11 +273,11 @@
   (def double
     (wrapper Double/TYPE Double Double/TYPE 0 false
              (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.newarray-code from)
-                #_T_FLOAT 6 (-> xb .f2d)
-                #_T_DOUBLE 7 nil
-                (#_T_BOOLEAN 4 #_T_CHAR 5 #_T_BYTE 8 #_T_SHORT 9 #_T_INT 10) (-> xb .i2d)
-                #_T_LONG 11 (-> xb .l2d)
+              (case (.aload-opcd from)
+                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 8) (-> xb .i2d)
+                #_long 1 (-> xb .l2d)
+                #_float 2 (-> xb .f2d)
+                #_double 3 nil
                 #_else_void (-> xb .dconst_0)))
              #_(to-upper (^TypeConversion fn [arg]
                           (condp jb/same-class? (x/type arg)
@@ -372,21 +386,6 @@
                 (primitive-from-reference? (of ptype))
                 ;; parameter is of reference type and argument is nil
                 (poly-reference? atype)))))))
-
-(defn aload-astore-delta ^int [^Class tp]
-  (if (.isPrimitive tp)
-    ;; numbering follows xa(load|store), with the exception of boolean and void
-    (condp identical? tp 
-      Integer/TYPE #_int 0     ;iaload and iastore
-      Long/TYPE #_long 1       ;laload and lastore
-      Float/TYPE #_float 2     ;faload and fastore
-      Double/TYPE #_double 3   ;daload and dastore
-      Boolean/TYPE #_boolean 8 ;reference is assigned a delta of 4 below
-      Byte/TYPE #_byte 5       ;baload and bastore
-      Character/TYPE #_char 6  ;caload and castore
-      Short/TYPE #_short 7     ;saload and sastore
-      Void/TYPE #_void -1)     ;arbitrary, pick negative for now
-    #_reference 4))                     ;aaload and aastore
 
 (defn convert-from-constant ^ConstantDesc [^Class target-type ^Number n]
   (if (identical? target-type (.getClass n))
