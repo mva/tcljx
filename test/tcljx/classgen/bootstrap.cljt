@@ -50,8 +50,9 @@
         ;;                  (files/default-project-name))
         ;; tcljx-mdir (files/tmp-dest-dir (str project-name ".mdir"))
         ;; tcljx-mod-rt (.resolve tcljx-mdir (files/path-of "tinyclj-rt.jar"))
-        ]
-    (loader/app-class-loader :platform [#_tcljx-mod-rt])))
+        
+        tcljx-mod-rt (files/path-of "../bootstrap-tcljc/tinyclj.rt")]
+    (loader/app-class-loader :platform [tcljx-mod-rt])))
 ;; (def ^:private bootstrap-ns-str "tinyclj.lang.bootstrap")
 
 ;; (def floor-mod
@@ -382,10 +383,10 @@
   (with-meta `(ptest/is (= (quote ~exp-asm) (asm-expr ~form)))
     (meta &form)))
 
-;; (defmacro is-error [form exp-msg]
-;;   (with-meta `(ptest/is (ptest/thrown-with-msg? tcljx.wrong.WrongInfo ~exp-msg
-;;                                                 (asm-expr ~form)))
-;;     (meta &form)))
+(defmacro is-error [form exp-msg]
+  (with-meta `(ptest/is (ptest/thrown-with-msg? tcljx.data.wrong.WrongInfo
+                                                ~exp-msg (asm-expr ~form)))
+    (meta &form)))
 
 ;;; ------------------------------------------------------------------------
 

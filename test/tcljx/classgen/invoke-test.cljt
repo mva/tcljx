@@ -60,8 +60,7 @@
                    (identity (. tinyclj.lang.RT setCoreLookup l)))))
 
   ;; Math/log takes a double and requires implicit conversion from int
-  (is (= '[(BIPUSH 123)
-           (I2D)
+  (is (= '[[LDC2_W 123.0]
            (INVOKESTATIC Math "log" "(D)D")
            (DRETURN)]
          (asm-expr (. java.lang.Math log 123))))

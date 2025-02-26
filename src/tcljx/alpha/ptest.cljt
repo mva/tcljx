@@ -26,7 +26,7 @@
         `(catch ~class _
            (.outcome-pass ~ctx))
         `(catch ~class e#
-           (let [m# (.getMessage e#), re# ~re]
+           (let [m# (or (.getMessage e#) ""), re# ~re]
              (if (re-find re# m#)
                (.outcome-pass ~ctx)
                (.outcome-fail ~ctx "unexpected exception message"

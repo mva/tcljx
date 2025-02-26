@@ -21,6 +21,12 @@
                     ^map data]
   RuntimeException
   (toString [this]
+    ;; For some reason, "make test" crashes in prn or println
+    ;; with "IllegalStateException: failed to resolve runtime fn
+    ;; tinyclj.core/isa?" in some scenarios, where "make
+    ;; watch-and-test" works as expected.  This happens in
+    ;; the (.toString data), or later when trying to print the summary
+    ;; report.  Running single tests via TEST=... avoids this problem.
     (str "tcljx.wrong.WrongInfo: " (.getMessage this) " " (.toString data))))
 
 (defn wr-info
@@ -121,14 +127,22 @@
    (q (symbol (.getName cl) member-name))))
 (defn q-namespace ^String [^Named x]
   (q (symbol nil (namespace x))))
+(defn q-type [tp]
+  (symbol nil (if tp (q tp) "<none>")))
 ;; (defn q-symbol ^String [x]
 ;;   (if (symbol? x)
 ;;     (q x)
 ;;     (str x)))
 
 (defn got ^String [x] (str " (got: " (str* x) ")"))
-;; (defn got-int ^String [^int i] (got (object i)))
+(defn got-int ^String [^int i] (got (object i)))
 (defn got-q ^String [x] (str " (got: " (q x) ")"))
+
+(defn got-type ^String [^Class tp]
+  (str " (got: " (q-type tp) ")"))
+(defn got-types ^String [tps]
+  (str " (got: " (mapv q-type tps) ")"))
+
 ;; (defn got-classes ^String [cls]
 ;;   (str " (got: " (->> (map #(.getName ^Class %) cls)
 ;;                       (sort)
@@ -147,8 +161,8 @@
 ;;      (syntax (str "expected symbol " (q exp)) form))))
 
 
-(defn unresolved [^String msg-prefix sym-or-str]
-  (throw (wr-info (str msg-prefix (q sym-or-str)))))
+(defn info-unresolved ^Throwable [^String msg-prefix sym-or-str]
+  (wr-info (str msg-prefix (q sym-or-str))))
 ;; (defn unresolved-nmsp-sym [resolved-ns-nm ^Symbol fq-sym]
 ;;   (throw (wr-info (str "no public var " (q (name fq-sym)) " in namespace "
 ;;                        (q resolved-ns-nm)))))
@@ -162,7 +176,7 @@
   (if (instance? NoClassDefFoundError x)
     (class-not-found (ex-message ^NoClassDefFoundError x))
     (let [sym (symbol x)]               ;idempotent
-      (unresolved "class not found: " sym))))
+      (throw (info-unresolved "class not found: " sym)))))
 
 
 ;; (defn file [^java.nio.file.Path rpath]

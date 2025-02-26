@@ -3,17 +3,28 @@
    (tcljx.data [config :as cfg] [wrong :as wrong] [type :as type]
                [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen [classfile :as classfile] [runtime :as rt] [emit :as emit]
-                   [segmgen :as segmgen] [constgen :as constgen]
-                   [methodgen :as methodgen]))
+                   [insn :as insn] [entity :as entity]
+                   [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import
-   (tcljx.data.model Expr Exprs ExprFactory CodeEmitter Entity Parameter Constant
-                     FnLiteral NamespaceBuilder)
+   (tcljx.data.model Expr Exprs ExprFactory CodeEmitter ArityType
+                     NamespaceBuilder)
    (tcljx.data.resolve Match)
-   (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
-   (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)
+   (tcljx.classgen.insn Insn Insns)
+   (tcljx.classgen.methodgen FnLiteral)
+   (java.lang.classfile ClassBuilder CodeBuilder Opcode)
+   (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
+                       ConstantDescs)
    (java.lang.reflect Member Constructor Field)
    (java.util ArrayList)
    (java.util.function Consumer)))
+
+(letfn [(find-factory ^Match [^String method-name]
+          (resolve/runtime-method tinyclj.lang.Literal method-name
+                                  (doto (new Class/1 1) (aset 0 Object/1))))]
+  (def ^:private literal-vector (find-factory "vector")) ;type/vector
+  (def ^:private literal-map (find-factory "map"))       ;type/map
+  (def ^:private literal-set (find-factory "set"))       ;type/set
+  (def ^:private literal-list (find-factory "list")))    ;type/list
 
 (definterface ClassElementEmitter
   (emit-class-element ^void [^ClassBuilder cb]))
@@ -22,204 +33,12 @@
 (defn emit-class-element ^CodeBuilder [^ClassBuilder cb ^ClassElementEmitter cee]
   (.emit-class-element cee cb))
 
-;;; The code generator's implementation of Expr.  The class in
-;;; `expr-type` is the Clojure(!) type of the expression after parsing
-;;; it in isolation.  Phrased differently, it is the expression's own
-;;; idea of its type in terms of Clojure's type system, disregarding
-;;; the context in which it appears.  By design, an Insn instance does
-;;; not expose the internal structure of a non-constant expression.
-;;; Only constants are discoverable, enabling bottom up constant
-;;; folding while building the expression tree.
-(deftype Insn [^CodeEmitter emitter
-               ^Class expr-type]
-  ;; FIXME... Valhalla value?
-  java.lang.Record
-  Expr
-  (entity [_]
-    (when (instance? Entity emitter)
-      emitter)))
-
-(def insn-empty (Insn. (^CodeEmitter fn [xb requested-type line] Void/TYPE)
-                       type/polymorphic))
-
-;;; Compilation centers around arrays of types and arrays of code
-;;; emitters.  For a sequence of forms, the parser vie ExprFactory
-;;; creates an instance of Insns: an array of code emitters and the
-;;; array with the emitters' (context free) expression types.  Using
-;;; method invocation as a generic example, the expression types are
-;;; then matched against JVM level parameter types to which they will
-;;; be passed.  This is the second kind of array of types, the
-;;; requested JVM level operand types.  When producing the bytecode
-;;; instructions, each of the emitters is called and, if necessary,
-;;; its operand type is adjusted to match the requested operand type.
-(deftype Insns [^CodeEmitter/1 emitters ^Class/1 expr-types]
-  ;; FIXME... Valhalla value?
-  java.lang.Record
-  Exprs
-  (length [_]
-    (alength emitters))
-  (empty? [_]
-    (zero? (alength emitters)))
-  (set [_ i x]
-    (aset emitters i (.emitter ^Insn x))
-    (aset expr-types i (.expr-type ^Insn x)))
-  (entity [_ i]
-    (let [ce (aget emitters i)]
-      (when (instance? Entity ce)
-        ce))))
-
-(defn emitter
-  (^CodeEmitter [^Insn insn]
-   (.emitter insn))
-  (^CodeEmitter [^Insns insns ^int i]
-   (aget (.emitters insns) i)))
-(defn- expr-type
-  (^Class [^Insn insn]
-   (.expr-type insn))
-  (^Class [^Insns insns ^int i]
-   (aget (.expr-types insns) i)))
-(defn- logical-type
-  (^Class [^Insn insn]
-   (type/expr-to-logical (expr-type insn)))
-  (^Class [^Insns insns ^int i]
-   (type/expr-to-logical (expr-type insns i))))
-
-(def ^:private empty-insns (Insns. (new CodeEmitter/1 0) (new Class/1 0)))
-
-
-(defn emit-opnd-logical ^CodeBuilder [^CodeBuilder xb ^Insn insn]
-  (emit/opnd xb cfg/no-line-number (logical-type insn) (.emitter insn)))
 
 (defn- with-line-number ^Insn [^Insn insn ^int line]
-  (Insn. (^CodeEmitter fn [xb _ requested-type]
-          (when (emit/opnd xb line requested-type (.emitter insn))
-            requested-type))
-         (expr-type insn)))
-
-(deftype ConstantImpl [^Class type ^Object const-value]
-  java.lang.Record
-  Constant
-  (emit-opnd* [_ xb line requested-type]
-    (constgen/load xb const-value)
-    type))
-
-(def insn-null (Insn. (ConstantImpl. Object ConstantDescs/NULL)
-                      type/poly-reference))
-(def insn-true (Insn. (ConstantImpl. Boolean/TYPE 1)
-                      Boolean/TYPE))
-(def insn-false (Insn. (ConstantImpl. Boolean/TYPE 0)
-                       Boolean/TYPE))
-
-(defn- progn ^Insn [^Insns insns ^Insn insn] ;`insns` should not be empty
-  (let [ces (.emitters insns), ce (.emitter insn)]
-    (Insn. (^CodeEmitter fn [xb line requested-type]
-            (when (some-> xb
-                          (emit/opnds-of-type line Void/TYPE ces)
-                          (emit/opnd line requested-type ce))
-              requested-type))
-           (expr-type insn))))
-
-(defn- identity
-  (^Insn [^Class new-type ^Insn insn]
-   (if (identical? new-type (.expr-type insn))
-     insn
-     (Insn. (^CodeEmitter fn [xb line requested-type]
-             (when (emit/opnd xb line new-type (.emitter insn))
-               new-type))
-            new-type)))
-  (^Insn [^Class new-type ^Insns insns ^int i]
-   (identity new-type (Insn. (emitter insns i) (expr-type insns i)))))
-
-(defn- emit-new-array ^CodeBuilder [^CodeBuilder xb ^Class component-type
-                                    ^int length]
-  (.loadConstant xb length)
-  (if (.isPrimitive component-type)
-    (.newarray xb (TypeKind/from component-type))
-    (.anewarray xb (reflect/describe-class component-type))))
-
-(defn- emit-array-of-more? ^CodeBuilder [^CodeBuilder xb ^Class component-type
-                                         ^CodeEmitter/1 ces ^int start]
-  (let [end (alength ces)
-        component-tk (TypeKind/from component-type)]
-    (emit-new-array xb component-type (- end start))
-    (loop [i start]
-      (if (< i end)
-        (when (some->
-               (-> (.dup xb)
-                   (.loadConstant (- i start))
-                   (emit/opnd cfg/no-line-number component-type (aget ces i)))
-               (.arrayStore component-tk))
-          (recur (inc i)))
-        xb))))
-
-(defn- invoke ^Insn [^Match m ^Insn receiver ^Insns args]
-  (-> (^CodeEmitter fn [xb line requested-type]
-       (letfn [(emit-varargs? ^CodeBuilder [^CodeBuilder xb ^Class varargs-tp
-                                            ^int start]
-                 (if (= (.invocation-mode m) resolve/invoke-tail-into-array)
-                   (emit-array-of-more? xb (.getComponentType varargs-tp)
-                                        (.emitters args) start)
-                   (assert false)))]
-         (let [fixed (resolve/end-of-fixed-parameters m)
-               varargs-tp (resolve/varargs-parameter-type m)]
-           (some->
-            xb
-            ;; new-dup-dance when creating a new instance of `owner`
-            (cond-> (instance? Constructor (.member m))
-              (-> (.new_ (reflect/describe-class (.owner m))) (.dup)))
-            ;; instance field or method require receiver argument
-            (cond-> (some? receiver)
-              (emit-opnd-logical receiver))
-            ;; all fixed (i.e. non-vararg) arguments
-            (emit/typed-opnds line (.parameter-types m)
-                                  (.emitters args) 0 fixed)
-            ;; optionally: all vararg arguments
-            (cond-> (some? varargs-tp)
-              (emit-varargs? varargs-tp fixed))
-            ;; the actual invoke instruction
-            (-> (.lineNumber line)
-                (reflect/invoke-member (.owner m) (.member m)))))
-         (.return-type m)))
-      (Insn. (.return-type m))))
-
-;;; ------------------------------------------------------------------------
-
-;;; Helper function for the local variable protocol.  When a method's
-;;; code attribute is produced, the Binding is established first: its
-;;; `emit-opnd` sets a private mutable field to the allocated slot
-;;; value.  The binding's `bound-value` method returns an Insn whose
-;;; own `emit-opnd` closes over the Binding instance (not the mutable
-;;; slot value in the mutable field!), allowing it to retrieve the
-;;; previously stored value via `allocated-slot`.  Initializiation
-;;; should set the undefined slot value to -1.
-(definterface LocalVariableSlot
-  (allocated-slot ^int []))
-
-(deftype ParameterImpl [^int param-no ^String name ^Class type
-                        ^:unsynchronized-mutable ^int slot]
-  Parameter
-  (emit-opnd* [this xb line requested-type]
-    (set! slot (.parameterSlot xb param-no))
-    (.localVariable xb slot name (reflect/describe-class type)
-                    (.startLabel xb) (.endLabel xb))
-    Void/TYPE)
-  (name [_]
-    name)
-  (namespace [_]
-    nil)
-  (init [_]
-    nil)
-  (bound-value [this]
-    (Insn. (^CodeEmitter fn [xb line requested-type]
-            (.loadLocal xb (TypeKind/from type) (.allocated-slot this))
-            type)
-           type))
-  (type [_]
-    type)
-  
-  LocalVariableSlot
-  (allocated-slot [_]
-    slot))
+  (insn/mk-insn (^CodeEmitter fn [xb _ requested-type]
+                 (when (emit/insn? xb line requested-type (.emitter insn))
+                   requested-type))
+                (insn/expr-type insn)))
 
 ;;; ------------------------------------------------------------------------
 
@@ -230,12 +49,13 @@
     (.add segment-elements
           (^ClassElementEmitter fn [cb]
            (let [at (aget (.arity-types fn-literal) 0)
-                 ce-body (emitter (.arity-bodies fn-literal) 0)
                  mnm (str (.mangled-name fn-literal) "~" (.parameter-count at))
                  mtd (model/mtd-of-arity-type at)]
              (classfile/with-method-body-> cb
                [mnm mtd classfile/acc-method-static]
-               (emit/method-return ce-body))))))
+               ;; pick up any fixed auto-return-type
+               (insn/emit-return (.return-type at)
+                                 (.get (.arity-bodies fn-literal) 0)))))))
   (.clear pending-functions))
 
 ;;; ------------------------------------------------------------------------
@@ -243,7 +63,7 @@
 (defn- invoke-single-match ^Insn [^seq ms ^Insn receiver ^Insns args]
   (when (nil? (next ms))
     (when-some [m (first ms)]
-      (invoke m receiver args))))
+      (insn/invoke-member m receiver args))))
 
 (defn- info-unresolved-member ^Throwable [^seq ms ^Class owner ^String mnm
                                           ^Insns args ^String label]
@@ -256,21 +76,15 @@
                      (str "no " entity " matching " member)
                      (str "multiple " entity "s matching " member)))))
 
-;;; ------------------------------------------------------------------------
-
-(defn- constants? ^boolean [^Insns insns]
-  (loop [i (dec (.length insns))]
-    (cond (neg? i) true
-          (model/const? insns i) (recur (dec i))
-          :else false)))
-(defn- as-typed-constants ^Object/1 [^Insns insns]
-  (let [a (new Object/1 (.length insns))]
-    (dotimes [i (.length insns)]
-      (aset a i (constgen/apply-expr-type (expr-type insns i)
-                                          (model/const-value insns i))))
-    a))
+;;; This indicates an error regarding the type *of* an expression.
+(defn info-type
+  (^Throwable [^String msg-prefix ^Expr x]
+   (info-type msg-prefix x (insn/expr-type x)))
+  (^Throwable [^String msg-prefix ^Expr x ^Class tp]
+   (wrong/wr-info (str msg-prefix (wrong/got-type tp)))))
 
 ;;; ------------------------------------------------------------------------
+
 
 ;;; Note: To save work, this code generator assumes that it can use
 ;;; types available at compile time to refer to runtime types of the
@@ -285,92 +99,129 @@
                           ]
   ExprFactory
   (empty-expr [_]
-    insn-empty)
+    insn/insn-empty)
   (new-exprs [_ n]
     (if (zero? n)
-      empty-insns
+      insn/empty-insns
       (Insns. (new CodeEmitter/1 n) (new Class/1 n))))
-  (progn-expr [_ xs x]
-    (if (zero? (.length xs)) x (progn xs x)))
-  
   (line-number [_ line insn]
     (cond-> insn ;preserve visibility of constant `insn` by not wrapping it
       (and (some? line) (not (model/const? insn)))
       (with-line-number ^int line)))
-  (new-constant [_ expr-type value]
-    #_(prn :new-constant expr-type value)
-    (java.util.Objects/requireNonNull expr-type)
-    (java.util.Objects/requireNonNull value)
-    (cond
-      (identical? ConstantDescs/NULL value)
-      insn-null                         ;enforce singleton
-      
-      (type/same? Boolean/TYPE expr-type)
-      (if (zero? ^int value) insn-false insn-true) ;enforce singletons
-      
-      :else (Insn. (ConstantImpl. expr-type value) expr-type)))
-
-  (attach-meta-to [_ opt-meta arg]
-    (if (nil? opt-meta)
-      arg
-      (assert false)))
-  (new-vector [this opt-meta args]
-    (.attach-meta-to this opt-meta
-                     (if (constants? args)
-                       (let [x (vec (as-typed-constants args))]
-                         (.new-constant this type/vector x))
-                       (invoke resolve/literal-vector nil args))))
-  (new-map [this opt-meta args]
-    (.attach-meta-to this opt-meta
-                     (if (constants? args)
-                       (let [x (apply array-map (as-typed-constants args))]
-                         (.new-constant this type/map x))
-                       (invoke resolve/literal-map nil args))))
-  (new-set [this opt-meta args]
-    (.attach-meta-to this opt-meta
-                     (if (constants? args)
-                       (let [x (set (as-typed-constants args))]
-                         (.new-constant this type/set x))
-                       (invoke resolve/literal-set nil args))))
-  (new-list [this opt-meta args]
-    (.attach-meta-to this opt-meta
-                     (if (constants? args)
-                       (let [x (or (seq (as-typed-constants args)) ())]
-                         (.new-constant this type/list x))
-                       (invoke resolve/literal-list nil args))))
   
-  (new-def-init [_ nmsp nm init]
+  (new-constant [_ expr-type value]
+    (entity/new-constant expr-type value))
+
+  (attach-meta-to [_ meta arg]
+    (assert false))
+  (new-vector [this args]
+    (let [args ^Insns args]
+      (if (entity/constants? args)
+        (->> (entity/as-typed-constants args)
+             (vec)
+             (.new-constant this type/vector))
+        (insn/invoke-member literal-vector nil args))))
+  (new-map [this args]
+    (let [args ^Insns args]
+      (if (entity/constants? args)
+        (->> (entity/as-typed-constants args)
+             (apply array-map)
+             (.new-constant this type/map))
+        (insn/invoke-member literal-map nil args))))
+  (new-set [this args]
+    (let [args ^Insns args]
+      (if (entity/constants? args)
+        (->> (entity/as-typed-constants args)
+             (set)
+             (.new-constant this type/set))
+        (insn/invoke-member literal-set nil args))))
+  (new-list [this args]
+    (let [args ^Insns args]
+      (if (entity/constants? args)
+        (.new-constant this type/list (-> (entity/as-typed-constants args)
+                                          (seq)
+                                          (or ())))
+        (insn/invoke-member literal-list nil args))))
+
+  (progn-expr [_ xs x]
+    (insn/progn xs x))
+  
+  (invoke [this form inv args]
+    (.invoke* inv form args))
+  
+  (new-def-init [this nmsp nm init]
     (let [init ^Insn init]
       (.add segment-elements
             (^ClassElementEmitter fn [cb]
-             (let [opnd-type (logical-type init)
+             (let [opnd-type (insn/logical-type init)
                    mtd (MethodTypeDesc/of (reflect/describe-class opnd-type))]
                (classfile/with-method-body-> cb
                  [nm mtd classfile/acc-method-static]
-                 (emit/method-return (.emitter ^Insn init))))))
-      insn-empty))
+                 (insn/emit-return opnd-type init)))))
+      insn/insn-empty))
   (new-def-alias [_ nmsp nm other]
     (assert false))
 
   (new-parameter [_ param-no name type]
-    (Insn. (ParameterImpl. param-no name type -1) Void/TYPE))
-  (new-function [this fn-literal]
-    ;; overwrite any auto-return-marker return types and adjust their
-    ;; body Insn to match the new type
-    (let [ats (.arity-types fn-literal)
-          bodies ^Insns (.arity-bodies fn-literal)]
-      (dotimes [i (alength ats)]
-        (let [at (aget ats i)]
-          (when (type/auto-return-marker? (.return-type at))
-            (let [logical-tp (logical-type bodies i)]
-              (aset ats i (.with-return-type at logical-tp))
-              (.set bodies i (identity logical-tp bodies i)))))))
-    
-    (.add pending-functions fn-literal)
-    (let [owner (ClassDesc/of "pkg.ns0._10")]
-      (.new-constant this tinyclj.lang.StaticFn
-                     (methodgen/static-fn-desc owner fn-literal))))
+    (Insn. (entity/mk-parameter param-no name type) Void/TYPE))
+  (new-local [_ name init]
+    (insn/mk-insn (entity/mk-local name init) Void/TYPE))
+  (block-let [_ bindings body]
+    (let [block (insn/progn bindings body)]
+      (-> (^CodeEmitter fn [xb line requested-type]
+           (.block xb (^Consumer fn ^void [^CodeBuilder xb]
+                       (emit/insn? xb line requested-type (.emitter block))))
+           requested-type) ;cannot report back `leaving` if insn? is false
+          (insn/mk-insn (insn/expr-type block)))))
   
+  (new-function [this mangled-name arity-types arity-bodies arity-redirections]
+    ;; overwrite any auto-return-marker return types
+    (dotimes [i (alength arity-types)]
+      (let [at (aget arity-types i)]
+        (when (type/auto-return-marker? (.return-type at))
+          (let [expr-tp (insn/expr-type arity-bodies i)
+                logical-tp (type/expr-to-logical expr-tp)]
+            (aset arity-types i (.with-return-type at logical-tp))))))
+    
+    (let [fn-literal (FnLiteral. mangled-name arity-types
+                                 arity-bodies arity-redirections)]
+      (.add pending-functions fn-literal)
+      (let [owner (ClassDesc/of "pkg.ns0._10")]
+        (.new-constant this tinyclj.lang.StaticFn
+                       (methodgen/static-fn-desc owner fn-literal)))))
+  
+  (type-cast [this target-type arg]
+    (let [arg-tp (insn/expr-type arg)]
+      (letfn [(wr-info-invalid-cast ^Throwable []
+                (wrong/wr-info (str "cannot cast to " (wrong/q-type target-type)
+                                    (wrong/got-type arg-tp))))
+              (checkcast ^Insn [^Class ref-target ^Insn ref-arg]
+                (let [arg-tp (insn/expr-type ref-arg)]
+                  (if (or (.isAssignableFrom ref-target arg-tp) ;empty
+                          (.isAssignableFrom arg-tp ref-target)) ;checkcast
+                    (insn/cast-into ref-target ref-arg)
+                    (throw (wr-info-invalid-cast)))))
+              (box-arg-into ^Insn [^Class prim-tp]
+                (insn/cast-into (.class-reference (type/of prim-tp)) arg))]
+        (cond
+          (type/same? target-type arg-tp)
+          arg
+          
+          (or (type/polymorphic? target-type) ;force void context
+              (type/polymorphic? arg-tp))
+          (insn/cast-into target-type arg)
+
+          (.isPrimitive target-type)
+          (if (.isPrimitive arg-tp)
+            (throw (wr-info-invalid-cast)) ;no cast between different primitives
+            (checkcast arg-tp (box-arg-into target-type)))
+          
+          ;; here holds: `target-type` is reference
+          (.isPrimitive arg-tp)
+          (checkcast target-type (box-arg-into arg-tp))
+          
+          ;; here holds: both `target-type` and `arg-tp` are reference
+          :else (checkcast target-type arg)))))
   (invoke-constructor [_ owner args]
     (let [args ^Insns args
           mnm resolve/constructor-name
@@ -390,19 +241,31 @@
               insn))
           (throw (info-unresolved-member ms owner mnm args "static")))))
   (invoke-virtual-member [_ receiver mnm args]
-    (let [args ^Insns args
-          owner (expr-type receiver)
-          ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
+    (let [receiver ^Insn receiver
+          args ^Insns args
+          owner (insn/expr-type receiver)
+          ms (resolve/members-by-arg-types false owner mnm
+                                           (.expr-types args))]
       #_(prn :et (seq (.expr-types args)))
       #_(prn :ms (seq ms))
       (or (invoke-single-match ms receiver args)
           (throw (info-unresolved-member ms owner mnm args "virtual")))))
 
   (get-static-field [_ owner mnm]
-    (let [args empty-insns
+    (let [args insn/empty-insns
           ms (resolve/field-exact nil true owner mnm resolve/empty-class-array)]
       (or (invoke-single-match ms nil args)
           (throw (info-unresolved-member ms owner mnm args "static")))))
+
+  (throw-expr [_ arg]
+    (let [arg ^Insn arg]
+      (if (.isAssignableFrom Throwable (insn/logical-type arg))
+        (-> (^CodeEmitter fn [xb line requested-type]
+             (when (emit/insn? xb line Throwable (.emitter arg))
+               (-> xb (.lineNumber line) (.athrow))
+               emit/leaving))         ;type seen by the code generator
+            (insn/mk-insn Void/TYPE)) ;type seen by the parser
+        (throw (info-type "expect instance of Throwable" arg)))))
   
   (mk-expr [_ form]
     (throw (UnsupportedOperationException. (str form)))))

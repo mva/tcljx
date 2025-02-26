@@ -4,13 +4,14 @@
                [model :as model])
    (tcljx.parser [context :as context] [form :as form] [namespace :as namespace])
    (tcljx.classgen [loader :as loader] [runtime :as rt] [classfile :as classfile]
-                   [segmgen :as segmgen] [codegen :as codegen] [emit :as emit]))
+                   [segmgen :as segmgen] [insn :as insn] [codegen :as codegen]
+                   [emit :as emit] [primitive :as primitive]))
   (:import
    (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
                      NamespaceBuilder SegmentBuilder
                      Expr ExprFactory Scope)
    (tcljx.classgen.loader Loader PackageBuilder)
-   (tcljx.classgen.codegen Insn)
+   (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassBuilder CodeBuilder)
    (java.nio.file Path)
    (java.util ArrayList)
@@ -100,15 +101,16 @@
          (let [elem (.get segment-elements i)]
            (when (codegen/class-element-emitter? elem)
              (codegen/emit-class-element cb elem)))))
-      (^Consumer fn ^void [^CodeBuilder xb]
-       (loop [i 0]
-         (if (< i end-of-segment-elements)
-           (let [elem (.get segment-elements i)]
-             (when (or (not (instance? Insn elem))
-                       (some? (emit/opnd xb cfg/no-line-number Void/TYPE
-                                         (codegen/emitter elem))))
-               (recur (inc i))))
-           xb))))
+      (let [a (doto (ArrayList.)
+                (.add (segmgen/clinit-prologue ns-str current-segm-id)))]
+        (loop [i 0]
+          (if (< i end-of-segment-elements)
+            (let [elem (.get segment-elements i)]
+              (when (instance? Insn elem)
+                (.add a elem))
+              (recur (inc i)))
+            (do (.add a (segmgen/clinit-epilogue pkg-build current-segm-id))
+                (insn/progn (insn/insns-of* a) insn/insn-empty))))))
     
     ;; revert back to requested state & move to next segment
     (set! globals then-globals)
@@ -131,7 +133,7 @@
                     pending-functions (ArrayList.)
                     ef (codegen/mk-code-generator
                         segment-elements pending-functions)
-                    globals {}]
+                    globals primitive/primitive-nmsp-globals]
                 (NmspBuilderImpl. this ns-str ef
                                   segment-elements pending-functions
                                   pkg-build globals known-ns ns-alias

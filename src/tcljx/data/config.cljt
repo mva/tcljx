@@ -49,7 +49,7 @@
                  ;; special forms that are not special in Clojure:
                  definterface* instanceof*})
 
-;; (def primitive-ns-str "tinyclj.lang.primitive")
+(def primitive-ns-str "tinyclj.lang.primitive")
 
 ;; (def key-force-clinit nil)
 

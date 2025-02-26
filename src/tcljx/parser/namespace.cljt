@@ -88,7 +88,7 @@
                     :rename (recur refer exclude (second-map specs)
                                    (nnext specs))
                     #_else (throw (syntax/info "expect :only, :exclude, or :rename"
-                                                (first specs))))
+                                               (first specs))))
                   (Require. cfg/core-lib nil refer rename exclude
                             refer-clj))))))
 
@@ -97,8 +97,8 @@
                                             ^ProvidedNamespace provided]
           (wrong/with-line-context (.error-context require)
             (if (nil? provided)
-              (wrong/unresolved "no such namespace:"
-                                (model/required-ns-sym require))
+              (throw (wrong/info-unresolved "no such namespace:"
+                                            (model/required-ns-sym require)))
               (.process-require nmsp require provided))))
         (process-requires ^NamespaceBuilder [^NamespaceBuilder nmsp
                                              ^seq requires]

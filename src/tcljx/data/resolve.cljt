@@ -13,14 +13,18 @@
    (java.lang.invoke MethodHandles$Lookup)
    (java.lang.reflect Method Constructor Executable Field Member Modifier)))
 
-  ;; Third party Java libraries cannot have a static method called
-  ;; `new`, because in Java `new` is a keyword and not an identifier.
-  ;; Clojure's deftype does not support static methods at all.  Taking
-  ;; this into account, there is little downside to having the dot
-  ;; form supporting `new` as symbolic constructor name as well.  So
-  ;; all of Classname/new, (Classname/new ...) and (. Classname new
-  ;; ...) are supported.
+;; Third party Java libraries cannot have a static method called
+;; `new`, because in Java `new` is a keyword and not an identifier.
+;; Clojure's deftype does not support static methods at all.  Taking
+;; this into account, there is little downside to having the dot form
+;; supporting `new` as symbolic constructor name as well.  So all of
+;; Classname/new, (Classname/new ...) and (. Classname new ...) are
+;; supported.
 (def constructor-name "new")
+
+(def jvm-primitive-types     ;arbitrary, follow `opcode-delta` for now
+  [Void/TYPE Integer/TYPE Long/TYPE Float/TYPE Double/TYPE
+   #_reference Byte/TYPE Character/TYPE Short/TYPE Boolean/TYPE])
 
 (def ^:private java-base-classes    ;almost all from package java.lang
   [Boolean Byte Character Class ClassLoader #_clojure.lang.Compiler Double
@@ -68,9 +72,7 @@
       
       ;; pseudo-import of primitive types types by their lower-case Java
       ;; name
-      (doseq [^Class cl [Void/TYPE Boolean/TYPE Byte/TYPE Short/TYPE
-                         Character/TYPE Integer/TYPE Float/TYPE
-                         Long/TYPE Double/TYPE]]
+      (doseq [^Class cl jvm-primitive-types]
         (.put m (.getSimpleName cl) cl))
       (into {} m))))
 
@@ -387,14 +389,11 @@
 
 ;;; ------------------------------------------------------------------------
 
-(letfn [(find-factory ^Match [^Class return-type ^String method-name]
-          (let [atypes (doto (new Class/1 1) (aset 0 Object/1))
-                ;; match excatly on varargs array type, and then
-                ;; adjust invocation mode of the returned match
-                ms (method-exact nil true tinyclj.lang.Literal
-                                 method-name atypes)]
-            (with-invocation-mode (first ms) invoke-tail-into-array)))]
-  (def literal-vector (find-factory type/vector "vector"))
-  (def literal-map (find-factory type/map "map"))
-  (def literal-set (find-factory type/map "set"))
-  (def literal-list (find-factory type/list "list")))
+(defn runtime-method ^Match [^Class owner ^String method-name ^Class/1 ptypes]
+  ;; match excatly on varargs array type, and then adjust invocation
+  ;; mode of the returned match
+  (let [ms (method-exact nil true owner method-name ptypes)
+        m ^Match (first ms)]
+    (cond-> m
+      (.isVarArgs ^Method (.member m))
+      (with-invocation-mode invoke-tail-into-array))))

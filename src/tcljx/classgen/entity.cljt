@@ -1,0 +1,128 @@
+(ns tcljx.classgen.entity
+  (:require
+   (tcljx.data [wrong :as wrong] [type :as type] [model :as model]
+               [reflect :as reflect])
+   (tcljx.classgen [emit :as emit] [insn :as insn] [constgen :as constgen]))
+  (:import
+   (tcljx.data.model Expr Binding Global Constant CodeEmitter)
+   (tcljx.classgen.insn Insn Insns)
+   (java.lang.classfile TypeKind)
+   (java.lang.constant ConstantDescs)))
+
+(deftype ConstantImpl [^Class type ^Object const-value]
+  java.lang.Record
+  Constant
+  (emit-insn* [_ xb line requested-type]
+    (insn/with-void-empty-if-requested requested-type
+      (constgen/load xb const-value)
+      type)))
+
+(def mk-constant ConstantImpl/new)
+
+(def insn-null (insn/mk-insn (mk-constant Object ConstantDescs/NULL)
+                              type/poly-reference))
+#_(def insn-int-one (insn/mk-insn (mk-constant Integer/TYPE 1) Integer/TYPE))
+#_(def insn-int-zero (insn/mk-insn (mk-constant Integer/TYPE 0) Integer/TYPE))
+(def insn-true (insn/mk-insn (mk-constant Boolean/TYPE 1) Boolean/TYPE))
+(def insn-false (insn/mk-insn (mk-constant Boolean/TYPE 0) Boolean/TYPE))
+
+(defn new-constant
+  (^Insn [^Object value] ;use if `expr-type` agrees with (.getClass value)
+   (new-constant (.getClass value) value))
+  (^Insn [^Class expr-type ^Object value]
+   #_(prn :new-constant expr-type value)
+   (java.util.Objects/requireNonNull expr-type)
+   (java.util.Objects/requireNonNull value)
+   (cond
+     (identical? ConstantDescs/NULL value)
+     insn-null                          ;enforce singleton
+     
+     (type/same? Boolean/TYPE expr-type)
+     (if (zero? ^int value)             ;enforce singletons
+       insn-false
+       insn-true)
+     
+     :else (insn/mk-insn (mk-constant expr-type value) expr-type))))
+
+(defn constants? ^boolean [^Insns insns]
+  (loop [i (dec (.length insns))]
+    (cond (neg? i) true
+          (model/const? insns i) (recur (dec i))
+          :else false)))
+
+(defn as-typed-constants ^Object/1 [^Insns insns]
+  (let [a (new Object/1 (.length insns))]
+    (dotimes [i (.length insns)]
+      (aset a i (constgen/typed-constant-value insns i)))
+    a))
+
+;;; ------------------------------------------------------------------------
+
+(deftype GlobalImpl [^String namespace ^String name ^CodeEmitter bound-to]
+  java.lang.Record
+  Global
+  )
+
+(def mk-global GlobalImpl/new)
+
+;;; ------------------------------------------------------------------------
+
+;;; Helper interface for the local variable protocol.  When a method's
+;;; code attribute is produced, the Binding is established first: its
+;;; `emit-opnd` sets a private mutable field to the allocated slot
+;;; value.  The binding's `bound-value` method returns an Insn whose
+;;; own `emit-opnd` closes over the Binding instance (not the mutable
+;;; slot value in the mutable field!), allowing it to retrieve the
+;;; previously stored value via `allocated-slot`.  Initializiation
+;;; should set the undefined slot value to -1.
+(definterface Local
+  :extends [Binding]
+  (name ^String [])                     ;passed to `localVariable`
+  (type ^Class [])                      ;passed to `localVariable`
+  (allocated-slot ^int []))
+
+(deftype LocalImpl [^int param-no ^String name ^Class type ^CodeEmitter bound-to
+                    ^:unsynchronized-mutable ^int slot]
+  Binding
+  (emit-insn* [this xb line requested-type]
+    (if (model/ce-const? bound-to)
+      Void/TYPE
+      
+      (let [tk (TypeKind/from type)]
+        (set! slot (if (some? bound-to)
+                     (.allocateLocal xb tk)
+                     (.parameterSlot xb param-no)))
+        (if (some? bound-to)          ;let binding provides `bound-to`
+          (do (set! slot (.allocateLocal xb tk))
+              (when (emit/insn? xb line type bound-to)
+                (.localVariable xb slot name (reflect/describe-class type)
+                                (.startLabel xb) (.endLabel xb))
+                (.storeLocal xb tk slot)
+                Void/TYPE))
+          (do (set! slot (.parameterSlot xb param-no))
+              (.localVariable xb slot name (reflect/describe-class type)
+                              (.startLabel xb) (.endLabel xb))
+              Void/TYPE)))))
+  (bound-to [_]
+    bound-to)
+  (bound-value [this]
+    (-> (if (model/ce-const? bound-to)
+          bound-to
+          (^CodeEmitter fn [xb line requested-type]
+           (insn/with-void-empty-if-requested requested-type
+             (.loadLocal xb (TypeKind/from type) (.allocated-slot this))
+             type)))
+        (insn/mk-insn type)))
+  
+  Local
+  (name [_]
+    name)
+  (type [_]
+    type)
+  (allocated-slot [_]
+    slot))
+
+(defn mk-parameter ^Local [^int param-no ^String name ^Class type]
+  (LocalImpl. param-no name type nil -1))
+(defn mk-local ^Local [^String name ^Expr init]
+  (LocalImpl. -1 name (insn/logical-type init) (insn/emitter init) -1))

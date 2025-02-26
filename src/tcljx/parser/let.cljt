@@ -1,0 +1,25 @@
+(ns tcljx.parser.let
+  (:require
+   (tcljx.data [wrong :as wrong] [model :as model])
+   (tcljx.parser [syntax :as syntax] [context :as context]))
+  (:import
+   (tcljx.data.model Expr Binding Scope)))
+
+(defn parse-let* ^Expr [^Scope scope [_ bindings & body :as form]]
+  (let [bindings (syntax/vector bindings true)
+        n (quot (count bindings) 2)
+        ef (.expr-factory scope)
+        bnd-xs (.new-exprs ef n)]
+    (loop [scope scope, i 0]
+      (if (< i n)
+        (let [nm (syntax/simple-symbol-str (nth bindings (* i 2)))
+              x (context/parse-form scope (nth bindings (inc (* i 2))))
+              bnd (.new-local ef nm x)]
+          (if (instance? Binding (.entity bnd))
+            (let [scope' (context/with-local-binding scope nm bnd)]
+              (.set bnd-xs i bnd)
+              (recur scope' (inc i)))
+            (throw (wrong/wr-info (str "intialization of binding "
+                                       (wrong/q-as-symbol nm)
+                                       " cannot complete normally")))))
+        (.block-let ef bnd-xs (context/parse-progn scope body))))))

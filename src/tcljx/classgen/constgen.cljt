@@ -1,8 +1,9 @@
 (ns tcljx.classgen.constgen
   (:require
-   (tcljx.data [meta :as meta] [reflect :as reflect])
-   (tcljx.classgen [runtime :as rt]))
+   (tcljx.data [meta :as meta] [reflect :as reflect] [model :as model])
+   (tcljx.classgen [runtime :as rt] [insn :as insn]))
   (:import
+   (tcljx.classgen.insn Insn Insns)
    (clojure.lang Named IMeta)
    (java.lang.classfile CodeBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry
@@ -77,14 +78,21 @@
     (let [ldbl (loadable-entry (.constantPool xb) value)]
       (.ldc xb ldbl)) ))
 
-;;; Embed accurate type information for a non-int but "computationally
-;;; int" value by materializing its DynamicConstantDesc description.
-(defn apply-expr-type [^Class expr-type ^Object value]
-  (if (and (instance? Integer value) (not (identical? Integer/TYPE expr-type)))
-    (reflect/describe (let [x ^int value]
-                        (condp identical? expr-type
-                          Boolean/TYPE (object (not= x 0))
-                          Byte/TYPE (object (byte x))
-                          Short/TYPE (object (short x))
-                          Character/TYPE (object (char x)))))
-    value))
+(letfn [(apply-expr-type [^Class expr-type ^Object value]
+          (if (and (instance? Integer value)
+                   (not (identical? Integer/TYPE expr-type)))
+            (reflect/describe (let [x ^int value]
+                                (condp identical? expr-type
+                                  Boolean/TYPE (object (not= x 0))
+                                  Byte/TYPE (object (byte x))
+                                  Short/TYPE (object (short x))
+                                  Character/TYPE (object (char x)))))
+            value))]
+  
+  ;; Embed accurate type information for a non-int but "computationally
+  ;; int" value by materializing its DynamicConstantDesc description.
+  (defn typed-constant-value
+    (^Object [^Insn insn]
+     (apply-expr-type (insn/expr-type insn) (model/const-value insn)))
+    (^Object [^Insns insn ^int i]
+     (apply-expr-type (insn/expr-type insn i) (model/const-value insn i)))))

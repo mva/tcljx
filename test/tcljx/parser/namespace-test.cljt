@@ -13,14 +13,14 @@
    [tcljx.alpha.ptest :refer :all])
   (:import
    (tcljx.data.model NamespaceBuilder ProvidedNamespace NamespaceProvider
-                     CodeEmitter Entity Binding Expr Exprs ExprFactory
+                     CodeEmitter Entity Global Invocable Expr Exprs ExprFactory
                      Resolver Scope)
    (tcljx.data.wrong WrongInfo)))
 
-(deftype CodeData [form]
+(deftype EmitterData [form]
   java.lang.Record
   CodeEmitter
-  (emit-opnd* [_ xb requested-type line]
+  (emit-insn* [_ xb line requested-type]
     (throw (UnsupportedOperationException.))))
 
 (deftype ExprStub [^CodeEmitter data]
@@ -32,32 +32,45 @@
 (deftype ExprsStub [^Expr/1 xs]
   Exprs
   (length [_] (alength xs))
+  (get [_ i] (aget xs i))
   (set [_ i x] (aset xs i x)))
 
 (defn mk-code ^CodeEmitter [form]
-  (CodeData. form))
+  (EmitterData. form))
 (defn mk-expr ^Expr [code-or-form]
   (ExprStub. (cond-> code-or-form
                (not (instance? CodeEmitter code-or-form))
                (mk-code))))
 
-(deftype BindingStub [^String namespace ^String name form]
+(deftype GlobalStub [^String namespace ^String name ^CodeEmitter bound-to]
   java.lang.Record
   CodeEmitter
-  (emit-opnd* [_ xb requested-type line]
+  (emit-insn* [_ xb line requested-type]
     (throw (UnsupportedOperationException.)))
-  Binding
+  Global
   (bound-value [this]
-    (mk-expr [:bound-value (model/binding-name this)])))
+    (mk-expr [:bound-value (model/global-name this)])))
 
 (defn class-data ^symbol [x]
   (if (nil? x) 'Null (symbol nil (.getSimpleName (class x)))))
-(defn expr-data [^Expr x]
-  (when (some? x)
-    (let [data (.data ^ExprStub x)]
-      (condp instance? data
-        CodeData (.form ^CodeData data)
-        BindingStub (.form ^BindingStub data)))))
+
+(letfn [(emitter-data [^CodeEmitter x]
+          (condp instance? x
+            EmitterData (.form ^EmitterData x)
+            GlobalStub (recur (.bound-to ^GlobalStub x))))]
+
+  (defn expr-data [^Expr x]
+    (when (some? x)
+      (emitter-data (.data ^ExprStub x)))))
+
+(defn exprs-data [^Exprs xs]
+  (map #(expr-data (.get xs ^int %)) (range (.length xs))))
+
+(deftype InvocableStub []
+  java.lang.Record
+  Invocable
+  (invoke* [_ form args]
+    (mk-expr (into [:invoke form] (exprs-data args)))))
 
 (deftype ExprFactoryStub [^java.util.ArrayList forms]
   ExprFactory
@@ -67,32 +80,36 @@
     (if (some? line)
       (mk-expr [:line-number line (expr-data value)])
       value))
+  
+  (new-constant [_ expr-type value]
+    (mk-expr [:constant value (class-data value)]))
+  
   (progn-expr [_ xs x]
     (mk-expr (-> (reduce (comp conj expr-data) [:progn] xs)
                  (conj (expr-data x)))))
-  (new-constant [_ expr-type value]
-    (mk-expr [:constant value (class-data value)]))
+  (invoke [this form inv args]
+    (.invoke* inv form args))
   
   (new-def-init [_ nmsp nm init]
     (let [ns-str (.ns-str nmsp)
           ns-sym (symbol ns-str nm)
-          x (mk-expr (BindingStub. ns-str nm
-                                   [:initialize-def ns-sym (expr-data init)]))]
-      (.add-def nmsp nm (model/require-entity x))
-      x))
+          init (EmitterData. [:initialize-def ns-sym (expr-data init)])
+          global (GlobalStub. ns-str nm init)]
+      (.add-def nmsp nm global)
+      (mk-expr global)))
   (new-def-alias [this nmsp nm other]
     (let [ns-str (.ns-str nmsp)
           ns-sym (symbol ns-str nm)
-          x (mk-expr (BindingStub. ns-str nm
-                                   [:alias-def ns-sym (model/binding-name other)]))]
+          init (EmitterData. [:alias-def ns-sym (model/global-name other)])
+          x (mk-expr (GlobalStub. ns-str nm init))]
       (.add-def nmsp nm (model/require-entity x))
       x))
   (assignment [_ bnd init]
-    (mk-expr [:assignment (model/binding-name bnd) (expr-data init)]))
+    (mk-expr [:assignment (model/global-name bnd) (expr-data init)]))
   
   (mk-expr [this form]
     (if (= form 'not-defined)
-      (wrong/unresolved "undefined symbol " form)
+      (throw (wrong/info-unresolved "undefined symbol " form))
       (mk-expr form))))
 
 (deftype NmspBuilderStub [^String ns-str
@@ -154,7 +171,8 @@
 (defn mk-nmsp-builder ^NamespaceBuilder []
   (let [ns-str "nmsp.expected"
         segment-forms (java.util.ArrayList.)
-        globals {}]
+        globals {"some" (GlobalStub. ns-str "some" (InvocableStub.))
+                 "form" (GlobalStub. ns-str "form" nil)}]
     (NmspBuilderStub. ns-str segment-forms globals)))
 (defn parse-forms-string ^vector [^String cs]
   (let [nmsp (mk-nmsp-builder)
@@ -173,12 +191,13 @@
   ;; use parse-forms-string, going through tcljx.parser.reader
   (is (= '[]
          (parse-forms-string "")))
-  (is (= '[[:line-number 1 (some form)]]
+  (is (= '[[:line-number 1
+            [:invoke (some form) [:bound-value nmsp.expected/form]]]]
          (parse-forms-string "(some form)")))
   ;; use parse-forms, relying on the host compiler's form processing
   (is (= '[]
          (parse-forms '[])))
-  (is (= '[(some form)]
+  (is (= '[[:invoke (some form) [:bound-value nmsp.expected/form]]]
          (parse-forms '[(some form)]))))
 
 ;;; ------------------------------------------------------------------------

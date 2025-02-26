@@ -4,9 +4,9 @@
     [meta :as meta] [wrong :as wrong] [type :as type] [model :as model])
    (tcljx.parser
     [interop :as interop] [syntax :as syntax] [context :as context] [def :as def]
-    [fn :as fn] [new :as new] [constant :as constant]))
+    [let :as let] [fn :as fn] [new :as new] [constant :as constant]))
   (:import
-   (tcljx.data.model Resolver Expr Exprs ExprFactory Scope)
+   (tcljx.data.model Resolver Expr Exprs ExprFactory Invocable Scope)
    (clojure.lang IMeta)))
 
 (deftype ScopeImpl [^ExprFactory expr-factory
@@ -24,45 +24,62 @@
             (parse-meta ^Expr [^map form-meta]
               (when form-meta
                 (parse-collection-literal form-meta (meta form-meta))))
+            (parse-collection-literal-nometa ^Expr [form]
+              (cond
+                (vector? form)
+                (.new-vector expr-factory (parse-args (seq form)))
+                (map? form)
+                (let [forms (mapcat identity form)]
+                  (.new-map expr-factory (parse-args forms)))
+                (set? form)
+                (.new-set expr-factory (parse-args (seq form)))
+                (seq? form)
+                (.new-list expr-factory (parse-args (seq form)))
+                :else
+                (throw (IllegalStateException. (str (class form))))))
             (parse-collection-literal ^Expr [form ^map form-meta]
-              (let [opt-meta (parse-meta form-meta)]
-                (cond
-                  (vector? form)
-                  (.new-vector expr-factory opt-meta (parse-args (seq form)))
-                  (map? form)
-                  (let [forms (mapcat identity form)]
-                    (.new-map expr-factory opt-meta (parse-args forms)))
-                  (set? form)
-                  (.new-set expr-factory opt-meta (parse-args (seq form)))
-                  (seq? form)
-                  (.new-list expr-factory opt-meta (parse-args (seq form)))
-                  :else
-                  (throw (IllegalStateException. (str (class form)))))))
+              (let [x-meta (parse-meta form-meta)
+                    x (parse-collection-literal-nometa form)]
+                (if (some? x-meta)
+                  (.attach-meta-to expr-factory x-meta x)
+                  x)))
 
             (parse-quoted-form ^Expr [form]
-              (if (instance? IMeta form) ;symbol, list, vector, map, set
+              (if (instance? IMeta form)
+                ;; symbol, list, vector, map, set
                 (let [tp (if (seq? form) type/list (class form))]
                   (.new-constant expr-factory tp form))
-                (constant/parse-constant this form))) ;adjust type to primitive
+                ;; adjust type to primitive if possible
+                (constant/parse-constant-nometa this form)))
             (parse-quote ^Expr [[_ & args]]
               (syntax/empty-tail (next args))
               (parse-quoted-form (syntax/some-first args)))
+            (parse-do ^Expr [[_ & forms]]
+              (if (nil? forms)
+                (.empty-expr expr-factory)
+                (let [n (count forms)
+                      prefix (.new-exprs expr-factory (dec n))]
+                  (loop [i 0, [form & formr] forms]
+                    (let [x (.parse-form this form)]
+                      (if (some? formr)
+                        (do (.set prefix i x) (recur (inc i) formr))
+                        (.progn-expr expr-factory prefix x)))))))
             
             (type-expression ^Class [^Expr x form] ;nil if no type expression
               (when-some [value (model/const-value x)]
                 (when (and (class? value) (syntax/simple-symbol? form))
                   value)))
-            (parse-type-expression ^Class [form]
-              (let [x (.parse-form this form)]
-                (or (type-expression x form)
-                    (throw (syntax/info "expected type expression" form)))))
+            (parse-throw ^Expr [[_ & args]]
+              (let [x (.parse-form this (syntax/some-first args))]
+                (syntax/empty-tail (next args))
+                (.throw-expr expr-factory x)))
 
             (unpack-member-args ^seq [^seq formr]
               (if (seq? (first formr))
                 (do (syntax/empty-tail (next formr))
                     (first formr))
                 formr))
-            (parse-dot [[_ owner & formr]]
+            (parse-dot ^Expr [[_ owner & formr]]
               (let [[member & args] (unpack-member-args formr)
                     mnm (syntax/simple-symbol-str member) ;implies owner exists
                     owner-expr (.parse-form this owner)
@@ -70,7 +87,16 @@
                 (if-some [owner (type-expression owner-expr owner)]
                   (.invoke-static-member expr-factory false owner mnm xs)
                   (.invoke-virtual-member expr-factory owner-expr mnm xs))))
-            
+            (parse-dot-member ^Expr [^String nm [_ & formr]]
+              (let [mnm (.substring nm 1)
+                    receiver (.parse-form this (syntax/some-first formr))
+                    xs (parse-args (rest formr))]
+                (.invoke-virtual-member expr-factory receiver mnm xs)))
+
+            (dot-member-name? ^boolean [^String nm]
+              (and (> (.length nm) 1)
+                   (= (.charAt nm 0) \.)
+                   (not= (.charAt nm 1) \.)))
             (wr-info-unresolved-qualified-sym ^Throwable [^symbol op]
               (wrong/wr-info
                (if (context/lookup-namespace this (namespace op))
@@ -85,21 +111,29 @@
                       ;; FIXME... implement these as proper primitive
                       ;; functions
                       "identity" (.parse-form this (second form))
-                      "int" (.parse-form this (.intValue ^Number (second form)))
-                      "long" (.parse-form this (.longValue ^Number (second form)))
-                      "float" (.parse-form this (.floatValue ^Number (second form)))
-                      "double" (.parse-form this (.doubleValue ^Number (second form)))
-                      "char" (.parse-form this (char (.intValue ^Number (second form))))
-                      "byte" (.parse-form this (.byteValue ^Number (second form)))
-                      "short" (.parse-form this (.shortValue ^Number (second form)))
                       
                       "def" (def/parse-def this form)
+                      "let*" (let/parse-let* this form)
+                      "do" (parse-do form)
+                      
                       "fn*" (fn/parse-fn* this form)
                       "quote" (parse-quote form)
                       "." (parse-dot form)
-                      "new" (new/parse-new this (parse-type-expression (second form)) form)
+                      "throw" (parse-throw form)
+                      "new" (let [sym (syntax/symbol (second form))]
+                              (new/parse-new this (parse-type-symbol sym) form))
                       
-                      #_else (.mk-expr expr-factory form))
+                      #_else
+                      (cond
+                        (dot-member-name? nm) (parse-dot-member nm form)
+                        
+                        :else
+                        (if-some [bnd (context/lookup this op)]
+                          (if-some [inv (model/bound-invocable bnd)]
+                            (.invoke expr-factory form inv
+                                     (parse-args (rest form)))
+                            (assert false))
+                          (throw (wr-info-unresolved op)))))
 
                     ;; `op` is qualified symbol: either a reference to
                     ;; a namespace ref, or a static class member
@@ -121,24 +155,34 @@
                           (throw (wr-info-unresolved-qualified-sym op)))))))
                 (.mk-expr expr-factory form)))
             
-            (wrong-unresolved ^Expr [^symbol sym]
-              (wrong/unresolved "undefined symbol " sym))
             (parse-class-qualified-symbol ^Expr [^Class nmsp ^String nm]
               (if-some [tp (interop/lookup-type resolver nmsp nm)]
                 (.new-constant expr-factory Class tp)
                 (.get-static-field expr-factory nmsp nm)))
+            (lookup-class-symbol ^Expr [^symbol sym]
+              (if-some [nmsp (namespace sym)]
+                (when-some [cl (.lookup-class resolver nmsp)]
+                  (parse-class-qualified-symbol cl (name sym)))
+                (when-some [cl (.lookup-class resolver (name sym))]
+                  (.new-constant expr-factory Class cl))))
+            (wr-info-unresolved ^Throwable [^symbol sym]
+              (wrong/info-unresolved "undefined symbol " sym))
             (parse-symbol ^Expr [^symbol sym] ;discards meta
               (if-some [bnd (context/lookup this sym)]
                 (.bound-value bnd)
-                (or (if-some [nmsp (namespace sym)]
-                      (when-some [cl (.lookup-class resolver nmsp)]
-                        (parse-class-qualified-symbol cl (name sym)))
-                      (when-some [cl (.lookup-class resolver (name sym))]
-                        (.new-constant expr-factory Class cl)))
-                    (wrong-unresolved sym))))
+                (or (lookup-class-symbol sym)
+                    (throw (wr-info-unresolved sym)))))
+            (wr-info-unresolved-type ^Throwable [^symbol sym]
+              (wrong/info-unresolved "undefined type symbol " sym))
+            (parse-type-symbol ^Class [^symbol sym]
+              (if-some [x (lookup-class-symbol sym)]
+                (if-some [tp (type-expression x sym)]
+                  tp
+                  (throw (syntax/info "expected type expression" sym)))
+                (throw (wr-info-unresolved-type sym))))
             
             (apply-type-hint ^Expr [^Expr x form-tag] ;pre: (some? form-tag)
-              (assert false))]
+              (.type-cast expr-factory (parse-type-symbol (syntax/symbol form-tag)) x))]
 
       (if (instance? IMeta form)
         (let [form-meta (.meta ^IMeta form)
@@ -161,7 +205,7 @@
         
         ;; keyword, pattern, number, character, string, boolean, nil,
         ;; or (via expansion) a class instance
-        (constant/parse-constant this form))))
+        (constant/parse-constant-nometa this form))))
 
   (with-bindings* [_ bindings]
     (ScopeImpl. expr-factory resolver bindings)))

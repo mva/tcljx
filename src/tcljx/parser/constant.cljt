@@ -28,7 +28,7 @@
 ;;; Note: This function caters for a superset of the form types that
 ;;; are produced by the reader.  It additionally accepts common values
 ;;; that may be injected via macros, like Class or Byte.
-(defn parse-constant ^Expr [^Scope scope form]
+(defn parse-constant-nometa ^Expr [^Scope scope form]
   ;; pre: (not (instance? IMeta form))
   (let [ef (.expr-factory scope)]
     (cond

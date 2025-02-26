@@ -9,10 +9,10 @@
   (:require
    (tcljx.alpha textflow__pp-test ptest__align-test ptest-test)
    (tcljx.parser reader-test namespace-test error-test redirection-test)
-   (tcljx.classgen bootstrap-test invoke-test
-                   const-test )
+   (tcljx.classgen bootstrap-test invoke-test unreachable-test
+                   const-test conv-test)
    
-   (tcljx #_conv-test #_prim-conv-test #_dot-form-test #_new-test #_arith-test
+   (tcljx #_prim-conv-test #_dot-form-test #_new-test #_arith-test
           #_let-test #_quote-test #_meta-test #_str-test #_bits-test #_switch-test #_cond-test
           #_try-test #_array-test #_loop-test #_logic-test #_clone-test #_xcmp-test
           #_unboxing-test #_boxing-test #_fn-member-test
@@ -39,9 +39,10 @@
     
     tcljx.classgen.bootstrap-test
     tcljx.classgen.invoke-test
+    tcljx.classgen.unreachable-test
     tcljx.classgen.const-test
+    tcljx.classgen.conv-test
     
-    #_tcljx.conv-test
     #_tcljx.prim-conv-test
     #_tcljx.dot-form-test
     #_tcljx.new-test

@@ -7,117 +7,161 @@
    (tcljx.data.type Wrapper)
    (tcljx.data.model CodeEmitter)
    (java.lang.classfile CodeBuilder TypeKind)
-   (java.lang.constant MethodTypeDesc)))
+   (java.lang.constant MethodTypeDesc ConstantDesc ConstantDescs)))
 
-;;; Emit instruction to `xb` and adapt the stack operand it produces
-;;; to `requested-type`.  Returns nil if the instruction returns
-;;; control to the invoking method, and `xb` if execution continues in
-;;; this method.
-(defn opnd ^CodeBuilder [^CodeBuilder xb ^int line ^Class requested-type
-                         ^CodeEmitter ce]
-  (letfn [(return-from-method ^CodeBuilder [^CodeBuilder xb ^Class opnd-type]
-            (.return_ xb (TypeKind/from opnd-type))
-            nil)
-          (pop-operand ^CodeBuilder [^CodeBuilder xb ^Class opnd-type]
-            ;; pre: `opnd-type` is not Void/TYPE
-            (if (or (identical? Long/TYPE opnd-type)
-                    (identical? Double/TYPE opnd-type))
-              (-> xb .pop2)
-              (-> xb .pop)))
+;; Type used for throw & return instructions, and more generally for
+;; any instruction sequence known to return from the current method.
+;; `CodeEmitter.emit-insn*` must only report back this special value
+;; if there is *no* way for the code sequence to complete normally.
+(def ^Class leaving nil)
+
+;; True if an instruction may(!) complete normally.
+(def may-complete? some?) 
+
+(letfn [(return-from-method? ^boolean [^CodeBuilder xb ^Class on-stack-type]
+          (when (some? on-stack-type)
+            (.return_ xb (TypeKind/from on-stack-type))
+            false))
+
+        (pop-operand ^boolean [^CodeBuilder xb ^Class on-stack-type]
+          ;; pre: `on-stack-type` is not Void/TYPE
+          (if (or (identical? Long/TYPE on-stack-type)
+                  (identical? Double/TYPE on-stack-type))
+            (-> xb .pop2)
+            (-> xb .pop))
+          true)
+
+        (unbox-reference ^void [^CodeBuilder xb ^int line
+                                ^Class requested-type ^Class on-stack-type]
+          ;; pre: (.isPrimitive requested-type)
+          (let [box-type (.class-reference (type/of requested-type))
+                mtd (MethodTypeDesc/of (reflect/describe-class requested-type))
+                mnm (str (.getSimpleName requested-type) "Value")]
+            (if (type/same? Number on-stack-type) ;not instanceof test!
+              ;; type conversion from Number to primitive type
+              ;; FIXME... does conversion via Number.xxxValue() make
+              ;; RT.longCast(Object) etc. redundant, at least as far
+              ;; as tcljx is concerned?
+              (-> (.lineNumber xb line)
+                  (.invokevirtual ConstantDescs/CD_Number mnm mtd))
+              ;; type cast from box type to primitive type
+              (do (when-not (.isAssignableFrom box-type on-stack-type)
+                    (cast-from-reference xb line box-type on-stack-type))
+                  (-> (.lineNumber xb line)
+                      (.invokevirtual (reflect/describe-class box-type) mnm
+                                      mtd))))))
+        (cast-from-reference ^void [^CodeBuilder xb ^int line
+                                    ^Class requested-type ^Class on-stack-type]
+          ;; pre: `on-stack-type` is reference type
+          ;; pre: `on-stack-type` is not Void/TYPE
+          ;; pre: `requested-type` is not void
+          (cond
+            (.isPrimitive requested-type)
+            (unbox-reference xb line requested-type on-stack-type)
+
+            (.isAssignableFrom requested-type on-stack-type)
+            nil
+                
+            :else
+            (-> (.lineNumber xb line)
+                (.checkcast (reflect/describe-class requested-type)))))
+
+        (box-primitive ^void [^CodeBuilder xb ^Class requested-type
+                              ^Class on-stack-type]
+          ;; pre: (.isPrimitive on-stack-type) but it is not void
+          (let [box-type (.class-reference (type/of on-stack-type))
+                cd-box (reflect/describe-class box-type)
+                mtd (MethodTypeDesc/of cd-box
+                                       (reflect/describe-class on-stack-type))]
+            (.invokestatic xb cd-box "valueOf" mtd)
+            ;; there should be no scenario where the additonal cast
+            ;; fails, so drop the line number for now
+            (cast-from-reference xb cfg/no-line-number requested-type box-type)))
+        (convert-from-primitive ^void [^CodeBuilder xb ^Class requested-type
+                                       ^Class on-stack-type]
+          ;; pre: `on-stack-type` is primitive type including void
+          ;; pre: `requested-type` is not void
+          (cond
+            (.isPrimitive requested-type)
+            (classfile/accept-> xb (.convert-from (type/of requested-type))
+                                (type/of on-stack-type))
+            ;; here holds: requested type is reference
+                
+            (identical? Void/TYPE on-stack-type)
+            (-> xb .aconst_null)
+                
+            :else
+            (box-primitive xb requested-type on-stack-type)))
+
+        ;; Emits instruction to `xb` and adapts the operand stack
+        ;; entry it produces to `requested-type`.  Returns false if
+        ;; the instruction is known to return from the current method,
+        ;; and true otherwise.  Note: The true case "instruction may
+        ;; complete normally" is only an approximation, because this
+        ;; is not known with certainty across instances of
+        ;; CodeBuilder.block().
+        (adapt-stack? ^boolean [^CodeBuilder xb ^int line
+                                ^Class requested-type ^Class on-stack-type]
+          ;; pre: (may-complete? requested-type)
+          (cond
+            (not (may-complete? on-stack-type))
+            false
+            
+            (identical? on-stack-type requested-type)
+            true
+            
+            (identical? Void/TYPE requested-type)
+            (pop-operand xb on-stack-type)
+            
+            ;; here holds: this function leaves an operand on the stack
+            :else (do (if (.isPrimitive on-stack-type)
+                        (convert-from-primitive xb requested-type
+                                                on-stack-type)
+                        (cast-from-reference xb line requested-type
+                                             on-stack-type))
+                      true)))
+
+        (emit-number? ^boolean [^CodeBuilder xb ^Class requested-type
+                                ^Number value]
+          (.loadConstant xb (type/convert-from-constant requested-type value))
+          true)]
+  
+  (defn insn? ^boolean [^CodeBuilder xb ^int line ^Class requested-type
+                        ^CodeEmitter ce]
+    (if (may-complete? requested-type)
+      (or (and (model/ce-const? ce)
+               (let [value (model/ce-const-value ce)]
+                 (if (model/null? value)
+                   (do (assert (not (.isPrimitive requested-type)))
+                       (.aconst_null xb)
+                       true)
+                   (and (instance? Number value)
+                        (.isPrimitive requested-type)
+                        (emit-number? xb requested-type value)))))
           
-          (unbox-reference ^CodeBuilder [^CodeBuilder xb
-                                         ^Class requested-type
-                                         ^Class opnd-type]
-            ;; pre: (.isPrimitive requested-type)
-            (let [box-type (.class-reference (type/of requested-type))
-                  mtd (MethodTypeDesc/of (reflect/describe-class requested-type))]
-              (-> (cast-from-reference xb box-type opnd-type)
-                  (.lineNumber line)
-                  (.invokevirtual (reflect/describe-class box-type)
-                                  (str (.getSimpleName requested-type) "Value")
-                                  mtd))))
-          (cast-from-reference ^CodeBuilder [^CodeBuilder xb
-                                             ^Class requested-type
-                                             ^Class opnd-type]
-            ;; pre: `opnd-type` is reference type
-            ;; pre: `opnd-type` is not Void/TYPE
-            ;; pre: `requested-type` is not void
-            (cond
-              (.isPrimitive requested-type)
-              (unbox-reference xb requested-type opnd-type)
+          (adapt-stack? xb line requested-type
+                        (.emit-insn* ce xb line requested-type)))
+      
+      (return-from-method? xb (.emit-insn* ce xb line leaving)))))
 
-              (or (.isAssignableFrom requested-type opnd-type)
-                  (model/const-null? ce))
-              xb
-              
-              :else (-> (.lineNumber xb line)
-                        (.checkcast (reflect/describe-class requested-type)))))
-
-          (box-primitive ^CodeBuilder [^CodeBuilder xb
-                                       ^Class requested-type
-                                       ^Class opnd-type]
-            ;; pre: (.isPrimitive opnd-type) but it is not void
-            (let [box-type (.class-reference (type/of opnd-type))
-                  cd-box (reflect/describe-class box-type)
-                  mtd (MethodTypeDesc/of cd-box (reflect/describe-class opnd-type))]
-              (-> (.invokestatic xb cd-box "valueOf" mtd)
-                  (cast-from-reference requested-type box-type))))
-          (convert-from-primitive ^CodeBuilder [^CodeBuilder xb
-                                                ^Class requested-type
-                                                ^Class opnd-type]
-            ;; pre: `opnd-type` is primitive type including void
-            ;; pre: `requested-type` is not void
-            (cond
-              (.isPrimitive requested-type)
-              (classfile/accept-> xb (.convert-from (type/of requested-type))
-                                  (type/of opnd-type))
-              ;; here holds: requested type is reference
-              
-              (identical? Void/TYPE opnd-type)
-              (-> xb .aconst_null)
-              
-              :else
-              (box-primitive xb requested-type opnd-type)))]
-    
-    ;; pre: (some? xb)
-    (when-some [on-stack-type (.emit-opnd* ce xb line requested-type)]
-      ;; here holds: (not (type/exits-method? on-stack-type))
-      (cond
-        (identical? on-stack-type requested-type)
-        xb      ;here holds: (not (type/exits-method? requested-type))
-        
-        (type/exits-method? requested-type)
-        (return-from-method xb on-stack-type)
-
-        (identical? Void/TYPE requested-type)
-        (pop-operand xb on-stack-type) ;here `on-stack-type` is not void
-        ;; here holds: this function leaves an operand on the stack
-
-        (.isPrimitive on-stack-type)
-        (convert-from-primitive xb requested-type on-stack-type)
-        
-        :else (cast-from-reference xb requested-type on-stack-type)))))
-(defn method-return ^CodeBuilder [^CodeBuilder xb ^CodeEmitter ce]
-  (opnd xb cfg/no-line-number type/exits-method ce))
-
-(defn opnds-of-type ^CodeBuilder [^CodeBuilder xb ^int line
-                                   ^Class requested-type ^CodeEmitter/1 ces]
-  (let [end (dec (alength ces))]
-    (loop [i 0]
-      (let [ce (aget ces i)]
-        (if (< i end)
-          (when (opnd xb line Void/TYPE ce)
-            (recur (inc i)))
-          (opnd xb line requested-type ce))))))
-
-(defn typed-opnds
-  (^CodeBuilder [^CodeBuilder xb ^int line ^Class/1 requested-types
-                 ^CodeEmitter/1 ces]
-   (typed-opnds xb line requested-types ces 0 (alength requested-types)))
-  (^CodeBuilder [^CodeBuilder xb ^int line ^Class/1 requested-types
-                 ^CodeEmitter/1 ces ^int start ^int end]
+(defn insns?
+  (^boolean [^CodeBuilder xb ^int line ^Class requested-type
+             ^CodeEmitter/1 ces]
+   (insns? xb line requested-type ces 0 (alength ces)))
+  (^boolean [^CodeBuilder xb ^int line ^Class requested-type
+             ^CodeEmitter/1 ces ^int start ^int end]
    (loop [i start]
-     (if (< i end)
-       (when (opnd xb line (aget requested-types i) (aget ces i))
-         (recur (inc i)))
-       xb))))
+     (or (>= i end)
+         (and (insn? xb line requested-type (aget ces i))
+              (recur (inc i)))))))
+
+(defn typed-insns?
+  (^boolean [^CodeBuilder xb ^int line ^Class/1 requested-types
+             ^CodeEmitter/1 ces]
+   (typed-insns? xb line requested-types ces 0 (alength requested-types)))
+  (^boolean [^CodeBuilder xb ^int line ^Class/1 requested-types
+             ^CodeEmitter/1 ces ^int start ^int end]
+   (loop [i start]
+     (or (>= i end)
+         (and (insn? xb line (aget requested-types i) (aget ces i))
+              (recur (inc i)))))))

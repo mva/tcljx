@@ -23,6 +23,8 @@
 (def ^:private MethodHandle ConstantDescs/CD_MethodHandle)
 (def ^:private MethodHandleArray (.arrayType MethodHandle))
 (def ^:private Lookup ConstantDescs/CD_MethodHandles_Lookup)
+(def ^:private MethodType ConstantDescs/CD_MethodType)
+(def ^:private CallSite ConstantDescs/CD_CallSite)
 
 (def ^:private Object ConstantDescs/CD_Object)
 (def ^:private ObjectArray (.arrayType Object))
@@ -43,6 +45,10 @@
   `(MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
                               ~owner ~name (mtd ~rtype ~ptypev)))
 
+(def bsm-concat ;note: "makeConcat" delegates to ""makeConcatWithConstants"
+  (mhd-static [(ClassDesc/of "java.lang.invoke.StringConcatFactory")
+               "makeConcatWithConstants"]
+              CallSite [Lookup String MethodType String ObjectArray]))
 (def bsm-quote (mhd-static [BootstrapMethod "quote"] Object
                            [Lookup String Class ObjectArray]))
 (def bsm-static-fn (mhd-static [BootstrapMethod "createStaticFn"] StaticFn

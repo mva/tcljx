@@ -5,7 +5,7 @@
    (tcljx.parser [syntax :as syntax] [context :as context]
                  [interop :as interop]))
   (:import
-   (tcljx.data.model Expr Exprs ExprFactory ArityType FnLiteral Scope Resolver)
+   (tcljx.data.model Expr Exprs ExprFactory ArityType Scope Resolver)
    (java.lang.constant MethodHandleDesc ConstantDescs)))
 
 #_(definterface ArityMethod
@@ -22,13 +22,6 @@
                           ^DirectMethodHandleDesc load-mh-impl]
   java.lang.Record
   ArityMethod)
-
-(deftype FnLiteralImpl [^String mangled-name
-                        ^ArityType/1 arity-types
-                        ^Exprs arity-bodies
-                        ^MethodHandleDesc/1 arity-redirections]
-  java.lang.Record
-  FnLiteral)
 
 ;;; ------------------------------------------------------------------------
 
@@ -86,19 +79,12 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def mk-fn-literal* FnLiteralImpl/new)
-(defn mk-fn-literal ^FnLiteral [^ExprFactory ef ^String mangled-name
-                                ^ArityType at ^Expr body
-                                ^MethodHandleDesc redirection]
-  (mk-fn-literal* mangled-name
-                  (doto (new ArityType/1 1) (aset 0 at))
-                  (doto (.new-exprs ef 1) (.set 0 body))
-                  (doto (new MethodHandleDesc/1 1) (aset 0 redirection))))
-
 (defn parse-arity-body ^Expr [^Scope scope ^seq error-context
-                              ^Exprs param-bindings ^seq body]
+                              ^String/1 param-names ^Exprs param-bindings
+                              ^seq body]
   (.progn-expr (.expr-factory scope) param-bindings
-               (-> (context/with-local-bindings scope param-bindings)
+               (-> (context/with-local-bindings scope
+                     param-names param-bindings)
                    (context/parse-progn error-context body))))
 
 (defn parse-fn* ^Expr [^Scope scope [_ fn-nm paramv & body :as ^seq form]]
@@ -106,10 +92,14 @@
         mangled-nm (context/pick-unique-name scope fn-nm)
         at (interop/parse-arity-type (.resolver scope) paramv form)
         pbnds (model/parameter-bindings scope at)
-        code (parse-arity-body scope form pbnds body)
+        code (parse-arity-body scope form (.parameter-names at) pbnds body)
         redir (when (nil? (next body))
                 (let [form (first body)]
                   (when (and (and  (seq? form)) (nil? (interop/tag-of form)))
                     (redirection (.resolver scope) at form))))
         ef (.expr-factory scope)]
-    (.new-function ef (mk-fn-literal ef mangled-nm at code redir))))
+    (.new-function ef
+                   mangled-nm
+                   (doto (new ArityType/1 1) (aset 0 at))
+                   (doto (.new-exprs ef 1) (.set 0 code))
+                   (doto (new MethodHandleDesc/1 1) (aset 0 redir)))))

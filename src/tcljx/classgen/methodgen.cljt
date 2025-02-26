@@ -1,12 +1,21 @@
 (ns tcljx.classgen.methodgen
   (:require
    (tcljx.data [model :as model])
-   (tcljx.classgen [runtime :as rt]))
+   (tcljx.classgen [runtime :as rt] [insn :as insn]))
   (:import
-   (tcljx.data.model ArityType FnLiteral)
+   (tcljx.data.model Invocable ArityType)
+   (tcljx.classgen.insn Insns)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDesc DirectMethodHandleDesc DynamicConstantDesc
                        ConstantDescs DirectMethodHandleDesc$Kind)))
+
+(deftype FnLiteral [^String mangled-name
+                    ^ArityType/1 arity-types
+                    ^Insns arity-bodies
+                    ^MethodHandleDesc/1 arity-redirections]
+  java.lang.Record
+  Invocable)
+
 
 (defn static-arity-mhd
   (^DirectMethodHandleDesc [^String method-name ^ArityType at]

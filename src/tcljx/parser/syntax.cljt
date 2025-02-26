@@ -44,10 +44,16 @@
 (defn simple-symbol-str ^String [form]
   (name (simple-symbol form)))
 
-(defn vector ^vector [form]
-  (if (vector? form)
-    form
-    (throw (info "expect vector" form))))
+(defn vector
+  (^vector [form]
+   (if (vector? form)
+     form
+     (throw (info "expect vector" form))))
+  (^vector [form ^boolean even?]
+   (let [x (vector form)]
+     (if (and even? (odd? (count x)))
+       (throw (info "expect vector with even number of elements" form))
+       x))))
 
 (defn map ^map [form]
   (if (map? form)

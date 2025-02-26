@@ -112,8 +112,9 @@
   java.lang.Record)
 
 (defn- class-file-of ^ClassFile [^ClassHierarchyResolver dyn-chr]
+  ;; *Not* setting KEEP_DEAD_CODE, because the code generator cannot
+  ;; *track unreachable code across instances of CodeBuilder.block().
   (ClassFile/of
-   java.lang.classfile.ClassFile$DeadCodeOption/KEEP_DEAD_CODE
    (java.lang.classfile.ClassFile$ClassHierarchyResolverOption/of dyn-chr)))
 
 (defn- with-version ^ClassBuilder [^ClassBuilder cb]

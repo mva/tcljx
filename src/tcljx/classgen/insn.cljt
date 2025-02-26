@@ -1,0 +1,222 @@
+(ns tcljx.classgen.insn
+  (:require
+   (tcljx.data [config :as cfg] [wrong :as wrong] [type :as type]
+               [model :as model] [reflect :as reflect] [resolve :as resolve])
+   (tcljx.classgen [emit :as emit]))
+  (:import
+   (tcljx.data.model Expr Exprs CodeEmitter Entity)
+   (tcljx.data.resolve Match)
+   (java.lang.classfile CodeBuilder TypeKind)
+   (java.lang.reflect #_Member Constructor #_Field)
+   (java.util Arrays)))
+
+;;; The code generator's implementation of Expr.  The class in
+;;; `expr-type` is the Clojure(!) type of the expression after parsing
+;;; it in isolation.  Phrased differently, it is the expression's own
+;;; idea of its type in terms of Clojure's type system, disregarding
+;;; the context in which it appears.  By design, an Insn instance does
+;;; not expose the internal structure of a non-constant expression.
+;;; Only constants are discoverable, enabling bottom up constant
+;;; folding while building the expression tree.
+;;;
+;;; Having an opaque expression tree is at odds with the desire to
+;;; generate only reachable code in the emit phase.  To alleviate this
+;;; conflict, every expression that has no completing code path
+;;; can (but does not have to) report its type as `leaving`.
+(deftype Insn [^CodeEmitter emitter
+               ^Class expr-type]
+  ;; FIXME... Valhalla value?
+  java.lang.Record
+  Expr
+  (entity [_]
+    (when (instance? Entity emitter)
+      emitter)))
+
+(def mk-insn Insn/new)
+(def insn-empty (mk-insn (^CodeEmitter fn [xb line requested-type] Void/TYPE)
+                          type/polymorphic))
+
+;;; Compilation centers around arrays of types and arrays of code
+;;; emitters.  For a sequence of forms, the parser vie ExprFactory
+;;; creates an instance of Insns: an array of code emitters and the
+;;; array with the emitters' (context free) expression types.  Using
+;;; method invocation as a generic example, the expression types are
+;;; then matched against JVM level parameter types to which they will
+;;; be passed.  This is the second kind of array of types, the
+;;; requested JVM level operand types.  When producing the bytecode
+;;; instructions, each of the emitters is called and, if necessary,
+;;; its operand type is adjusted to match the requested operand type.
+(deftype Insns [^CodeEmitter/1 emitters ^Class/1 expr-types]
+  ;; FIXME... Valhalla value?
+  java.lang.Record
+  Exprs
+  (length [_]
+    (alength emitters))
+  (empty? [_]
+    (zero? (alength emitters)))
+  (get [_ i]
+    (mk-insn (aget emitters i) (aget expr-types i)))
+  (set [_ i x]
+    (aset emitters i (.emitter ^Insn x))
+    (aset expr-types i (.expr-type ^Insn x))
+    x)
+  (entity [_ i]
+    (let [ce (aget emitters i)]
+      (when (instance? Entity ce)
+        ce))))
+
+(defn mk-insns* ^Insns [^int n]
+  (Insns. (new CodeEmitter/1 n) (new Class/1 n)))
+(def empty-insns (mk-insns* 0))
+
+(defn insns-of
+  (^Insns []
+   empty-insns)
+  (^Insns [^Insn x0]
+   (doto (mk-insns* 1) (.set 0 x0)))
+  (^Insns [^Insn x0 ^Insn x1]
+   (doto (mk-insns* 2) (.set 0 x0) (.set 1 x1))))
+(defn insns-of* ^Insns [xs]
+  (let [n (count xs)]
+    (case n
+      0 (insns-of)
+      1 (insns-of (first xs))
+      #_else (let [insns (mk-insns* n)]
+               (loop [[x & xr] xs, i 0]
+                 (.set insns i x)
+                 (if (some? xr)
+                   (recur xr (inc i))
+                   insns))))))
+
+(defn copy-of-insns
+  (^Insns [^Insns insns]
+   (copy-of-insns insns (.length insns)))
+  (^Insns [^Insns insns ^int new-length]
+   (if (zero? new-length)
+     empty-insns
+     (Insns. (Arrays/copyOf (.emitters insns) new-length)
+             (Arrays/copyOf (.expr-types insns) new-length)))))
+
+(defn emitter
+  (^CodeEmitter [^Insn insn]
+   (.emitter insn))
+  (^CodeEmitter [^Insns insns ^int i]
+   (aget (.emitters insns) i)))
+
+(defn expr-type
+  (^Class [^Insn insn]
+   (.expr-type insn))
+  (^Class [^Insns insns ^int i]
+   (aget (.expr-types insns) i)))
+(defn expr-types ^seq [^Insns insns] ;for error messages
+  (map (partial expr-type insns) (range (.length insns))))
+
+(defn logical-type
+  (^Class [^Insn insn]
+   (type/expr-to-logical (expr-type insn)))
+  (^Class [^Insns insns ^int i]
+   (type/expr-to-logical (expr-type insns i))))
+
+;;; ------------------------------------------------------------------------
+
+(defn progn ^Insn [^Insns insns ^Insn insn-n]
+  (if (identical? empty-insns insns)
+    insn-n
+    (-> (^CodeEmitter fn [xb line requested-type]
+         (when (emit/insns? xb line Void/TYPE (.emitters insns))
+           (when (emit/insn? xb line requested-type (.emitter insn-n))
+             requested-type)))
+        (mk-insn (expr-type insn-n)))))
+
+;; Note: Casting from primitive numeric or reference Number to a
+;; primitive numeric type is a type conversion.
+(defn cast-into
+  (^Insn [^Class target-type ^Insn arg]
+   (if (identical? target-type (.expr-type arg))
+     arg
+     (-> (^CodeEmitter fn [xb line requested-type]
+          (when (emit/insn? xb line target-type (.emitter ^Insn arg))
+            target-type))
+         (mk-insn target-type))))
+  (^Insn [^Class target-type ^Insns args ^int i]
+   (cast-into target-type (.get args i))))
+
+(defn cast-to-logical
+  (^Insn [^Insn insn]
+   (cast-into (type/expr-to-logical (expr-type insn)) insn))
+  (^Insn [^Insns insns ^int i]
+   (cast-to-logical (.get insns i))))
+
+(defn emit-return ^void [^CodeBuilder xb ^Class return-type ^Insn body]
+  (let [body (cast-into return-type body)]
+    (emit/insn? xb cfg/no-line-number emit/leaving (emitter body))))
+
+;;; ------------------------------------------------------------------------
+
+(defn emit-insn-logical? ^boolean [^CodeBuilder xb ^Insn insn]
+  (emit/insn? xb cfg/no-line-number (logical-type insn) (.emitter insn)))
+
+(defn- emit-new-array ^CodeBuilder [^CodeBuilder xb ^Class component-type
+                                    ^int length]
+  (.loadConstant xb length)
+  (if (.isPrimitive component-type)
+    (.newarray xb (TypeKind/from component-type))
+    (.anewarray xb (reflect/describe-class component-type))))
+
+(defn- emit-array-of? ^boolean [^CodeBuilder xb ^Class component-type
+                                ^CodeEmitter/1 ces ^int start]
+  (let [end (alength ces)
+        component-tk (TypeKind/from component-type)]
+    (emit-new-array xb component-type (- end start))
+    (loop [i start]
+      (if (< i end)
+        (let [ce (aget ces i)]
+          (-> xb (.dup) (.loadConstant (- i start)))
+          (when (emit/insn? xb cfg/no-line-number component-type ce)
+            (.arrayStore xb component-tk)
+            (recur (inc i))))
+        true))))
+
+(defn invoke-member ^Insn [^Match m ^Insn receiver ^Insns args]
+  (-> (^CodeEmitter fn [xb line requested-type]
+       (letfn [(emit-varargs? ^boolean [^CodeBuilder xb ^Class varargs-tp
+                                        ^int start]
+                 (if (= (.invocation-mode m) resolve/invoke-tail-into-array)
+                   (emit-array-of? xb (.getComponentType varargs-tp)
+                                   (.emitters args) start)
+                   (assert false)))]
+         (let [fixed (resolve/end-of-fixed-parameters m)
+               varargs-tp (resolve/varargs-parameter-type m)]
+           ;; new-dup-dance when creating a new instance of `owner`
+           (when (instance? Constructor (.member m))
+             (-> xb (.new_ (reflect/describe-class (.owner m))) (.dup)))
+           ;; instance field or method require receiver argument
+           (when (or (nil? receiver) (emit-insn-logical? xb receiver))
+             ;; all fixed (i.e. non-vararg) arguments
+             (when (emit/typed-insns? xb line (.parameter-types m)
+                                      (.emitters args) 0 fixed)
+               ;; optionally: all vararg arguments
+               (when (or (nil? varargs-tp) (emit-varargs? xb varargs-tp fixed))
+                 ;; the actual invoke instruction
+                 (-> (.lineNumber xb line)
+                     (reflect/invoke-member (.owner m) (.member m)))
+                 (.return-type m)))))))
+      (mk-insn (.return-type m))))
+
+;;; ------------------------------------------------------------------------
+
+;;; FIXME... drop this after all old unit tests have been ported over;
+;;; interesting experiment to see if it works, but probably of little
+;;; or even no practical value.
+(defmacro with-void-empty-if-requested [requested-type & body]
+  (assert (symbol? requested-type))
+  `(if (identical? Void/TYPE ~requested-type)
+     Void/TYPE
+     (do ~@body)))
+(defmacro with-void-args-if-requested [requested-type args & body]
+  (assert (symbol? requested-type))
+  `(if (identical? Void/TYPE ~requested-type)
+     (when (emit/insns? ~'xb ~'line Void/TYPE (.emitters ~args))
+       Void/TYPE)
+     (do ~@body)))
+

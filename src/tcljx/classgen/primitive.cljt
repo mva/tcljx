@@ -1,0 +1,260 @@
+(ns tcljx.classgen.primitive
+  (:require
+   (tcljx.data
+    [config :as cfg] [type :as type] [resolve :as resolve] [reflect :as reflect]
+    [model :as model] [wrong :as wrong])
+   (tcljx.classgen
+    [emit :as emit] [insn :as insn] [entity :as entity] [runtime :as rt]
+    [constgen :as constgen] [condgen :as condgen])
+   (tinyclj [string :as str]))
+  (:import
+   (tcljx.data.type Wrapper)
+   (tcljx.data.model Expr Exprs CodeEmitter Invocable)
+   (tcljx.classgen.insn Insn Insns)
+   (java.lang.classfile Opcode CodeBuilder)
+   (java.lang.classfile.constantpool ConstantPoolBuilder)
+   (java.lang.classfile.instruction OperatorInstruction)
+   (java.lang.constant ConstantDescs MethodTypeDesc)))
+
+(defn take-args ^Insns [^seq form ^Exprs xs ^int n]
+  (when-not (= (.length xs) n)
+    (throw (wrong/wr-info (str (wrong/q (first form)) " takes " n
+                               " argument" (when-not (= 1 n) "s")
+                               (wrong/got-int (.length xs))))))
+  xs)
+(defn take-arg ^Insn [^seq form ^Exprs xs]
+  (.get (take-args form xs 1) 0))
+
+
+(letfn [(fold-cast-from ^Expr [^Class target-type c]
+          ;; pre: `target-type` is primitive
+          ;; pre: expression type of constant `c` is primitive
+          (if (type/polymorphic? target-type)
+            insn/insn-empty             ;casting some constant to void
+            (let [c' (type/convert-from-constant target-type c)]
+              (entity/new-constant target-type c'))))
+        (convert-to-primitive ^Expr [^Class target-type ^Insn arg]
+          (let [arg-type (insn/expr-type arg)]
+            (cond
+              (type/same? target-type arg-type)
+              arg         ;elide cast from primitive to same primitive
+              
+              (.isPrimitive arg-type)
+              (or (when-some [c (model/const-value arg)]
+                    (fold-cast-from target-type c))
+                  (insn/cast-into target-type arg))
+              ;; here holds: `arg-type` is a reference type
+              
+              (type/numeric? target-type) ;type conversion path of `cast-into`
+              (let [arg' (cond->> arg
+                           (not (.isAssignableFrom Number arg-type))
+                           (insn/cast-into Number))]
+                (insn/cast-into target-type arg'))
+              
+              ;; here holds: `target-type` is char, boolean, or void
+              :else (insn/cast-into target-type arg))))]
+  
+  (defn mk-convert-to-primitive ^Invocable [^Class target-type]
+    (^Invocable fn [form args]
+     (convert-to-primitive target-type (take-arg form args))))
+
+  (def convert-to-logical-truth
+    (^Invocable fn [form args]
+     (condgen/logical-truth (take-arg form args))))
+
+  (def convert-to-object
+    (^Invocable fn [form args]
+     (let [arg (take-arg form args)
+           arg-tp (insn/expr-type arg)]
+       (if (.isPrimitive arg-tp)
+         (insn/cast-into (.class-reference (type/of arg-tp)) arg)
+         arg)))))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private op-instr (new OperatorInstruction/1 (- #_iinc 132 #_iadd 96)))
+(let [opcodes (Opcode/values)]
+  (dotimes [i (alength opcodes)]
+    (let [opcode (aget opcodes i)]
+      (when (and (<= #_iadd 96 (.bytecode opcode))
+                 (< (.bytecode opcode) #_iinc 132))
+        (aset op-instr (- i #_iadd 96) (OperatorInstruction/of opcode))))))
+
+(defn- with-bytecode ^CodeBuilder [^CodeBuilder xb ^int bytecode]
+  (.with xb (aget op-instr (- bytecode #_iadd 96))))
+
+(defn- operator ^Insn [^Class op-type ^int bytecode ^Insns args]
+  (let [ces (.emitters args)]
+    (-> (^CodeEmitter fn [xb line requested-type]
+         (insn/with-void-args-if-requested requested-type args
+           (if (and (<= #_isub 100 bytecode #_dsub 103)
+                    (model/ce-zero? (aget ces 0)))
+             (when (emit/insn? xb line op-type (aget ces 1))
+               (with-bytecode xb (+ bytecode 16)) ;XSUB to XNEG
+               op-type)
+             (when (emit/insns? xb line op-type ces)
+               (when (<= #_idiv 108 bytecode #_drem 115)
+                 ;; [il]div and [il]rem can raise a division by zero
+                 ;; exception, so provide a line number for div & rem
+                 (.lineNumber xb line))
+               (with-bytecode xb bytecode)
+               op-type))))
+        (insn/mk-insn op-type))))
+
+(letfn [(opcode-delta ^int [^Class tp]
+          (condp identical? tp
+            Integer/TYPE 0
+            Long/TYPE 1
+            Float/TYPE 2
+            Double/TYPE 3))
+        
+        (const-fold-int ^int [^Opcode base-opc ^Number c0 ^Number c1]
+          (let [a0 (.intValue c0), a1 (.intValue c1)]
+            (case (.bytecode base-opc)
+              #_iadd 96 (+ a0 a1)
+              #_isub 100 (- a0 a1)
+              #_imul 104 (* a0 a1)
+              #_idiv 108 (quot a0 a1)
+              #_irem 112 (rem a0 a1))))
+        (const-fold ^Number [^int opcd ^Opcode base-opc ^Number c0 ^Number c1]
+          (case opcd
+            #_int 0 (object (const-fold-int base-opc c0 c1))
+            ;; #_long 1 (const-fold-long base-opc c0 c1)
+            ;; #_float 2 (const-fold-float base-opc c0 c1)
+            ;; #_double 3 (const-fold-double base-opc c0 c1)
+            ))
+        (binary-op ^Expr [^Class op-type ^Opcode base-opc ^Insns args]
+          (let [opcd (opcode-delta op-type)]
+            (if (and (model/const? args 0) (model/const? args 1))
+              ;; note: XSUB -> XNEG conversion is currently handled by
+              ;; `operator`
+              (entity/new-constant op-type
+                                   (const-fold opcd base-opc
+                                               (model/const-value args 0)
+                                               (model/const-value args 1)))
+              (operator op-type (+ (.bytecode base-opc) opcd) args))))]
+  
+  (defn mk-binary-numeric ^Invocable [^Opcode base-opc]
+    (reify Invocable
+      (invoke* [_ form args]
+        (let [args (take-args form args 2)
+              warg0 (type/of (insn/expr-type args 0))
+              warg1 (type/of (insn/expr-type args 1))]
+          (cond
+            (type/widens-from-numeric? warg0 warg1)
+            (binary-op (.class-computational warg0) base-opc args)
+            (type/widens-from-numeric? warg1 warg0)
+            (binary-op (.class-computational warg1) base-opc args)
+            :else (throw (-> (str (wrong/q (first form))
+                                  " expects two numeric arguments"
+                                  (wrong/got-types (insn/expr-types args)))
+                             (wrong/wr-info)))))))))
+
+;;; ------------------------------------------------------------------------
+
+(defn- mtd-of ^MethodTypeDesc [^Class return-type ^Class/1 parameter-types]
+  (MethodTypeDesc/of (reflect/describe-class return-type)
+                     (reflect/describe-class* parameter-types)))
+
+(def ^:private dyn-mark "\u0001")
+(def ^:private const-mark "\u0002")
+(def ^:private re-marks #"[\u0001\u0002]") ;note: hash of Pattern is not stable
+(def ^:private cd-Objects (reflect/describe-class java.util.Objects))
+(def ^:private mtd-String-Object-String
+  (MethodTypeDesc/of ConstantDescs/CD_String
+                     ConstantDescs/CD_Object ConstantDescs/CD_String))
+(letfn [(prepare-concat-args ^Insns [^Insns args]
+          ;; arguments are converted to their logical types and, if
+          ;; they are of reference type, are then passed through
+          ;; a "nil to empty string" filter
+          (let [args' (insn/copy-of-insns args)]
+            (loop [i (dec (.length args'))]
+              (when-not (neg? i)
+                (let [insn (insn/cast-to-logical args' i)
+                      tp (insn/expr-type insn)]
+                  (.set args' i
+                        (if (or (.isPrimitive tp) (model/const? insn))
+                          insn ;note: *all* constants are passed through
+                          (-> (^CodeEmitter fn [xb line _]
+                               (when (emit/insn? xb line tp (.emitter insn))
+                                 (-> (.ldc xb "")
+                                     (.invokestatic cd-Objects "toString"
+                                                    mtd-String-Object-String))
+                                 String))
+                              (insn/mk-insn String))))
+                  (recur (dec i)))))
+            args'))
+        (consts-to-lces ^java.util.List [^ConstantPoolBuilder cpb insns]
+          (for [^Insn insn insns]
+            (constgen/loadable-entry cpb (constgen/typed-constant-value insn))))
+        (insn-str ^Insn [^String rstr ^Insns inv-args ^seq const-args]
+          (let [recipe (entity/new-constant rstr)]
+            (cond
+              (and (nil? const-args) (.empty? inv-args))
+              recipe
+               
+              (and (= rstr dyn-mark)
+                   (type/same? String (insn/expr-type inv-args 0)))
+              (.get inv-args 0)   ;output of mhd-Objects-toString call
+               
+              (= rstr const-mark)
+              (first const-args)
+
+              :else
+              (-> (^CodeEmitter fn [xb line requested-type]
+                   (let [cpb (.constantPool xb)
+                         ptypes (.expr-types inv-args) ;only logical types
+                         mhe (.methodHandleEntry cpb rt/bsm-concat)
+                         bsm (.bsmEntry cpb mhe (->> (cons recipe const-args)
+                                                     (consts-to-lces cpb)))
+                         nat (.nameAndTypeEntry cpb ConstantDescs/DEFAULT_NAME
+                                                (mtd-of String ptypes))]
+                     (when (emit/typed-insns? xb line ptypes
+                                              (.emitters inv-args))
+                       (-> (.lineNumber xb line)
+                           (.invokedynamic (.invokeDynamicEntry cpb bsm nat)))
+                       String)))
+                  (insn/mk-insn String)))))]
+  
+  (def string-concat
+    (^Invocable fn [form args]
+     (let [args (prepare-concat-args args)]
+       (loop [rparts nil, dyn-args nil, const-args nil, i 0]
+         (if (= i (.length args))
+           (insn-str (str/join "" (reverse rparts))
+                     (insn/insns-of* (reverse dyn-args))
+                     (reverse const-args))
+           
+           (let [x ^Insn (.get args i)]
+             (if (model/const? x)
+               (let [c (constgen/typed-constant-value x)
+                     s (if (seq? c)
+                         (str (list* c)) ;wrap LazySeq
+                         (str c))
+                     x-str (entity/new-constant s)]
+                 (if (re-find re-marks s)
+                   (recur (cons const-mark rparts) dyn-args
+                          (cons x-str const-args) (inc i))
+                   (recur (cons s rparts) dyn-args const-args (inc i))))
+               (recur (cons dyn-mark rparts) (cons x dyn-args)
+                      const-args (inc i))))))))))
+
+;;; ------------------------------------------------------------------------
+
+(def primitive-nmsp-globals
+  (letfn [(assoc-prim ^map [^map acc ^String nm ^Invocable inv]
+            (assoc acc nm (entity/mk-global cfg/primitive-ns-str nm inv)))
+
+          (assoc-conversions ^map [^map acc]
+            (-> (reduce (fn ^map [^map acc ^Class tp]
+                          (let [nm (.getSimpleName tp)]
+                            (assoc-prim acc nm (mk-convert-to-primitive tp))))
+                        acc resolve/jvm-primitive-types)
+                ;; provide Clojure rules for (boolean ...)
+                (assoc-prim "boolean" convert-to-logical-truth)
+                (assoc-prim "object" convert-to-object)))]
+    (-> {}
+        (assoc-conversions)
+        (assoc-prim "+" (mk-binary-numeric Opcode/IADD))
+        (assoc-prim "-" (mk-binary-numeric Opcode/ISUB))
+        (assoc-prim "str" string-concat))))

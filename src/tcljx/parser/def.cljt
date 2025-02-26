@@ -3,12 +3,12 @@
    (tcljx.data [wrong :as wrong] [model :as model])
    (tcljx.parser [syntax :as syntax] [context :as context]))
   (:import
-   (tcljx.data.model Expr Binding Scope)))
+   (tcljx.data.model Expr Binding Global Scope)))
 
 (defn parse-def ^Expr [^Scope scope [_ nm & args]]
-  (letfn [(aliased-def ^Binding [^symbol init]
+  (letfn [(aliased-def ^Global [^symbol init]
             (if-some [bnd (context/lookup scope init)]
-              (when (model/def? bnd)
+              (when (model/global? bnd)
                 bnd)))
           (new-def ^Expr [^String nm ^seq init-forms]
             ;; pre: `init-forms` is nil when empty

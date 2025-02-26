@@ -1,7 +1,8 @@
 (ns tcljx.data.model
   (:require (tcljx.data [config :as cfg] [reflect :as reflect]))
   (:import (java.lang.constant MethodHandleDesc MethodTypeDesc ConstantDescs)
-           (java.util Arrays)))
+           (java.util Arrays))
+  (:refer-clojure :exclude [zero?]))
 
 #_(definterface Type
   )
@@ -19,7 +20,7 @@
 ;;; before its own opcode only if an exception may be raised during
 ;;; the opcode's execution.
 (definterface CodeEmitter
-  (emit-opnd* ^Class [^java.lang.classfile.CodeBuilder xb ^int line
+  (emit-insn* ^Class [^java.lang.classfile.CodeBuilder xb ^int line
                       ^Class requested-type]))
 
 ;;; A named entity on the level of the code generator that exists at
@@ -42,15 +43,17 @@
 ;;; class Insn).  In particular, Expr does not expose the expression's
 ;;; type.
 (definterface Expr         ;FIXME... turn this into an abstract class?
+  (emitter ^CodeEmitter [])
+  
   ;; If this expression is backed by a runtime entity, then return it.
   ;; Otherwise, return nil.
-  (emitter ^CodeEmitter [])
   (entity ^Entity []))
 
 (definterface Exprs
   (length ^int [])
   (empty? ^boolean [])
-  (set ^void [^int i ^Expr x])
+  (get ^Expr [^int i])
+  (set ^Expr [^int i ^Expr x])
   (entity ^Entity [^int i]))
 
 (defn entity
@@ -81,18 +84,27 @@
    (instance? Constant (.entity x)))
   (^boolean [^Exprs xs ^int i]
    (instance? Constant (.entity xs i))))
+
+(defn null? ^boolean [^Object value]
+  (identical? ConstantDescs/NULL value))
+(defn zero? ^boolean [^Object value]
+  (and (instance? Number value) (= (.doubleValue ^Number value) 0.0)))
+(defn ce-const? ^boolean [^CodeEmitter ce]
+  (instance? Constant ce))
+(def ce-const-value Constant/.const-value)
+(defn ce-null? ^boolean [^CodeEmitter ce]
+  (and (ce-const? ce) (null? (ce-const-value ce))))
+(defn ce-zero? ^boolean [^CodeEmitter ce]
+  (and (ce-const? ce) (zero? (ce-const-value ce))))
+
 (defn const-value
   (^Object [^Expr x]                    ;nil if `x` is not a Constant
-   (let [e (.entity x)]
-     (when (instance? Constant e)
-       (.const-value ^Constant e))))
+   (let [ce (.entity x)]
+     (when (ce-const? ce) (ce-const-value ce))))
   (^Object [^Exprs xs ^int i]        ;nil if `xs[i]` is not a Constant
-   (let [e (.entity xs i)]
-     (when (instance? Constant e)
-       (.const-value ^Constant e)))))
-(defn const-null? ^boolean [^CodeEmitter ce]
-  (and (instance? Constant ce)
-       (identical? ConstantDescs/NULL (.const-value ^Constant ce))))
+   (let [ce (.entity xs i)]
+     (when (ce-const? ce) (ce-const-value ce)))))
+
 
 ;;; ------------------------------------------------------------------------
 
@@ -100,25 +112,27 @@
 ;;; entity.  Depending on the context it is used to detect aliasing of
 ;;; one name to another, to identify a macro expansion form, and to
 ;;; produce the bound value of the binding.
-(definterface Binding ;FIXME... change this name once picture becomes clearer
+(definterface Binding
+  ;; FIXME... should init return a CodeEmitter?
   :extends [Entity]
-  (namespace ^String [])                ;non-nil for namespace def
-  (name ^String [])
-  (init ^Expr [])                       ;Binding if this is an alias
+  (bound-to ^CodeEmitter [])            ;Entity if this is an alias
   (bound-value ^Expr []))
 
 (defn binding? ^boolean [^Expr x]
   (instance? Binding (.entity x)))
-(defn def? ^boolean [^Binding bnd]
-  (some? (.namespace bnd)))
 
-(defn binding-name ^symbol [^Binding bnd] ;for error messages
+
+(definterface Global
+  :extends [Binding]
+  (namespace ^String [])                ;not nil
+  (name ^String []))
+
+(defn global-name ^symbol [^Global bnd] ;for error messages
   (symbol (.namespace bnd) (.name bnd)))
 
+(defn global? ^boolean [^Binding bnd]
+  (instance? Global bnd))
 
-(definterface Parameter
-  :extends [Binding]
-  (type ^Class []))
 
 ;;; Description of an arity's signature.  Basically the information
 ;;; encoded in an `fn` parameter vector, with the parameter names
@@ -161,12 +175,15 @@
   (MethodTypeDesc/of (reflect/describe-class (.return-type at))
                      (reflect/describe-class* (.parameter-types at))))
 
-(definterface FnLiteral
+
+(definterface Invocable
   :extends [Entity]
-  (mangled-name ^String [])
-  (arity-types ^ArityType/1 [])
-  (arity-bodies ^Exprs [])
-  (arity-redirections ^MethodHandleDesc/1 []))
+  (invoke* ^Expr [^seq form ^Exprs xs]))
+
+(defn bound-invocable ^Invocable [^Binding bnd]
+  (when-some [bound-to (.bound-to bnd)]
+    (when (instance? Invocable bound-to)
+      bound-to)))
 
 ;;; If `x` is a binding, then return the very first non-aliasing
 ;;; binding that defines its value.  Otherwise, return nil.
@@ -270,13 +287,16 @@
 
 ;;; ------------------------------------------------------------------------
 
+;;; An ExprFactory provides an API to the parser to generate a
+;;; representation of the namespace's entities and their executable
+;;; code.
+;;; 
 ;;; Threading: Confined to a single thread, either one parsing a
 ;;; function or to the thread parsing the non-function parts of a
 ;;; namespace.
 (definterface ExprFactory
   (empty-expr ^Expr [])
   (new-exprs ^Exprs [^int length])
-  (progn-expr ^Expr [^Exprs xs ^Expr x])
   (line-number ^Expr [^Integer line ^Expr x])
 
   ;; Create an expression denoting the constant `value` of type
@@ -293,11 +313,16 @@
   (new-constant ^Expr [^Class expr-type ^Object value])
 
   ;; These methods return a constant expression when possible:
-  (attach-meta-to ^Expr [^Expr opt-meta ^Expr arg])
-  (new-vector ^Expr [^Expr opt-meta ^Exprs args])
-  (new-map ^Expr [^Expr opt-meta ^Exprs args])
-  (new-set ^Expr [^Expr opt-meta ^Exprs args])
-  (new-list ^Expr [^Expr opt-meta ^Exprs args])
+  (attach-meta-to ^Expr [^Expr meta ^Expr arg])
+  (new-vector ^Expr [^Exprs args])
+  (new-map ^Expr [^Exprs args])
+  (new-set ^Expr [^Exprs args])
+  (new-list ^Expr [^Exprs args])
+
+  ;; ### basics
+  
+  (progn-expr ^Expr [^Exprs xs ^Expr x])
+  (invoke ^Expr [^Object form ^Invocable inv ^Exprs args])
   
   ;; ### bindings
 
@@ -308,16 +333,23 @@
   (new-def-alias ^Expr [^NamespaceBuilder nmsp ^String nm ^Binding other])
   (assignment ^Expr [^Binding bnd ^Expr value])
 
-
-  ;; ### functions
   (new-parameter ^Expr [^int param-no ^String name ^Class type])
-
+  (new-local ^Expr [^String name ^Expr init])
+  (block-let ^Expr [^Exprs bindings ^Expr body])
+  
+  ;; ### functions
+  
   ;; Replaces any arity return types `auto-return-marker` with their
   ;; corresponding body's expression type.
-  (new-function ^Expr [^FnLiteral fn-literal])
+  (new-function ^Expr [^String mangled-name
+                       ^ArityType/1 arity-types
+                       ^Exprs arity-bodies
+                       ^MethodHandleDesc/1 arity-redirections])
   
   ;; ### interop
 
+  (type-cast ^Expr [^Class target-type ^Expr arg])
+  
   (invoke-constructor ^Expr [^Class owner ^Exprs args])
   
   ;; Invoke static public method or field `mnm` of class `owner`.
@@ -329,6 +361,8 @@
   (invoke-virtual-member ^Expr [^Expr receiver ^String mnm ^Exprs args])
 
   (get-static-field ^Expr [^Class owner ^String mnm])
+  
+  (throw-expr ^Expr [^Expr arg])
   
   ;; ### misc
   
