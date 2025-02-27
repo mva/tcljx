@@ -22,7 +22,7 @@
 ;; supported.
 (def constructor-name "new")
 
-(def jvm-primitive-types     ;arbitrary, follow `opcode-delta` for now
+(def ^:private jvm-primitive-types ;arbitrary, follow xaload/xastore for now
   [Void/TYPE Integer/TYPE Long/TYPE Float/TYPE Double/TYPE
    #_reference Byte/TYPE Character/TYPE Short/TYPE Boolean/TYPE])
 

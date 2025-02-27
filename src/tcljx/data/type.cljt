@@ -2,15 +2,16 @@
   (:import (java.lang.classfile CodeBuilder TypeKind)
            (java.lang.constant ConstantDesc)
            (java.util.function BiConsumer))
-  (:refer-clojure :exclude [symbol keyword vector map set list]))
+  (:refer-clojure :exclude [symbol keyword vector map set list
+                            byte short int long float double char boolean void]))
 
 (defn same? ^boolean [^Class a ^Class b]
   (identical? a b))
 
-(defn numeric? ^boolean [^Class tp]
-  (and (.isPrimitive tp) (not (or (identical? Character/TYPE tp)
-                                  (identical? Boolean/TYPE tp)
-                                  (identical? Void/TYPE tp)))))
+#_(defn numeric? ^boolean [^Class tp]
+    (and (.isPrimitive tp) (not (or (identical? Character/TYPE tp)
+                                    (identical? Boolean/TYPE tp)
+                                    (identical? Void/TYPE tp)))))
 
 #_(defn reference? ^boolean [^Class tp]
     (not (.isPrimitive tp)))
@@ -74,20 +75,19 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- aload-astore-delta ^int [^Class tp]
-  (if (.isPrimitive tp)
-    ;; numbering follows xa(load|store), with the exception of boolean and void
-    (condp identical? tp 
-      Integer/TYPE #_int 0     ;iaload and iastore
-      Long/TYPE #_long 1       ;laload and lastore
-      Float/TYPE #_float 2     ;faload and fastore
-      Double/TYPE #_double 3   ;daload and dastore
-      Boolean/TYPE #_boolean 8 ;reference is assigned a delta of 4 below
-      Byte/TYPE #_byte 5       ;baload and bastore
-      Character/TYPE #_char 6  ;caload and castore
-      Short/TYPE #_short 7     ;saload and sastore
-      Void/TYPE #_void -1)     ;arbitrary, pick negative for now
-    #_reference 4))                     ;aaload and aastore
+(defn- primitive-id ^int [^Class tp]    ;pre: (.isPrimitive tp)
+  ;; numbering follows xa(load|store), with the exception of boolean and void
+  (condp identical? tp 
+    Integer/TYPE #_int 0                ;iaload and iastore
+    Long/TYPE #_long 1                  ;laload and lastore
+    Float/TYPE #_float 2                ;faload and fastore
+    Double/TYPE #_double 3              ;daload and dastore
+    Boolean/TYPE #_boolean 4            ;takes place of aaload/aastore
+    Byte/TYPE #_byte 5                  ;baload and bastore
+    Character/TYPE #_char 6             ;caload and castore
+    Short/TYPE #_short 7                ;saload and sastore
+    Void/TYPE #_void 8                  ;arbitrary
+    #_else (throw (IllegalArgumentException.))))
 
 ;;; Note: `convert-from` does not get any line number information.
 ;;; Therefore the conversion functions must only emit bytecodes that
@@ -96,219 +96,115 @@
 (deftype Wrapper [^Class class-primitive
                   ^Class class-reference
                   ^Class class-computational
-                  ;; ^Expr default-value
-                  ^int numeric-order
-
-                  ^int aload-opcd       ;-1 for void
-                  ^boolean computational-int?
-                  ^BiConsumer convert-from
-                  ;; ^DirectMethodHandleDesc unboxing-mhd
-                  ;; ^TypeConversion primitive-to
-                  ;; ^TypeConversion unbox-exact-to
-                  ;; ^TypeConversion box-of
-                  ;; ^TypeConversion reference-to
-                  ]
+                  ^boolean numeric?
+                  ^short mask-assignable-from
+                  ^int primitive-id     ;4 for boolean, 8 for void
+                  ^BiConsumer convert-from]
   java.lang.Record)
 
 (letfn [(wrapper ^Wrapper [^Class class-primitive
                            ^Class class-reference
                            ^Class class-computational
-                           ^int numeric-order
-                           ^boolean computational-int?
-                           ^BiConsumer convert-to
-                           ;; ^TypeConversion primitive-to
-                           ;; ^DirectMethodHandleDesc unboxing-mhd
-                           ;; ^DirectMethodHandleDesc boxing-mhd
-                           ;; ^DirectMethodHandleDesc converting-mhd
-                           ]
-          (Wrapper. class-primitive class-reference class-computational
-                    #_(if (jb/same-class? jb/boolean class-primitive)
-                        x/expr-false
-                        (.adapt primitive-to x/expr-zero-int))
-                    numeric-order
-                    (aload-astore-delta class-primitive)
-                    computational-int? convert-to
-                    #_unboxing-mhd #_primitive-to
-                    #_(^TypeConversion fn [arg]
-                       (x/invoke-xref (x/flags-of arg) class-primitive [arg]
-                                      unboxing-mhd))
-                    #_(^TypeConversion fn [arg]
-                       (x/invoke-xref (x/flags-of arg) class-reference [arg]
-                                      boxing-mhd))
-                    #_(^TypeConversion fn [arg]
-                       (x/invoke-xref (x/flags-of arg) class-primitive [arg]
-                                      (if (x/type? class-reference arg)
-                                        unboxing-mhd
-                                        converting-mhd)))))]
-  (def int
-    (wrapper Integer/TYPE Integer Integer/TYPE 3 true
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.aload-opcd from)
-                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 8) nil
-                #_long 1 (-> xb .l2i)
-                #_float 2 (-> xb .f2i)
-                #_double 3 (-> xb .d2i)
-                #_else_void (-> xb .iconst_0)))
-             #_primitive-to-int
-             #_(rt/mhd-virtual [ConstantDescs/CD_Integer "intValue"]
-                               ConstantDescs/CD_int [])
-             #_(rt/mhd-static [ConstantDescs/CD_Integer "valueOf"]
-                              ConstantDescs/CD_Integer [ConstantDescs/CD_int])
-             #_(rt/mhd-static [rt/ClojureRT "intCast"] ConstantDescs/CD_int
-                              [ConstantDescs/CD_Object])))
-  (def long
-    (wrapper Long/TYPE Long Long/TYPE 2 false
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.aload-opcd from)
-                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 8) (-> xb .i2l)
-                #_long 1 nil
-                #_float 2 (-> xb .f2l)
-                #_double 3 (-> xb .d2l)
-                #_else_void (-> xb .lconst_0)))
-             #_(to-upper (^TypeConversion fn [arg]
-                          (condp jb/same-class? (x/type arg)
-                            Integer/TYPE (xf/conv jb/long arg Opcode/I2L)
-                            Long/TYPE arg
-                            Float/TYPE (xf/conv jb/long arg Opcode/F2L)
-                            Double/TYPE (xf/conv jb/long arg Opcode/D2L)
-                            #_else nil)))
-             #_(rt/mhd-virtual [ConstantDescs/CD_Long "longValue"]
-                               ConstantDescs/CD_long [])
-             #_(rt/mhd-static [ConstantDescs/CD_Long "valueOf"]
-                              ConstantDescs/CD_Long [ConstantDescs/CD_long])
-             #_(rt/mhd-static [rt/ClojureRT "longCast"] ConstantDescs/CD_long
-                              [ConstantDescs/CD_Object])))
-  (def boolean
-    (wrapper Boolean/TYPE Boolean Integer/TYPE -1 true
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (letfn [#_(mask-int ^CodeBuilder [^CodeBuilder xb]
-                          (-> xb (.iconst_1) (.iand)))]
-                (case (.aload-opcd from)
-                  #_boolean 8 nil
-                  ;; #_float 2 (-> xb .f2i (mask-int))
-                  ;; #_double 3 (-> xb .d2i (mask-int))
-                  ;; (#_char 6 #_byte 5 #_short 7 #_int 0) (-> xb (mask-int))
-                  ;; #_long 1 (-> xb .l2i (mask-int))
-                  #_else_void (-> xb .iconst_0))))
-             #_nil  ;conversion to boolean is not a thing for Java/JVM
-             #_(rt/mhd-virtual [ConstantDescs/CD_Boolean "booleanValue"]
-                               ConstantDescs/CD_boolean [])
-             #_(rt/mhd-static [ConstantDescs/CD_Boolean "valueOf"]
-                              ConstantDescs/CD_Boolean [ConstantDescs/CD_boolean])
-             #_(rt/mhd-static [rt/ClojureRT "booleanCast"] ConstantDescs/CD_boolean
-                              [ConstantDescs/CD_Object])))
-  (def short
-    (wrapper Short/TYPE Short Integer/TYPE 4 true
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.aload-opcd from)
-                (#_int 0 #_char 6) (-> xb .i2s)
-                #_long 1 (-> xb .l2i .i2s)
-                #_float 2 (-> xb .f2i .i2s)
-                #_double 3 (-> xb .d2i .i2s)
-                (#_byte 5 #_short 7 #_boolean 8) nil
-                #_else_void (-> xb .iconst_0)))
-             #_(to-lower jb/short Opcode/I2S)
-             #_(rt/mhd-virtual [ConstantDescs/CD_Short "shortValue"]
-                               ConstantDescs/CD_short [])
-             #_(rt/mhd-static [ConstantDescs/CD_Short "valueOf"]
-                              ConstantDescs/CD_Short [ConstantDescs/CD_short])
-             #_(rt/mhd-static [rt/ClojureRT "shortCast"] ConstantDescs/CD_short
-                              [ConstantDescs/CD_Object])))
+                           ^Wrapper assignable-from
+                           ^BiConsumer convert-to]
+          (let [prim-id (primitive-id class-primitive)]
+            (Wrapper. class-primitive class-reference class-computational
+                      (.isAssignableFrom Number class-reference)
+                      (tinyclj.core/short
+                       (cond-> (bit-set 0 prim-id)
+                         (some? assignable-from)
+                         (bit-or (.mask-assignable-from assignable-from))))
+                      prim-id convert-to)))]
   (def byte
-    (wrapper Byte/TYPE Byte Integer/TYPE 5 true
+    (wrapper Byte/TYPE Byte Integer/TYPE nil
              (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.aload-opcd from)
+              (case (.primitive-id from)
                 (#_int 0 #_char 6 #_short 7) (-> xb .i2b)
                 #_long 1 (-> xb .l2i .i2b)
                 #_float 2 (-> xb .f2i .i2b)
                 #_double 3 (-> xb .d2i .i2b)
-                (#_byte 5 #_boolean 8) nil
-                #_else_void (-> xb .iconst_0)))
-             #_(to-lower jb/byte Opcode/I2B)
-             #_(rt/mhd-virtual [ConstantDescs/CD_Byte "byteValue"]
-                               ConstantDescs/CD_byte [])
-             #_(rt/mhd-static [ConstantDescs/CD_Byte "valueOf"]
-                              ConstantDescs/CD_Byte [ConstantDescs/CD_byte])
-             #_(rt/mhd-static [rt/ClojureRT "byteCast"] ConstantDescs/CD_byte
-                              [ConstantDescs/CD_Object])))
-  (def char
-    (wrapper Character/TYPE Character Integer/TYPE -1 true ;not numeric in Clojure
+                (#_byte 5 #_boolean 4) nil
+                #_else_void (-> xb .iconst_0)))))
+  (def short
+    (wrapper Short/TYPE Short Integer/TYPE byte
              (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.aload-opcd from)
-                (#_int 0 #_byte 5 #_short 7 #_boolean 8) (-> xb .i2c)
+              (case (.primitive-id from)
+                (#_int 0 #_char 6) (-> xb .i2s)
+                #_long 1 (-> xb .l2i .i2s)
+                #_float 2 (-> xb .f2i .i2s)
+                #_double 3 (-> xb .d2i .i2s)
+                (#_byte 5 #_short 7 #_boolean 4) nil
+                #_else_void (-> xb .iconst_0)))))
+  (def int
+    (wrapper Integer/TYPE Integer Integer/TYPE short
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (case (.primitive-id from)
+                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) nil
+                #_long 1 (-> xb .l2i)
+                #_float 2 (-> xb .f2i)
+                #_double 3 (-> xb .d2i)
+                #_else_void (-> xb .iconst_0)))))
+  (def long
+    (wrapper Long/TYPE Long Long/TYPE int
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (case (.primitive-id from)
+                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) (-> xb .i2l)
+                #_long 1 nil
+                #_float 2 (-> xb .f2l)
+                #_double 3 (-> xb .d2l)
+                #_else_void (-> xb .lconst_0)))))
+  (def float
+    (wrapper Float/TYPE Float Float/TYPE long
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (case (.primitive-id from)
+                #_long 1 (-> xb .l2f)
+                #_float 2 nil
+                #_double 3 (-> xb .d2f)
+                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) (-> xb .i2f)
+                #_else_void (-> xb .fconst_0)))))
+  (def double
+    (wrapper Double/TYPE Double Double/TYPE float
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (case (.primitive-id from)
+                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) (-> xb .i2d)
+                #_long 1 (-> xb .l2d)
+                #_float 2 (-> xb .f2d)
+                #_double 3 nil
+                #_else_void (-> xb .dconst_0)))))
+  
+  (def boolean
+    (wrapper Boolean/TYPE Boolean Integer/TYPE nil
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (letfn [#_(mask-int ^CodeBuilder [^CodeBuilder xb]
+                          (-> xb (.iconst_1) (.iand)))]
+                (case (.primitive-id from)
+                  #_boolean 4 nil
+                  ;; #_float 2 (-> xb .f2i (mask-int))
+                  ;; #_double 3 (-> xb .d2i (mask-int))
+                  ;; (#_char 6 #_byte 5 #_short 7 #_int 0) (-> xb (mask-int))
+                  ;; #_long 1 (-> xb .l2i (mask-int))
+                  #_else_void (-> xb .iconst_0))))))
+  
+  (def char
+    (wrapper Character/TYPE Character Integer/TYPE nil ;not numeric in Clojure
+             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+              (case (.primitive-id from)
+                (#_int 0 #_byte 5 #_short 7 #_boolean 4) (-> xb .i2c)
                 #_long 1 (-> xb .l2i .i2c)
                 #_float 2 (-> xb .f2i .i2c)
                 #_double 3 (-> xb .d2i .i2c)
                 #_char 6 nil
-                #_else_void (-> xb .iconst_0)))
-             #_(to-lower jb/char Opcode/I2C)
-             #_(rt/mhd-virtual [ConstantDescs/CD_Character "charValue"]
-                               ConstantDescs/CD_char [])
-             #_(rt/mhd-static [ConstantDescs/CD_Character "valueOf"]
-                              ConstantDescs/CD_Character [ConstantDescs/CD_char])
-             #_(rt/mhd-static [rt/ClojureRT "charCast"] ConstantDescs/CD_char
-                              [ConstantDescs/CD_Object])))
-  (def float
-    (wrapper Float/TYPE Float Float/TYPE 1 false
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.aload-opcd from)
-                #_long 1 (-> xb .l2f)
-                #_float 2 nil
-                #_double 3 (-> xb .d2f)
-                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 8) (-> xb .i2f)
-                #_else_void (-> xb .fconst_0)))
-             #_(to-upper (^TypeConversion fn [arg]
-                          (condp jb/same-class? (x/type arg)
-                            Integer/TYPE (xf/conv jb/float arg Opcode/I2F)
-                            Long/TYPE (xf/conv jb/float arg Opcode/L2F)
-                            Float/TYPE arg
-                            Double/TYPE (xf/conv jb/float arg Opcode/D2F)
-                            #_else nil)))
-             #_(rt/mhd-virtual [ConstantDescs/CD_Float "floatValue"]
-                               ConstantDescs/CD_float [])
-             #_(rt/mhd-static [ConstantDescs/CD_Float "valueOf"]
-                              ConstantDescs/CD_Float [ConstantDescs/CD_float])
-             #_(rt/mhd-static [rt/ClojureRT "floatCast"] ConstantDescs/CD_float
-                              [ConstantDescs/CD_Object])))
-  (def double
-    (wrapper Double/TYPE Double Double/TYPE 0 false
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.aload-opcd from)
-                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 8) (-> xb .i2d)
-                #_long 1 (-> xb .l2d)
-                #_float 2 (-> xb .f2d)
-                #_double 3 nil
-                #_else_void (-> xb .dconst_0)))
-             #_(to-upper (^TypeConversion fn [arg]
-                          (condp jb/same-class? (x/type arg)
-                            Integer/TYPE (xf/conv jb/double arg Opcode/I2D)
-                            Long/TYPE (xf/conv jb/double arg Opcode/L2D)
-                            Float/TYPE (xf/conv jb/double arg Opcode/F2D)
-                            Double/TYPE arg
-                            #_else nil)))
-             #_(rt/mhd-virtual [ConstantDescs/CD_Double "doubleValue"]
-                               ConstantDescs/CD_double [])
-             #_(rt/mhd-static [ConstantDescs/CD_Double "valueOf"]
-                              ConstantDescs/CD_Double [ConstantDescs/CD_double])
-             #_(rt/mhd-static [rt/ClojureRT "doubleCast"] ConstantDescs/CD_double
-                              [ConstantDescs/CD_Object])))
-  
+                #_else_void (-> xb .iconst_0)))))
   (def void
-    (let [#_#_discard-result (^TypeConversion fn [arg] (pop arg))]
-      (Wrapper. Void/TYPE Void Void/TYPE #_x/expr-empty -1 -1 false
-                nil #_(^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-                       (assert false))
-                #_nil                   ;no class-reference Void
-                #_discard-result        ;primitive-to
-                #_nil                   ;unbox-to
-                #_(^TypeConversion fn [arg] x/expr-nil-object) ;box-of
-                #_discard-result)))     ;reference-to
+    (Wrapper. Void/TYPE Void Void/TYPE false (tinyclj.core/short -1) 9
+              nil #_(^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
+                     (assert false)))))
 
-  )
+(def primitive-types   ;arbitrary, follow `aload-astore-delta` for now
+  [void int long float double #_reference byte char short boolean])
 
-;;; True if `atype` widens to numeric type `ptype`.
-(defn widens-from-numeric? ^boolean [^Wrapper ptype ^Wrapper atype]
-  (>= (.numeric-order atype) (.numeric-order ptype) (.numeric-order double)))
+(defn primitive-assignable-from? ^boolean [^Wrapper ptype ^Wrapper atype]
+  (bit-test (.mask-assignable-from ptype) (.primitive-id atype)))
 
 (defn of ^Wrapper [^Class cl]           ;pre: `cl` is primitive
   (condp identical? cl
@@ -359,7 +255,7 @@
             ;; pre: `awrapper` denotes a non-void primitive type
             (if (.isPrimitive ptype)
               ;; widening numeric type conversion?
-              (widens-from-numeric? (of ptype) awrapper)
+              (primitive-assignable-from? (of ptype) awrapper)
               ;; auto-boxing the argument
               (.isAssignableFrom ptype (.class-reference awrapper))))
           (primitive-from-reference? ^boolean [^Wrapper pwrapper]
@@ -390,7 +286,7 @@
 (defn convert-from-constant ^ConstantDesc [^Class target-type ^Number n]
   (if (identical? target-type (.getClass n))
     n
-    (case (aload-astore-delta target-type)
+    (case (primitive-id target-type)
       #_int 0 (object (.intValue n))
       #_long 1 (object (.longValue n))
       #_float 2 (object (.floatValue n))

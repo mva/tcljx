@@ -32,37 +32,35 @@
           (if (type/polymorphic? target-type)
             insn/insn-empty             ;casting some constant to void
             (let [c' (type/convert-from-constant target-type c)]
-              (entity/new-constant target-type c'))))
-        (convert-to-primitive ^Expr [^Class target-type ^Insn arg]
-          (let [arg-type (insn/expr-type arg)]
-            (cond
-              (type/same? target-type arg-type)
-              arg         ;elide cast from primitive to same primitive
-              
-              (.isPrimitive arg-type)
-              (or (when-some [c (model/const-value arg)]
-                    (fold-cast-from target-type c))
-                  (insn/cast-into target-type arg))
-              ;; here holds: `arg-type` is a reference type
-              
-              (type/numeric? target-type) ;type conversion path of `cast-into`
-              (let [arg' (cond->> arg
-                           (not (.isAssignableFrom Number arg-type))
-                           (insn/cast-into Number))]
-                (insn/cast-into target-type arg'))
-              
-              ;; here holds: `target-type` is char, boolean, or void
-              :else (insn/cast-into target-type arg))))]
+              (entity/new-constant target-type c'))))]
   
-  (defn mk-convert-to-primitive ^Invocable [^Class target-type]
-    (^Invocable fn [form args]
-     (convert-to-primitive target-type (take-arg form args))))
+  (defn- mk-convert-to-primitive ^Invocable [^Wrapper target]
+    (let [target-type (.class-primitive target)
+          numeric? (.numeric? target)]
+      (^Invocable fn [form args]
+       (let [arg (take-arg form args)
+             arg-type (insn/expr-type arg)]
+         (cond
+           (type/same? target-type arg-type)
+           arg        ;elide conversion from primitive to same primitive
+           
+           (.isPrimitive arg-type)
+           (or (when-some [c (model/const-value arg)]
+                 (fold-cast-from target-type c))
+               (insn/cast-into target-type arg))
+           
+           :else             ;here holds: `arg-type` is a reference type
+           (insn/cast-into target-type
+                           (cond->> arg
+                             (and numeric?
+                                  (not (.isAssignableFrom Number arg-type)))
+                             (insn/cast-into Number))))))))
 
-  (def convert-to-logical-truth
+  (def ^:private convert-to-logical-truth
     (^Invocable fn [form args]
      (condgen/logical-truth (take-arg form args))))
 
-  (def convert-to-object
+  (def ^:private convert-to-object
     (^Invocable fn [form args]
      (let [arg (take-arg form args)
            arg-tp (insn/expr-type arg)]
@@ -132,23 +130,31 @@
                                    (const-fold opcd base-opc
                                                (model/const-value args 0)
                                                (model/const-value args 1)))
-              (operator op-type (+ (.bytecode base-opc) opcd) args))))]
+              (operator op-type (+ (.bytecode base-opc) opcd) args))))
+
+        (computational-numeric-of ^Class [^Class/1 expr-types]
+          (loop [acc type/int, i (dec (alength expr-types))]
+            (if (neg? i)
+              (.class-primitive acc)
+              (let [tp (aget expr-types i)]
+                (when (.isPrimitive tp)
+                  (let [wtp (type/of tp)]
+                    (when (.numeric? wtp)
+                      (recur (if (type/primitive-assignable-from? acc wtp)
+                               acc
+                               wtp)
+                             (dec i)))))))))]
   
   (defn mk-binary-numeric ^Invocable [^Opcode base-opc]
     (reify Invocable
       (invoke* [_ form args]
-        (let [args (take-args form args 2)
-              warg0 (type/of (insn/expr-type args 0))
-              warg1 (type/of (insn/expr-type args 1))]
-          (cond
-            (type/widens-from-numeric? warg0 warg1)
-            (binary-op (.class-computational warg0) base-opc args)
-            (type/widens-from-numeric? warg1 warg0)
-            (binary-op (.class-computational warg1) base-opc args)
-            :else (throw (-> (str (wrong/q (first form))
-                                  " expects two numeric arguments"
-                                  (wrong/got-types (insn/expr-types args)))
-                             (wrong/wr-info)))))))))
+        (let [args (take-args form args 2)]
+          (if-some [wtop (computational-numeric-of (.expr-types args))]
+            (binary-op wtop base-opc args)
+            (throw (-> (str (wrong/q (first form))
+                            " expects two numeric arguments"
+                            (wrong/got-types (insn/expr-types args)))
+                       (wrong/wr-info)))))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -246,10 +252,11 @@
             (assoc acc nm (entity/mk-global cfg/primitive-ns-str nm inv)))
 
           (assoc-conversions ^map [^map acc]
-            (-> (reduce (fn ^map [^map acc ^Class tp]
-                          (let [nm (.getSimpleName tp)]
-                            (assoc-prim acc nm (mk-convert-to-primitive tp))))
-                        acc resolve/jvm-primitive-types)
+            (-> (reduce (fn ^map [^map acc ^Wrapper wtp]
+                          (let [tp (.class-primitive wtp)
+                                nm (.getSimpleName tp)]
+                            (assoc-prim acc nm (mk-convert-to-primitive wtp))))
+                        acc type/primitive-types)
                 ;; provide Clojure rules for (boolean ...)
                 (assoc-prim "boolean" convert-to-logical-truth)
                 (assoc-prim "object" convert-to-object)))]
