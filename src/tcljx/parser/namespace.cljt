@@ -13,10 +13,7 @@
 ;;; on).  What it doesn't do is deriving or working with the type of
 ;;; an evaluated expression.
 
-(letfn [(prefixed-nmsp-str ^String [form ^String prefix]
-          (str prefix (syntax/simple-symbol-str form)))
-        
-        (second-vector ^vector [^seq xs]
+(letfn [(second-vector ^vector [^seq xs]
           (mapv syntax/simple-symbol-str (syntax/vector (second xs))))
         (second-map ^map [^seq xs]
           (persistent! (reduce (fn [acc [k v]]
@@ -49,19 +46,19 @@
           (letfn [(flatten-require ^seq [^seq rrequires spec]
                     (cond
                       (symbol? spec)
-                      (let [ns-str (prefixed-nmsp-str spec prefix)]
+                      (let [ns-str (syntax/prefixed-nmsp-str spec prefix)]
                         (cons
                          (model/require-refer-none ns-str error-context)
                          rrequires))
                       
                       (vector? spec)
-                      (let [ns-str (prefixed-nmsp-str (first spec) prefix)]
+                      (let [ns-str (syntax/prefixed-nmsp-str (first spec) prefix)]
                         (cons
                          (parse-require-spec ns-str (next spec) error-context)
                          rrequires))
                       
                       (and (= prefix "") (seq? spec))
-                      (let [prefix (prefixed-nmsp-str (first spec) prefix)]
+                      (let [prefix (syntax/prefixed-nmsp-str (first spec) prefix)]
                         (flatten-requires rrequires (str prefix ".")
                                           (rest spec) spec))
                       
@@ -115,22 +112,6 @@
                       (recur (inc i)))
                   nmsp)))))
 
-        (flatten-imports ^seq [^seq rimports ^String prefix ^seq specs
-                               ^seq error-context]
-          (letfn [(flatten-import ^seq [^seq rimports spec]
-                    (cond
-                      (symbol? spec)
-                      (cons (prefixed-nmsp-str spec prefix) rimports)
-                      
-                      (seq? spec)
-                      (let [prefix (prefixed-nmsp-str (first spec) prefix)]
-                        (flatten-imports rimports (str prefix ".")
-                                         (rest spec) spec))
-                      
-                      :else
-                      (throw (syntax/info "expect symbol or list" spec))))]
-            (reduce flatten-import rimports specs)))
-        
         (ns-form ^NamespaceBuilder [^NamespaceBuilder nmsp
                                     [_ ns-sym & formr :as ^seq form]]
           ;; pre: (first form) is 'ns
@@ -150,7 +131,7 @@
                 
                 :import
                 (recur rrequires
-                       (flatten-imports rimports "" (next clause) clause)
+                       (syntax/flatten-imports rimports "" (next clause) clause)
                        rrefer-cljs clauses')
                 
                 :refer-clojure

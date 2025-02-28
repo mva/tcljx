@@ -44,32 +44,34 @@
            (when (or completing-true? completing-false?)
              requested-type)))))))
 
-(defn- mk-branch* ^Branching [^int bytecode ^Class arg-type ^CodeEmitter/1 args]
-  (reify Branching
-    (emit-insn* [this xb line requested-type]
-      (.emit-insn* (conditional this (.emitter entity/insn-true)
-                                (.emitter entity/insn-false))
-                   xb line requested-type))
-    (emit-branch-if-false? [_ xb line target]
-      (when (emit/insns? xb line arg-type args)
-        (case (negate-test bytecode)
-          153 (.ifeq xb target)
-          154 (.ifne xb target)
-          155 (.iflt xb target)
-          156 (.ifge xb target)
-          157 (.ifgt xb target)
-          158 (.ifle xb target)
-          159 (.if_icmpeq xb target)
-          160 (.if_icmpne xb target)
-          161 (.if_icmplt xb target)
-          162 (.if_icmpge xb target)
-          163 (.if_icmpgt xb target)
-          164 (.if_icmple xb target)
-          165 (.if_acmpeq xb target)
-          166 (.if_acmpne xb target)
-          198 (.ifnull xb target)
-          199 (.ifnonnull xb target))
-        true))))
+(defn- mk-branch* ^Branching [^int opcode-eq ^int cmp-opcd
+                              ^Class arg-type ^CodeEmitter/1 args]
+  (let [bytecode (+ opcode-eq (negate-test cmp-opcd))]
+    (reify Branching
+      (emit-insn* [this xb line requested-type]
+        (.emit-insn* (conditional this (.emitter entity/insn-true)
+                                  (.emitter entity/insn-false))
+                     xb line requested-type))
+      (emit-branch-if-false? [_ xb line target]
+        (when (emit/insns? xb line arg-type args)
+          (case bytecode
+            153 (.ifeq xb target)
+            154 (.ifne xb target)
+            155 (.iflt xb target)
+            156 (.ifge xb target)
+            157 (.ifgt xb target)
+            158 (.ifle xb target)
+            159 (.if_icmpeq xb target)
+            160 (.if_icmpne xb target)
+            161 (.if_icmplt xb target)
+            162 (.if_icmpge xb target)
+            163 (.if_icmpgt xb target)
+            164 (.if_icmple xb target)
+            165 (.if_acmpeq xb target)
+            166 (.if_acmpne xb target)
+            198 (.ifnull xb target)
+            199 (.ifnonnull xb target))
+          true)))))
 
 (defn- mk-branch ^Branching [^Opcode eq-opc ^int cmp-opcd
                              ^Class arg-type ^CodeEmitter/1 args]
@@ -79,23 +81,24 @@
     ;; loop body is executed at most twice
     (cond
       (model/ce-zero? right)            ;slide if_icmpeq to ifeq
-      (mk-branch* (+ (- (.bytecode eq-opc) 6) opcd) arg-type
+      (mk-branch* (- (.bytecode eq-opc) 6) opcd arg-type
                   (doto (new CodeEmitter/1 1) (aset 0 left)))
       
       (model/ce-zero? left)
       (recur (swap-cmp opcd) right left)
                   
       (model/ce-null? right)            ;slide if_acmpeq to ifnull
-      (mk-branch* (+ (+ (.bytecode eq-opc) 33) opcd) arg-type
+      (mk-branch* (+ (.bytecode eq-opc) 33) opcd arg-type
                   (doto (new CodeEmitter/1 1) (aset 0 left)))
       
       (model/ce-null? left)
       (recur (swap-cmp opcd) right left)
       
-      :else (mk-branch* (+ (.bytecode eq-opc) opcd) arg-type
-                        (doto (new CodeEmitter/1 2)
-                          (aset 0 left)
-                          (aset 1 right))))))
+      :else
+      (mk-branch* (.bytecode eq-opc) opcd arg-type
+                  (doto (new CodeEmitter/1 2)
+                    (aset 0 left)
+                    (aset 1 right))))))
 
 (defn- cmp-expr ^Insn [^Opcode eq-opc ^int cmp-opcd
                        ^Class arg-type ^Insn arg0 ^Insn arg1]
@@ -125,6 +128,22 @@
                   entity/insn-true)))))
         (cmp-expr Opcode/IF_ACMPEQ cmp-opcd Object arg0 arg1))))
 
+(defn icmp ^Insn [^Insn arg0 ^Insn arg1 ^int cmp-opcd]
+  (or (when-some [c0 (model/const-value arg0)]
+        (when-some [c1 (model/const-value arg1)]
+          (let [n0 ^int c0, n1 ^int c1]
+            (when (or c0 c1)         ;both non-null means "don't know"
+              (if (case cmp-opcd
+                    #_eq 0 (= n0 n1)
+                    #_ne 1 (not= n0 n1)
+                    #_lt 2 (< n0 n1)
+                    #_ge 3 (>= n0 n1)
+                    #_gt 4 (> n0 n1)
+                    #_le 5 (<= n0 n1))
+                entity/insn-true
+                entity/insn-false)))))
+      (cmp-expr Opcode/IF_ICMPEQ cmp-opcd Integer/TYPE arg0 arg1)))
+
 ;;; ------------------------------------------------------------------------
 
 (def rt-boolean-cast
@@ -145,7 +164,7 @@
       (cond               ;important: any nil value is logically false
         ;; (model/ce-null? (.emitter arg)) ;argument is literal nil
         ;; entity/insn-false
-        (.isAssignableFrom arg-tp Boolean) ;argument is a Boolean
+        (.isAssignableFrom arg-tp Boolean) ;argument may be Boolean instance
         (insn/invoke-member rt-boolean-cast nil (insn/insns-of arg))
         :else   ;any reference that is a non-Boolean subtype of Object
         (acmp arg entity/insn-null cmp-ne)))))

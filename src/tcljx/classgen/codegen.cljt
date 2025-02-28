@@ -3,15 +3,16 @@
    (tcljx.data [config :as cfg] [wrong :as wrong] [type :as type]
                [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen [classfile :as classfile] [runtime :as rt] [emit :as emit]
-                   [insn :as insn] [entity :as entity]
+                   [insn :as insn] [entity :as entity] [defgen :as defgen]
                    [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import
    (tcljx.data.model Expr Exprs ExprFactory CodeEmitter ArityType
                      NamespaceBuilder)
    (tcljx.data.resolve Match)
+   (tcljx.classgen.classfile ClassElementEmitter)
    (tcljx.classgen.insn Insn Insns)
    (tcljx.classgen.methodgen FnLiteral)
-   (java.lang.classfile ClassBuilder CodeBuilder Opcode)
+   (java.lang.classfile ClassBuilder CodeBuilder Opcode TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDescs)
    (java.lang.reflect Member Constructor Field)
@@ -25,14 +26,6 @@
   (def ^:private literal-map (find-factory "map"))       ;type/map
   (def ^:private literal-set (find-factory "set"))       ;type/set
   (def ^:private literal-list (find-factory "list")))    ;type/list
-
-(definterface ClassElementEmitter
-  (emit-class-element ^void [^ClassBuilder cb]))
-(defn class-element-emitter? ^boolean [x]
-  (instance? ClassElementEmitter x))
-(defn emit-class-element ^CodeBuilder [^ClassBuilder cb ^ClassElementEmitter cee]
-  (.emit-class-element cee cb))
-
 
 (defn- with-line-number ^Insn [^Insn insn ^int line]
   (insn/mk-insn (^CodeEmitter fn [xb _ requested-type]
@@ -77,13 +70,13 @@
                      (str "multiple " entity "s matching " member)))))
 
 ;;; This indicates an error regarding the type *of* an expression.
-(defn info-type
+(defn- info-type
   (^Throwable [^String msg-prefix ^Expr x]
    (info-type msg-prefix x (insn/expr-type x)))
   (^Throwable [^String msg-prefix ^Expr x ^Class tp]
    (wrong/wr-info (str msg-prefix (wrong/got-type tp)))))
 
-(defn ensure-assignable ^void [^Class target-type ^Class arg-type]
+(defn- ensure-assignable ^void [^Class target-type ^Class arg-type]
   (when-not (type/assignable-from? target-type arg-type)
     (throw (info-type (str "cannot assign to " (wrong/q target-type)
                            #_(when (some? dest-descr)
@@ -101,8 +94,7 @@
 ;;; Likewise for symbols, keywords, vectors, and so on.  This works
 ;;; only as long as compiler and application agree on the names of
 ;;; their runtime classes.
-(deftype ExprFactoryImpl [^ArrayList segment-elements ;shared with NmspBuilder
-                          ^ArrayList pending-functions ;shared with NmspBuilder
+(deftype ExprFactoryImpl [^ArrayList pending-functions ;shared with NmspBuilder
                           ]
   ExprFactory
   (empty-expr [_]
@@ -149,26 +141,28 @@
                                           (seq)
                                           (or ())))
         (insn/invoke-member literal-list nil args))))
-
+  (new-array [_ array-type dims]
+    (let [dims ^Insns dims]
+      (dotimes [i (.length dims)]
+        (ensure-assignable Integer/TYPE (insn/expr-type dims i)))
+      (-> (^CodeEmitter fn [xb line requested-type]
+           (when (emit/insns? xb line Integer/TYPE (.emitters dims))
+             (if (= (.length dims) 1)
+               (let [component-type (.getComponentType array-type)]
+                 (if (.isPrimitive component-type)
+                   (.newarray xb (TypeKind/from component-type))
+                   (.anewarray xb (reflect/describe-class component-type))))
+               (.multianewarray xb (reflect/describe-class array-type)
+                                (.length dims)))
+             array-type))
+          (insn/mk-insn array-type))))
+  
   (progn-expr [_ xs x]
     (insn/progn xs x))
   
   (invoke [this form inv args]
     (.invoke* inv form args))
   
-  (new-def-init [this nmsp nm init]
-    (let [init ^Insn init]
-      (.add segment-elements
-            (^ClassElementEmitter fn [cb]
-             (let [opnd-type (insn/logical-type init)
-                   mtd (MethodTypeDesc/of (reflect/describe-class opnd-type))]
-               (classfile/with-method-body-> cb
-                 [nm mtd classfile/acc-method-static]
-                 (insn/emit-return opnd-type init)))))
-      insn/insn-empty))
-  (new-def-alias [_ nmsp nm other]
-    (assert false))
-
   (new-parameter [_ param-no name type]
     (Insn. (entity/mk-parameter param-no name type) Void/TYPE))
   (new-local [_ name init]
@@ -176,7 +170,9 @@
   (block-let [_ bindings body]
     (let [block (insn/progn bindings body)]
       (-> (^CodeEmitter fn [xb line requested-type]
+           ;; FIXME... emit lineNumber here?
            (.block xb (^Consumer fn ^void [^CodeBuilder xb]
+                       ;; FIXME... or emit lineNumber here?
                        (emit/insn? xb line requested-type (.emitter block))))
            requested-type) ;cannot report back `leaving` if insn? is false
           (insn/mk-insn (insn/expr-type block)))))
@@ -207,20 +203,21 @@
                                     (wrong/got-type arg-tp))))
               (checkcast ^Insn [^Class ref-target ^Insn ref-arg]
                 (let [arg-tp (insn/expr-type ref-arg)]
-                  (if (or (.isAssignableFrom ref-target arg-tp) ;empty
+                  (if (or (.isInterface ref-target)
+                          (.isAssignableFrom ref-target arg-tp) ;empty
                           (.isAssignableFrom arg-tp ref-target)) ;checkcast
                     (insn/cast-into ref-target ref-arg)
                     (throw (wr-info-invalid-cast)))))
               (box-arg-into ^Insn [^Class prim-tp]
                 (insn/cast-into (.class-reference (type/of prim-tp)) arg))]
         (cond
-          (type/same? target-type arg-tp)
-          arg
-          
           (or (type/polymorphic? target-type) ;force void context
               (type/polymorphic? arg-tp))
           (insn/cast-into target-type arg)
 
+          (type/same? target-type arg-tp)
+          arg
+          
           (.isPrimitive target-type)
           (if (.isPrimitive arg-tp)
             (throw (wr-info-invalid-cast)) ;no cast between different primitives
@@ -254,10 +251,7 @@
     (let [receiver ^Insn receiver
           args ^Insns args
           owner (insn/expr-type receiver)
-          ms (resolve/members-by-arg-types false owner mnm
-                                           (.expr-types args))]
-      #_(prn :et (seq (.expr-types args)))
-      #_(prn :ms (seq ms))
+          ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
       (or (invoke-single-match ms receiver args)
           (throw (info-unresolved-member ms owner mnm args "virtual")))))
 
@@ -266,13 +260,21 @@
           ms (resolve/field-exact nil true owner mnm resolve/empty-class-array)]
       (or (invoke-single-match ms nil args)
           (throw (info-unresolved-member ms owner mnm args "static")))))
+  (get-virtual-field [_ receiver mnm]
+    (let [receiver ^Insn receiver
+          args insn/empty-insns
+          owner (insn/expr-type receiver)
+          ms (resolve/field-exact nil false owner mnm (.expr-types args))]
+      (or (invoke-single-match ms receiver args)
+          (throw (wrong/wr-info (str "no virtual field matching "
+                                     (wrong/q-as-symbol owner mnm)))))))
 
   (throw-expr [_ arg]
     (let [arg ^Insn arg]
       (if (.isAssignableFrom Throwable (insn/logical-type arg))
         (-> (^CodeEmitter fn [xb line requested-type]
              (when (emit/insn? xb line Throwable (.emitter arg))
-               (-> xb (.lineNumber line) (.athrow))
+               (-> xb (emit/line-number line) (.athrow))
                emit/leaving))         ;type seen by the code generator
             (insn/mk-insn Void/TYPE)) ;type seen by the parser
         (throw (info-type "expect instance of Throwable" arg)))))
@@ -280,6 +282,5 @@
   (mk-expr [_ form]
     (throw (UnsupportedOperationException. (str form)))))
 
-(defn mk-code-generator ^ExprFactory [^ArrayList segment-elements
-                                      ^ArrayList pending-functions]
-  (ExprFactoryImpl. segment-elements pending-functions))
+(defn mk-code-generator ^ExprFactory [^ArrayList pending-functions]
+  (ExprFactoryImpl. pending-functions))

@@ -267,8 +267,13 @@
   (process-require ^NamespaceBuilder [^Require require
                                       ^ProvidedNamespace provided])
   (process-imports ^NamespaceBuilder [^seq import-strs])
-  (add-def ^Binding [^String nm ^Binding bnd])
-  
+
+  ;; Adds the new binding to the namespace.  Returns an expression
+  ;; that initializes the binding with its value (if any).  Pass an
+  ;; `init` of nil if no intial value is provided.
+  (new-def-init ^Expr [^String nm ^Expr init])
+  (new-def-alias ^Expr [^String nm ^Binding other])
+
   ;; FIXME... see tcljc/emitter/namespace.cljt
   ;; hack for dependency chain core_print.cljt
   ;; -> MultiFn.java -> tinyclj.core fns
@@ -318,6 +323,7 @@
   (new-map ^Expr [^Exprs args])
   (new-set ^Expr [^Exprs args])
   (new-list ^Expr [^Exprs args])
+  (new-array ^Expr [^Class array-type ^Exprs dims])
 
   ;; ### basics
   
@@ -326,11 +332,6 @@
   
   ;; ### bindings
 
-  ;; Adds the new binding to the namespace.  Returns an expression
-  ;; that initializes the binding with its value (if any).  Pass an
-  ;; `init` of nil if no intial value is provided.
-  (new-def-init ^Expr [^NamespaceBuilder nmsp ^String nm ^Expr init])
-  (new-def-alias ^Expr [^NamespaceBuilder nmsp ^String nm ^Binding other])
   (assignment ^Expr [^Binding bnd ^Expr value])
 
   (new-parameter ^Expr [^int param-no ^String name ^Class type])
@@ -361,15 +362,13 @@
   (invoke-virtual-member ^Expr [^Expr receiver ^String mnm ^Exprs args])
 
   (get-static-field ^Expr [^Class owner ^String mnm])
+  (get-virtual-field ^Expr [^Expr receiver ^String mnm])
   
   (throw-expr ^Expr [^Expr arg])
   
   ;; ### misc
   
   (mk-expr ^Expr [form]))               ;FIXME... drop this
-
-(defn aconst-null ^Expr [^ExprFactory ef]
-  (.new-constant ef Void ConstantDescs/NULL))
 
 (defn exprs-of ^Exprs [^ExprFactory ef & ^Expr/1 xs*]
   (let [xs (.new-exprs ef (alength xs*))]

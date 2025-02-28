@@ -60,3 +60,24 @@
     form
     (throw (info "expect map" form))))
 
+;;; ------------------------------------------------------------------------
+
+(defn prefixed-nmsp-str ^String [form ^String prefix]
+  (str prefix (simple-symbol-str form)))
+        
+(defn flatten-imports ^seq [^seq rimports ^String prefix ^seq specs
+                            ^seq error-context]
+  (letfn [(flatten-import ^seq [^seq rimports spec]
+            (cond
+              (symbol? spec)
+              (cons (prefixed-nmsp-str spec prefix) rimports)
+                      
+              (seq? spec)
+              (let [prefix (prefixed-nmsp-str (first spec) prefix)]
+                (flatten-imports rimports (str prefix ".")
+                                 (rest spec) spec))
+                      
+              :else
+              (throw (info "expect symbol or list" spec))))]
+    (reduce flatten-import rimports specs)))
+

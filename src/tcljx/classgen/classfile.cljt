@@ -12,6 +12,12 @@
 (def acc-method-virtual (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_FINAL))
 (def acc-method-static (bit-or acc-method-virtual ClassFile/ACC_STATIC))
 
+(definterface ClassElementEmitter
+  (emit-class-element ^void [^ClassBuilder cb]))
+(defn class-element-emitter? ^boolean [x]
+  (instance? ClassElementEmitter x))
+(defn emit-class-element ^CodeBuilder [^ClassBuilder cb ^ClassElementEmitter cee]
+  (.emit-class-element cee cb))
 
 (defmacro accept->
   ([builder handler]

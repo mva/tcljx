@@ -38,7 +38,7 @@
     (let [target-type (.class-primitive target)
           numeric? (.numeric? target)]
       (^Invocable fn [form args]
-       (let [arg (take-arg form args)
+       (let [arg (-> (take-arg form args) (insn/cast-to-logical))
              arg-type (insn/expr-type arg)]
          (cond
            (type/same? target-type arg-type)
@@ -58,11 +58,13 @@
 
   (def ^:private convert-to-logical-truth
     (^Invocable fn [form args]
-     (condgen/logical-truth (take-arg form args))))
+     (-> (take-arg form args)
+         (insn/cast-to-logical)
+         (condgen/logical-truth))))
 
   (def ^:private convert-to-object
     (^Invocable fn [form args]
-     (let [arg (take-arg form args)
+     (let [arg (-> (take-arg form args) (insn/cast-to-logical))
            arg-tp (insn/expr-type arg)]
        (if (.isPrimitive arg-tp)
          (insn/cast-into (.class-reference (type/of arg-tp)) arg)
@@ -94,7 +96,7 @@
                (when (<= #_idiv 108 bytecode #_drem 115)
                  ;; [il]div and [il]rem can raise a division by zero
                  ;; exception, so provide a line number for div & rem
-                 (.lineNumber xb line))
+                 (emit/line-number xb line))
                (with-bytecode xb bytecode)
                op-type))))
         (insn/mk-insn op-type))))
@@ -143,24 +145,34 @@
                       (recur (if (type/primitive-assignable-from? acc wtp)
                                acc
                                wtp)
-                             (dec i)))))))))]
+                             (dec i)))))))))
+        (info-two-numeric ^Throwable [form ^Insns args]
+          (-> (str (wrong/q (first form)) " expects two numeric arguments"
+                   (wrong/got-types (insn/expr-types args)))
+              (wrong/wr-info)))]
   
   (defn mk-binary-numeric ^Invocable [^Opcode base-opc]
     (reify Invocable
       (invoke* [_ form args]
         (let [args (take-args form args 2)]
-          (if-some [wtop (computational-numeric-of (.expr-types args))]
-            (binary-op wtop base-opc args)
-            (throw (-> (str (wrong/q (first form))
-                            " expects two numeric arguments"
-                            (wrong/got-types (insn/expr-types args)))
-                       (wrong/wr-info)))))))))
+          (if-some [tp-top (computational-numeric-of (.expr-types args))]
+            (binary-op tp-top base-opc args)
+            (throw (info-two-numeric form args)))))))
+
+  (defn mk-binary-compare ^Invocable [^int cmp-opcd]
+    (^Invocable fn [form args]
+     (let [args (take-args form args 2)]
+       (if-some [tp-top (computational-numeric-of (.expr-types args))]
+         (if (type/same? Integer/TYPE tp-top)
+           (condgen/icmp (.get args 0) (.get args 1) cmp-opcd)
+           (assert false))
+         (throw (info-two-numeric form args))))))
 
 ;;; ------------------------------------------------------------------------
 
-(defn- mtd-of ^MethodTypeDesc [^Class return-type ^Class/1 parameter-types]
-  (MethodTypeDesc/of (reflect/describe-class return-type)
-                     (reflect/describe-class* parameter-types)))
+  )
+
+;;; ------------------------------------------------------------------------
 
 (def ^:private dyn-mark "\u0001")
 (def ^:private const-mark "\u0002")
@@ -209,15 +221,16 @@
               :else
               (-> (^CodeEmitter fn [xb line requested-type]
                    (let [cpb (.constantPool xb)
-                         ptypes (.expr-types inv-args) ;only logical types
+                         atypes (.expr-types inv-args) ;only logical types
                          mhe (.methodHandleEntry cpb rt/bsm-concat)
                          bsm (.bsmEntry cpb mhe (->> (cons recipe const-args)
                                                      (consts-to-lces cpb)))
+                         mtd (insn/mtd-of-poly String atypes)
                          nat (.nameAndTypeEntry cpb ConstantDescs/DEFAULT_NAME
-                                                (mtd-of String ptypes))]
-                     (when (emit/typed-insns? xb line ptypes
+                                                mtd)]
+                     (when (emit/typed-insns? xb line atypes
                                               (.emitters inv-args))
-                       (-> (.lineNumber xb line)
+                       (-> (emit/line-number xb line)
                            (.invokedynamic (.invokeDynamicEntry cpb bsm nat)))
                        String)))
                   (insn/mk-insn String)))))]
@@ -264,4 +277,5 @@
         (assoc-conversions)
         (assoc-prim "+" (mk-binary-numeric Opcode/IADD))
         (assoc-prim "-" (mk-binary-numeric Opcode/ISUB))
+        (assoc-prim "<" (mk-binary-compare condgen/cmp-lt))
         (assoc-prim "str" string-concat))))

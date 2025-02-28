@@ -71,7 +71,7 @@
   (let [rsv (.resolver scope)]
     (if (instance? NamespaceBuilder rsv)
       rsv
-      (wrong "cannot def new namespace entry in this position"))))
+      (wrong "cannot manipulate namespace data in this position"))))
 
 (defn pick-unique-name ^String [^Scope scope ^String nm]
   (.pick-unique-name (.resolver scope) nm))

@@ -1,11 +1,14 @@
 (ns tcljx.classgen.universe
   (:require
-   (tcljx.data [config :as cfg] [files :as files] [resolve :as resolve]
-               [model :as model])
-   (tcljx.parser [context :as context] [form :as form] [namespace :as namespace])
-   (tcljx.classgen [loader :as loader] [runtime :as rt] [classfile :as classfile]
-                   [segmgen :as segmgen] [insn :as insn] [codegen :as codegen]
-                   [emit :as emit] [primitive :as primitive]))
+   (tcljx.data
+    [config :as cfg] [files :as files] [resolve :as resolve] [model :as model]
+    [wrong :as wrong])
+   (tcljx.parser
+    [context :as context] [form :as form] [namespace :as namespace])
+   (tcljx.classgen
+    [loader :as loader] [runtime :as rt] [classfile :as classfile]
+    [emit :as emit] [insn :as insn] [segmgen :as segmgen] [codegen :as codegen]
+    [defgen :as defgen] [primitive :as primitive]))
   (:import
    (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
                      NamespaceBuilder SegmentBuilder
@@ -24,7 +27,7 @@
 (deftype NmspBuilderImpl [^NamespaceProvider universe
                           ^String ns-str
                           ^ExprFactory code-gen
-                          ^ArrayList segment-elements ;added to by `code-gen`
+                          ^ArrayList segment-elements
                           ^ArrayList pending-functions ;added to by `code-gen`
                           ^PackageBuilder pkg-build
                           ^:unsynchronized-mutable ^map globals
@@ -57,11 +60,22 @@
     universe)
   (process-require [this require provided]
     this)                               ;FIXME...
-  (process-imports [this imports]
-    this)                               ;FIXME...
-  (add-def [_ nm bnd]
-    (set! globals (assoc globals nm bnd))
-    bnd)
+  (process-imports [this import-strs]
+    (doseq [^String nm import-strs]
+      (if-some [cl (.lookup-class this nm)]
+        (set! imports (-> imports
+                          (assoc (resolve/imported-short-name cl) cl)
+                          (assoc (.getName cl) cl)))
+        (throw (wrong/info-class-not-found nm))))
+    this)
+  ;; (add-def [_ nm bnd]
+  ;;   (set! globals (assoc globals nm bnd))
+  ;;   bnd)
+  (new-def-init [_ nm init]
+    (let [this-segm (segmgen/segment-cld pkg-build current-segm-id)]
+      (defgen/new-def-init segment-elements this-segm nm init)))
+  (new-def-alias [_ nm other]
+    (assert false))
 
   (load-file [this path-str]
     (assert false))
@@ -99,8 +113,8 @@
       (^Consumer fn ^void [^ClassBuilder cb]
        (dotimes [i end-of-segment-elements]
          (let [elem (.get segment-elements i)]
-           (when (codegen/class-element-emitter? elem)
-             (codegen/emit-class-element cb elem)))))
+           (when (classfile/class-element-emitter? elem)
+             (classfile/emit-class-element cb elem)))))
       (let [a (doto (ArrayList.)
                 (.add (segmgen/clinit-prologue ns-str current-segm-id)))]
         (loop [i 0]
@@ -129,10 +143,9 @@
     (letfn [(mk-nmsp-builder ^NamespaceBuilder [^String ns-str]
               (let [source-file nil
                     pkg-build (loader/mk-package-builder loader ns-str)
-                    segment-elements (ArrayList.)
                     pending-functions (ArrayList.)
-                    ef (codegen/mk-code-generator
-                        segment-elements pending-functions)
+                    ef (codegen/mk-code-generator pending-functions)
+                    segment-elements (ArrayList.)
                     globals primitive/primitive-nmsp-globals]
                 (NmspBuilderImpl. this ns-str ef
                                   segment-elements pending-functions

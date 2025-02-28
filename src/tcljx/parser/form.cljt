@@ -67,13 +67,20 @@
             
             (type-expression ^Class [^Expr x form] ;nil if no type expression
               (when-some [value (model/const-value x)]
-                (when (and (class? value) (syntax/simple-symbol? form))
+                (when (and (class? value) (symbol? form))
                   value)))
             (parse-throw ^Expr [[_ & args]]
               (let [x (.parse-form this (syntax/some-first args))]
                 (syntax/empty-tail (next args))
                 (.throw-expr expr-factory x)))
 
+            (parse-import* ^Expr [[_ & formr :as form]]
+              (let [specs (map syntax/strip-quote formr)
+                    rimports (syntax/flatten-imports nil "" specs form)]
+                (.process-imports (context/namespace-builder this)
+                                  (reverse rimports))
+                (.empty-expr expr-factory)))
+            
             (unpack-member-args ^seq [^seq formr]
               (if (seq? (first formr))
                 (do (syntax/empty-tail (next formr))
@@ -83,20 +90,28 @@
               (let [[member & args] (unpack-member-args formr)
                     mnm (syntax/simple-symbol-str member) ;implies owner exists
                     owner-expr (.parse-form this owner)
-                    xs (parse-args args)]
+                    xs (parse-args args)
+                    fnm (when (and (> (.length mnm) 1) (= (.charAt mnm 0) \-)
+                                   (.empty? xs))
+                          (.substring mnm 1))]
                 (if-some [owner (type-expression owner-expr owner)]
-                  (.invoke-static-member expr-factory false owner mnm xs)
-                  (.invoke-virtual-member expr-factory owner-expr mnm xs))))
-            (parse-dot-member ^Expr [^String nm [_ & formr]]
-              (let [mnm (.substring nm 1)
-                    receiver (.parse-form this (syntax/some-first formr))
-                    xs (parse-args (rest formr))]
-                (.invoke-virtual-member expr-factory receiver mnm xs)))
+                  (if fnm
+                    (.get-static-field expr-factory owner fnm)
+                    (.invoke-static-member expr-factory false owner mnm xs))
+                  (if fnm
+                    (.get-virtual-field expr-factory owner-expr fnm)
+                    (.invoke-virtual-member expr-factory owner-expr mnm xs)))))
+            (parse-dot-dot-or-member ^Expr [^String nm [_ & formr]]
+              (if (= nm "..")
+                (parse-dot (reduce #(list '. %1 %2)
+                                   (list '. (syntax/some-first formr)
+                                         (syntax/some-first (next formr)))
+                                   (nnext formr)))
+                (let [mnm (.substring nm 1)
+                      receiver (.parse-form this (syntax/some-first formr))
+                      xs (parse-args (rest formr))]
+                  (.invoke-virtual-member expr-factory receiver mnm xs))))
 
-            (dot-member-name? ^boolean [^String nm]
-              (and (> (.length nm) 1)
-                   (= (.charAt nm 0) \.)
-                   (not= (.charAt nm 1) \.)))
             (wr-info-unresolved-qualified-sym ^Throwable [^symbol op]
               (wrong/wr-info
                (if (context/lookup-namespace this (namespace op))
@@ -118,6 +133,7 @@
                       
                       "fn*" (fn/parse-fn* this form)
                       "quote" (parse-quote form)
+                      "import*" (parse-import* form)
                       "." (parse-dot form)
                       "throw" (parse-throw form)
                       "new" (let [sym (syntax/symbol (second form))]
@@ -125,7 +141,8 @@
                       
                       #_else
                       (cond
-                        (dot-member-name? nm) (parse-dot-member nm form)
+                        (= (.charAt nm 0) \.)
+                        (parse-dot-dot-or-member nm form)
                         
                         :else
                         (if-some [bnd (context/lookup this op)]

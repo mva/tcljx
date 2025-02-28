@@ -20,7 +20,7 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- segment-cld ^ClassDesc [^PackageBuilder pkg-build ^int segm-id]
+(defn segment-cld ^ClassDesc [^PackageBuilder pkg-build ^int segm-id]
   (ClassDesc/of (.pkg-name pkg-build) (str segment-class-prefix segm-id)))
 
 (defn- with-requires ^ClassBuilder [^ClassBuilder cb ^String req-str]

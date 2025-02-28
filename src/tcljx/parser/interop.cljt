@@ -31,7 +31,7 @@
     (syntax/symbol tag)))
 (defn resolve-tag* ^Class [^Resolver rsv ^symbol tag ^Class or-else]
   (if (some? tag)
-    (or (lookup-type rsv tag) (wrong/class-not-found tag))
+    (or (lookup-type rsv tag) (throw (wrong/info-class-not-found tag)))
     or-else))
 (defn resolve-tag
   (^Class [^Resolver rsv ^IMeta form]

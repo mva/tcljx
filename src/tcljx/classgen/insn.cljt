@@ -7,6 +7,7 @@
    (tcljx.data.model Expr Exprs CodeEmitter Entity)
    (tcljx.data.resolve Match)
    (java.lang.classfile CodeBuilder TypeKind)
+   (java.lang.constant MethodTypeDesc)
    (java.lang.reflect #_Member Constructor #_Field)
    (java.util Arrays)))
 
@@ -22,7 +23,7 @@
 ;;; Having an opaque expression tree is at odds with the desire to
 ;;; generate only reachable code in the emit phase.  To alleviate this
 ;;; conflict, every expression that has no completing code path
-;;; can (but does not have to) report its type as `leaving`.
+;;; can (but does not have to) report its type as `emit/leaving`.
 (deftype Insn [^CodeEmitter emitter
                ^Class expr-type]
   ;; FIXME... Valhalla value?
@@ -128,16 +129,17 @@
              requested-type)))
         (mk-insn (expr-type insn-n)))))
 
-;; Note: Casting from primitive numeric or reference Number to a
-;; primitive numeric type is a type conversion.
+;; Note: Casting to primitive numeric from either primitive numeric or
+;; reference Number is a type conversion.
 (defn cast-into
   (^Insn [^Class target-type ^Insn arg]
-   (if (identical? target-type (.expr-type arg))
-     arg
+   (if (or (not (identical? target-type (.expr-type arg)))
+           (identical? Void/TYPE target-type)) ;force operand type to void
      (-> (^CodeEmitter fn [xb line requested-type]
           (when (emit/insn? xb line target-type (.emitter ^Insn arg))
             target-type))
-         (mk-insn target-type))))
+         (mk-insn target-type))
+     arg))
   (^Insn [^Class target-type ^Insns args ^int i]
    (cast-into target-type (.get args i))))
 
@@ -146,6 +148,19 @@
    (cast-into (type/expr-to-logical (expr-type insn)) insn))
   (^Insn [^Insns insns ^int i]
    (cast-to-logical (.get insns i))))
+
+(defn new-array ^Insn [^Class array-type ^Insns dims]
+  (-> (^CodeEmitter fn [xb line requested-type]
+       (when (emit/insns? xb line Integer/TYPE (.emitters dims))
+         (if (= (.length dims) 1)
+           (let [component-type (.getComponentType array-type)]
+             (if (.isPrimitive component-type)
+               (.newarray xb (TypeKind/from component-type))
+               (.anewarray xb (reflect/describe-class component-type))))
+           (.multianewarray xb (reflect/describe-class array-type)
+                            (.length dims)))
+         array-type))
+      (mk-insn array-type)))
 
 (defn emit-return ^void [^CodeBuilder xb ^Class return-type ^Insn body]
   (let [body (cast-into return-type body)]
@@ -177,14 +192,29 @@
             (recur (inc i))))
         true))))
 
+(defn mtd-of-poly
+  (^MethodTypeDesc [^Class return-type ^Class/1 invocation-atypes]
+   (MethodTypeDesc/of (reflect/describe-class return-type)
+                      (reflect/describe-class* invocation-atypes)))
+  (^MethodTypeDesc [^Class return-type ^Class/1 lookup-ptypes ^int fixed
+                    ^Class/1 invocation-atypes]
+   (let [ptypes (Arrays/copyOf lookup-ptypes (alength invocation-atypes))]
+     (System/arraycopy invocation-atypes fixed
+                       ptypes fixed (- (alength invocation-atypes) fixed))
+     (MethodTypeDesc/of (reflect/describe-class return-type)
+                        (reflect/describe-class* ptypes)))))
+
 (defn invoke-member ^Insn [^Match m ^Insn receiver ^Insns args]
   (-> (^CodeEmitter fn [xb line requested-type]
-       (letfn [(emit-varargs? ^boolean [^CodeBuilder xb ^Class varargs-tp
-                                        ^int start]
-                 (if (= (.invocation-mode m) resolve/invoke-tail-into-array)
-                   (emit-array-of? xb (.getComponentType varargs-tp)
-                                   (.emitters args) start)
-                   (assert false)))]
+       (letfn [(invoke-polymorphic ^Class [^int fixed]
+                 (when (emit/typed-insns? xb line (.expr-types args)
+                                          (.emitters args) fixed (.length args))
+                   (let [return-type (or requested-type Void/TYPE)
+                         mtd (mtd-of-poly return-type (.parameter-types m)
+                                          fixed (.expr-types args))]
+                     (-> (emit/line-number xb line)
+                         (reflect/invoke-member (.owner m) (.member m) mtd))
+                     return-type)))]
          (let [fixed (resolve/end-of-fixed-parameters m)
                varargs-tp (resolve/varargs-parameter-type m)]
            ;; new-dup-dance when creating a new instance of `owner`
@@ -195,12 +225,17 @@
              ;; all fixed (i.e. non-vararg) arguments
              (when (emit/typed-insns? xb line (.parameter-types m)
                                       (.emitters args) 0 fixed)
-               ;; optionally: all vararg arguments
-               (when (or (nil? varargs-tp) (emit-varargs? xb varargs-tp fixed))
-                 ;; the actual invoke instruction
-                 (-> (.lineNumber xb line)
-                     (reflect/invoke-member (.owner m) (.member m)))
-                 (.return-type m)))))))
+               (if (neg? (.invocation-mode m))
+                 (invoke-polymorphic fixed)
+                 
+                 ;; optionally: all vararg arguments
+                 (when (or (nil? varargs-tp)
+                           (emit-array-of? xb (.getComponentType varargs-tp)
+                                           (.emitters args) fixed))
+                   ;; the actual invoke instruction
+                   (-> (emit/line-number xb line)
+                       (reflect/invoke-member (.owner m) (.member m)))
+                   (.return-type m))))))))
       (mk-insn (.return-type m))))
 
 ;;; ------------------------------------------------------------------------

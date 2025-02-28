@@ -18,6 +18,13 @@
 ;; True if an instruction may(!) complete normally.
 (def may-complete? some?) 
 
+(defn line-number ^CodeBuilder [^CodeBuilder xb ^int line]
+  ;; Note: Writing only line number of zero triggers output of an
+  ;; empty "LineNumberTable" attribute.  Probably pointless to
+  ;; suppress this special case.  FIXME... set this to
+  ;; CodeBuilder/.lineNumber
+  (cond-> xb (not= line cfg/no-line-number) (.lineNumber line)))
+
 (letfn [(return-from-method? ^boolean [^CodeBuilder xb ^Class on-stack-type]
           (when (some? on-stack-type)
             (.return_ xb (TypeKind/from on-stack-type))
@@ -42,12 +49,12 @@
               ;; FIXME... does conversion via Number.xxxValue() make
               ;; RT.longCast(Object) etc. redundant, at least as far
               ;; as tcljx is concerned?
-              (-> (.lineNumber xb line)
+              (-> (line-number xb line)
                   (.invokevirtual ConstantDescs/CD_Number mnm mtd))
               ;; type cast from box type to primitive type
-              (do (when-not (.isAssignableFrom box-type on-stack-type)
+              (do (when-not (type/same? box-type on-stack-type)
                     (cast-from-reference xb line box-type on-stack-type))
-                  (-> (.lineNumber xb line)
+                  (-> (line-number xb line)
                       (.invokevirtual (reflect/describe-class box-type) mnm
                                       mtd))))))
         (cast-from-reference ^void [^CodeBuilder xb ^int line
@@ -63,7 +70,7 @@
             nil
                 
             :else
-            (-> (.lineNumber xb line)
+            (-> (line-number xb line)
                 (.checkcast (reflect/describe-class requested-type)))))
 
         (box-primitive ^void [^CodeBuilder xb ^Class requested-type

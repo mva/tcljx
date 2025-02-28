@@ -89,6 +89,10 @@
     Void/TYPE #_void 8                  ;arbitrary
     #_else (throw (IllegalArgumentException.))))
 
+;;; Like the primitive equivalent, the reference class of a box type
+;;; is final.  This means, that an `isAssignableFrom` check reduces to
+;;; an identity test.
+;;; 
 ;;; Note: `convert-from` does not get any line number information.
 ;;; Therefore the conversion functions must only emit bytecodes that
 ;;; cannot throw.  Conversion from void produces the zero value of the
@@ -286,15 +290,19 @@
 (defn convert-from-constant ^ConstantDesc [^Class target-type ^Number n]
   (if (identical? target-type (.getClass n))
     n
-    (case (primitive-id target-type)
-      #_int 0 (object (.intValue n))
-      #_long 1 (object (.longValue n))
-      #_float 2 (object (.floatValue n))
-      #_double 3 (object (.doubleValue n))
-      ;; conversion to computationally int type:
-      #_byte 5 (object (tinyclj.core/int (.byteValue n)))
-      #_character 6 (object (tinyclj.core/int (tinyclj.core/char (.intValue n))))
-      #_short 7 (object (tinyclj.core/int (.shortValue n))))))
+    (let [prim-id (primitive-id target-type)]
+      (case prim-id
+        #_int 0 (object (.intValue n))
+        #_long 1 (object (.longValue n))
+        #_float 2 (object (.floatValue n))
+        #_double 3 (object (.doubleValue n))
+        #_else
+        (-> (case prim-id     ;conversion to computationally int type
+              #_boolean 4 (tinyclj.core/int (not= (.intValue n) 0))
+              #_byte 5 (tinyclj.core/int (.byteValue n))
+              #_character 6 (tinyclj.core/int (tinyclj.core/char (.intValue n)))
+              #_short 7 (tinyclj.core/int (.shortValue n)))
+            (object))))))
 
 ;;; ------------------------------------------------------------------------
 

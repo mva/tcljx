@@ -89,16 +89,15 @@
       Void/TYPE
       
       (let [tk (TypeKind/from type)]
-        (set! slot (if (some? bound-to)
-                     (.allocateLocal xb tk)
-                     (.parameterSlot xb param-no)))
         (if (some? bound-to)          ;let binding provides `bound-to`
-          (do (set! slot (.allocateLocal xb tk))
-              (when (emit/insn? xb line type bound-to)
-                (.localVariable xb slot name (reflect/describe-class type)
-                                (.startLabel xb) (.endLabel xb))
-                (.storeLocal xb tk slot)
-                Void/TYPE))
+          (when (emit/insn? xb line type bound-to)
+            (set! slot (.allocateLocal xb tk))
+            (let [label (.newLabel xb)]
+              (-> (.storeLocal xb tk slot)
+                  (.labelBinding label)
+                  (.localVariable slot name (reflect/describe-class type)
+                                  label (.endLabel xb)))
+              Void/TYPE))
           (do (set! slot (.parameterSlot xb param-no))
               (.localVariable xb slot name (reflect/describe-class type)
                               (.startLabel xb) (.endLabel xb))

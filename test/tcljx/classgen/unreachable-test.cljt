@@ -12,68 +12,17 @@
   (:import (tcljx.data.wrong WrongInfo)))
 
 (deftest def-with-throw-test
-  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "foo" "()Ljava/lang/Object;")
-             (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
-             (ATHROW)]
-            
-            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-             (LDC "pkg.ns0")
-             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-             (RETURN)]]
-           
-           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
-                     "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
-             (ARETURN)]]]
-         (nmsp '[(ns pkg.ns0)
-                 (def foo (throw (Throwable/new)))])))
-  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "foo" "()Ljava/lang/Object;")
-             (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
-             (ATHROW)]
-            
-            [(METHOD [PUBLIC STATIC FINAL] "bar" "()I")
-             (BIPUSH 123)
-             (IRETURN)]
-            
-            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-             (LDC "pkg.ns0")
-             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-             (RETURN)]]
-           
-           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
-                     "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
-             (ARETURN)]]]
-         (nmsp '[(ns pkg.ns0)
-                 (def foo (throw (Throwable/new)))
-                 (def bar 123)])))
-  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "foo" "()Ljava/lang/Object;")
-             (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
-             (ATHROW)]
-            
-            [(METHOD [PUBLIC STATIC FINAL] "bar" "()Ljava/lang/Object;")
-             (INVOKESTATIC System "gc" "()V")
-             (ACONST_NULL)
-             (ARETURN)]
-            
-            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-             (LDC "pkg.ns0")
-             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-             (RETURN)]]
-           
-           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
-                     "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
-             (ARETURN)]]]
-         (nmsp '[(ns pkg.ns0)
-                 (def foo (throw (Throwable/new)))
-                 (def bar (System/gc))]))))
+  (is (thrown? Throwable                ;during namespace clinit
+               (nmsp '[(ns pkg.ns0)
+                       (def foo (throw (Throwable/new)))])))
+  (is (thrown? Throwable                ;during namespace clinit
+               (nmsp '[(ns pkg.ns0)
+                       (def foo (throw (Throwable/new)))
+                       (def bar 123)])))
+  (is (thrown? Throwable                ;during namespace clinit
+               (nmsp '[(ns pkg.ns0)
+                       (def foo (throw (Throwable/new)))
+                       (def bar (System/gc))]))))
 
 (deftest fn-body-with-throw-test
   (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
@@ -113,9 +62,9 @@
          (asm-expr (let* [x 123
                           a (throw (Throwable/new))]
                      a))))
-  (is (= '[["LOCAL 1: Object x"]
-           (INVOKESTATIC System "gc" "()V") (ACONST_NULL)
-           (ASTORE_1)
+  (is (= '[(INVOKESTATIC System "gc" "()V") (ACONST_NULL)
+           (ASTORE_0)
+           ["LOCAL 0: Object x"]
            (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
            (ATHROW)]
          (asm-expr (let* [x (System/gc)

@@ -90,20 +90,6 @@
   (invoke [this form inv args]
     (.invoke* inv form args))
   
-  (new-def-init [_ nmsp nm init]
-    (let [ns-str (.ns-str nmsp)
-          ns-sym (symbol ns-str nm)
-          init (EmitterData. [:initialize-def ns-sym (expr-data init)])
-          global (GlobalStub. ns-str nm init)]
-      (.add-def nmsp nm global)
-      (mk-expr global)))
-  (new-def-alias [this nmsp nm other]
-    (let [ns-str (.ns-str nmsp)
-          ns-sym (symbol ns-str nm)
-          init (EmitterData. [:alias-def ns-sym (model/global-name other)])
-          x (mk-expr (GlobalStub. ns-str nm init))]
-      (.add-def nmsp nm (model/require-entity x))
-      x))
   (assignment [_ bnd init]
     (mk-expr [:assignment (model/global-name bnd) (expr-data init)]))
   
@@ -154,9 +140,18 @@
     (when-not (empty? imports)
       (.add segment-forms (vec (list* :imports imports))))
     this)
-  (add-def [_ nm bnd]
-    (set! globals (assoc globals nm bnd))
-    bnd)
+  (new-def-init [this nm init]
+    (let [ns-sym (symbol ns-str nm)
+          init (EmitterData. [:initialize-def ns-sym (expr-data init)])
+          bnd (GlobalStub. ns-str nm init)]
+      (set! globals (assoc globals nm bnd))
+      (mk-expr bnd)))
+  (new-def-alias [this nm other]
+    (let [ns-sym (symbol ns-str nm)
+          init (EmitterData. [:alias-def ns-sym (model/global-name other)])
+          x (mk-expr (GlobalStub. ns-str nm init))]
+      (set! globals (assoc globals nm (model/require-entity x)))
+      x))
 
   (load-file [this path-str]
     (.add segment-forms [:load path-str])

@@ -86,20 +86,35 @@
     (.getParameterTypes ^Executable member)
     (new Class/1 0)))
 
-(defn invoke-member ^CodeBuilder [^CodeBuilder xb ^Class owner ^Member member]
-  (let [cld (describe-class owner)
-        v? (virtual? member)]
-    (condp instance? member
-      Method
-      (.invoke xb (if v?
-                    (if (.isInterface owner)
-                      Opcode/INVOKEINTERFACE
-                      Opcode/INVOKEVIRTUAL)
-                    Opcode/INVOKESTATIC)
-               cld (.getName member) (mtd-of-method member) (.isInterface owner))
-      Constructor
-      (.invokespecial xb cld ConstantDescs/INIT_NAME
-                      (mtd-of-constructor member))
-      Field
-      (.fieldAccess xb (if v? Opcode/GETFIELD Opcode/GETSTATIC) cld
-                    (.getName member) (describe-class (.getType ^Field member))))))
+(defn invoke-member
+  (^CodeBuilder [^CodeBuilder xb ^Class owner ^Member member]
+   (let [cld (describe-class owner)
+         v? (virtual? member)]
+     (condp instance? member
+       Method
+       (.invoke xb (if v?
+                     (if (.isInterface owner)
+                       Opcode/INVOKEINTERFACE
+                       Opcode/INVOKEVIRTUAL)
+                     Opcode/INVOKESTATIC)
+                cld (.getName member) (mtd-of-method member) (.isInterface owner))
+       Constructor
+       (.invokespecial xb cld ConstantDescs/INIT_NAME
+                       (mtd-of-constructor member))
+       Field
+       (.fieldAccess xb (if v? Opcode/GETFIELD Opcode/GETSTATIC) cld
+                     (.getName member) (describe-class (.getType ^Field member))))))
+  (^CodeBuilder [^CodeBuilder xb ^Class owner ^Member member
+                 ^MethodTypeDesc mtd]
+   (let [cld (describe-class owner)]
+     (condp instance? member
+       Method
+       (.invoke xb (if (virtual? member)
+                     (if (.isInterface owner)
+                       Opcode/INVOKEINTERFACE
+                       Opcode/INVOKEVIRTUAL)
+                     Opcode/INVOKESTATIC)
+                cld (.getName member) mtd (.isInterface owner))
+       ;; Constructor
+       ;; (.invokespecial xb cld ConstantDescs/INIT_NAME mtd)
+       ))))

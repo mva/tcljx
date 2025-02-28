@@ -1,0 +1,42 @@
+(ns tcljx.classgen.defgen
+  (:require
+   (tcljx.data [reflect :as reflect] [model :as model])
+   (tcljx.classgen [classfile :as classfile] [emit :as emit] [insn :as insn]))
+  (:import
+   (tcljx.data.model CodeEmitter)
+   (tcljx.classgen.classfile ClassElementEmitter)
+   (tcljx.classgen.insn Insn)
+   (java.lang.classfile ClassFile)
+   (java.lang.constant ClassDesc MethodTypeDesc)
+   (java.util ArrayList)))
+
+(defn new-def-init ^Insn [^ArrayList segment-elements
+                          ^ClassDesc this-segm ^String nm ^Insn init]
+  (let [sink-type (insn/logical-type init)
+        sink-cld (reflect/describe-class sink-type)]
+    (letfn [(as-method ^Insn []
+              (.add segment-elements
+                    (^ClassElementEmitter fn [cb]
+                     (let [mtd (MethodTypeDesc/of sink-cld)]
+                       (classfile/with-method-body-> cb
+                         [nm mtd classfile/acc-method-static]
+                         (insn/emit-return sink-type init)))))
+              insn/insn-empty)
+            (field-flags ^int []
+              (bit-or ClassFile/ACC_STATIC
+                      ClassFile/ACC_PUBLIC ;unless namespace private
+                      ClassFile/ACC_FINAL  ;unless mutable
+                      ClassFile/ACC_TRANSIENT)) ;if initialized with constant
+            (as-field ^Insn []
+              (.add segment-elements
+                    (^ClassElementEmitter fn [cb]
+                     (.withField cb nm sink-cld (field-flags))))
+              (-> (^CodeEmitter fn [xb line _]
+                   (when (emit/insn? xb line sink-type (.emitter init))
+                     (.putstatic xb this-segm nm sink-cld)
+                     Void/TYPE))
+                  (insn/mk-insn Void/TYPE)))]
+      
+      (if-some [const (model/const-value init)]
+        (as-method)
+        (as-field)))))
