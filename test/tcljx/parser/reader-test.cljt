@@ -12,7 +12,8 @@
             [tcljx.alpha.ptest :refer :all])
   (:import (tcljx.data.model Resolver)
            (tcljx.data.wrong WrongInfo)
-           (tcljx.parser.reader FormBuilder TokenParser)))
+           (tcljx.parser.reader FormBuilder TokenParser)
+           (java.lang.invoke MethodHandles)))
 
 (deftype ResolverStub [^String ns-str
                        ^map ns-alias-map
@@ -32,7 +33,8 @@
   (^Resolver []
    (stub-resolver "NO_NS" {}))
   (^Resolver [^String ns-str ^map ns-alias]
-   (ResolverStub. ns-str ns-alias resolve/predefined-imports {}))
+   (let [import-map (resolve/predefined-imports (MethodHandles/lookup))]
+     (ResolverStub. ns-str ns-alias import-map {})))
   (^Resolver [^String ns-str ^map ns-alias
               ^map import-map ^map global-qname-map]
    (ResolverStub. ns-str ns-alias import-map global-qname-map)))

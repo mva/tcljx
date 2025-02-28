@@ -21,6 +21,8 @@
     
     (letfn [(parse-args ^Exprs [^seq args]
               (context/parse-args this args))
+            (parse-forms ^Exprs [^seq forms] ;FIXME... expand this later?
+              (context/parse-args this forms))
             (parse-meta ^Expr [^map form-meta]
               (when form-meta
                 (parse-collection-literal form-meta (meta form-meta))))
@@ -54,6 +56,11 @@
             (parse-quote ^Expr [[_ & args]]
               (syntax/empty-tail (next args))
               (parse-quoted-form (syntax/some-first args)))
+
+            (parse-if ^Expr [[_ & formr]]
+              (syntax/some-first (next formr)) ;test and first path exist?
+              (syntax/empty-tail 3 formr) ;nothing after test and two paths?
+              (.if-expr expr-factory (parse-forms formr)))
             (parse-do ^Expr [[_ & forms]]
               (if (nil? forms)
                 (.empty-expr expr-factory)
@@ -73,7 +80,14 @@
               (let [x (.parse-form this (syntax/some-first args))]
                 (syntax/empty-tail (next args))
                 (.throw-expr expr-factory x)))
-
+            (parse-instanceof* ^Expr [[_ & args]]
+              (let [xs (context/parse-args this args)]
+                (syntax/empty-tail 2 args)
+                (if-some [tp (type-expression (.get xs 0) (first args))]
+                  (.instanceof-expr expr-factory tp (.get xs 1))
+                  (.invoke-virtual-member expr-factory (.get xs 0) "isInstance"
+                                          (.drop xs 1)))))
+            
             (parse-import* ^Expr [[_ & formr :as form]]
               (let [specs (map syntax/strip-quote formr)
                     rimports (syntax/flatten-imports nil "" specs form)]
@@ -111,7 +125,10 @@
                       receiver (.parse-form this (syntax/some-first formr))
                       xs (parse-args (rest formr))]
                   (.invoke-virtual-member expr-factory receiver mnm xs))))
-
+            (parse-class-dot ^Expr [^String nm [_ & formr]]
+              (let [clnm (.substring nm 0 (dec (.length nm)))]
+                (parse-dot (list* \. (symbol nil clnm) 'new formr))))
+            
             (wr-info-unresolved-qualified-sym ^Throwable [^symbol op]
               (wrong/wr-info
                (if (context/lookup-namespace this (namespace op))
@@ -128,21 +145,42 @@
                       "identity" (.parse-form this (second form))
                       
                       "def" (def/parse-def this form)
+                      ;; loop* (loop*-form form)
+                      ;; recur (recur-form form)
+                      "if" (parse-if form)
+                      ;; case* (case*-form form)
                       "let*" (let/parse-let* this form)
+                      ;; letfn* (letfn*-form form)
                       "do" (parse-do form)
-                      
                       "fn*" (fn/parse-fn* this form)
                       "quote" (parse-quote form)
+                      ;; var (var-form form)
                       "import*" (parse-import* form)
                       "." (parse-dot form)
+                      ;; set! (set!-form form)
+                      ;; deftype* (deftype*-form form)
+                      ;; reify* (reify*-form form)
+                      ;; try (try-form form) ;note: finally & catch are not specials
                       "throw" (parse-throw form)
+                      ;; monitor-enter (monitor-form Opcode/MONITORENTER form)
+                      ;; monitor-exit (monitor-form Opcode/MONITOREXIT form)
+                      ;; catch is only special within `try-form`
+                      ;; finally is only special within `try-form`
                       "new" (let [sym (syntax/symbol (second form))]
-                              (new/parse-new this (parse-type-symbol sym) form))
+                              (new/parse-new
+                               this (parse-type-symbol sym) form))
+                      ;; & is only special within arity signature
                       
+                      ;; special forms that are not special in Clojure:
+                      ;; "definterface*" (definterface*-form form)
+                      "instanceof*" (parse-instanceof* form)
                       #_else
                       (cond
                         (= (.charAt nm 0) \.)
                         (parse-dot-dot-or-member nm form)
+                        
+                        (= (.charAt nm (dec (.length nm))) \.)
+                        (parse-class-dot nm form)
                         
                         :else
                         (if-some [bnd (context/lookup this op)]

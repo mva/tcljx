@@ -140,8 +140,11 @@
 
 (defn got-type ^String [^Class tp]
   (str " (got: " (q-type tp) ")"))
-(defn got-types ^String [tps]
-  (str " (got: " (mapv q-type tps) ")"))
+(defn got-types
+  (^String [tps]
+   (str " (got: " (mapv q-type tps) ")"))
+  (^String [^Class/1 tps ^int start ^int end]
+   (got-types (->> tps (take end) (drop start)))))
 
 ;; (defn got-classes ^String [cls]
 ;;   (str " (got: " (->> (map #(.getName ^Class %) cls)

@@ -1,6 +1,7 @@
 (ns tcljx.classgen.condgen
   (:require
-   (tcljx.data [type :as type] [resolve :as resolve] [model :as model])
+   (tcljx.data [type :as type] [resolve :as resolve] [model :as model]
+               [wrong :as wrong])
    (tcljx.classgen [insn :as insn] [entity :as entity] [emit :as emit]))
   (:import
    (tcljx.data.model CodeEmitter Invocable)
@@ -169,19 +170,28 @@
         :else   ;any reference that is a non-Boolean subtype of Object
         (acmp arg entity/insn-null cmp-ne)))))
 
-(defn if-expr ^Insn [^Insn test ^Class expr-type ^Insn if-true ^Insn if-false]
-  (let [test (logical-truth test)]
-    (cond
-      (identical? entity/insn-true test)
-      if-true
-      (identical? entity/insn-false test)
-      if-false
-      :else
-      (-> (if (instance? Branching (.emitter test))
-            (.emitter test)    ;`test` is already a branch instruction
-            (mk-branch Opcode/IF_ICMPEQ cmp-ne Boolean/TYPE ;compare with zero!
-                       (doto (new CodeEmitter/1 2)
-                         (aset 0 (.emitter test)) ;the boolean value to test
-                         (aset 1 (.emitter entity/insn-false))))) 
-          (conditional (.emitter if-true) (.emitter if-false))
-          (insn/mk-insn expr-type)))))
+;;; Throws if there is no type from which all paths in the given range
+;;; of `types` are assignable.  pre: (< start end)
+(defn join-type ^Class [^Class/1 types ^int start ^int end]
+  (loop [candidate (aget types (dec end)), i (- end 2)]
+    (if (< i start)
+      candidate
+      (let [tp (aget types i)]
+        (cond
+          (or (identical? candidate tp) (type/polymorphic? tp))
+          (recur candidate (dec i))
+          (type/polymorphic? candidate)
+          (recur tp (dec i))
+          :else
+          (throw (wrong/wr-info (str "incompatible path types"
+                                     (wrong/got-types types start end)))))))))
+
+(defn mk-if ^CodeEmitter [^CodeEmitter test
+                          ^CodeEmitter if-true ^CodeEmitter if-false]
+  (-> (if (instance? Branching test)
+        test                   ;`test` is already a branch instruction
+        (mk-branch Opcode/IF_ICMPEQ cmp-ne Boolean/TYPE ;compare to zero!
+                   (doto (new CodeEmitter/1 2)
+                     (aset 0 test)      ;the boolean value to test
+                     (aset 1 (.emitter entity/insn-false))))) 
+      (conditional if-true if-false)))

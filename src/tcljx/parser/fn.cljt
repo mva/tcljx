@@ -6,7 +6,9 @@
                  [interop :as interop]))
   (:import
    (tcljx.data.model Expr Exprs ExprFactory ArityType Scope Resolver)
-   (java.lang.constant MethodHandleDesc ConstantDescs)))
+   (tcljx.data.resolve Match)
+   (java.lang.constant MethodHandleDesc ConstantDescs)
+   (java.lang.reflect Method Constructor Field)))
 
 #_(definterface ArityMethod
   (at ^ArityType [])
@@ -46,12 +48,22 @@
                   ;; number of arguments matches number of parameters,
                   ;; and no pathological duplicate argument names
                   (and (nil? (seq args)) (= form-args (distinct form-args)))))))
-          (static-method ^MethodHandleDesc [^Class owner ^String mnm ^seq args]
+          (member-mhd ^MethodHandleDesc [^Class owner ^String mnm ^seq args]
             (when (parameters-in-sequence? args)
-              (when-some [m (resolve/method-by-param-tags true owner mnm
-                                                          (.parameter-types at))]
-                ;; FIXME... varargs flag must also match the arity signature
-                (reflect/mhd-of-method owner (.member m)))))]
+              (let [ms (resolve/members-by-param-tags true owner mnm
+                                                      (.parameter-types at))]
+                (when (and (some? (seq ms)) (nil? (next ms)))
+                  ;; FIXME... varargs flag must also match the arity signature
+                  (let [m ^Match (first ms)
+                        mode (.invocation-mode m)
+                        member (.member m)]
+                    (when (and (not= mode resolve/invoke-polymorphic)
+                               (= (.varargs? at)
+                                  (= mode resolve/invoke-tail-into-array)))
+                      (condp instance? member
+                        Method (reflect/mhd-of-method owner member)
+                        Constructor (reflect/mhd-of-constructor owner member)
+                        Field (reflect/mhd-of-field owner member))))))))]
 
     ;; Important: Working on the syntax level is brittle.  There are
     ;; many syntactically different ways to redirect to a method or
@@ -64,11 +76,11 @@
                   (when (syntax/simple-symbol? (second form))
                     (when-some [cl (resolves-to-class (name (second form)))]
                       (when-some [[member-sym & args] (dot-member-args form)]
-                        (static-method cl (name member-sym) args))))
+                        (member-mhd cl (name member-sym) args))))
                   ;; invoke static (Classname/member ...)
                   (when-some [cl (resolves-to-class (namespace op))]
                     (when (nil? (interop/param-tags-of op))
-                      (static-method cl (name op) (rest form)))))
+                      (member-mhd cl (name op) (rest form)))))
             auto? (type/auto-return-marker? (.return-type at))]
         (when (some? mhd)
           (when (= (cond-> (.invocationType mhd)

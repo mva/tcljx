@@ -10,9 +10,9 @@
    (tcljx.alpha textflow__pp-test ptest__align-test ptest-test)
    (tcljx.parser reader-test namespace-test error-test redirection-test)
    (tcljx.classgen bootstrap-test invoke-test unreachable-test
-                   const-test conv-test prim-conv-test dot-form-test)
+                   const-test conv-test prim-conv-test dot-form-test new-test)
    
-   (tcljx #_new-test #_arith-test
+   (tcljx #_arith-test
           #_let-test #_quote-test #_meta-test #_str-test #_bits-test #_switch-test #_cond-test
           #_try-test #_array-test #_loop-test #_logic-test #_clone-test #_xcmp-test
           #_unboxing-test #_boxing-test #_fn-member-test
@@ -44,40 +44,40 @@
     tcljx.classgen.conv-test
     tcljx.classgen.prim-conv-test
     tcljx.classgen.dot-form-test
+    tcljx.classgen.new-test
     
-    #_tcljx.new-test
-    #_tcljx.arith-test
-    #_tcljx.let-test
-    #_tcljx.quote-test
-    #_tcljx.meta-test
-    #_tcljx.str-test
-    #_tcljx.bits-test
-    #_tcljx.switch-test
-    #_tcljx.cond-test
-    #_tcljx.try-test
-    #_tcljx.array-test
-    #_tcljx.loop-test
-    #_tcljx.logic-test
-    #_tcljx.clone-test
-    #_tcljx.xcmp-test
-    #_tcljx.unboxing-test
-    #_tcljx.boxing-test
-    #_tcljx.fn-member-test
+    #_tcljx.classgen.arith-test
+    #_tcljx.classgen.let-test
+    #_tcljx.classgen.quote-test
+    #_tcljx.classgen.meta-test
+    #_tcljx.classgen.str-test
+    #_tcljx.classgen.bits-test
+    #_tcljx.classgen.switch-test
+    #_tcljx.classgen.cond-test
+    #_tcljx.classgen.try-test
+    #_tcljx.classgen.array-test
+    #_tcljx.classgen.loop-test
+    #_tcljx.classgen.logic-test
+    #_tcljx.classgen.clone-test
+    #_tcljx.classgen.xcmp-test
+    #_tcljx.classgen.unboxing-test
+    #_tcljx.classgen.boxing-test
+    #_tcljx.classgen.fn-member-test
 
-    #_tcljx.namespace-test
-    #_tcljx.fn-test
-    #_tcljx.itf-fn-test
-    #_tcljx.variadic-test
-    #_tcljx.macro-test
-    #_tcljx.deftype-test
-    #_tcljx.record-test
-    #_tcljx.set-test
-    #_tcljx.definterface-test
-    #_tcljx.closure-test
-    #_tcljx.line-test
-    #_tcljx.letfn-test
-    #_tcljx.reify-test
-    #_tcljx.require-test
+    #_tcljx.classgen.namespace-test
+    #_tcljx.classgen.fn-test
+    #_tcljx.classgen.itf-fn-test
+    #_tcljx.classgen.variadic-test
+    #_tcljx.classgen.macro-test
+    #_tcljx.classgen.deftype-test
+    #_tcljx.classgen.record-test
+    #_tcljx.classgen.set-test
+    #_tcljx.classgen.definterface-test
+    #_tcljx.classgen.closure-test
+    #_tcljx.classgen.line-test
+    #_tcljx.classgen.letfn-test
+    #_tcljx.classgen.reify-test
+    #_tcljx.classgen.require-test
     #_tcljx.main-test]
 
   #_tcljx.rtiow-nocore-test)

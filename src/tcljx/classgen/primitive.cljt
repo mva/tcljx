@@ -42,19 +42,19 @@
              arg-type (insn/expr-type arg)]
          (cond
            (type/same? target-type arg-type)
-           arg        ;elide conversion from primitive to same primitive
+           arg      ;elide conversion from primitive to same primitive
            
            (.isPrimitive arg-type)
            (or (when-some [c (model/const-value arg)]
                  (fold-cast-from target-type c))
-               (insn/cast-into target-type arg))
+               (insn/cast-to arg target-type))
            
-           :else             ;here holds: `arg-type` is a reference type
-           (insn/cast-into target-type
-                           (cond->> arg
-                             (and numeric?
-                                  (not (.isAssignableFrom Number arg-type)))
-                             (insn/cast-into Number))))))))
+           :else           ;here holds: `arg-type` is a reference type
+           (insn/cast-to (cond-> arg
+                           (and numeric?
+                                (not (.isAssignableFrom Number arg-type)))
+                           (insn/cast-to Number))
+                         target-type))))))
 
   (def ^:private convert-to-logical-truth
     (^Invocable fn [form args]
@@ -66,9 +66,9 @@
     (^Invocable fn [form args]
      (let [arg (-> (take-arg form args) (insn/cast-to-logical))
            arg-tp (insn/expr-type arg)]
-       (if (.isPrimitive arg-tp)
-         (insn/cast-into (.class-reference (type/of arg-tp)) arg)
-         arg)))))
+       (cond-> arg
+         (.isPrimitive arg-tp)
+         (insn/cast-to (.class-reference (type/of arg-tp))))))))
 
 ;;; ------------------------------------------------------------------------
 

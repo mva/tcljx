@@ -146,11 +146,11 @@
                     pending-functions (ArrayList.)
                     ef (codegen/mk-code-generator pending-functions)
                     segment-elements (ArrayList.)
-                    globals primitive/primitive-nmsp-globals]
+                    globals primitive/primitive-nmsp-globals
+                    imports (resolve/predefined-imports (.rt-lookup loader))]
                 (NmspBuilderImpl. this ns-str ef
                                   segment-elements pending-functions
-                                  pkg-build globals known-ns ns-alias
-                                  resolve/predefined-imports
+                                  pkg-build globals known-ns ns-alias imports
                                   source-file segmgen/first-segm-id)))
             
             (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]

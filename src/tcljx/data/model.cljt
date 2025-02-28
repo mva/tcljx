@@ -54,7 +54,8 @@
   (empty? ^boolean [])
   (get ^Expr [^int i])
   (set ^Expr [^int i ^Expr x])
-  (entity ^Entity [^int i]))
+  (entity ^Entity [^int i])
+  (drop ^Exprs [^int n]))
 
 (defn entity
   (^Entity [^Expr x]
@@ -155,7 +156,17 @@
   ;; The names of the parameters if the arity is being compiled from
   ;; source.  For an imported function this is nil.
   (parameter-names ^String/1 [])
-  (parameter-name ^String [^int i]))
+  (parameter-name ^String [^int i])
+
+  ;; JVM-style varargs arity/method with an array parameter like
+  ;; `Object...` or `int...`.  Mutually exclusive with `variadic?`.
+  (varargs? ^boolean [])
+
+  ;; Clojure-style variadic arity with an `ISeq` rest parameter.
+  ;; External view on the arity's method is a varargs `Object...` with
+  ;; a bridge method in between.  Mutually exclusive with `varargs?`.
+  (variadic? ^boolean [])
+  )
 
 (deftype ArityTypeImpl [^Class return-type
                         ^Class/1 parameter-types
@@ -169,7 +180,11 @@
   (parameter-name [_ ^int i]
     (aget parameter-names i))
   (parameter-type [_ ^int i]
-    (aget parameter-types i)))
+    (aget parameter-types i))
+  (varargs? [_]                         ;FIXME...
+    false)
+  (variadic? [_]                        ;FIXME...
+    false))
 
 (defn mtd-of-arity-type ^MethodTypeDesc [^ArityType at]
   (MethodTypeDesc/of (reflect/describe-class (.return-type at))
@@ -328,6 +343,7 @@
   ;; ### basics
   
   (progn-expr ^Expr [^Exprs xs ^Expr x])
+  (if-expr ^Expr [^Exprs xs])
   (invoke ^Expr [^Object form ^Invocable inv ^Exprs args])
   
   ;; ### bindings
@@ -363,7 +379,8 @@
 
   (get-static-field ^Expr [^Class owner ^String mnm])
   (get-virtual-field ^Expr [^Expr receiver ^String mnm])
-  
+
+  (instanceof-expr ^Expr [^Class type ^Expr arg])
   (throw-expr ^Expr [^Expr arg])
   
   ;; ### misc

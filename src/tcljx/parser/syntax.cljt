@@ -18,9 +18,12 @@
 (defn next-if-string ^seq [^seq xs]
   (cond-> xs (string? (first xs)) (next)))
 
-(defn empty-tail ^void [^seq forms]    ;pre: `forms` is nil when empty
-  (when (some? forms)
-    (throw (info "unexpected arguments at end" forms))))
+(defn empty-tail
+  (^void [^seq forms]
+   (empty-tail 0 forms))
+  (^void [^int n ^seq forms]
+   (when (some? (nthnext forms n))
+     (throw (info "unexpected arguments at end" (nthnext forms n))))))
 
 (defn some-first [^seq forms]          ;pre: `forms` is nil when empty
   (if (some? forms)

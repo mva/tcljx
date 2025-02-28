@@ -64,7 +64,10 @@
   (entity [_ i]
     (let [ce (aget emitters i)]
       (when (instance? Entity ce)
-        ce))))
+        ce)))
+  (drop [_ n]
+    (Insns. (Arrays/copyOfRange emitters n (alength emitters))
+            (Arrays/copyOfRange expr-types n (alength expr-types)))))
 
 (defn mk-insns* ^Insns [^int n]
   (Insns. (new CodeEmitter/1 n) (new Class/1 n)))
@@ -129,23 +132,30 @@
              consumed-type)))
         (mk-insn (expr-type insn-n)))))
 
-;; Note: Casting to primitive numeric from either primitive numeric or
-;; reference Number is a type conversion.
-(defn cast-into
-  (^Insn [^Class target-type ^Insn arg]
-   (if (or (not (identical? target-type (.expr-type arg)))
-           (identical? Void/TYPE target-type)) ;force operand type to void
-     (-> (^CodeEmitter fn [xb line _]
-          (when (emit/insn? xb line target-type (.emitter ^Insn arg))
-            target-type))
-         (mk-insn target-type))
-     arg))
-  (^Insn [^Class target-type ^Insns args ^int i]
-   (cast-into target-type (.get args i))))
+(letfn [(materialize-as ^CodeEmitter [^CodeEmitter ce ^Class target-type]
+          (^CodeEmitter fn [xb line _]
+           (when (emit/insn? xb line target-type ce)
+             target-type)))]
+
+  (defn emitting-as ^CodeEmitter [^Insn arg ^Class target-type] ;FIXME... drop?
+    (cond-> (.emitter ^Insn arg)
+      (or (not (identical? target-type (.expr-type arg)))
+          (identical? Void/TYPE target-type))
+      (materialize-as target-type)))
+  
+  ;; Note: Casting to primitive numeric from either primitive numeric or
+  ;; reference Number is a type conversion.
+  (defn cast-to ^Insn [^Insn arg ^Class target-type]
+    (if (or (not (identical? target-type (.expr-type arg)))
+            (identical? Void/TYPE target-type)) ;force operand type to void
+      (-> (.emitter ^Insn arg)
+          (materialize-as target-type)
+          (mk-insn target-type))
+      arg)))
 
 (defn cast-to-logical
   (^Insn [^Insn insn]
-   (cast-into (type/expr-to-logical (expr-type insn)) insn))
+   (cast-to insn (type/expr-to-logical (expr-type insn))))
   (^Insn [^Insns insns ^int i]
    (cast-to-logical (.get insns i))))
 
@@ -163,8 +173,8 @@
       (mk-insn array-type)))
 
 (defn emit-return ^void [^CodeBuilder xb ^Class return-type ^Insn body]
-  (let [body (cast-into return-type body)]
-    (emit/insn? xb cfg/no-line-number emit/leaving (emitter body))))
+  (emit/insn? xb cfg/no-line-number emit/leaving
+              (emitting-as body return-type)))
 
 ;;; ------------------------------------------------------------------------
 

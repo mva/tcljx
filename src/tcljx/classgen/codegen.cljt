@@ -1,10 +1,12 @@
 (ns tcljx.classgen.codegen
   (:require
-   (tcljx.data [config :as cfg] [wrong :as wrong] [type :as type]
-               [model :as model] [resolve :as resolve] [reflect :as reflect])
-   (tcljx.classgen [classfile :as classfile] [runtime :as rt] [emit :as emit]
-                   [insn :as insn] [entity :as entity] [defgen :as defgen]
-                   [segmgen :as segmgen] [methodgen :as methodgen]))
+   (tcljx.data
+    [config :as cfg] [wrong :as wrong] [type :as type] [model :as model]
+    [resolve :as resolve] [reflect :as reflect])
+   (tcljx.classgen
+    [classfile :as classfile] [runtime :as rt] [emit :as emit] [insn :as insn]
+    [entity :as entity] [condgen :as condgen] [defgen :as defgen]
+    [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import
    (tcljx.data.model Expr Exprs ExprFactory CodeEmitter ArityType
                      NamespaceBuilder)
@@ -159,7 +161,21 @@
   
   (progn-expr [_ xs x]
     (insn/progn xs x))
-  
+  (if-expr [_ xs]
+    (let [xs ^Insns xs
+          tp (condgen/join-type (.expr-types xs) 1 (.length xs))
+          if-true (-> (.get xs 1)
+                      (insn/emitting-as tp))
+          if-false (-> (if (= (.length xs) 3)
+                         (.get xs 2)
+                         insn/insn-empty)
+                       (insn/emitting-as tp))
+          test (condgen/logical-truth (.get xs 0))]
+      (cond
+        (identical? entity/insn-true test) if-true
+        (identical? entity/insn-false test) if-false
+        :else (-> (condgen/mk-if (.emitter test) if-true if-false)
+                  (insn/mk-insn tp)))))
   (invoke [this form inv args]
     (.invoke* inv form args))
   
@@ -206,14 +222,14 @@
                   (if (or (.isInterface ref-target)
                           (.isAssignableFrom ref-target arg-tp) ;empty
                           (.isAssignableFrom arg-tp ref-target)) ;checkcast
-                    (insn/cast-into ref-target ref-arg)
+                    (insn/cast-to ref-arg ref-target)
                     (throw (wr-info-invalid-cast)))))
               (box-arg-into ^Insn [^Class prim-tp]
-                (insn/cast-into (.class-reference (type/of prim-tp)) arg))]
+                (insn/cast-to arg (.class-reference (type/of prim-tp))))]
         (cond
           (or (type/polymorphic? target-type) ;force void context
               (type/polymorphic? arg-tp))
-          (insn/cast-into target-type arg)
+          (insn/cast-to arg target-type)
 
           (type/same? target-type arg-tp)
           arg
@@ -269,6 +285,13 @@
           (throw (wrong/wr-info (str "no virtual field matching "
                                      (wrong/q-as-symbol owner mnm)))))))
 
+  (instanceof-expr [_ type arg]
+    (let [arg ^Insn arg]
+      (-> (^CodeEmitter fn [xb line _]
+           (when (insn/emit-insn-logical? xb arg)
+             (.instanceOf xb (reflect/describe-class type))
+             Boolean/TYPE))
+          (insn/mk-insn Boolean/TYPE))))
   (throw-expr [_ arg]
     (let [arg ^Insn arg]
       (if (.isAssignableFrom Throwable (insn/logical-type arg))

@@ -62,7 +62,8 @@
   (let [s (.getName cl)] ;want "Thread$State" for j.l.Thread.State
     (.substring s (inc (.lastIndexOf s (int \.))))))
 
-(def predefined-imports
+;;; `rt-lookup` is used to resolve class names of the Clojure runtime.
+(defn predefined-imports ^map [^MethodHandles$Lookup rt-lookup]
   (let [m (java.util.HashMap.)]
     ;; by default, import certain java.base classes using their
     ;; short name; references using the long name are resolved on
@@ -75,6 +76,18 @@
     ;; name
     (doseq [^Class cl jvm-primitive-types]
       (.put m (.getSimpleName cl) cl))
+
+    (letfn [(put-alias ^void [^String nm ^Class compiler-class]
+              (.put m nm (.findClass rt-lookup (.getName compiler-class))))]
+      ;; shorthand names for Clojure building blocks
+      (put-alias "symbol" type/symbol)
+      (put-alias "keyword" type/keyword)
+      (put-alias "vector" type/vector)
+      (put-alias "map" type/map)
+      (put-alias "set" type/set)
+      (put-alias "list" type/list)
+      (put-alias "seq" type/seq))
+    
     (into {} m)))
 
 ;;; ------------------------------------------------------------------------
@@ -116,35 +129,6 @@
 (defn varargs-parameter-type ^Class [^Match m] ;nil if invoke-standard
   (when (not= (.invocation-mode m) invoke-standard)
     (aget (.parameter-types m) (end-of-fixed-parameters m))))
-
-
-#_(def flag-static 0)
-#_(def flag-virtual 1)
-;; (def flag-field 2)
-;; (def flag-method 3)
-;; (def flag-no-candidate-returns-nil 4)
-;; (def flag-minus-is-field 5)
-
-#_(def opts-virtual (bit-set 0 flag-virtual))
-#_(def opts-static (bit-set 0 flag-static))
-
-(let [#_#_mask-field (bit-set 0 flag-field)
-      #_#_mask-method (bit-set 0 flag-method)
-      #_#_mask-member (bit-or mask-field mask-method)]
-  #_(defn fields-only? ^boolean [^int opts]
-      (= mask-field (bit-and mask-member opts)))
-  #_(defn methods-only? ^boolean [^int opts]
-      (= mask-method (bit-and mask-member opts)))
-  #_(defn static-virtual-match? ^boolean [^int opts ^Member m]
-    (if (Modifier/isStatic (.getModifiers m))
-      (bit-test opts flag-static)
-      (bit-test opts flag-virtual))))
-
-;; (defn first-argument-index ^int [^int opts] ;skips receiver
-;;   (if (bit-test opts flag-virtual) 1 0))
-
-;; (defn starts-with-dot? ^boolean [^String s]
-;;   (and  (> (.length s) 1) (= (.charAt s 0) \.)))
 
 ;;; Problem: class MethodHandle.PolymorphicSignature is not public
 (def ^:private ann-polymorphic-signature
@@ -286,18 +270,6 @@
 
     (or (member-exact nil static? owner mnm ptags)
         (filter-by-ptags nil (member-candidates nil static? owner mnm)))))
-
-(defn methods-by-param-tags ^seq [^boolean static? ^Class owner ^String mnm
-                                  ^Class/1 ptags]
-  ;; FIXME... drop this later?
-  (->> (members-by-param-tags static? owner mnm ptags)
-       (filter #(instance? Method (.member ^Match %)))))
-(defn method-by-param-tags ^Match [^boolean static? ^Class owner ^String mnm
-                                   ^Class/1 ptags]
-  ;; FIXME... drop this later?
-  (let [ms (methods-by-param-tags static? owner mnm ptags)]
-    (when (nil? (next ms))
-      (first ms))))
 
 ;;; ------------------------------------------------------------------------
 
