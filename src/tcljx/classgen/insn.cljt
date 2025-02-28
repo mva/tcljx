@@ -34,7 +34,7 @@
       emitter)))
 
 (def mk-insn Insn/new)
-(def insn-empty (mk-insn (^CodeEmitter fn [xb line requested-type] Void/TYPE)
+(def insn-empty (mk-insn (^CodeEmitter fn [xb line _] Void/TYPE)
                           type/polymorphic))
 
 ;;; Compilation centers around arrays of types and arrays of code
@@ -123,10 +123,10 @@
 (defn progn ^Insn [^Insns insns ^Insn insn-n]
   (if (identical? empty-insns insns)
     insn-n
-    (-> (^CodeEmitter fn [xb line requested-type]
+    (-> (^CodeEmitter fn [xb line consumed-type]
          (when (emit/insns? xb line Void/TYPE (.emitters insns))
-           (when (emit/insn? xb line requested-type (.emitter insn-n))
-             requested-type)))
+           (when (emit/insn? xb line consumed-type (.emitter insn-n))
+             consumed-type)))
         (mk-insn (expr-type insn-n)))))
 
 ;; Note: Casting to primitive numeric from either primitive numeric or
@@ -135,7 +135,7 @@
   (^Insn [^Class target-type ^Insn arg]
    (if (or (not (identical? target-type (.expr-type arg)))
            (identical? Void/TYPE target-type)) ;force operand type to void
-     (-> (^CodeEmitter fn [xb line requested-type]
+     (-> (^CodeEmitter fn [xb line _]
           (when (emit/insn? xb line target-type (.emitter ^Insn arg))
             target-type))
          (mk-insn target-type))
@@ -150,7 +150,7 @@
    (cast-to-logical (.get insns i))))
 
 (defn new-array ^Insn [^Class array-type ^Insns dims]
-  (-> (^CodeEmitter fn [xb line requested-type]
+  (-> (^CodeEmitter fn [xb line _]
        (when (emit/insns? xb line Integer/TYPE (.emitters dims))
          (if (= (.length dims) 1)
            (let [component-type (.getComponentType array-type)]
@@ -205,16 +205,15 @@
                         (reflect/describe-class* ptypes)))))
 
 (defn invoke-member ^Insn [^Match m ^Insn receiver ^Insns args]
-  (-> (^CodeEmitter fn [xb line requested-type]
+  (-> (^CodeEmitter fn [xb line consumed-type]
        (letfn [(invoke-polymorphic ^Class [^int fixed]
                  (when (emit/typed-insns? xb line (.expr-types args)
                                           (.emitters args) fixed (.length args))
-                   (let [return-type (or requested-type Void/TYPE)
-                         mtd (mtd-of-poly return-type (.parameter-types m)
+                   (let [mtd (mtd-of-poly consumed-type (.parameter-types m)
                                           fixed (.expr-types args))]
                      (-> (emit/line-number xb line)
                          (reflect/invoke-member (.owner m) (.member m) mtd))
-                     return-type)))]
+                     consumed-type)))]
          (let [fixed (resolve/end-of-fixed-parameters m)
                varargs-tp (resolve/varargs-parameter-type m)]
            ;; new-dup-dance when creating a new instance of `owner`
@@ -243,14 +242,14 @@
 ;;; FIXME... drop this after all old unit tests have been ported over;
 ;;; interesting experiment to see if it works, but probably of little
 ;;; or even no practical value.
-(defmacro with-void-empty-if-requested [requested-type & body]
-  (assert (symbol? requested-type))
-  `(if (identical? Void/TYPE ~requested-type)
+(defmacro with-void-empty-if-requested [consumed-type & body]
+  (assert (symbol? consumed-type))
+  `(if (identical? Void/TYPE ~consumed-type)
      Void/TYPE
      (do ~@body)))
-(defmacro with-void-args-if-requested [requested-type args & body]
-  (assert (symbol? requested-type))
-  `(if (identical? Void/TYPE ~requested-type)
+(defmacro with-void-args-if-requested [consumed-type args & body]
+  (assert (symbol? consumed-type))
+  `(if (identical? Void/TYPE ~consumed-type)
      (when (emit/insns? ~'xb ~'line Void/TYPE (.emitters ~args))
        Void/TYPE)
      (do ~@body)))

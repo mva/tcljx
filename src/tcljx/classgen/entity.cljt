@@ -12,8 +12,8 @@
 (deftype ConstantImpl [^Class type ^Object const-value]
   java.lang.Record
   Constant
-  (emit-insn* [_ xb line requested-type]
-    (insn/with-void-empty-if-requested requested-type
+  (emit-insn* [_ xb line consumed-type]
+    (insn/with-void-empty-if-requested consumed-type
       (constgen/load xb const-value)
       type)))
 
@@ -84,7 +84,7 @@
 (deftype LocalImpl [^int param-no ^String name ^Class type ^CodeEmitter bound-to
                     ^:unsynchronized-mutable ^int slot]
   Binding
-  (emit-insn* [this xb line requested-type]
+  (emit-insn* [this xb line consumed-type]
     (if (model/ce-const? bound-to)
       Void/TYPE
       
@@ -107,8 +107,8 @@
   (bound-value [this]
     (-> (if (model/ce-const? bound-to)
           bound-to
-          (^CodeEmitter fn [xb line requested-type]
-           (insn/with-void-empty-if-requested requested-type
+          (^CodeEmitter fn [xb line consumed-type]
+           (insn/with-void-empty-if-requested consumed-type
              (.loadLocal xb (TypeKind/from type) (.allocated-slot this))
              type)))
         (insn/mk-insn type)))

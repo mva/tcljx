@@ -20,7 +20,7 @@
 (deftype EmitterData [form]
   java.lang.Record
   CodeEmitter
-  (emit-insn* [_ xb line requested-type]
+  (emit-insn* [_ xb line consumed-type]
     (throw (UnsupportedOperationException.))))
 
 (deftype ExprStub [^CodeEmitter data]
@@ -45,7 +45,7 @@
 (deftype GlobalStub [^String namespace ^String name ^CodeEmitter bound-to]
   java.lang.Record
   CodeEmitter
-  (emit-insn* [_ xb line requested-type]
+  (emit-insn* [_ xb line consumed-type]
     (throw (UnsupportedOperationException.)))
   Global
   (bound-value [this]

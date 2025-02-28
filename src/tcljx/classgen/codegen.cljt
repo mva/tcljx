@@ -28,9 +28,9 @@
   (def ^:private literal-list (find-factory "list")))    ;type/list
 
 (defn- with-line-number ^Insn [^Insn insn ^int line]
-  (insn/mk-insn (^CodeEmitter fn [xb _ requested-type]
-                 (when (emit/insn? xb line requested-type (.emitter insn))
-                   requested-type))
+  (insn/mk-insn (^CodeEmitter fn [xb _ consumed-type]
+                 (when (emit/insn? xb line consumed-type (.emitter insn))
+                   consumed-type))
                 (insn/expr-type insn)))
 
 ;;; ------------------------------------------------------------------------
@@ -145,7 +145,7 @@
     (let [dims ^Insns dims]
       (dotimes [i (.length dims)]
         (ensure-assignable Integer/TYPE (insn/expr-type dims i)))
-      (-> (^CodeEmitter fn [xb line requested-type]
+      (-> (^CodeEmitter fn [xb line _]
            (when (emit/insns? xb line Integer/TYPE (.emitters dims))
              (if (= (.length dims) 1)
                (let [component-type (.getComponentType array-type)]
@@ -169,12 +169,12 @@
     (insn/mk-insn (entity/mk-local name init) Void/TYPE))
   (block-let [_ bindings body]
     (let [block (insn/progn bindings body)]
-      (-> (^CodeEmitter fn [xb line requested-type]
+      (-> (^CodeEmitter fn [xb line consumed-type]
            ;; FIXME... emit lineNumber here?
            (.block xb (^Consumer fn ^void [^CodeBuilder xb]
                        ;; FIXME... or emit lineNumber here?
-                       (emit/insn? xb line requested-type (.emitter block))))
-           requested-type) ;cannot report back `leaving` if insn? is false
+                       (emit/insn? xb line consumed-type (.emitter block))))
+           consumed-type) ;cannot report back `leaving` if insn? is false
           (insn/mk-insn (insn/expr-type block)))))
   
   (new-function [this mangled-name arity-types arity-bodies arity-redirections]
@@ -272,7 +272,7 @@
   (throw-expr [_ arg]
     (let [arg ^Insn arg]
       (if (.isAssignableFrom Throwable (insn/logical-type arg))
-        (-> (^CodeEmitter fn [xb line requested-type]
+        (-> (^CodeEmitter fn [xb line _]
              (when (emit/insn? xb line Throwable (.emitter arg))
                (-> xb (emit/line-number line) (.athrow))
                emit/leaving))         ;type seen by the code generator

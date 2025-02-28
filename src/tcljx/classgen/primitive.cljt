@@ -85,8 +85,8 @@
 
 (defn- operator ^Insn [^Class op-type ^int bytecode ^Insns args]
   (let [ces (.emitters args)]
-    (-> (^CodeEmitter fn [xb line requested-type]
-         (insn/with-void-args-if-requested requested-type args
+    (-> (^CodeEmitter fn [xb line consumed-type]
+         (insn/with-void-args-if-requested consumed-type args
            (if (and (<= #_isub 100 bytecode #_dsub 103)
                     (model/ce-zero? (aget ces 0)))
              (when (emit/insn? xb line op-type (aget ces 1))
@@ -219,7 +219,7 @@
               (first const-args)
 
               :else
-              (-> (^CodeEmitter fn [xb line requested-type]
+              (-> (^CodeEmitter fn [xb line _]
                    (let [cpb (.constantPool xb)
                          atypes (.expr-types inv-args) ;only logical types
                          mhe (.methodHandleEntry cpb rt/bsm-concat)

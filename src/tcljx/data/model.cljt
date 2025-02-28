@@ -8,12 +8,12 @@
   )
 
 ;;; Emit instruction code into the CodeBuilder instance.  Return the
-;;; logical type of the value pushed onto operand stack.  This is
+;;; actual type of the value pushed onto operand stack.  This is
 ;;; either the original expression type baked into the emitter, or the
-;;; value it takes in the argument `requested-type`.  If the operand
-;;; type returned by the emitter differs from `requested-type`, then
-;;; it is the caller's responsibility to adapt the operand value to
-;;; the type it requires.
+;;; provided `consumed-type` expected by the instruction that the
+;;; consumes the operand.  If the returned operand type differs from
+;;; `consumed-type`, then `emit/insn?` adapts the on stack value to
+;;; match the `consumed-type`.
 ;;; 
 ;;; Right now, line numbers are only written to decorate stack traces.
 ;;; A bytecode instruction must emit a line number pseudo instruction
@@ -21,7 +21,7 @@
 ;;; the opcode's execution.
 (definterface CodeEmitter
   (emit-insn* ^Class [^java.lang.classfile.CodeBuilder xb ^int line
-                      ^Class requested-type]))
+                      ^Class consumed-type]))
 
 ;;; A named entity on the level of the code generator that exists at
 ;;; runtime.  Exposes additional operations beyond "emit code that

@@ -30,28 +30,28 @@
 
 (defn- conditional ^CodeEmitter [^Branching branch
                                  ^CodeEmitter if-true ^CodeEmitter if-false]
-  (^CodeEmitter fn [xb line requested-type]
+  (^CodeEmitter fn [xb line consumed-type]
    (let [start-false (.newLabel xb), end-false (.newLabel xb)]
      (when (.emit-branch-if-false? branch xb line start-false)
        
-       (let [completing-true? (emit/insn? xb line requested-type if-true)]
+       (let [completing-true? (emit/insn? xb line consumed-type if-true)]
          (when completing-true?
            (.goto_ xb end-false))
          
          (.labelBinding xb start-false)
-         (let [completing-false? (emit/insn? xb line requested-type if-false)]
+         (let [completing-false? (emit/insn? xb line consumed-type if-false)]
            (.labelBinding xb end-false)
            (when (or completing-true? completing-false?)
-             requested-type)))))))
+             consumed-type)))))))
 
 (defn- mk-branch* ^Branching [^int opcode-eq ^int cmp-opcd
                               ^Class arg-type ^CodeEmitter/1 args]
   (let [bytecode (+ opcode-eq (negate-test cmp-opcd))]
     (reify Branching
-      (emit-insn* [this xb line requested-type]
+      (emit-insn* [this xb line consumed-type]
         (.emit-insn* (conditional this (.emitter entity/insn-true)
                                   (.emitter entity/insn-false))
-                     xb line requested-type))
+                     xb line consumed-type))
       (emit-branch-if-false? [_ xb line target]
         (when (emit/insns? xb line arg-type args)
           (case bytecode
