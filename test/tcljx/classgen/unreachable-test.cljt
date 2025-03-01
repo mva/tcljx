@@ -83,9 +83,9 @@
          (asm-expr (int (throw (Throwable/new)))))))
 
 (deftest binary-operator-with-throw-test
-  (is (thrown-with-msg? WrongInfo #"expects two numeric arguments"
+  (is (thrown-with-msg? WrongInfo #"expects numeric arguments"
                         (asm-expr (- (throw (Throwable/new)) 2))))
-  (is (thrown-with-msg? WrongInfo #"expects two numeric arguments"
+  (is (thrown-with-msg? WrongInfo #"expects numeric arguments"
                         (asm-expr (- (System/gc) (throw (Throwable/new)))))))
 
 (deftest string-concat-with-throw-test

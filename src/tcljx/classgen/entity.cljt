@@ -17,14 +17,19 @@
       (constgen/load xb const-value)
       type)))
 
-(def mk-constant ConstantImpl/new)
+(defn mk-constant
+  #_(^ConstantImpl [^Object const-value]
+   (mk-constant (.getClass const-value) const-value))
+  (^ConstantImpl [^Class type ^Object const-value]
+   (ConstantImpl/new type const-value)))
 
 (def insn-null (insn/mk-insn (mk-constant Object ConstantDescs/NULL)
                               type/poly-reference))
-#_(def insn-int-one (insn/mk-insn (mk-constant Integer/TYPE 1) Integer/TYPE))
-#_(def insn-int-zero (insn/mk-insn (mk-constant Integer/TYPE 0) Integer/TYPE))
 (def insn-true (insn/mk-insn (mk-constant Boolean/TYPE 1) Boolean/TYPE))
 (def insn-false (insn/mk-insn (mk-constant Boolean/TYPE 0) Boolean/TYPE))
+(def insn-int-one (insn/mk-insn (mk-constant Integer/TYPE 1) Integer/TYPE))
+(def insn-int-zero (insn/mk-insn (mk-constant Integer/TYPE 0) Integer/TYPE))
+(def insn-float-one (insn/mk-insn (mk-constant Float/TYPE 1.0f) Float/TYPE))
 
 (defn new-constant
   (^Insn [^Object value] ;use if `expr-type` agrees with (.getClass value)

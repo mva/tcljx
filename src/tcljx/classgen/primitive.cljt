@@ -9,7 +9,7 @@
    (tinyclj [string :as str]))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.model Expr Exprs CodeEmitter Invocable)
+   (tcljx.data.model Expr Exprs CodeEmitter Constant Invocable)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile Opcode CodeBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
@@ -33,6 +33,11 @@
             insn/insn-empty             ;casting some constant to void
             (let [c' (type/convert-from-constant target-type c)]
               (entity/new-constant target-type c'))))]
+
+  (defn- convert-to-primitive ^Insn [^Insn arg ^Class target-type]
+    (or (when-some [c (model/const-value arg)]
+          (fold-cast-from target-type c))
+        (insn/cast-to arg target-type)))
   
   (defn- mk-convert-to-primitive ^Invocable [^Wrapper target]
     (let [target-type (.class-primitive target)
@@ -45,9 +50,7 @@
            arg      ;elide conversion from primitive to same primitive
            
            (.isPrimitive arg-type)
-           (or (when-some [c (model/const-value arg)]
-                 (fold-cast-from target-type c))
-               (insn/cast-to arg target-type))
+           (convert-to-primitive arg target-type)
            
            :else           ;here holds: `arg-type` is a reference type
            (insn/cast-to (cond-> arg
@@ -83,23 +86,16 @@
 (defn- with-bytecode ^CodeBuilder [^CodeBuilder xb ^int bytecode]
   (.with xb (aget op-instr (- bytecode #_iadd 96))))
 
-(defn- operator ^Insn [^Class op-type ^int bytecode ^Insns args]
+(defn- operator ^CodeEmitter [^Class op-type ^int bytecode ^Insns args]
   (let [ces (.emitters args)]
-    (-> (^CodeEmitter fn [xb line consumed-type]
-         (insn/with-void-args-if-requested consumed-type args
-           (if (and (<= #_isub 100 bytecode #_dsub 103)
-                    (model/ce-zero? (aget ces 0)))
-             (when (emit/insn? xb line op-type (aget ces 1))
-               (with-bytecode xb (+ bytecode 16)) ;XSUB to XNEG
-               op-type)
-             (when (emit/insns? xb line op-type ces)
-               (when (<= #_idiv 108 bytecode #_drem 115)
-                 ;; [il]div and [il]rem can raise a division by zero
-                 ;; exception, so provide a line number for div & rem
-                 (emit/line-number xb line))
-               (with-bytecode xb bytecode)
-               op-type))))
-        (insn/mk-insn op-type))))
+    (^CodeEmitter fn [xb line consumed-type]
+     (when (emit/insns? xb line op-type ces)
+       #_(when (<= #_idiv 108 bytecode #_drem 115)
+           ;; [il]div and [il]rem can raise a division by zero
+           ;; exception, so provide a line number for div & rem
+           (emit/line-number xb line))
+       (with-bytecode xb bytecode)
+       op-type))))
 
 (letfn [(opcode-delta ^int [^Class tp]
           (condp identical? tp
@@ -107,35 +103,52 @@
             Long/TYPE 1
             Float/TYPE 2
             Double/TYPE 3))
+        (typed-bytecode ^int [^Opcode base-opc ^Class op-type]
+          (+ (.bytecode base-opc) (opcode-delta op-type)))
         
-        (const-fold-int ^int [^Opcode base-opc ^Number c0 ^Number c1]
+        (const-fold-int ^int [^int bytecode ^Number c0 ^Number c1]
           (let [a0 (.intValue c0), a1 (.intValue c1)]
-            (case (.bytecode base-opc)
+            (case bytecode
               #_iadd 96 (+ a0 a1)
               #_isub 100 (- a0 a1)
               #_imul 104 (* a0 a1)
               #_idiv 108 (quot a0 a1)
               #_irem 112 (rem a0 a1))))
-        (const-fold ^Number [^int opcd ^Opcode base-opc ^Number c0 ^Number c1]
-          (case opcd
-            #_int 0 (object (const-fold-int base-opc c0 c1))
-            ;; #_long 1 (const-fold-long base-opc c0 c1)
-            ;; #_float 2 (const-fold-float base-opc c0 c1)
-            ;; #_double 3 (const-fold-double base-opc c0 c1)
-            ))
-        (binary-op ^Expr [^Class op-type ^Opcode base-opc ^Insns args]
-          (let [opcd (opcode-delta op-type)]
-            (if (and (model/const? args 0) (model/const? args 1))
-              ;; note: XSUB -> XNEG conversion is currently handled by
-              ;; `operator`
-              (entity/new-constant op-type
-                                   (const-fold opcd base-opc
-                                               (model/const-value args 0)
-                                               (model/const-value args 1)))
-              (operator op-type (+ (.bytecode base-opc) opcd) args))))
-
-        (computational-numeric-of ^Class [^Class/1 expr-types]
-          (loop [acc type/int, i (dec (alength expr-types))]
+        (const-fold-long ^long [^int bytecode ^Number arg0 ^Number arg1]
+          (let [a0 (.longValue arg0), a1 (.longValue arg1)]
+            (case bytecode
+              #_ladd 97 (+ a0 a1)
+              #_lsub 101 (- a0 a1)
+              #_lmul 105 (* a0 a1)
+              #_ldiv 109 (quot a0 a1)
+              #_lrem 113 (rem a0 a1))))
+        (const-fold-float ^float [^int bytecode ^Number arg0 ^Number arg1]
+          (let [a0 (.floatValue arg0), a1 (.floatValue arg1)]
+            (case bytecode
+              #_fadd 98 (+ a0 a1)
+              #_fsub 102 (- a0 a1)
+              #_fmul 106 (* a0 a1)
+              #_fdiv 110 (/ a0 a1)
+              #_frem 114 (rem a0 a1))))
+        (const-fold-double ^double [^int bytecode ^Number arg0 ^Number arg1]
+          (let [a0 (.doubleValue arg0), a1 (.doubleValue arg1)]
+            (case bytecode
+              #_dadd 99 (+ a0 a1)
+              #_dsub 103 (- a0 a1)
+              #_dmul 107 (* a0 a1)
+              #_ddiv 111 (/ a0 a1)
+              #_drem 115 (rem a0 a1))))
+        (const-fold ^Number [^Opcode base-opc ^Class op-type
+                             ^Number c0 ^Number c1]
+          (let [bytecode (typed-bytecode base-opc op-type)]
+            (case (- bytecode (.bytecode base-opc))
+              #_int 0 (object (const-fold-int bytecode c0 c1))
+              #_long 1 (object (const-fold-long bytecode c0 c1))
+              #_float 2 (object (const-fold-float bytecode c0 c1))
+              #_double 3 (object (const-fold-double bytecode c0 c1)))))
+        
+        (top-numeric-of ^Class [^Wrapper bottom-type ^Class/1 expr-types]
+          (loop [acc bottom-type, i (dec (alength expr-types))]
             (if (neg? i)
               (.class-primitive acc)
               (let [tp (aget expr-types i)]
@@ -146,31 +159,124 @@
                                acc
                                wtp)
                              (dec i)))))))))
-        (info-two-numeric ^Throwable [form ^Insns args]
+        (info-two-numeric ^Throwable [form ^Insns args] ;FIXME... drop
           (-> (str (wrong/q (first form)) " expects two numeric arguments"
                    (wrong/got-types (insn/expr-types args)))
-              (wrong/wr-info)))]
-  
-  (defn mk-binary-numeric ^Invocable [^Opcode base-opc]
-    (reify Invocable
-      (invoke* [_ form args]
-        (let [args (take-args form args 2)]
-          (if-some [tp-top (computational-numeric-of (.expr-types args))]
-            (binary-op tp-top base-opc args)
-            (throw (info-two-numeric form args)))))))
+              (wrong/wr-info)))
+        (info-numeric-args-only ^Throwable [form ^Insns args]
+          (-> (str (wrong/q (first form)) " expects numeric arguments"
+                   (wrong/got-types (insn/expr-types args)))
+              (wrong/wr-info)))
 
-  (defn mk-binary-compare ^Invocable [^int cmp-opcd]
+        (emit-suffix ^CodeEmitter [^Opcode base-opc ^Class op-type
+                                   ^CodeEmitter lhs ^CodeEmitter/1 ces
+                                   ^int start]
+          (let [bytecode (typed-bytecode base-opc op-type)]
+            (^CodeEmitter fn [xb line consumed-type]
+             (when (emit/insn? xb line op-type lhs)
+               (loop [i start]
+                 (if (< i (alength ces))
+                   (let [ce (aget ces i)]
+                     (when (emit/insn? xb line op-type ce)
+                       (when (<= #_idiv 108 bytecode #_drem 115)
+                         ;; [il]div and [il]rem can raise a division by
+                         ;; zero exception, so provide a line number for
+                         ;; div & rem
+                         (emit/line-number xb line))
+                       (with-bytecode xb bytecode)
+                       (recur (inc i))))
+                   op-type))))))
+        (fold-lhs-then-emit ^CodeEmitter [^Opcode base-opc ^Class op-type
+                                          ^CodeEmitter/1 ces]
+          ;; pre: (model/ce-const? (aget ces 0))
+          (loop [lhs ^Number (model/ce-const-value (aget ces 0)), i 1]
+            (cond
+              (>= i (alength ces))
+              (entity/mk-constant op-type lhs)
+              
+              (model/ce-const? (aget ces i))
+              (-> (const-fold base-opc op-type lhs
+                              (model/ce-const-value (aget ces i)))
+                  (recur (inc i)))
+              
+              :else
+              (emit-suffix base-opc op-type (entity/mk-constant op-type lhs)
+                           ces i))))
+        (fold-or-emit ^CodeEmitter [^Opcode base-opc ^Class op-type
+                                    ^CodeEmitter/1 ces]
+          (if (model/ce-const? (aget ces 0))
+            (fold-lhs-then-emit base-opc op-type ces)
+            (emit-suffix base-opc op-type (aget ces 0) ces 1)))
+        (single-argument ^CodeEmitter [^Opcode base-opc ^Class op-type
+                                       ^Insns args]
+          (let [ce (insn/emitter args 0)]
+            (condp identical? base-opc
+              Opcode/IADD
+              (insn/emitter args 0)
+                      
+              Opcode/ISUB
+              (if-some [c (when (model/ce-const? ce)
+                            (model/ce-const-value ce))]
+                (entity/mk-constant op-type (const-fold base-opc op-type 0 c))
+                (operator op-type (typed-bytecode Opcode/INEG op-type) args))
+
+              Opcode/IMUL 
+              (insn/emitter args 0)
+
+              Opcode/IDIV
+              (if-some [c (when (model/ce-const? ce)
+                            (model/ce-const-value ce))]
+                (entity/mk-constant op-type (const-fold base-opc op-type 1 c))
+                (->> (insn/insns-of entity/insn-int-one (.get args 0))
+                     (operator op-type (typed-bytecode Opcode/IDIV op-type)))))))]
+  
+  (defn mk-nary-numeric ^Invocable [^Wrapper bottom-type ^Opcode base-opc
+                                    ^Insn identity]
+    (^Invocable fn [form args]
+     (let [args ^Insns args]
+       (if-some [op-type (top-numeric-of bottom-type (.expr-types args))]
+         (-> (case (.length args)
+               0 (.emitter identity)
+               1 (single-argument base-opc op-type args)
+               #_else (fold-or-emit base-opc op-type (.emitters args)))
+             (insn/mk-insn op-type))
+         (throw (info-numeric-args-only form args))))))
+
+  (defn mk-binary-numeric ^Invocable [^Wrapper bottom-type ^Opcode base-opc]
     (^Invocable fn [form args]
      (let [args (take-args form args 2)]
-       (if-some [tp-top (computational-numeric-of (.expr-types args))]
+       (if-some [op-type (top-numeric-of bottom-type (.expr-types args))]
+         (insn/mk-insn (fold-or-emit base-opc op-type (.emitters args))
+                       op-type)
+         (throw (info-numeric-args-only form args))))))
+  
+  (def binary-xdiv-integral             ;aka 'quot
+    (^Invocable fn [form args]
+     (let [args (take-args form args 2)]
+       ;; FIXME... this does not work if the result is out of range of
+       ;; long; maybe better: truncate with something along the line of
+       ;; `(if (neg? x) (Math/ceil x) (Math/floor x))` (or put this
+       ;; into a static method that first checks if the division
+       ;; result is in range for long, and only falls back to the
+       ;; ceil/floor variant if out of range)
+       (if-some [op-type (top-numeric-of type/int (.expr-types args))]
+         (cond-> (insn/mk-insn (fold-or-emit Opcode/IDIV op-type
+                                             (.emitters args))
+                               op-type)
+           (or (type/same? Float/TYPE op-type)
+               (type/same? Double/TYPE op-type))
+           (-> (convert-to-primitive Long/TYPE)
+               (convert-to-primitive op-type)))
+         (throw (info-numeric-args-only form args))))))
+  
+  (defn mk-binary-compare ^Invocable [^int cmp-opcd] ;FIXME... drop?
+    (^Invocable fn [form args]
+     (let [args (take-args form args 2)]
+       (if-some [tp-top (top-numeric-of type/int (.expr-types args))]
          (if (type/same? Integer/TYPE tp-top)
            (condgen/icmp (.get args 0) (.get args 1) cmp-opcd)
            (assert false))
-         (throw (info-two-numeric form args))))))
-
-;;; ------------------------------------------------------------------------
-
-  )
+         (throw (info-two-numeric form args)))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -275,7 +381,15 @@
                 (assoc-prim "object" convert-to-object)))]
     (-> {}
         (assoc-conversions)
-        (assoc-prim "+" (mk-binary-numeric Opcode/IADD))
-        (assoc-prim "-" (mk-binary-numeric Opcode/ISUB))
+        (assoc-prim "+" (mk-nary-numeric type/int Opcode/IADD
+                                         entity/insn-int-zero))
+        (assoc-prim "-" (mk-nary-numeric type/int Opcode/ISUB
+                                         entity/insn-int-zero))
+        (assoc-prim "*" (mk-nary-numeric type/int Opcode/IMUL
+                                         entity/insn-int-one))
+        (assoc-prim "/" (mk-nary-numeric type/float Opcode/IDIV
+                                         entity/insn-float-one))
+        (assoc-prim "quot" binary-xdiv-integral)
+        (assoc-prim "rem" (mk-binary-numeric type/int Opcode/IREM))
         (assoc-prim "<" (mk-binary-compare condgen/cmp-lt))
         (assoc-prim "str" string-concat))))

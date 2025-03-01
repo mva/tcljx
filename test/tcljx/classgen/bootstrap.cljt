@@ -411,9 +411,9 @@
    ;; enforce materialization of method by wrapping in `identity`
    `(fn-call-method '~params (object '(~'identity ~form)) ~args)))
 
-;; (defmacro is-class [form cl]
-;;   (with-meta `(ptest/is (= ~cl (.getClass (call-expr ~form))))
-;;     (meta &form)))
+(defmacro is-class [form cl]
+  (with-meta `(ptest/is (= ~cl (.getClass (call-expr ~form))))
+    (meta &form)))
 
 ;;; ------------------------------------------------------------------------
 
