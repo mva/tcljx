@@ -31,8 +31,8 @@
           ;; pre: expression type of constant `c` is primitive
           (if (type/polymorphic? target-type)
             insn/insn-empty             ;casting some constant to void
-            (let [c' (type/convert-from-constant target-type c)]
-              (entity/new-constant target-type c'))))]
+            (-> (type/convert-from-constant target-type c)
+                (entity/new-constant target-type))))]
 
   (defn- convert-to-primitive ^Insn [^Insn arg ^Class target-type]
     (or (when-some [c (model/const-value arg)]
@@ -87,15 +87,23 @@
   (.with xb (aget op-instr (- bytecode #_iadd 96))))
 
 (defn- operator ^CodeEmitter [^Class op-type ^int bytecode ^Insns args]
-  (let [ces (.emitters args)]
-    (^CodeEmitter fn [xb line consumed-type _]
-     (when (emit/insns? xb line op-type ces)
-       #_(when (<= #_idiv 108 bytecode #_drem 115)
-           ;; [il]div and [il]rem can raise a division by zero
-           ;; exception, so provide a line number for div & rem
-           (emit/line-number xb line))
-       (with-bytecode xb bytecode)
-       op-type))))
+  (^CodeEmitter fn [xb line consumed-type _]
+   (when (emit/insns? xb line op-type (.emitters args))
+     (when (<= #_idiv 108 bytecode #_drem 115)
+       ;; [il]div and [il]rem can raise a division by zero
+       ;; exception, so provide a line number for div & rem
+       (emit/line-number xb line))
+     (with-bytecode xb bytecode)
+     op-type)))
+
+(deftype NumericOp [^Wrapper bottom-type ;arguments are widened to this
+                    ^Opcode base-opcode
+                    ^Number right-identity]
+  java.lang.Record)
+(defn- numeric-op ^NumericOp [^Wrapper bottom-type
+                              ^Opcode base-opcode
+                              ^Insn right-identity]
+  (NumericOp. bottom-type base-opcode (model/const-value right-identity)))
 
 (letfn [(opcode-delta ^int [^Class tp]
           (condp identical? tp
@@ -146,6 +154,12 @@
               #_long 1 (object (const-fold-long bytecode c0 c1))
               #_float 2 (object (const-fold-float bytecode c0 c1))
               #_double 3 (object (const-fold-double bytecode c0 c1)))))
+        (const-inverse ^CodeEmitter [^NumericOp num-op ^Class op-type
+                                     ^CodeEmitter ce]
+          (when (model/ce-const? ce)
+            (-> (const-fold (.base-opcode num-op) op-type
+                            (.right-identity num-op) (model/ce-const-value ce))
+                (entity/mk-constant op-type))))
         
         (top-numeric-of ^Class [^Wrapper bottom-type ^Class/1 expr-types]
           (loop [acc bottom-type, i (dec (alength expr-types))]
@@ -192,7 +206,7 @@
           (loop [lhs ^Number (model/ce-const-value (aget ces 0)), i 1]
             (cond
               (>= i (alength ces))
-              (entity/mk-constant op-type lhs)
+              (entity/mk-constant lhs op-type)
               
               (model/ce-const? (aget ces i))
               (-> (const-fold base-opc op-type lhs
@@ -200,45 +214,41 @@
                   (recur (inc i)))
               
               :else
-              (emit-suffix base-opc op-type (entity/mk-constant op-type lhs)
+              (emit-suffix base-opc op-type (entity/mk-constant lhs op-type)
                            ces i))))
         (fold-or-emit ^CodeEmitter [^Opcode base-opc ^Class op-type
                                     ^CodeEmitter/1 ces]
           (if (model/ce-const? (aget ces 0))
             (fold-lhs-then-emit base-opc op-type ces)
             (emit-suffix base-opc op-type (aget ces 0) ces 1)))
-        (single-argument ^CodeEmitter [^Opcode base-opc ^Class op-type
-                                       ^Insns args]
+        (unary ^CodeEmitter [^NumericOp num-op ^Class op-type ^Insns args]
           (let [ce (insn/emitter args 0)]
-            (condp identical? base-opc
+            (condp identical? (.base-opcode num-op)
               Opcode/IADD
               (insn/emitter args 0)
                       
               Opcode/ISUB
-              (if-some [c (when (model/ce-const? ce)
-                            (model/ce-const-value ce))]
-                (entity/mk-constant op-type (const-fold base-opc op-type 0 c))
-                (operator op-type (typed-bytecode Opcode/INEG op-type) args))
+              (or (const-inverse num-op op-type ce)
+                  (operator op-type (typed-bytecode Opcode/INEG op-type) args))
 
               Opcode/IMUL 
               (insn/emitter args 0)
 
               Opcode/IDIV
-              (if-some [c (when (model/ce-const? ce)
-                            (model/ce-const-value ce))]
-                (entity/mk-constant op-type (const-fold base-opc op-type 1 c))
-                (->> (insn/insns-of entity/insn-int-one (.get args 0))
-                     (operator op-type (typed-bytecode Opcode/IDIV op-type)))))))]
+              (or (const-inverse num-op op-type ce)
+                  (->> (insn/insns-of entity/insn-int-one (.get args 0))
+                       (operator op-type (typed-bytecode Opcode/IDIV op-type)))))))]
   
-  (defn mk-nary-numeric ^Invocable [^Wrapper bottom-type ^Opcode base-opc
-                                    ^Insn identity]
+  (defn mk-nary-numeric ^Invocable [^NumericOp num-op]
     (^Invocable fn [form args]
      (let [args ^Insns args]
-       (if-some [op-type (top-numeric-of bottom-type (.expr-types args))]
+       (if-some [op-type (top-numeric-of (.bottom-type num-op)
+                                         (.expr-types args))]
          (-> (case (.length args)
-               0 (.emitter identity)
-               1 (single-argument base-opc op-type args)
-               #_else (fold-or-emit base-opc op-type (.emitters args)))
+               0 (entity/mk-constant (.right-identity num-op) op-type)
+               1 (unary num-op op-type args)
+               #_else (fold-or-emit (.base-opcode num-op) op-type
+                                    (.emitters args)))
              (insn/mk-insn op-type))
          (throw (info-numeric-args-only form args))))))
 
@@ -312,7 +322,7 @@
           (for [^Insn insn insns]
             (constgen/loadable-entry cpb (constgen/typed-constant-value insn))))
         (insn-str ^Insn [^String rstr ^Insns inv-args ^seq const-args]
-          (let [recipe (entity/new-constant rstr)]
+          (let [recipe (entity/new-constant rstr String)]
             (cond
               (and (nil? const-args) (.empty? inv-args))
               recipe
@@ -356,7 +366,7 @@
                      s (if (seq? c)
                          (str (list* c)) ;wrap LazySeq
                          (str c))
-                     x-str (entity/new-constant s)]
+                     x-str (entity/new-constant s String)]
                  (if (re-find re-marks s)
                    (recur (cons const-mark rparts) dyn-args
                           (cons x-str const-args) (inc i))
@@ -369,7 +379,8 @@
 (def primitive-nmsp-globals
   (letfn [(assoc-prim ^map [^map acc ^String nm ^Invocable inv]
             (assoc acc nm (entity/mk-global cfg/primitive-ns-str nm inv)))
-
+          (assoc-nary ^map [^map acc ^String nm ^NumericOp num-op]
+            (assoc-prim acc nm (mk-nary-numeric num-op)))
           (assoc-conversions ^map [^map acc]
             (-> (reduce (fn ^map [^map acc ^Wrapper wtp]
                           (let [tp (.class-primitive wtp)
@@ -381,14 +392,11 @@
                 (assoc-prim "object" convert-to-object)))]
     (-> {}
         (assoc-conversions)
-        (assoc-prim "+" (mk-nary-numeric type/int Opcode/IADD
-                                         entity/insn-int-zero))
-        (assoc-prim "-" (mk-nary-numeric type/int Opcode/ISUB
-                                         entity/insn-int-zero))
-        (assoc-prim "*" (mk-nary-numeric type/int Opcode/IMUL
-                                         entity/insn-int-one))
-        (assoc-prim "/" (mk-nary-numeric type/float Opcode/IDIV
-                                         entity/insn-float-one))
+        (assoc-nary "+" (numeric-op type/int Opcode/IADD entity/insn-int-zero))
+        (assoc-nary "-" (numeric-op type/int Opcode/ISUB entity/insn-int-zero))
+        (assoc-nary "*" (numeric-op type/int Opcode/IMUL entity/insn-int-one))
+        (assoc-nary "/" (numeric-op type/float Opcode/IDIV entity/insn-float-one))
+        
         (assoc-prim "quot" binary-xdiv-integral)
         (assoc-prim "rem" (mk-binary-numeric type/int Opcode/IREM))
         (assoc-prim "<" (mk-binary-compare condgen/cmp-lt))

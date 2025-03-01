@@ -111,7 +111,7 @@
       (with-line-number ^int line)))
   
   (new-constant [_ expr-type value]
-    (entity/new-constant expr-type value))
+    (entity/new-constant value expr-type))
 
   (attach-meta-to [_ meta arg]
     (assert false))

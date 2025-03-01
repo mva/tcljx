@@ -9,7 +9,7 @@
    (java.lang.classfile TypeKind)
    (java.lang.constant ConstantDescs)))
 
-(deftype ConstantImpl [^Class type ^Object const-value]
+(deftype ConstantImpl [^Object const-value ^Class type]
   java.lang.Record
   Constant
   (emit-insn* [_ xb line consumed-type _]
@@ -17,37 +17,31 @@
       (constgen/load xb const-value)
       type)))
 
-(defn mk-constant
-  #_(^ConstantImpl [^Object const-value]
-   (mk-constant (.getClass const-value) const-value))
-  (^ConstantImpl [^Class type ^Object const-value]
-   (ConstantImpl/new type const-value)))
+(defn mk-constant ^ConstantImpl [^Object const-value ^Class type]
+  (ConstantImpl/new const-value type))
 
-(def insn-null (insn/mk-insn (mk-constant Object ConstantDescs/NULL)
+(def insn-null (insn/mk-insn (mk-constant ConstantDescs/NULL Object)
                               type/poly-reference))
-(def insn-true (insn/mk-insn (mk-constant Boolean/TYPE 1) Boolean/TYPE))
-(def insn-false (insn/mk-insn (mk-constant Boolean/TYPE 0) Boolean/TYPE))
-(def insn-int-one (insn/mk-insn (mk-constant Integer/TYPE 1) Integer/TYPE))
-(def insn-int-zero (insn/mk-insn (mk-constant Integer/TYPE 0) Integer/TYPE))
-(def insn-float-one (insn/mk-insn (mk-constant Float/TYPE 1.0f) Float/TYPE))
+(def insn-true (insn/mk-insn (mk-constant 1 Boolean/TYPE) Boolean/TYPE))
+(def insn-false (insn/mk-insn (mk-constant 0 Boolean/TYPE) Boolean/TYPE))
+(def insn-int-one (insn/mk-insn (mk-constant 1 Integer/TYPE) Integer/TYPE))
+(def insn-int-zero (insn/mk-insn (mk-constant 0 Integer/TYPE) Integer/TYPE))
+(def insn-float-one (insn/mk-insn (mk-constant 1.0f Float/TYPE) Float/TYPE))
 
-(defn new-constant
-  (^Insn [^Object value] ;use if `expr-type` agrees with (.getClass value)
-   (new-constant (.getClass value) value))
-  (^Insn [^Class expr-type ^Object value]
-   #_(prn :new-constant expr-type value)
-   (java.util.Objects/requireNonNull expr-type)
-   (java.util.Objects/requireNonNull value)
-   (cond
-     (identical? ConstantDescs/NULL value)
-     insn-null                          ;enforce singleton
-     
-     (type/same? Boolean/TYPE expr-type)
-     (if (zero? ^int value)             ;enforce singletons
-       insn-false
-       insn-true)
-     
-     :else (insn/mk-insn (mk-constant expr-type value) expr-type))))
+(defn new-constant ^Insn [^Object value ^Class expr-type]
+  #_(prn :new-constant expr-type value)
+  (java.util.Objects/requireNonNull expr-type)
+  (java.util.Objects/requireNonNull value)
+  (cond
+    (identical? ConstantDescs/NULL value)
+    insn-null                          ;enforce singleton
+    
+    (type/same? Boolean/TYPE expr-type)
+    (if (zero? ^int value)             ;enforce singletons
+      insn-false
+      insn-true)
+    
+    :else (insn/mk-insn (mk-constant value expr-type) expr-type)))
 
 (defn constants? ^boolean [^Insns insns]
   (loop [i (dec (.length insns))]
