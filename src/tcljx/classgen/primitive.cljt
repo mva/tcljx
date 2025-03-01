@@ -88,7 +88,7 @@
 
 (defn- operator ^CodeEmitter [^Class op-type ^int bytecode ^Insns args]
   (let [ces (.emitters args)]
-    (^CodeEmitter fn [xb line consumed-type]
+    (^CodeEmitter fn [xb line consumed-type _]
      (when (emit/insns? xb line op-type ces)
        #_(when (<= #_idiv 108 bytecode #_drem 115)
            ;; [il]div and [il]rem can raise a division by zero
@@ -172,12 +172,12 @@
                                    ^CodeEmitter lhs ^CodeEmitter/1 ces
                                    ^int start]
           (let [bytecode (typed-bytecode base-opc op-type)]
-            (^CodeEmitter fn [xb line consumed-type]
-             (when (emit/insn? xb line op-type lhs)
+            (^CodeEmitter fn [xb line consumed-type _]
+             (when (emit/insn? xb line op-type lhs false)
                (loop [i start]
                  (if (< i (alength ces))
                    (let [ce (aget ces i)]
-                     (when (emit/insn? xb line op-type ce)
+                     (when (emit/insn? xb line op-type ce false)
                        (when (<= #_idiv 108 bytecode #_drem 115)
                          ;; [il]div and [il]rem can raise a division by
                          ;; zero exception, so provide a line number for
@@ -299,8 +299,8 @@
                   (.set args' i
                         (if (or (.isPrimitive tp) (model/const? insn))
                           insn ;note: *all* constants are passed through
-                          (-> (^CodeEmitter fn [xb line _]
-                               (when (emit/insn? xb line tp (.emitter insn))
+                          (-> (^CodeEmitter fn [xb line _ _]
+                               (when (emit/insn? xb line tp (.emitter insn) false)
                                  (-> (.ldc xb "")
                                      (.invokestatic cd-Objects "toString"
                                                     mtd-String-Object-String))
@@ -325,7 +325,7 @@
               (first const-args)
 
               :else
-              (-> (^CodeEmitter fn [xb line _]
+              (-> (^CodeEmitter fn [xb line _ _]
                    (let [cpb (.constantPool xb)
                          atypes (.expr-types inv-args) ;only logical types
                          mhe (.methodHandleEntry cpb rt/bsm-concat)

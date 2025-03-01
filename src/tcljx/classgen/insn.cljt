@@ -23,7 +23,7 @@
 ;;; Having an opaque expression tree is at odds with the desire to
 ;;; generate only reachable code in the emit phase.  To alleviate this
 ;;; conflict, every expression that has no completing code path
-;;; can (but does not have to) report its type as `emit/leaving`.
+;;; can (but does not have to) report its produced type as nil.
 (deftype Insn [^CodeEmitter emitter
                ^Class expr-type]
   ;; FIXME... Valhalla value?
@@ -34,8 +34,8 @@
       emitter)))
 
 (def mk-insn Insn/new)
-(def insn-empty (mk-insn (^CodeEmitter fn [xb line _] Void/TYPE)
-                          type/polymorphic))
+(def insn-empty (mk-insn (^CodeEmitter fn [xb _ _ _] Void/TYPE)
+                         type/polymorphic))
 
 ;;; Compilation centers around arrays of types and arrays of code
 ;;; emitters.  For a sequence of forms, the parser vie ExprFactory
@@ -126,32 +126,30 @@
 (defn progn ^Insn [^Insns insns ^Insn insn-n]
   (if (identical? empty-insns insns)
     insn-n
-    (-> (^CodeEmitter fn [xb line consumed-type]
+    (-> (^CodeEmitter fn [xb line consumed-type then-leave?]
          (when (emit/insns? xb line Void/TYPE (.emitters insns))
-           (when (emit/insn? xb line consumed-type (.emitter insn-n))
+           (when (emit/insn? xb line consumed-type (.emitter insn-n) then-leave?)
              consumed-type)))
         (mk-insn (expr-type insn-n)))))
 
 (letfn [(materialize-as ^CodeEmitter [^CodeEmitter ce ^Class target-type]
-          (^CodeEmitter fn [xb line _]
-           (when (emit/insn? xb line target-type ce)
+          (^CodeEmitter fn [xb line consumed-type then-leave?]
+           (when (emit/insn? xb line target-type ce
+                             (and then-leave?
+                                  (identical? consumed-type target-type)))
              target-type)))]
-
-  (defn emitting-as ^CodeEmitter [^Insn arg ^Class target-type] ;FIXME... drop?
-    (cond-> (.emitter ^Insn arg)
-      (or (not (identical? target-type (.expr-type arg)))
-          (identical? Void/TYPE target-type))
-      (materialize-as target-type)))
   
   ;; Note: Casting to primitive numeric from either primitive numeric or
   ;; reference Number is a type conversion.
   (defn cast-to ^Insn [^Insn arg ^Class target-type]
-    (if (or (not (identical? target-type (.expr-type arg)))
-            (identical? Void/TYPE target-type)) ;force operand type to void
-      (-> (.emitter ^Insn arg)
-          (materialize-as target-type)
-          (mk-insn target-type))
-      arg)))
+    (let [x-tp (.expr-type arg)]
+      (if (and (identical? target-type x-tp) (not (type/polymorphic? x-tp)))
+        ;; do not elide cast if `arg` may be a signature polymorphic
+        ;; method invocation
+        arg
+        (-> (.emitter ^Insn arg)
+            (materialize-as target-type)
+            (mk-insn target-type))))))
 
 (defn cast-to-logical
   (^Insn [^Insn insn]
@@ -160,7 +158,7 @@
    (cast-to-logical (.get insns i))))
 
 (defn new-array ^Insn [^Class array-type ^Insns dims]
-  (-> (^CodeEmitter fn [xb line _]
+  (-> (^CodeEmitter fn [xb line _ _]
        (when (emit/insns? xb line Integer/TYPE (.emitters dims))
          (if (= (.length dims) 1)
            (let [component-type (.getComponentType array-type)]
@@ -173,13 +171,12 @@
       (mk-insn array-type)))
 
 (defn emit-return ^void [^CodeBuilder xb ^Class return-type ^Insn body]
-  (emit/insn? xb cfg/no-line-number emit/leaving
-              (emitting-as body return-type)))
+  (emit/insn? xb cfg/no-line-number return-type (.emitter body) true))
 
 ;;; ------------------------------------------------------------------------
 
 (defn emit-insn-logical? ^boolean [^CodeBuilder xb ^Insn insn]
-  (emit/insn? xb cfg/no-line-number (logical-type insn) (.emitter insn)))
+  (emit/insn? xb cfg/no-line-number (logical-type insn) (.emitter insn) false))
 
 (defn- emit-new-array ^CodeBuilder [^CodeBuilder xb ^Class component-type
                                     ^int length]
@@ -197,7 +194,7 @@
       (if (< i end)
         (let [ce (aget ces i)]
           (-> xb (.dup) (.loadConstant (- i start)))
-          (when (emit/insn? xb cfg/no-line-number component-type ce)
+          (when (emit/insn? xb cfg/no-line-number component-type ce false)
             (.arrayStore xb component-tk)
             (recur (inc i))))
         true))))
@@ -215,7 +212,7 @@
                         (reflect/describe-class* ptypes)))))
 
 (defn invoke-member ^Insn [^Match m ^Insn receiver ^Insns args]
-  (-> (^CodeEmitter fn [xb line consumed-type]
+  (-> (^CodeEmitter fn [xb line consumed-type _]
        (letfn [(invoke-polymorphic ^Class [^int fixed]
                  (when (emit/typed-insns? xb line (.expr-types args)
                                           (.emitters args) fixed (.length args))

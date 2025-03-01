@@ -31,8 +31,8 @@
               (.add segment-elements
                     (^ClassElementEmitter fn [cb]
                      (.withField cb nm sink-cld (field-flags))))
-              (-> (^CodeEmitter fn [xb line _]
-                   (when (emit/insn? xb line sink-type (.emitter init))
+              (-> (^CodeEmitter fn [xb line _ _]
+                   (when (emit/insn? xb line sink-type (.emitter init) false)
                      (.putstatic xb this-segm nm sink-cld)
                      Void/TYPE))
                   (insn/mk-insn Void/TYPE)))]

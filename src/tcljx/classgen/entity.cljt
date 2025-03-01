@@ -12,7 +12,7 @@
 (deftype ConstantImpl [^Class type ^Object const-value]
   java.lang.Record
   Constant
-  (emit-insn* [_ xb line consumed-type]
+  (emit-insn* [_ xb line consumed-type _]
     (insn/with-void-empty-if-requested consumed-type
       (constgen/load xb const-value)
       type)))
@@ -89,13 +89,13 @@
 (deftype LocalImpl [^int param-no ^String name ^Class type ^CodeEmitter bound-to
                     ^:unsynchronized-mutable ^int slot]
   Binding
-  (emit-insn* [this xb line consumed-type]
+  (emit-insn* [this xb line consumed-type _]
     (if (model/ce-const? bound-to)
       Void/TYPE
       
       (let [tk (TypeKind/from type)]
         (if (some? bound-to)          ;let binding provides `bound-to`
-          (when (emit/insn? xb line type bound-to)
+          (when (emit/insn? xb line type bound-to false)
             (set! slot (.allocateLocal xb tk))
             (let [label (.newLabel xb)]
               (-> (.storeLocal xb tk slot)
@@ -112,7 +112,7 @@
   (bound-value [this]
     (-> (if (model/ce-const? bound-to)
           bound-to
-          (^CodeEmitter fn [xb line consumed-type]
+          (^CodeEmitter fn [xb line consumed-type _]
            (insn/with-void-empty-if-requested consumed-type
              (.loadLocal xb (TypeKind/from type) (.allocated-slot this))
              type)))

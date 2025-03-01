@@ -30,10 +30,10 @@
   (def ^:private literal-list (find-factory "list")))    ;type/list
 
 (defn- with-line-number ^Insn [^Insn insn ^int line]
-  (insn/mk-insn (^CodeEmitter fn [xb _ consumed-type]
-                 (when (emit/insn? xb line consumed-type (.emitter insn))
-                   consumed-type))
-                (insn/expr-type insn)))
+  (-> (^CodeEmitter fn [xb _ consumed-type then-leave?]
+       (when (emit/insn? xb line consumed-type (.emitter insn) then-leave?)
+         consumed-type))
+      (insn/mk-insn (insn/expr-type insn))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -147,7 +147,7 @@
     (let [dims ^Insns dims]
       (dotimes [i (.length dims)]
         (ensure-assignable Integer/TYPE (insn/expr-type dims i)))
-      (-> (^CodeEmitter fn [xb line _]
+      (-> (^CodeEmitter fn [xb line _ _]
            (when (emit/insns? xb line Integer/TYPE (.emitters dims))
              (if (= (.length dims) 1)
                (let [component-type (.getComponentType array-type)]
@@ -164,12 +164,10 @@
   (if-expr [_ xs]
     (let [xs ^Insns xs
           tp (condgen/join-type (.expr-types xs) 1 (.length xs))
-          if-true (-> (.get xs 1)
-                      (insn/emitting-as tp))
-          if-false (-> (if (= (.length xs) 3)
-                         (.get xs 2)
-                         insn/insn-empty)
-                       (insn/emitting-as tp))
+          if-true (insn/emitter xs 1)
+          if-false (if (= (.length xs) 3)
+                     (insn/emitter xs 2)
+                     (.emitter insn/insn-empty))
           test (condgen/logical-truth (.get xs 0))]
       (cond
         (identical? entity/insn-true test) if-true
@@ -185,12 +183,13 @@
     (insn/mk-insn (entity/mk-local name init) Void/TYPE))
   (block-let [_ bindings body]
     (let [block (insn/progn bindings body)]
-      (-> (^CodeEmitter fn [xb line consumed-type]
+      (-> (^CodeEmitter fn [xb line consumed-type then-leave?]
            ;; FIXME... emit lineNumber here?
            (.block xb (^Consumer fn ^void [^CodeBuilder xb]
                        ;; FIXME... or emit lineNumber here?
-                       (emit/insn? xb line consumed-type (.emitter block))))
-           consumed-type) ;cannot report back `leaving` if insn? is false
+                       (emit/insn? xb line consumed-type (.emitter block) then-leave?)))
+           (when-not then-leave?     ;can the insn? above return true?
+             consumed-type))
           (insn/mk-insn (insn/expr-type block)))))
   
   (new-function [this mangled-name arity-types arity-bodies arity-redirections]
@@ -287,7 +286,7 @@
 
   (instanceof-expr [_ type arg]
     (let [arg ^Insn arg]
-      (-> (^CodeEmitter fn [xb line _]
+      (-> (^CodeEmitter fn [xb line _ _]
            (when (insn/emit-insn-logical? xb arg)
              (.instanceOf xb (reflect/describe-class type))
              Boolean/TYPE))
@@ -295,10 +294,10 @@
   (throw-expr [_ arg]
     (let [arg ^Insn arg]
       (if (.isAssignableFrom Throwable (insn/logical-type arg))
-        (-> (^CodeEmitter fn [xb line _]
-             (when (emit/insn? xb line Throwable (.emitter arg))
+        (-> (^CodeEmitter fn [xb line _ _]
+             (when (emit/insn? xb line Throwable (.emitter arg) false)
                (-> xb (emit/line-number line) (.athrow))
-               emit/leaving))         ;type seen by the code generator
+               nil))                  ;type seen by the code generator
             (insn/mk-insn Void/TYPE)) ;type seen by the parser
         (throw (info-type "expect instance of Throwable" arg)))))
   
