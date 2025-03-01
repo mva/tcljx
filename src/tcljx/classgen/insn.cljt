@@ -143,9 +143,9 @@
   ;; reference Number is a type conversion.
   (defn cast-to ^Insn [^Insn arg ^Class target-type]
     (let [x-tp (.expr-type arg)]
-      (if (and (identical? target-type x-tp) (not (type/polymorphic? x-tp)))
-        ;; do not elide cast if `arg` may be a signature polymorphic
-        ;; method invocation
+      (if (identical? target-type x-tp)
+        ;; this elides the cast even if `arg` may be a signature
+        ;; polymorphic method invocation
         arg
         (-> (.emitter ^Insn arg)
             (materialize-as target-type)

@@ -213,14 +213,21 @@
          (asm-expr [^java.lang.invoke.MethodHandle mh]
                    (char (.invoke mh)))))
 
-  ;; type hint ^void changes the invocation signature as well
+  ;; type hint ^void does *not* change the invocation signature, but a
+  ;; void *context* is pushed into the invoke
+  (is (= '[["LOCAL 0: MethodHandle mh"]
+           (ALOAD_0)
+           (INVOKEVIRTUAL MethodHandle "invoke" "()Ljava/lang/Object;")
+           (ARETURN)]
+         (asm-expr [^java.lang.invoke.MethodHandle mh]
+                   ^void (.invoke mh))))
   (is (= '[["LOCAL 0: MethodHandle mh"]
            (ALOAD_0)
            (INVOKEVIRTUAL MethodHandle "invoke" "()V")
            (ACONST_NULL)
            (ARETURN)]
          (asm-expr [^java.lang.invoke.MethodHandle mh]
-                   ^void (.invoke mh))))
+                   (do (.invoke mh) nil))))
   (is (= '[["LOCAL 0: MethodHandle mh"]
            (ALOAD_0)
            (INVOKEVIRTUAL MethodHandle "invoke" "()V")
