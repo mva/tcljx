@@ -4,6 +4,7 @@
                [wrong :as wrong])
    (tcljx.classgen [insn :as insn] [entity :as entity] [emit :as emit]))
   (:import
+   (tcljx.data.type Wrapper)
    (tcljx.data.model CodeEmitter Invocable)
    (tcljx.classgen.insn Insn #_Insns)
    (java.lang.classfile CodeBuilder Opcode Label)))
@@ -124,9 +125,7 @@
           (when-some [c1 (null-value-pred arg1)]
             (let [c0 ^boolean c0, c1 ^boolean c1]
               (when (or c0 c1)       ;both non-null means "don't know"
-                (if (= (= cmp-opcd cmp-ne) (and c0 c1))
-                  entity/insn-false
-                  entity/insn-true)))))
+                (entity/insn-boolean (not= (= cmp-opcd cmp-ne) (and c0 c1)))))))
         (cmp-expr Opcode/IF_ACMPEQ cmp-opcd Object arg0 arg1))))
 
 (defn icmp ^Insn [^Insn arg0 ^Insn arg1 ^int cmp-opcd]
@@ -134,16 +133,56 @@
         (when-some [c1 (model/const-value arg1)]
           (let [n0 ^int c0, n1 ^int c1]
             (when (or c0 c1)         ;both non-null means "don't know"
-              (if (case cmp-opcd
+              (-> (case cmp-opcd
                     #_eq 0 (= n0 n1)
                     #_ne 1 (not= n0 n1)
                     #_lt 2 (< n0 n1)
                     #_ge 3 (>= n0 n1)
                     #_gt 4 (> n0 n1)
                     #_le 5 (<= n0 n1))
-                entity/insn-true
-                entity/insn-false)))))
+                  (entity/insn-boolean))))))
       (cmp-expr Opcode/IF_ICMPEQ cmp-opcd Integer/TYPE arg0 arg1)))
+
+;;; ------------------------------------------------------------------------
+
+(defn- top-monomorphic-primitive ^Class [^Class/1 types ^int start ^int end]
+  ;; pre: there exists at least one monomorphic primitive in the range
+  (letfn [(accept-primitive-type ^Wrapper [^Wrapper acc ^Class tp]
+            (let [wtp (type/of tp)]
+              (cond (nil? acc) wtp      ;unconditionally take first
+                    (type/primitive-assignable-from? acc wtp) acc
+                    (type/primitive-assignable-from? wtp acc) wtp
+                    :else nil)))]
+    (loop [^Wrapper acc nil, i (dec end)]
+      (if (< i start)
+        (.class-primitive acc)          ;acc not nil by precondition
+        (let [tp (aget types i)]
+          (if (type/polymorphic? tp)
+            (recur acc (dec i))         ;skip polymorphic
+            (when (.isPrimitive tp) ;failure if there is a reference in the mix
+              (when-some [acc (accept-primitive-type acc tp)]
+                (recur acc (dec i))))))))))
+
+;;; Throws if there is no type from which all paths in the given range
+;;; of `types` are assignable.  pre: (< start end)
+(defn join-type ^Class [^Class/1 types ^int start ^int end]
+  (loop [candidate (aget types (dec end)), i (- end 2)]
+    (if (< i start)
+      candidate
+      (let [tp (aget types i)]
+        (cond
+          (or (identical? candidate tp) (type/polymorphic? tp))
+          (recur candidate (dec i))
+          
+          (type/polymorphic? candidate)
+          (recur tp (dec i))
+          
+          (type/any-monomorphic-primitive? types start end)
+          (or (top-monomorphic-primitive types start end)
+              (throw (wrong/wr-info (str "incompatible path types"
+                                         (wrong/got-types types start end)))))
+          
+          :else Object)))))   ;different references plus possibly void
 
 ;;; ------------------------------------------------------------------------
 
@@ -170,28 +209,20 @@
         :else   ;any reference that is a non-Boolean subtype of Object
         (acmp arg entity/insn-null cmp-ne)))))
 
-;;; Throws if there is no type from which all paths in the given range
-;;; of `types` are assignable.  pre: (< start end)
-(defn join-type ^Class [^Class/1 types ^int start ^int end]
-  (loop [candidate (aget types (dec end)), i (- end 2)]
-    (if (< i start)
-      candidate
-      (let [tp (aget types i)]
-        (cond
-          (or (identical? candidate tp) (type/polymorphic? tp))
-          (recur candidate (dec i))
-          (type/polymorphic? candidate)
-          (recur tp (dec i))
-          :else
-          (throw (wrong/wr-info (str "incompatible path types"
-                                     (wrong/got-types types start end)))))))))
-
 (defn mk-if ^CodeEmitter [^CodeEmitter test
                           ^CodeEmitter if-true ^CodeEmitter if-false]
-  (-> (if (instance? Branching test)
-        test                   ;`test` is already a branch instruction
-        (mk-branch Opcode/IF_ICMPEQ cmp-ne Boolean/TYPE ;compare to zero!
-                   (doto (new CodeEmitter/1 2)
-                     (aset 0 test)      ;the boolean value to test
-                     (aset 1 (.emitter entity/insn-false))))) 
-      (conditional if-true if-false)))
+  (cond
+    (identical? (.emitter entity/insn-true) test)
+    if-true
+    
+    (identical? (.emitter entity/insn-false) test)
+    if-false
+    
+    :else
+    (-> (if (instance? Branching test)
+          test                   ;`test` is already a branch instruction
+          (mk-branch Opcode/IF_ICMPEQ cmp-ne Boolean/TYPE ;compare to zero!
+                     (doto (new CodeEmitter/1 2)
+                       (aset 0 test)      ;the boolean value to test
+                       (aset 1 (.emitter entity/insn-false))))) 
+        (conditional if-true if-false))))

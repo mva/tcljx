@@ -31,6 +31,9 @@
 (defn polymorphic? ^boolean [^Class expr-type]
   (identical? Void/TYPE expr-type))
 
+(defn monomorphic-primitive? ^boolean [^Class expr-type]
+  (and (.isPrimitive expr-type) (not (identical? Void/TYPE expr-type))))
+
 ;;; The type of the special reference `nil`.  Also known as nullptr.
 (def poly-reference Void)
 (defn poly-reference? ^boolean [^Class expr-type]
@@ -43,6 +46,19 @@
           #_(poly-reference? expr-type))
     Object
     expr-type))
+
+;;; ------------------------------------------------------------------------
+
+(defn any-primitive? ^boolean [^Class/1 types]
+  (loop [i (dec (alength types))]
+    (cond (neg? i) false
+          (.isPrimitive (aget types i)) true
+          :else (recur (dec i)))))
+(defn any-monomorphic-primitive? ^boolean [^Class/1 types ^int start ^int end]
+  (loop [i (dec end)]
+    (cond (< i start) false
+          (monomorphic-primitive? (aget types i)) true
+          :else (recur (dec i)))))
 
 ;;; ------------------------------------------------------------------------
 

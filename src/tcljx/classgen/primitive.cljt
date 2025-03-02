@@ -173,8 +173,12 @@
                                acc
                                wtp)
                              (dec i)))))))))
-        (info-two-numeric ^Throwable [form ^Insns args] ;FIXME... drop
+        (info-two-numeric-args ^Throwable [form ^Insns args]
           (-> (str (wrong/q (first form)) " expects two numeric arguments"
+                   (wrong/got-types (insn/expr-types args)))
+              (wrong/wr-info)))
+        (info-two-reference-args ^Throwable [form ^Insns args]
+          (-> (str (wrong/q (first form)) " expects two reference arguments"
                    (wrong/got-types (insn/expr-types args)))
               (wrong/wr-info)))
         (info-numeric-args-only ^Throwable [form ^Insns args]
@@ -286,7 +290,14 @@
          (if (type/same? Integer/TYPE tp-top)
            (condgen/icmp (.get args 0) (.get args 1) cmp-opcd)
            (assert false))
-         (throw (info-two-numeric form args)))))))
+         (throw (info-two-numeric-args form args))))))
+
+  (def binary-identical
+    (^Invocable fn [form args]
+     (let [args (take-args form args 2)]
+       (if (type/any-primitive? (.expr-types args))
+         (throw (info-two-reference-args form args))
+         (condgen/acmp (.get args 0) (.get args 1) condgen/cmp-eq))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -399,5 +410,6 @@
         
         (assoc-prim "quot" binary-xdiv-integral)
         (assoc-prim "rem" (mk-binary-numeric type/int Opcode/IREM))
+        (assoc-prim "identical?" binary-identical)
         (assoc-prim "<" (mk-binary-compare condgen/cmp-lt))
         (assoc-prim "str" string-concat))))

@@ -163,17 +163,13 @@
     (insn/progn xs x))
   (if-expr [_ xs]
     (let [xs ^Insns xs
-          tp (condgen/join-type (.expr-types xs) 1 (.length xs))
-          if-true (insn/emitter xs 1)
-          if-false (if (= (.length xs) 3)
-                     (insn/emitter xs 2)
-                     (.emitter insn/insn-empty))
-          test (condgen/logical-truth (.get xs 0))]
-      (cond
-        (identical? entity/insn-true test) if-true
-        (identical? entity/insn-false test) if-false
-        :else (-> (condgen/mk-if (.emitter test) if-true if-false)
-                  (insn/mk-insn tp)))))
+          tp (condgen/join-type (.expr-types xs) 1 (.length xs))]
+      (-> (condgen/mk-if (.emitter (condgen/logical-truth (.get xs 0)))
+                         (insn/emitter xs 1)
+                         (if (= (.length xs) 3)
+                           (insn/emitter xs 2)
+                           (.emitter insn/insn-empty)))
+          (insn/mk-insn tp))))
   (invoke [this form inv args]
     (.invoke* inv form args))
   
