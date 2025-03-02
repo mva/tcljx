@@ -1,5 +1,7 @@
 (ns tcljx.parser.context
-  (:require (tcljx.data [meta :as meta] [wrong :as wrong] [model :as model]))
+  (:require (tcljx.data [meta :as meta] [wrong :as wrong] [model :as model])
+            (tcljx.parser [interop :as interop]))
+  
   (:import (tcljx.data.model Resolver NamespaceBuilder Binding
                              Expr Exprs ExprFactory Scope)))
 
@@ -59,6 +61,11 @@
       (or (.valAt (.bindings* scope) nm nil)
           (.lookup-def (.resolver scope) nil nm))))) ;to cover all defs
 
+(defn lookup-if-alias ^Binding [^symbol sink ^Scope scope form]
+  (when (and (symbol? form) (nil? (.meta ^symbol form))
+             (nil? (interop/get-tag (.meta sink))))
+    (lookup scope form)))
+
 ;;; Returns nil if `nm` does not resolve to a class name.
 (defn lookup-namespace ^String [^Scope scope ^String alias]
   (.lookup-namespace (.resolver scope) alias))
@@ -78,15 +85,14 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn with-local-binding ^Scope [^Scope scope ^String name ^Expr bound]
-  (.with-bindings* scope (assoc (.bindings* scope) name
-                                ^Binding (model/require-entity bound))))
+(defn with-local-binding ^Scope [^Scope scope ^Expr binding-expr]
+  (let [bnd (model/require-binding binding-expr)]
+    (.with-bindings* scope (assoc (.bindings* scope) (.name bnd) bnd))))
 
-(defn with-local-bindings ^Scope [^Scope scope ^String/1 names ^Exprs bounds]
+(defn with-local-bindings ^Scope [^Scope scope ^Exprs binding-exprs]
   (loop [locals (transient (.bindings* scope))
          i 0]
-    (if (< i (.length bounds))
-      (recur (assoc! locals (aget names i)
-                     ^Binding (model/require-entity bounds i))
-             (inc i))
+    (if (< i (.length binding-exprs))
+      (let [bnd (model/require-binding binding-exprs i)]
+        (recur (assoc! locals (.name bnd) bnd) (inc i)))
       (.with-bindings* scope (persistent! locals)))))

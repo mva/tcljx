@@ -3,11 +3,11 @@
    (tcljx.data [wrong :as wrong] [model :as model])
    (tcljx.parser [syntax :as syntax] [context :as context]))
   (:import
-   (tcljx.data.model Expr Binding Global Scope)))
+   (tcljx.data.model Expr Binding Scope)))
 
-(defn parse-def ^Expr [^Scope scope [_ nm & args]]
-  (letfn [(aliased-def ^Global [^symbol init]
-            (if-some [bnd (context/lookup scope init)]
+(defn parse-def ^Expr [^Scope scope [_ nm-sym & args]]
+  (letfn [(aliased-def ^Binding [init]
+            (if-some [bnd (context/lookup-if-alias nm-sym scope init)]
               (when (model/global? bnd)
                 bnd)))
           (new-def ^Expr [^String nm ^seq init-forms]
@@ -16,7 +16,7 @@
             (let [nmsp (context/namespace-builder scope)]
               (if (some? init-forms)
                 (let [init (first init-forms)]
-                  (if-some [bnd (when (symbol? init) (aliased-def init))]
+                  (if-some [bnd (aliased-def init)]
                     (.new-def-alias nmsp nm bnd)
                     (.new-def-init nmsp nm (context/parse-form scope init))))
                 (.new-def-init nmsp nm nil))))
@@ -25,7 +25,7 @@
               (-> (.expr-factory scope)
                   (.assignment bnd (context/parse-form scope init)))))]
     
-    (let [nm (syntax/simple-symbol-str nm)
+    (let [nm (syntax/simple-symbol-str nm-sym)
           prior-def (.lookup-def (.resolver scope) nil nm)]
       (syntax/empty-tail (next args))
       (if (some? prior-def)

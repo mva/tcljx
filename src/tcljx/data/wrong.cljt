@@ -164,8 +164,11 @@
 ;;      (syntax (str "expected symbol " (q exp)) form))))
 
 
-(defn info-unresolved ^Throwable [^String msg-prefix sym-or-str]
-  (wr-info (str msg-prefix (q sym-or-str))))
+(defn info-unresolved
+  (^Throwable [sym-or-str]
+   (info-unresolved "undefined symbol " sym-or-str))
+  (^Throwable [^String msg-prefix sym-or-str]
+   (wr-info (str msg-prefix (q sym-or-str)))))
 ;; (defn unresolved-nmsp-sym [resolved-ns-nm ^Symbol fq-sym]
 ;;   (throw (wr-info (str "no public var " (q (name fq-sym)) " in namespace "
 ;;                        (q resolved-ns-nm)))))

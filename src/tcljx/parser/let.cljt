@@ -1,7 +1,8 @@
 (ns tcljx.parser.let
   (:require
    (tcljx.data [wrong :as wrong] [model :as model])
-   (tcljx.parser [syntax :as syntax] [context :as context]))
+   (tcljx.parser [syntax :as syntax] [interop :as interop]
+                 [context :as context]))
   (:import
    (tcljx.data.model Expr Binding Scope)))
 
@@ -12,14 +13,13 @@
         bnd-xs (.new-exprs ef n)]
     (loop [scope scope, i 0]
       (if (< i n)
-        (let [nm (syntax/simple-symbol-str (nth bindings (* i 2)))
-              x (context/parse-form scope (nth bindings (inc (* i 2))))
-              bnd (.new-local ef nm x)]
-          (if (instance? Binding (.entity bnd))
-            (let [scope' (context/with-local-binding scope nm bnd)]
-              (.set bnd-xs i bnd)
-              (recur scope' (inc i)))
-            (throw (wrong/wr-info (str "intialization of binding "
-                                       (wrong/q-as-symbol nm)
-                                       " cannot complete normally")))))
+        (let [nm-sym (nth bindings (* i 2))
+              nm (syntax/simple-symbol-str nm-sym)
+              init (nth bindings (inc (* i 2)))
+              opt-type (interop/resolve-tag (.resolver scope) nm-sym nil)
+              bnd-x (.new-local ef opt-type nm
+                                (or (context/lookup-if-alias nm-sym scope init)
+                                    (context/parse-form scope init)))]
+          (.set bnd-xs i bnd-x)
+          (recur (context/with-local-binding scope bnd-x) (inc i)))
         (.block-let ef bnd-xs (context/parse-progn scope body))))))

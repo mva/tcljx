@@ -188,7 +188,7 @@
                             (.invoke expr-factory form inv
                                      (parse-args (rest form)))
                             (assert false))
-                          (throw (wr-info-unresolved op)))))
+                          (throw (wrong/info-unresolved op)))))
 
                     ;; `op` is qualified symbol: either a reference to
                     ;; a namespace ref, or a static class member
@@ -220,13 +220,11 @@
                   (parse-class-qualified-symbol cl (name sym)))
                 (when-some [cl (.lookup-class resolver (name sym))]
                   (.new-constant expr-factory Class cl))))
-            (wr-info-unresolved ^Throwable [^symbol sym]
-              (wrong/info-unresolved "undefined symbol " sym))
             (parse-symbol ^Expr [^symbol sym] ;discards meta
               (if-some [bnd (context/lookup this sym)]
                 (.bound-value bnd)
                 (or (lookup-class-symbol sym)
-                    (throw (wr-info-unresolved sym)))))
+                    (throw (wrong/info-unresolved sym)))))
             (wr-info-unresolved-type ^Throwable [^symbol sym]
               (wrong/info-unresolved "undefined type symbol " sym))
             (parse-type-symbol ^Class [^symbol sym]

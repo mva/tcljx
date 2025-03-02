@@ -389,7 +389,7 @@
 
 (def primitive-nmsp-globals
   (letfn [(assoc-prim ^map [^map acc ^String nm ^Invocable inv]
-            (assoc acc nm (entity/mk-global cfg/primitive-ns-str nm inv)))
+            (assoc acc nm (entity/global-binding inv cfg/primitive-ns-str nm)))
           (assoc-nary ^map [^map acc ^String nm ^NumericOp num-op]
             (assoc-prim acc nm (mk-nary-numeric num-op)))
           (assoc-conversions ^map [^map acc]

@@ -72,8 +72,10 @@
   ;;   (set! globals (assoc globals nm bnd))
   ;;   bnd)
   (new-def-init [_ nm init]
-    (let [this-segm (segmgen/segment-cld pkg-build current-segm-id)]
-      (defgen/new-def-init segment-elements this-segm nm init)))
+    (let [this-segm (segmgen/segment-cld pkg-build current-segm-id)
+          bnd (defgen/new-def-init segment-elements this-segm ns-str nm init)]
+      (set! globals (assoc globals nm bnd))
+      (insn/mk-insn bnd Void/TYPE)))
   (new-def-alias [_ nm other]
     (assert false))
 

@@ -28,14 +28,11 @@
                ^Class expr-type]
   ;; FIXME... Valhalla value?
   java.lang.Record
-  Expr
-  (entity [_]
-    (when (instance? Entity emitter)
-      emitter)))
+  Expr)
 
 (def mk-insn Insn/new)
-(def insn-empty (mk-insn (^CodeEmitter fn [xb _ _ _] Void/TYPE)
-                         type/polymorphic))
+(def emitter-empty (^CodeEmitter fn [xb _ _ _] Void/TYPE))
+(def insn-empty (mk-insn emitter-empty type/polymorphic))
 
 ;;; Compilation centers around arrays of types and arrays of code
 ;;; emitters.  For a sequence of forms, the parser vie ExprFactory
@@ -61,10 +58,8 @@
     (aset emitters i (.emitter ^Insn x))
     (aset expr-types i (.expr-type ^Insn x))
     x)
-  (entity [_ i]
-    (let [ce (aget emitters i)]
-      (when (instance? Entity ce)
-        ce)))
+  (emitter [_ i]
+    (aget emitters i))
   (drop [_ n]
     (Insns. (Arrays/copyOfRange emitters n (alength emitters))
             (Arrays/copyOfRange expr-types n (alength expr-types)))))

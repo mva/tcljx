@@ -27,19 +27,24 @@
   (emit-insn* ^Class [^java.lang.classfile.CodeBuilder xb ^int line
                       ^Class consumed-type ^boolean then-leave?]))
 
+
 ;;; A named entity on the level of the code generator that exists at
-;;; runtime.  Exposes additional operations beyond "emit code that
-;;; produces this entity's value".  The code emitted by Entity
-;;; itself (if any) usually only establishes the entity without
-;;; putting a value on the operand stack.  The exception are loadable
-;;; constant values, where establishing the value *does* push it onto
-;;; the stack.
+;;; runtime, usually appearing as the "provide the value of the given
+;;; name" operation of a binding.  Exposes additional operations
+;;; beyond "emit code that produces this entity's value".  The code
+;;; emitted by Entity itself puts its current value on the operand
+;;; stack.
 ;;;
 ;;; Implementation note: To ease certain code generation patterns,
 ;;; identity of Entity instances is important.  A runtime entity
 ;;; should be mirrored by at most one Entity instance during
 ;;; compilation.
-(definterface Entity :extends [CodeEmitter])
+(definterface Entity
+  :extends [CodeEmitter]
+  (emit-setup-code ^Class [^java.lang.classfile.CodeBuilder xb ^int line
+                           ^Class consumed-type ^CodeEmitter init]))
+
+
 
 ;;; The parser works with opaque instances of Expr exclusively.  An
 ;;; Expr gives a very restricted view on whatever data the code
@@ -47,30 +52,48 @@
 ;;; class Insn).  In particular, Expr does not expose the expression's
 ;;; type.
 (definterface Expr         ;FIXME... turn this into an abstract class?
-  (emitter ^CodeEmitter [])
-  
-  ;; If this expression is backed by a runtime entity, then return it.
-  ;; Otherwise, return nil.
-  (entity ^Entity []))
+  (emitter ^CodeEmitter []))
 
 (definterface Exprs
   (length ^int [])
   (empty? ^boolean [])
   (get ^Expr [^int i])
   (set ^Expr [^int i ^Expr x])
-  (entity ^Entity [^int i])
+  (emitter ^CodeEmitter [^int i])
   (drop ^Exprs [^int n]))
 
-(defn entity
-  (^Entity [^Expr x]
-   (.entity x))
-  (^Entity [^Exprs xs ^int i]
-   (.entity xs i)))
-(defn require-entity
-  (^Entity [^Expr x]
-   (java.util.Objects/requireNonNull (entity x)))
-  (^Entity [^Exprs xs ^int i]
-   (java.util.Objects/requireNonNull (entity xs i))))
+
+;;; A binding represents the partial evaluation to a runtime named
+;;; entity.  Depending on the context it is used to detect aliasing of
+;;; one name to another, to identify a macro expansion form, and to
+;;; produce the bound value of the binding.
+(definterface Binding
+  :extends [CodeEmitter]
+  ;; The runtime entity for which this binding provides a name.  There
+  ;; can be multiple bindings referring to the same shared entity.  In
+  ;; this case, only the root binding performs initialization of the
+  ;; entity by calling `emit-setup-code`.
+  (bound-to ^Entity [])
+
+  ;; The expression that produces the entity's value.
+  (bound-value ^Expr [])
+
+  ;; Every binding has a name, but only global bindings on the
+  ;; namespace level provide a non-nil namespace name.
+  (namespace ^String [])                ;non nil if global def
+  (name ^String []))
+
+(defn binding-name ^symbol [^Binding bnd] ;for error messages
+  (symbol (.namespace bnd) (.name bnd)))
+
+(defn global? ^boolean [^Binding bnd]
+  (some? (.namespace bnd)))
+
+(defn require-binding
+  (^Binding [^Expr x]
+   (.emitter x))
+  (^Binding [^Exprs xs ^int i]
+   (.emitter xs i)))
 
 
 ;;; ------------------------------------------------------------------------
@@ -86,9 +109,9 @@
 
 (defn const?
   (^boolean [^Expr x]
-   (instance? Constant (.entity x)))
+   (instance? Constant (.emitter x)))
   (^boolean [^Exprs xs ^int i]
-   (instance? Constant (.entity xs i))))
+   (instance? Constant (.emitter xs i))))
 
 (defn null? ^boolean [^Object value]
   (identical? ConstantDescs/NULL value))
@@ -104,40 +127,13 @@
 
 (defn const-value
   (^Object [^Expr x]                    ;nil if `x` is not a Constant
-   (let [ce (.entity x)]
+   (let [ce (.emitter x)]
      (when (ce-const? ce) (ce-const-value ce))))
   (^Object [^Exprs xs ^int i]        ;nil if `xs[i]` is not a Constant
-   (let [ce (.entity xs i)]
+   (let [ce (.emitter xs i)]
      (when (ce-const? ce) (ce-const-value ce)))))
 
-
 ;;; ------------------------------------------------------------------------
-
-;;; A binding represents the partial evaluation to a runtime named
-;;; entity.  Depending on the context it is used to detect aliasing of
-;;; one name to another, to identify a macro expansion form, and to
-;;; produce the bound value of the binding.
-(definterface Binding
-  ;; FIXME... should init return a CodeEmitter?
-  :extends [Entity]
-  (bound-to ^CodeEmitter [])            ;Entity if this is an alias
-  (bound-value ^Expr []))
-
-(defn binding? ^boolean [^Expr x]
-  (instance? Binding (.entity x)))
-
-
-(definterface Global
-  :extends [Binding]
-  (namespace ^String [])                ;not nil
-  (name ^String []))
-
-(defn global-name ^symbol [^Global bnd] ;for error messages
-  (symbol (.namespace bnd) (.name bnd)))
-
-(defn global? ^boolean [^Binding bnd]
-  (instance? Global bnd))
-
 
 ;;; Description of an arity's signature.  Basically the information
 ;;; encoded in an `fn` parameter vector, with the parameter names
@@ -200,9 +196,8 @@
   (invoke* ^Expr [^seq form ^Exprs xs]))
 
 (defn bound-invocable ^Invocable [^Binding bnd]
-  (when-some [bound-to (.bound-to bnd)]
-    (when (instance? Invocable bound-to)
-      bound-to)))
+  (when (instance? Invocable (.bound-to bnd))
+    (.bound-to bnd)))
 
 ;;; If `x` is a binding, then return the very first non-aliasing
 ;;; binding that defines its value.  Otherwise, return nil.
@@ -355,7 +350,7 @@
   (assignment ^Expr [^Binding bnd ^Expr value])
 
   (new-parameter ^Expr [^int param-no ^String name ^Class type])
-  (new-local ^Expr [^String name ^Expr init])
+  (new-local ^Expr [^Class opt-type ^String name init-or-binding])
   (block-let ^Expr [^Exprs bindings ^Expr body])
   
   ;; ### functions

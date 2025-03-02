@@ -4,10 +4,10 @@
                [reflect :as reflect])
    (tcljx.classgen [emit :as emit] [insn :as insn] [constgen :as constgen]))
   (:import
-   (tcljx.data.model Expr Binding Global Constant CodeEmitter)
+   (tcljx.data.model Expr CodeEmitter Binding Entity Constant)
    (tcljx.classgen.insn Insn Insns)
-   (java.lang.classfile TypeKind)
-   (java.lang.constant ConstantDescs)))
+   (java.lang.classfile CodeBuilder TypeKind)
+   (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)))
 
 (deftype ConstantImpl [^Object const-value ^Class type]
   java.lang.Record
@@ -15,7 +15,9 @@
   (emit-insn* [_ xb line consumed-type _]
     (insn/with-void-empty-if-requested consumed-type
       (constgen/load xb const-value)
-      type)))
+      type))
+  (emit-setup-code [this xb line consumed-type _]
+    (.emit-insn* this xb line consumed-type false)))
 
 (defn mk-constant ^ConstantImpl [^Object const-value ^Class type]
   (ConstantImpl/new const-value type))
@@ -57,70 +59,108 @@
 
 ;;; ------------------------------------------------------------------------
 
-(deftype GlobalImpl [^String namespace ^String name ^CodeEmitter bound-to]
-  java.lang.Record
-  Global
-  )
+(defn- dup ^CodeBuilder [^CodeBuilder xb ^Class type]
+  (case (.slotSize (TypeKind/from type))
+    1 (.dup xb)
+    2 (.dup2 xb)))
 
-(def mk-global GlobalImpl/new)
+(defn static-field ^Entity [^ClassDesc owner ^String fnm ^Class type]
+  (let [type-cld (reflect/describe-class type)]
+    (reify Entity
+      (emit-insn* [_ xb _ _ _]
+        (.getstatic xb owner fnm type-cld)
+        type)
+      (emit-setup-code [_ xb line consumed-type init]
+        (when (emit/insn? xb line type init false)
+          (if (identical? Void/TYPE consumed-type)
+            (do (.putstatic xb owner fnm type-cld) Void/TYPE)
+            (do (-> xb (dup type) (.putstatic owner fnm type-cld)) type)))))))
+
+(defn static-method ^Entity [^ClassDesc owner ^String mnm ^Class type]
+  (let [mtd (MethodTypeDesc/of (reflect/describe-class type))]
+    (reify Entity
+      (emit-insn* [_ xb _ _ _]
+        (.invokestatic xb owner mnm mtd)
+        type)
+      (emit-setup-code [_ xb line consumed-type init]
+        Void/TYPE))))
+
+(deftype LocalVariable [^String name ^Class type
+                        ^:unsynchronized-mutable ^int slot]
+  Entity
+  (emit-insn* [_ xb line consumed-type _]
+    (insn/with-void-empty-if-requested consumed-type
+      (.loadLocal xb (TypeKind/from type) slot)
+      type))
+  (emit-setup-code [_ xb line consumed-type init]
+    (let [tk (TypeKind/from type), label (.newLabel xb)]
+      (when (emit/insn? xb line type init false)
+        (set! slot (.allocateLocal xb tk))
+        (-> (.storeLocal xb tk slot)
+            (.labelBinding label)
+            (.localVariable slot name (reflect/describe-class type)
+                            label (.endLabel xb)))
+        Void/TYPE))))
+
+(defn local-variable ^Entity [^String name ^Class type]
+  (LocalVariable. name type -1))
+
+(deftype Parameter [^String name ^Class type ^int param-no
+                    ^:unsynchronized-mutable ^int slot]
+  Entity
+  (emit-insn* [_ xb line consumed-type _]
+    (insn/with-void-empty-if-requested consumed-type
+      (.loadLocal xb (TypeKind/from type) slot)
+      type))
+  (emit-setup-code [_ xb line consumed-type _]
+    (set! slot (.parameterSlot xb param-no))
+    (.localVariable xb slot name (reflect/describe-class type)
+                    (.startLabel xb) (.endLabel xb))
+    Void/TYPE))
+
+(defn parameter ^Entity [^String name ^Class type ^int param-no]
+  (Parameter. name type param-no -1))
 
 ;;; ------------------------------------------------------------------------
 
-;;; Helper interface for the local variable protocol.  When a method's
-;;; code attribute is produced, the Binding is established first: its
-;;; `emit-opnd` sets a private mutable field to the allocated slot
-;;; value.  The binding's `bound-value` method returns an Insn whose
-;;; own `emit-opnd` closes over the Binding instance (not the mutable
-;;; slot value in the mutable field!), allowing it to retrieve the
-;;; previously stored value via `allocated-slot`.  Initializiation
-;;; should set the undefined slot value to -1.
-(definterface Local
-  :extends [Binding]
-  (name ^String [])                     ;passed to `localVariable`
-  (type ^Class [])                      ;passed to `localVariable`
-  (allocated-slot ^int []))
-
-(deftype LocalImpl [^int param-no ^String name ^Class type ^CodeEmitter bound-to
-                    ^:unsynchronized-mutable ^int slot]
+(deftype BindingImpl [^Entity bound-to ^Expr bound-value
+                      ^String namespace ^String name
+                      ^CodeEmitter initialize-with]
+  java.lang.Record
   Binding
   (emit-insn* [this xb line consumed-type _]
-    (if (model/ce-const? bound-to)
-      Void/TYPE
-      
-      (let [tk (TypeKind/from type)]
-        (if (some? bound-to)          ;let binding provides `bound-to`
-          (when (emit/insn? xb line type bound-to false)
-            (set! slot (.allocateLocal xb tk))
-            (let [label (.newLabel xb)]
-              (-> (.storeLocal xb tk slot)
-                  (.labelBinding label)
-                  (.localVariable slot name (reflect/describe-class type)
-                                  label (.endLabel xb)))
-              Void/TYPE))
-          (do (set! slot (.parameterSlot xb param-no))
-              (.localVariable xb slot name (reflect/describe-class type)
-                              (.startLabel xb) (.endLabel xb))
-              Void/TYPE)))))
-  (bound-to [_]
-    bound-to)
-  (bound-value [this]
-    (-> (if (model/ce-const? bound-to)
-          bound-to
-          (^CodeEmitter fn [xb line consumed-type _]
-           (insn/with-void-empty-if-requested consumed-type
-             (.loadLocal xb (TypeKind/from type) (.allocated-slot this))
-             type)))
-        (insn/mk-insn type)))
-  
-  Local
-  (name [_]
-    name)
-  (type [_]
-    type)
-  (allocated-slot [_]
-    slot))
+    (if initialize-with
+      ;; skip setup if this binding is an alias, the bound entity is a
+      ;; constant, or the entity's value is provided by other means
+      (.emit-setup-code bound-to xb line consumed-type initialize-with)
+      Void/TYPE)))
 
-(defn mk-parameter ^Local [^int param-no ^String name ^Class type]
-  (LocalImpl. param-no name type nil -1))
-(defn mk-local ^Local [^String name ^Expr init]
-  (LocalImpl. -1 name (insn/logical-type init) (insn/emitter init) -1))
+(defn- mk-binding ^Binding [^Entity bound-to ^Insn bound-value
+                            ^String namespace ^String name
+                            ^CodeEmitter initialize-with]
+  (BindingImpl. bound-to bound-value namespace name initialize-with))
+
+(defn parameter-binding ^Binding [^int param-no ^String name ^Class type]
+  (let [ent (parameter name type param-no)]
+    (mk-binding ent (insn/mk-insn ent type) nil name insn/emitter-empty)))
+
+(defn local-binding ^Binding [^Class opt-type ^String name init-or-bnd]
+  (letfn [(non-alias-local ^Binding [^Insn init]
+            (let [ce (insn/emitter init)
+                  tp (or opt-type (insn/logical-type init))]
+              (if (and (model/ce-const? ce) (nil? opt-type))
+                (mk-binding ce init nil name nil)
+                (let [ent (local-variable name tp)]
+                  (mk-binding ent (insn/mk-insn ent tp) nil name
+                              (.emitter init))))))]
+    (if (instance? Insn init-or-bnd)
+      (non-alias-local init-or-bnd)
+      (let [bnd ^Binding init-or-bnd]
+        (mk-binding (.bound-to bnd) (.bound-value bnd) nil name nil)))))
+
+(defn global-binding
+  (^Binding [^Entity bound-to ^String namespace ^String name]
+   (mk-binding bound-to nil namespace name nil)) ;for predefined entities
+  (^Binding [^Entity bound-to ^Insn bound-value ^String namespace ^String name
+             ^CodeEmitter initialize-with]
+   (mk-binding bound-to bound-value namespace name initialize-with)))

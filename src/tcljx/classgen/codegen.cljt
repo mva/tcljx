@@ -78,12 +78,17 @@
   (^Throwable [^String msg-prefix ^Expr x ^Class tp]
    (wrong/wr-info (str msg-prefix (wrong/got-type tp)))))
 
-(defn- ensure-assignable ^void [^Class target-type ^Class arg-type]
-  (when-not (type/assignable-from? target-type arg-type)
-    (throw (info-type (str "cannot assign to " (wrong/q target-type)
-                           #_(when (some? dest-descr)
-                               (str " of " (wrong/q-symbol dest-descr))))
-                      nil arg-type))))
+(letfn [(ensure-assignable* ^void [^Class target-type ^Class arg-type]
+          (when-not (type/assignable-from? target-type arg-type)
+            (throw (info-type (str "cannot assign to " (wrong/q target-type)
+                                   #_(when (some? dest-descr)
+                                       (str " of " (wrong/q-symbol dest-descr))))
+                              nil arg-type))))]
+  (defn- ensure-assignable
+    (^void [^Class target-type ^Insn x]
+     (ensure-assignable* target-type (insn/expr-type x)))
+    (^void [^Class target-type ^Insns xs ^int i]
+     (ensure-assignable* target-type (insn/expr-type xs i)))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -146,7 +151,7 @@
   (new-array [_ array-type dims]
     (let [dims ^Insns dims]
       (dotimes [i (.length dims)]
-        (ensure-assignable Integer/TYPE (insn/expr-type dims i)))
+        (ensure-assignable Integer/TYPE dims i))
       (-> (^CodeEmitter fn [xb line _ _]
            (when (emit/insns? xb line Integer/TYPE (.emitters dims))
              (if (= (.length dims) 1)
@@ -174,9 +179,11 @@
     (.invoke* inv form args))
   
   (new-parameter [_ param-no name type]
-    (Insn. (entity/mk-parameter param-no name type) Void/TYPE))
-  (new-local [_ name init]
-    (insn/mk-insn (entity/mk-local name init) Void/TYPE))
+    (Insn. (entity/parameter-binding param-no name type) Void/TYPE))
+  (new-local [_ opt-type name init-or-binding]
+    (when opt-type    ;presence of type tag means this is not an alias
+      (ensure-assignable opt-type init-or-binding))
+    (insn/mk-insn (entity/local-binding opt-type name init-or-binding) Void/TYPE))
   (block-let [_ bindings body]
     (let [block (insn/progn bindings body)]
       (-> (^CodeEmitter fn [xb line consumed-type then-leave?]
@@ -197,8 +204,7 @@
           (let [expr-tp (insn/expr-type arity-bodies i)
                 logical-tp (type/expr-to-logical expr-tp)]
             (aset arity-types i (.with-return-type at logical-tp)))
-          (ensure-assignable (.return-type at)
-                             (insn/expr-type arity-bodies i)))))
+          (ensure-assignable (.return-type at) arity-bodies i))))
     
     (let [fn-literal (FnLiteral. mangled-name arity-types
                                  arity-bodies arity-redirections)]

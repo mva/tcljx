@@ -32,6 +32,7 @@
   (identical? Void/TYPE expr-type))
 
 (defn monomorphic-primitive? ^boolean [^Class expr-type]
+  ;; FIXME... is the "primitive" in the name implied and should be dropped?
   (and (.isPrimitive expr-type) (not (identical? Void/TYPE expr-type))))
 
 ;;; The type of the special reference `nil`.  Also known as nullptr.
@@ -239,21 +240,20 @@
     Void/TYPE void))
 
 (defn convert-from-constant ^ConstantDesc [^Class target-type ^Number n]
-  (if (identical? target-type (.getClass n))
-    n
-    (let [prim-id (primitive-id target-type)]
-      (case prim-id
-        #_int 0 (object (.intValue n))
-        #_long 1 (object (.longValue n))
-        #_float 2 (object (.floatValue n))
-        #_double 3 (object (.doubleValue n))
-        #_else
-        (-> (case prim-id     ;conversion to computationally int type
-              #_boolean 4 (tinyclj.core/int (not= (.intValue n) 0))
-              #_byte 5 (tinyclj.core/int (.byteValue n))
-              #_character 6 (tinyclj.core/int (tinyclj.core/char (.intValue n)))
-              #_short 7 (tinyclj.core/int (.shortValue n)))
-            (object))))))
+  ;; pre: `target-type` is monomorphic primitive type
+  (let [prim-id (primitive-id target-type)]
+    (case prim-id
+      #_int 0 (object (.intValue n))
+      #_long 1 (object (.longValue n))
+      #_float 2 (object (.floatValue n))
+      #_double 3 (object (.doubleValue n))
+      #_else
+      (-> (case prim-id        ;conversion to computationally int type
+            #_boolean 4 (tinyclj.core/int (not= (.intValue n) 0))
+            #_byte 5 (tinyclj.core/int (.byteValue n))
+            #_character 6 (tinyclj.core/int (tinyclj.core/char (.intValue n)))
+            #_short 7 (tinyclj.core/int (.shortValue n)))
+          (object)))))
 
 #_(defn of-descriptor ^Wrapper [^TypeDescriptor$OfField tpd]
     (case (.charAt (.descriptorString tpd) 0)

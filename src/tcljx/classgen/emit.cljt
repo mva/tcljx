@@ -131,7 +131,7 @@
                          (.aconst_null xb)
                          true)
                      (and (instance? Number value)
-                          (.isPrimitive consumed-type)
+                          (type/monomorphic-primitive? consumed-type)
                           (emit-number? xb consumed-type value)))))
           
             (adapt-stack? xb line consumed-type
