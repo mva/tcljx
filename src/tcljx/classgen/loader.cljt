@@ -38,7 +38,7 @@
 (defn dyn-class-loader ^URLClassLoader [^ClassLoader app-ld source-paths]
   (class-loader-instance app-ld "tclj-dyn" source-paths))
 
-(defn- get-rt-lookup ^MethodHandles$Lookup [^ClassLoader app-ld]
+(defn get-rt-lookup ^MethodHandles$Lookup [^ClassLoader app-ld]
   (let [cl (Class/forName "tinyclj.lang.CljCljMapper" false app-ld)
         f (.getDeclaredField cl "rtLookup")]
     (.get f nil)))

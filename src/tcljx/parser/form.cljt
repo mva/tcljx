@@ -49,7 +49,7 @@
             (parse-quoted-form ^Expr [form]
               (if (instance? IMeta form)
                 ;; symbol, list, vector, map, set
-                (let [tp (if (seq? form) type/list (class form))]
+                (let [tp (type/of-quoted-form form)]
                   (.new-constant expr-factory tp form))
                 ;; adjust type to primitive if possible
                 (constant/parse-constant-nometa this form)))

@@ -624,7 +624,7 @@
 ;;; character to read otherwise.
 (defn- push-form-or-nothing* ^int [^int pos ^FormBuilder fb ^TokenParser tp]
   (letfn [(length-cs ^int []
-            (.length (.cs fb)))     ;no need to compensate for eot
+            (.length (.cs fb)))         ;no need to compensate for eot
           (char-at ^char [^int pos]
             (if (>= pos (.length (.cs fb)))
               eot
@@ -712,8 +712,8 @@
                   nmsp (when (pos? slash) (substring start slash))
                   nm (substring (if (pos? slash) (inc slash) start) end)]
               (.push fb end (if two-colons?
-                                  (parse-qualified-keyword nmsp nm)
-                                  (keyword nmsp nm)))))
+                              (parse-qualified-keyword nmsp nm)
+                              (keyword nmsp nm)))))
           (push-number-or-symbol ^int [^int pos ^char char-after-sign]
             ;; pre: not looking at whitespace or starting character of a macro
             (if (Character/isDigit char-after-sign)
@@ -784,8 +784,8 @@
               (loop [pos (+ pos 2)]
                 (case (char-at pos)
                   \" (.push fb (inc pos) (mk-list line
-                                                      cfg/sym-regex-literal
-                                                      (.toString sb)))
+                                                  cfg/sym-regex-literal
+                                                  (.toString sb)))
                   \\ (let [ch+1 (char-at (inc pos))]
                        (if (at-eol? ch+1)
                          (wrong-pos pos "incomplete quote at end of line")
@@ -846,9 +846,9 @@
                   pos (push-form (+ pos (if splicing? 2 1))
                                  (.enter-unquote tp))]
               (.push fb pos (mk-list line (if splicing?
-                                                sym-unquote-splicing
-                                                sym-unquote)
-                                         (.pop fb)))))
+                                            sym-unquote-splicing
+                                            sym-unquote)
+                                     (.pop fb)))))
           
           (push-symbolic-value ^int [^int pos]
             (let [pos (push-form (+ pos 2))

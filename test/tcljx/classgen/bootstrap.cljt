@@ -7,7 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.classgen.bootstrap
   (:require
-   (tcljx.data [files :as files])
+   (tcljx.data [files :as files] [reflect :as reflect] [macro :as macro])
    (tcljx.classgen [loader :as loader] [universe :as universe]
                    [segmgen :as segmgen])
    #_tcljx.macro                        ;for class ArrayToCpl
@@ -33,11 +33,11 @@
    #_(tcljx.io BuildFiles BuildIO NmspIO NmspBuilder)
    #_(tcljx.expr MacroRef FnMacroFn)
    #_(clojure.lang Symbol IPersistentMap)
-   #_(java.lang.invoke MethodHandle MethodType)
+   (java.lang.invoke MethodHandle MethodType)
    (java.lang.reflect Method)
    (java.nio.file Path)
    (java.util #_HashMap #_Map List)
-   (java.util.function Consumer #_Function)))
+   (java.util.function Consumer Function)))
 
 ;;; FIXME... For now, the bootstrap class picks up classes of
 ;;; tinyclj.rt via the platform class loader, "seeing" the classes
@@ -53,6 +53,7 @@
         
         tcljx-mod-rt (files/path-of "../bootstrap-tcljc/tinyclj.rt")]
     (loader/app-class-loader :platform [tcljx-mod-rt])))
+(def ^:private rt-lookup (loader/get-rt-lookup app-ld))
 ;; (def ^:private bootstrap-ns-str "tinyclj.lang.bootstrap")
 
 ;; (def floor-mod
@@ -425,32 +426,32 @@
 
 ;;; ------------------------------------------------------------------------
 
-;; (defn- mt-of ^MethodType [^Class return-type ^List parameter-types]
-;;   (MethodType/methodType return-type parameter-types))
+(defn- mt-of ^MethodType [^Class return-type parameter-types]
+  (MethodType/methodType return-type ^List parameter-types))
 
-;; (def array-to-cpl (tcljx.macro.ArrayToCpl. (.getClassLoader Object)))
+(def array-to-cpl (tcljx.data.macro.ArrayToCpl. (.getClassLoader Object)))
 
-;; (defn to-compiler-mh ^MethodHandle [^ClassLoader app-ld]
-;;   (let [ccm-cl (.lookupClass rt-lookup)
+(defn to-compiler-mh ^MethodHandle [^ClassLoader app-ld]
+  (let [ccm-cl (.lookupClass rt-lookup)
         
-;;         ccm-cld (rt/describe-constable ccm-cl)
-;;         ccm-mt (mt-of ccm-cl [Function Function])
-;;         ccm (.findStatic rt-lookup ccm-cl "create" ccm-mt)
+        ccm-cld (reflect/describe-class ccm-cl)
+        ccm-mt (mt-of ccm-cl [Function Function])
+        ccm (.findStatic rt-lookup ccm-cl "create" ccm-mt)
 
-;;         mtc-mt (mt-of Object [Object])
-;;         mtc (.findVirtual rt-lookup ccm-cl "appToCpl" mtc-mt)
-;;         ^List args [nil array-to-cpl]]
-;;     (.bindTo mtc (.invokeWithArguments ccm args))))
+        mtc-mt (mt-of Object [Object])
+        mtc (.findVirtual rt-lookup ccm-cl "appToCpl" mtc-mt)
+        args [nil array-to-cpl]]
+    (.bindTo mtc (.invokeWithArguments ccm ^List args))))
 
-;; (def target-to-compiler-mh (to-compiler-mh app-ld))
+(def target-to-compiler-mh (to-compiler-mh app-ld))
 
-;; (defn target->compiler [x]
-;;   (let [^List args [x]]
-;;     (.invokeWithArguments target-to-compiler-mh args)))
+(defn target->compiler [x]
+  (let [args [x]]
+    (.invokeWithArguments target-to-compiler-mh ^List args)))
 
-;; (defmacro data-expr
-;;   ([form]
-;;    `(data-expr [] ~form []))
-;;   ([params form args]
-;;    `(let [res# (fn-call-method '~params (object '~form) ~args)]
-;;       (target->compiler res#))))
+(defmacro data-expr
+  ([form]
+   `(data-expr [] ~form []))
+  ([params form args]
+   `(let [res# (fn-call-method '~params (object '~form) ~args)]
+      (target->compiler res#))))
