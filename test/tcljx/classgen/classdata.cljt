@@ -34,7 +34,7 @@
 (def ^:private named-mhd
   {#_#_rt/bsm-invoke :bsm-invoke
    rt/bsm-quote :bsm-quote
-   #_#_rt/bsm-concat :bsm-concat
+   rt/bsm-concat :bsm-concat
    rt/bsm-static-fn :bsm-static-fn
    #_#_rt/bsm-invoke-fn :bsm-invoke-fn
    #_#_rt/bsm-clause-code :bsm-clause-code

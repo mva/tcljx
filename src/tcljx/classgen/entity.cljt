@@ -51,10 +51,10 @@
           (model/const? insns i) (recur (dec i))
           :else false)))
 
-(defn as-typed-constants ^Object/1 [^Insns insns]
+(defn as-typed-constant-descriptions ^Object/1 [^Insns insns]
   (let [a (new Object/1 (.length insns))]
     (dotimes [i (.length insns)]
-      (aset a i (constgen/typed-constant-value insns i)))
+      (aset a i (constgen/typed-constant-description-of insns i)))
     a))
 
 ;;; ------------------------------------------------------------------------

@@ -131,30 +131,31 @@
   (new-vector [this args]
     (let [args ^Insns args]
       (if (entity/constants? args)
-        (->> (entity/as-typed-constants args)
+        (->> (entity/as-typed-constant-descriptions args)
              (vec)
              (.new-constant this type/vector))
         (insn/invoke-member literal-vector nil args))))
   (new-map [this args]
     (let [args ^Insns args]
       (if (entity/constants? args)
-        (->> (entity/as-typed-constants args)
+        (->> (entity/as-typed-constant-descriptions args)
              (apply array-map)
              (.new-constant this type/map))
         (insn/invoke-member literal-map nil args))))
   (new-set [this args]
     (let [args ^Insns args]
       (if (entity/constants? args)
-        (->> (entity/as-typed-constants args)
+        (->> (entity/as-typed-constant-descriptions args)
              (set)
              (.new-constant this type/set))
         (insn/invoke-member literal-set nil args))))
   (new-list [this args]
     (let [args ^Insns args]
       (if (entity/constants? args)
-        (.new-constant this type/list (-> (entity/as-typed-constants args)
-                                          (seq)
-                                          (or ())))
+        (.new-constant this type/list
+                       (-> (entity/as-typed-constant-descriptions args)
+                           (seq)
+                           (or ())))
         (insn/invoke-member literal-list nil args))))
   (new-array [_ array-type dims]
     (let [dims ^Insns dims]

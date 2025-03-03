@@ -83,20 +83,34 @@
     (let [ldbl (loadable-entry (.constantPool xb) value)]
       (.ldc xb ldbl)) ))
 
+(defn constant-literal-of
+  (^Object [^Insn x]
+   (constant-literal-of (.expr-type x) (model/const-value x)))
+  (^Object [^Class expr-type ^Object value]
+   (when-not (identical? ConstantDescs/NULL value)
+     (if (and (instance? Integer value)
+              (not (identical? Integer/TYPE expr-type)))
+       (let [x ^int value]
+         (condp identical? expr-type
+           Boolean/TYPE (object (not= x 0))
+           Byte/TYPE (object (byte x))
+           Short/TYPE (object (short x))
+           Character/TYPE (object (char x))))
+       value))))
+
+(defn constant-literal-str ^String [^Insn x]
+  (let [c (constant-literal-of x)]
+    (str (cond-> c (seq? c) (list*))))) ;wrap LazySeq
+
 (letfn [(apply-expr-type [^Class expr-type ^Object value]
           (if (and (instance? Integer value)
                    (not (identical? Integer/TYPE expr-type)))
-            (reflect/describe (let [x ^int value]
-                                (condp identical? expr-type
-                                  Boolean/TYPE (object (not= x 0))
-                                  Byte/TYPE (object (byte x))
-                                  Short/TYPE (object (short x))
-                                  Character/TYPE (object (char x)))))
+            (reflect/describe (constant-literal-of expr-type value))
             value))]
   
   ;; Embed accurate type information for a non-int but "computationally
   ;; int" value by materializing its DynamicConstantDesc description.
-  (defn typed-constant-value
+  (defn typed-constant-description-of
     (^Object [^Insn insn]
      (apply-expr-type (insn/expr-type insn) (model/const-value insn)))
     (^Object [^Insns insn ^int i]

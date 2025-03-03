@@ -1,0 +1,106 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.classgen.str-test
+  (:require [tcljx.classgen.bootstrap :refer [asm-expr call-expr]]
+            [tcljx.alpha.ptest :refer :all]))
+
+(deftest concat-test
+  (is (= '[(LDC "one is 210000")
+           (ARETURN)]
+         (asm-expr (str "one is " 210000))))
+
+  (is (= '[(GETSTATIC System "out" "Ljava/io/PrintStream;")
+           (LDC "")
+           (INVOKESTATIC Objects "toString" "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/String;")
+           (INVOKEDYNAMIC "_" "(Ljava/lang/String;)Ljava/lang/String;"
+                          :bsm-concat ["test if nil: \u0001"])
+           (ARETURN)]
+         (asm-expr (str "test if nil: " java.lang.System/out)))))
+
+(deftest no-args-str-test
+  (is (= '[(LDC "")
+           (ARETURN)]
+         (asm-expr (str)))))
+
+(deftest unary-str-test
+  (is (= '[(LDC "123")
+           (ARETURN)]
+         (asm-expr (str 123))))
+  (is (= '[(LDC "abc")
+           (ARETURN)]
+         (asm-expr (str "abc"))))
+  (is (= '[(LDC "regex")
+           (ARETURN)]
+         (asm-expr (str #"regex"))))
+  (is (= '[["LOCAL 0: String s"]
+           (ALOAD_0)
+           (LDC "")
+           (INVOKESTATIC Objects "toString"
+                         "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/String;")
+           (ARETURN)]
+         (asm-expr [^String s] (str s))))
+
+  ;; nil arguments passed to str have no effect:
+  (is (= '[(LDC "")
+           (ARETURN)]
+         (asm-expr (str nil))))
+  (is (= '[(LDC "123")
+           (ARETURN)]
+         (asm-expr (str nil 123 nil))))
+  (is (= '[["LOCAL 0: String s"]
+           (ALOAD_0)
+           (LDC "")
+           (INVOKESTATIC Objects "toString"
+                         "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/String;")
+           (ARETURN)]
+         (asm-expr [^String s] (str nil s nil)))))
+
+(deftest argument-marker-test
+  (is (= '[(INVOKEDYNAMIC "_" "()Ljava/lang/String;" :bsm-concat
+                          ["\u0002\u0002" "\u0001" "\u0002"])
+           (ARETURN)]
+         (asm-expr (str "\u0001" "\u0002"))))
+  (is (= '[(LDC "[\"\u0001\"]") (ARETURN)]
+         (asm-expr (str ["\u0001"]))))
+  (is (= '[(LDC "[\"\u0002\"]") (ARETURN)]
+         (asm-expr (str ["\u0002"])))))
+
+(deftest compile-time-const
+  (is (= '[(LDC "") (ARETURN)]
+         (asm-expr (str nil))))
+  (is (= '[(LDC "true") (ARETURN)]
+         (asm-expr (str true))))
+  (is (= '[(LDC "false") (ARETURN)]
+         (asm-expr (str false))))
+  (is (= '[(LDC "abc") (ARETURN)]
+         (asm-expr (str "abc"))))
+  (is (= '[(LDC "123") (ARETURN)]
+         (asm-expr (str 123))))
+  (is (= '[(LDC "1234.5") (ARETURN)]
+         (asm-expr (str 1234.5))))
+
+  (is (= '[(LDC "sym") (ARETURN)]
+         (asm-expr (str 'sym))))
+  (is (= '[(LDC ":kw") (ARETURN)]
+         (asm-expr (str :kw))))
+  (is (= '[(LDC "A") (ARETURN)]
+         (asm-expr (str \A))))
+  (is (= '[(LDC "foo") (ARETURN)]
+         (asm-expr (str #"foo"))))
+  (is (= '[(LDC "class java.lang.Object") (ARETURN)]
+         (asm-expr (str Object)))))
+
+(deftest collection-const
+  (is (= '[(LDC "(1 2 3)") (ARETURN)]
+           (asm-expr (str '(1 2 3)))))  ;quoted form
+  (is (= '[(LDC "[1 2 3]") (ARETURN)]
+         (asm-expr (str [1 2 3]))))     ;vector literal with constants
+
+  (is (= '[(LDC "(some-fn \"abc\" 123.0 true java.lang.Object nil)")
+           (ARETURN)]
+         (asm-expr (str '(some-fn "abc" 123.0 true java.lang.Object nil))))))

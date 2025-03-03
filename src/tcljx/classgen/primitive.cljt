@@ -331,11 +331,11 @@
             args'))
         (consts-to-lces ^java.util.List [^ConstantPoolBuilder cpb insns]
           (for [^Insn insn insns]
-            (constgen/loadable-entry cpb (constgen/typed-constant-value insn))))
+            (constgen/loadable-entry cpb (constgen/typed-constant-description-of insn))))
         (insn-str ^Insn [^String rstr ^Insns inv-args ^seq const-args]
           (let [recipe (entity/new-constant rstr String)]
             (cond
-              (and (nil? const-args) (.empty? inv-args))
+              (and (empty? const-args) (.empty? inv-args))
               recipe
                
               (and (= rstr dyn-mark)
@@ -373,10 +373,7 @@
            
            (let [x ^Insn (.get args i)]
              (if (model/const? x)
-               (let [c (constgen/typed-constant-value x)
-                     s (if (seq? c)
-                         (str (list* c)) ;wrap LazySeq
-                         (str c))
+               (let [s (constgen/constant-literal-str x)
                      x-str (entity/new-constant s String)]
                  (if (re-find re-marks s)
                    (recur (cons const-mark rparts) dyn-args
