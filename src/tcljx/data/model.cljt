@@ -4,9 +4,6 @@
            (java.util Arrays))
   (:refer-clojure :exclude [zero?]))
 
-#_(definterface Type
-  )
-
 ;;; Emit instruction code into the CodeBuilder instance.  Return the
 ;;; actual type of the value pushed onto operand stack, or nil if
 ;;; control leaves the current method.  The produced operand type can
@@ -119,7 +116,9 @@
   (and (instance? Number value) (= (.doubleValue ^Number value) 0.0)))
 (defn ce-const? ^boolean [^CodeEmitter ce]
   (instance? Constant ce))
-(def ce-const-value Constant/.const-value)
+(defn ce-const-value ^Object [^CodeEmitter ce]
+  (when (ce-const? ce)
+    (Constant/.const-value ce)))
 (defn ce-null? ^boolean [^CodeEmitter ce]
   (and (ce-const? ce) (null? (ce-const-value ce))))
 (defn ce-zero? ^boolean [^CodeEmitter ce]
@@ -127,11 +126,9 @@
 
 (defn const-value
   (^Object [^Expr x]                    ;nil if `x` is not a Constant
-   (let [ce (.emitter x)]
-     (when (ce-const? ce) (ce-const-value ce))))
+   (ce-const-value (.emitter x)))
   (^Object [^Exprs xs ^int i]        ;nil if `xs[i]` is not a Constant
-   (let [ce (.emitter xs i)]
-     (when (ce-const? ce) (ce-const-value ce)))))
+   (ce-const-value (.emitter xs i))))
 
 ;;; ------------------------------------------------------------------------
 

@@ -30,6 +30,7 @@
 
 (def insn-int-one (insn/mk-insn (mk-constant 1 Integer/TYPE) Integer/TYPE))
 (def insn-int-zero (insn/mk-insn (mk-constant 0 Integer/TYPE) Integer/TYPE))
+(def insn-int-m1 (insn/mk-insn (mk-constant -1 Integer/TYPE) Integer/TYPE))
 (def insn-float-one (insn/mk-insn (mk-constant 1.0f Float/TYPE) Float/TYPE))
 
 (defn new-constant ^Insn [^Object value ^Class expr-type]

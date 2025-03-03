@@ -164,47 +164,47 @@
   (is (= '[(LDC2_W -1.0) (DRETURN)] (asm-expr (rem -3.0 2.0)))))
 
 
-;; (deftest add-zero-test
-;;   (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
-;;          (asm-expr [^int x] (+ x 0))))
-;;   (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
-;;          (asm-expr [^int x] (+ 0 x))))
+(deftest add-zero-test
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
+         (asm-expr [^int x] (+ x 0))))
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
+         (asm-expr [^int x] (+ 0 x))))
   
-;;   (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
-;;          (asm-expr [^long x] (+ x 0))))
-;;   (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
-;;          (asm-expr [^long x] (+ 0 x))))
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
+         (asm-expr [^long x] (+ x 0))))
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
+         (asm-expr [^long x] (+ 0 x))))
 
-;;   (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
-;;          (asm-expr [^float x] (+ x 0))))
-;;   (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
-;;          (asm-expr [^float x] (+ 0 x))))
+  (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
+         (asm-expr [^float x] (+ x 0))))
+  (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
+         (asm-expr [^float x] (+ 0 x))))
   
-;;   (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
-;;          (asm-expr [^double x] (+ x 0))))
-;;   (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
-;;          (asm-expr [^double x] (+ 0 x)))))
+  (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
+         (asm-expr [^double x] (+ x 0))))
+  (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
+         (asm-expr [^double x] (+ 0 x)))))
 
-;; (deftest multiply-by-one-test
-;;   (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
-;;          (asm-expr [^int x] (* x 1))))
-;;   (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
-;;          (asm-expr [^int x] (* 1 x))))
+(deftest multiply-by-one-test
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
+         (asm-expr [^int x] (* x 1))))
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
+         (asm-expr [^int x] (* 1 x))))
   
-;;   (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
-;;          (asm-expr [^long x] (* x 1))))
-;;   (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
-;;          (asm-expr [^long x] (* 1 x))))
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
+         (asm-expr [^long x] (* x 1))))
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
+         (asm-expr [^long x] (* 1 x))))
 
-;;   (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
-;;          (asm-expr [^float x] (* x 1))))
-;;   (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
-;;          (asm-expr [^float x] (* 1 x))))
+  (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
+         (asm-expr [^float x] (* x 1))))
+  (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
+         (asm-expr [^float x] (* 1 x))))
   
-;;   (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
-;;          (asm-expr [^double x] (* x 1))))
-;;   (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
-;;          (asm-expr [^double x] (* 1 x)))))
+  (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
+         (asm-expr [^double x] (* x 1))))
+  (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
+         (asm-expr [^double x] (* 1 x)))))
 
 ;; (comment transform backed out again
 ;;   (deftest multiply-by-zero-test

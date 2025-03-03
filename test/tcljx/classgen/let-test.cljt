@@ -167,8 +167,6 @@
 (deftest reused-name
   (is (= '[["LOCAL 0: int n"]
            (ILOAD_0)
-           (ICONST_1)
-           (IMUL)
            (ISTORE_1)
            ["LOCAL 1: int a"]
            (ILOAD_0)

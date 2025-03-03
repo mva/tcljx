@@ -83,36 +83,35 @@
                  (< (.bytecode opcode) #_iinc 132))
         (aset op-instr (- i #_iadd 96) (OperatorInstruction/of opcode))))))
 
-(defn- with-bytecode ^CodeBuilder [^CodeBuilder xb ^int bytecode]
-  (.with xb (aget op-instr (- bytecode #_iadd 96))))
 
-(defn- operator ^CodeEmitter [^Class op-type ^int bytecode ^Insns args]
-  (^CodeEmitter fn [xb line consumed-type _]
-   (when (emit/insns? xb line op-type (.emitters args))
-     (when (<= #_idiv 108 bytecode #_drem 115)
-       ;; [il]div and [il]rem can raise a division by zero
-       ;; exception, so provide a line number for div & rem
-       (emit/line-number xb line))
-     (with-bytecode xb bytecode)
-     op-type)))
-
-(deftype NumericOp [^Wrapper bottom-type ;arguments are widened to this
-                    ^Opcode base-opcode
-                    ^Number right-identity]
+(deftype OpSpec [^Wrapper bottom-type ;arguments are at least widened to this
+                 ^Wrapper top-type    ;... and at most widened to this
+                 ^Opcode base-opcode
+                 ^Number left-identity
+                 ^Number right-identity]
   java.lang.Record)
-(defn- numeric-op ^NumericOp [^Wrapper bottom-type
-                              ^Opcode base-opcode
-                              ^Insn right-identity]
-  (NumericOp. bottom-type base-opcode (model/const-value right-identity)))
+(defn left-identity? [^OpSpec op ^Object const]
+  (and (some? const) (= const (.left-identity op))))
+(defn right-identity? [^OpSpec op ^Object const]
+  (and (some? const) (= const (.right-identity op))))
 
-(letfn [(opcode-delta ^int [^Class tp]
-          (condp identical? tp
-            Integer/TYPE 0
-            Long/TYPE 1
-            Float/TYPE 2
-            Double/TYPE 3))
-        (typed-bytecode ^int [^Opcode base-opc ^Class op-type]
-          (+ (.bytecode base-opc) (opcode-delta op-type)))
+(defn- numeric-op ^OpSpec [^Wrapper bottom-type ^Opcode base-opcode
+                           ^Insn left-identity ^Insn right-identity]
+  (OpSpec. bottom-type type/double base-opcode
+           (when left-identity (model/const-value left-identity))
+           (model/const-value right-identity)))
+
+(defn- bitset-op ^OpSpec [^Opcode base-opcode ^Insn identity]
+  (OpSpec. type/int type/long base-opcode
+           (model/const-value identity) (model/const-value identity)))
+
+
+(letfn [(op-type ^Class [^int opcd]
+          (case opcd
+            0 Integer/TYPE
+            1 Long/TYPE
+            2 Float/TYPE
+            3 Double/TYPE))
         
         (const-fold-int ^int [^int bytecode ^Number c0 ^Number c1]
           (let [a0 (.intValue c0), a1 (.intValue c1)]
@@ -121,7 +120,13 @@
               #_isub 100 (- a0 a1)
               #_imul 104 (* a0 a1)
               #_idiv 108 (quot a0 a1)
-              #_irem 112 (rem a0 a1))))
+              #_irem 112 (rem a0 a1)
+              #_ishl 120 (bit-shift-left a0 a1)
+              #_ishr 122 (bit-shift-right a0 a1)
+              #_iushr 124 (unsigned-bit-shift-right a0 a1)
+              #_iand 126 (bit-and a0 a1)
+              #_ior 128 (bit-or a0 a1)
+              #_ixor 130 (bit-xor a0 a1))))
         (const-fold-long ^long [^int bytecode ^Number arg0 ^Number arg1]
           (let [a0 (.longValue arg0), a1 (.longValue arg1)]
             (case bytecode
@@ -129,7 +134,13 @@
               #_lsub 101 (- a0 a1)
               #_lmul 105 (* a0 a1)
               #_ldiv 109 (quot a0 a1)
-              #_lrem 113 (rem a0 a1))))
+              #_lrem 113 (rem a0 a1)
+              #_lshl 121 (bit-shift-left a0 (int a1))
+              #_lshr 123 (bit-shift-right a0 (int a1))
+              #_lushr 125 (unsigned-bit-shift-right a0 (int a1))
+              #_land 127 (bit-and a0 a1)
+              #_lor 129 (bit-or a0 a1)
+              #_lxor 131 (bit-xor a0 a1))))
         (const-fold-float ^float [^int bytecode ^Number arg0 ^Number arg1]
           (let [a0 (.floatValue arg0), a1 (.floatValue arg1)]
             (case bytecode
@@ -146,151 +157,179 @@
               #_dmul 107 (* a0 a1)
               #_ddiv 111 (/ a0 a1)
               #_drem 115 (rem a0 a1))))
-        (const-fold ^Number [^Opcode base-opc ^Class op-type
-                             ^Number c0 ^Number c1]
-          (let [bytecode (typed-bytecode base-opc op-type)]
-            (case (- bytecode (.bytecode base-opc))
-              #_int 0 (object (const-fold-int bytecode c0 c1))
-              #_long 1 (object (const-fold-long bytecode c0 c1))
-              #_float 2 (object (const-fold-float bytecode c0 c1))
-              #_double 3 (object (const-fold-double bytecode c0 c1)))))
-        (const-inverse ^CodeEmitter [^NumericOp num-op ^Class op-type
-                                     ^CodeEmitter ce]
-          (when (model/ce-const? ce)
-            (-> (const-fold (.base-opcode num-op) op-type
-                            (.right-identity num-op) (model/ce-const-value ce))
-                (entity/mk-constant op-type))))
-        
-        (top-numeric-of ^Class [^Wrapper bottom-type ^Class/1 expr-types]
-          (loop [acc bottom-type, i (dec (alength expr-types))]
-            (if (neg? i)
-              (.class-primitive acc)
-              (let [tp (aget expr-types i)]
-                (when (.isPrimitive tp)
-                  (let [wtp (type/of tp)]
-                    (when (.numeric? wtp)
-                      (recur (if (type/primitive-assignable-from? acc wtp)
-                               acc
-                               wtp)
-                             (dec i)))))))))
-        (info-two-numeric-args ^Throwable [form ^Insns args]
-          (-> (str (wrong/q (first form)) " expects two numeric arguments"
-                   (wrong/got-types (insn/expr-types args)))
+        (folded-constant ^CodeEmitter [^OpSpec op ^int opcd0
+                                       ^Number c0 ^Number c1]
+          (-> (let [bytecode (+ (-> op .base-opcode .bytecode) opcd0)]
+                (case opcd0
+                  #_int 0 (object (const-fold-int bytecode c0 c1))
+                  #_long 1 (object (const-fold-long bytecode c0 c1))
+                  #_float 2 (object (const-fold-float bytecode c0 c1))
+                  #_double 3 (object (const-fold-double bytecode c0 c1))))
+              (entity/mk-constant (op-type opcd0))))
+
+        (info-type-mismatch ^Throwable [form ^Insns args ^int i ^String exp]
+          (-> (str (wrong/q (first form)) " expects " exp " type for argument #"
+                   (inc i) (wrong/got-types (insn/expr-types args)))
               (wrong/wr-info)))
+        (info-top-type ^Throwable [^Wrapper top-type form ^Insns args ^int i]
+          (info-type-mismatch form args i (if (identical? type/double top-type)
+                                            "numeric"
+                                            "integral")))
+        (top-type-of
+          (^Wrapper [^OpSpec op form ^Insns args]
+           (top-type-of (.bottom-type op) (.top-type op) form args))
+          (^Wrapper [^Wrapper bottom-type ^Wrapper top-type form ^Insns args]
+           (loop [acc bottom-type, i (dec (alength (.expr-types args)))]
+             (if (neg? i)
+               acc
+               (let [tp (aget (.expr-types args) i)]
+                 (if (.isPrimitive tp)
+                   (let [wtp (type/of tp)]
+                     (if (type/primitive-assignable-from? top-type wtp)
+                       (recur (if (type/primitive-assignable-from? acc wtp)
+                                acc
+                                wtp)
+                              (dec i))
+                       (throw (info-top-type top-type form args i))))
+                   (throw (info-top-type top-type form args i))))))))
+        (top-numeric-of ^Wrapper [form ^Insns args]
+          (top-type-of type/int type/double form args))
+
+        (consumed-as ^Wrapper [^Wrapper target ^Insns args ^int i]
+          ;; pre: `target` is numeric type
+          (let [tp (insn/expr-type args i)]
+            (when (.isPrimitive tp)
+              (let [wtp (type/of tp)]
+                (when (type/primitive-assignable-from? target wtp)
+                  (if (> (.primitive-id wtp) 3)
+                    type/int   ;byte and short are computationally int
+                    wtp))))))  ;int, long, float, or double
+        (integral-type ^Wrapper [form ^Insns args ^int i]
+          (or (consumed-as type/long args i)
+              (throw (info-type-mismatch form args i "integral"))))
+        (integer-type ^Wrapper [form ^Insns args ^int i]
+          (or (consumed-as type/int args i)
+              (throw (info-type-mismatch form args i "integer"))))
         (info-two-reference-args ^Throwable [form ^Insns args]
           (-> (str (wrong/q (first form)) " expects two reference arguments"
                    (wrong/got-types (insn/expr-types args)))
               (wrong/wr-info)))
-        (info-numeric-args-only ^Throwable [form ^Insns args]
-          (-> (str (wrong/q (first form)) " expects numeric arguments"
-                   (wrong/got-types (insn/expr-types args)))
-              (wrong/wr-info)))
-
-        (emit-suffix ^CodeEmitter [^Opcode base-opc ^Class op-type
-                                   ^CodeEmitter lhs ^CodeEmitter/1 ces
-                                   ^int start]
-          (let [bytecode (typed-bytecode base-opc op-type)]
-            (^CodeEmitter fn [xb line consumed-type _]
-             (when (emit/insn? xb line op-type lhs false)
-               (loop [i start]
-                 (if (< i (alength ces))
-                   (let [ce (aget ces i)]
-                     (when (emit/insn? xb line op-type ce false)
-                       (when (<= #_idiv 108 bytecode #_drem 115)
-                         ;; [il]div and [il]rem can raise a division by
-                         ;; zero exception, so provide a line number for
-                         ;; div & rem
-                         (emit/line-number xb line))
-                       (with-bytecode xb bytecode)
-                       (recur (inc i))))
-                   op-type))))))
-        (fold-lhs-then-emit ^CodeEmitter [^Opcode base-opc ^Class op-type
-                                          ^CodeEmitter/1 ces]
-          ;; pre: (model/ce-const? (aget ces 0))
-          (loop [lhs ^Number (model/ce-const-value (aget ces 0)), i 1]
+        
+        (op-2* ^CodeEmitter [^int base-bytecode ^int opcd0 ^int opcd1
+                             ^CodeEmitter ce0 ^CodeEmitter ce1]
+          (^CodeEmitter fn [xb line _ _]
+           (let [tp0 (op-type opcd0), tp1 (op-type opcd1)
+                 bytecode (+ base-bytecode opcd0)]
+             (when (emit/insn? xb line tp0 ce0 false)
+               (when (or (nil? ce1) (emit/insn? xb line tp1 ce1 false))
+                 (when (<= #_idiv 108 bytecode #_drem 115)
+                   ;; [il]div and [il]rem can raise a division by zero
+                   ;; exception, so provide a line number for div & rem
+                   (emit/line-number xb line))
+                 (.with xb (aget op-instr (- bytecode #_iadd 96)))
+                 tp0)))))
+        (op-2 ^CodeEmitter [^OpSpec op ^int opcd0 ^int opcd1
+                            ^CodeEmitter ce0 ^CodeEmitter ce1]
+          (let [c0 (model/ce-const-value ce0)
+                c1 (model/ce-const-value ce1)]
             (cond
-              (>= i (alength ces))
-              (entity/mk-constant lhs op-type)
-              
-              (model/ce-const? (aget ces i))
-              (-> (const-fold base-opc op-type lhs
-                              (model/ce-const-value (aget ces i)))
-                  (recur (inc i)))
-              
+              (left-identity? op c0)
+              ce1
+              (right-identity? op c1)
+              ce0
+              (and (some? c0) (some? c1))
+              (folded-constant op opcd0 c0 c1)
               :else
-              (emit-suffix base-opc op-type (entity/mk-constant lhs op-type)
-                           ces i))))
-        (fold-or-emit ^CodeEmitter [^Opcode base-opc ^Class op-type
-                                    ^CodeEmitter/1 ces]
-          (if (model/ce-const? (aget ces 0))
-            (fold-lhs-then-emit base-opc op-type ces)
-            (emit-suffix base-opc op-type (aget ces 0) ces 1)))
-        (unary ^CodeEmitter [^NumericOp num-op ^Class op-type ^Insns args]
-          (let [ce (insn/emitter args 0)]
-            (condp identical? (.base-opcode num-op)
-              Opcode/IADD
-              (insn/emitter args 0)
-                      
-              Opcode/ISUB
-              (or (const-inverse num-op op-type ce)
-                  (operator op-type (typed-bytecode Opcode/INEG op-type) args))
+              (op-2* (-> op .base-opcode .bytecode) opcd0 opcd1 ce0 ce1))))
+        (op-n ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter/1 ces]
+          (loop [acc (aget ces 0), i 1]
+            (if (< i (alength ces))
+              (recur (op-2 op opcd opcd acc (aget ces i)) (inc i))
+              acc)))
 
-              Opcode/IMUL 
-              (insn/emitter args 0)
-
-              Opcode/IDIV
-              (or (const-inverse num-op op-type ce)
-                  (->> (insn/insns-of entity/insn-int-one (.get args 0))
-                       (operator op-type (typed-bytecode Opcode/IDIV op-type)))))))]
+        (unary ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter ce]
+          (condp identical? (.base-opcode op)
+            Opcode/ISUB
+            (if-some [c (model/ce-const-value ce)]
+              (folded-constant op opcd (.right-identity op) c)
+              (op-2* (.bytecode Opcode/INEG) opcd opcd ce nil))
+            Opcode/IDIV
+            (if-some [c (model/ce-const-value ce)]
+              (folded-constant op opcd (.right-identity op) c)
+              (op-2 op opcd opcd (.emitter entity/insn-int-one) ce))
+            #_else ce))
+        (binary-numeric-insn ^Insn [^OpSpec op form ^Insns args]
+          (let [args (take-args form args 2)
+                wop-type (top-numeric-of form args)
+                opcd (.primitive-id wop-type)]
+            (-> (op-2 op opcd opcd (insn/emitter args 0) (insn/emitter args 1))
+                (insn/mk-insn (.class-primitive wop-type)))))]
   
-  (defn mk-nary-numeric ^Invocable [^NumericOp num-op]
+  (defn mk-nary-numeric ^Invocable [^OpSpec op]
     (^Invocable fn [form args]
-     (let [args ^Insns args]
-       (if-some [op-type (top-numeric-of (.bottom-type num-op)
-                                         (.expr-types args))]
-         (-> (case (.length args)
-               0 (entity/mk-constant (.right-identity num-op) op-type)
-               1 (unary num-op op-type args)
-               #_else (fold-or-emit (.base-opcode num-op) op-type
-                                    (.emitters args)))
-             (insn/mk-insn op-type))
-         (throw (info-numeric-args-only form args))))))
+     (let [args ^Insns args
+           wop-type (top-type-of op form args)
+           op-type (.class-primitive wop-type)]
+       (-> (case (.length args)
+             0 (entity/mk-constant (.right-identity op) op-type)
+             1 (unary op (.primitive-id wop-type) (insn/emitter args 0))
+             #_else (op-n op (.primitive-id wop-type) (.emitters args)))
+           (insn/mk-insn op-type)))))
 
-  (defn mk-binary-numeric ^Invocable [^Wrapper bottom-type ^Opcode base-opc]
+  (defn mk-binary-numeric ^Invocable [^OpSpec op]
     (^Invocable fn [form args]
-     (let [args (take-args form args 2)]
-       (if-some [op-type (top-numeric-of bottom-type (.expr-types args))]
-         (insn/mk-insn (fold-or-emit base-opc op-type (.emitters args))
-                       op-type)
-         (throw (info-numeric-args-only form args))))))
+     (binary-numeric-insn op form args)))
   
-  (def binary-xdiv-integral             ;aka 'quot
+  (defn mk-binary-xdiv-integral [^OpSpec op] ;aka 'quot
     (^Invocable fn [form args]
-     (let [args (take-args form args 2)]
+     (let [insn (binary-numeric-insn op form args)
+           op-type (.expr-type insn)]
        ;; FIXME... this does not work if the result is out of range of
        ;; long; maybe better: truncate with something along the line of
        ;; `(if (neg? x) (Math/ceil x) (Math/floor x))` (or put this
        ;; into a static method that first checks if the division
        ;; result is in range for long, and only falls back to the
        ;; ceil/floor variant if out of range)
-       (if-some [op-type (top-numeric-of type/int (.expr-types args))]
-         (cond-> (insn/mk-insn (fold-or-emit Opcode/IDIV op-type
-                                             (.emitters args))
-                               op-type)
-           (or (type/same? Float/TYPE op-type)
-               (type/same? Double/TYPE op-type))
-           (-> (convert-to-primitive Long/TYPE)
-               (convert-to-primitive op-type)))
-         (throw (info-numeric-args-only form args))))))
+       (cond-> insn
+         (or (identical? Float/TYPE op-type) (identical? Double/TYPE op-type))
+         (-> (convert-to-primitive Long/TYPE)
+             (convert-to-primitive op-type))))))
+
+  (def unary-bit-not
+    (^Invocable fn [form args]
+     (let [arg (take-arg form args)
+           wop-type (integral-type form args 0)
+           opcd (.primitive-id wop-type)]
+       (-> (op-2 (bitset-op Opcode/IXOR entity/insn-int-zero)
+                 opcd opcd (.emitter arg) (.emitter entity/insn-int-m1))
+           (insn/mk-insn (.class-primitive wop-type))))))
+  
+  (def unary-xdefault ;FIXME... only use is shifted-one; find something better?
+    (^Invocable fn [form args]
+     (let [arg (take-arg form args)
+           tp (.expr-type arg)]
+       (cond
+         (type/same? Void/TYPE tp) insn/insn-empty
+         (.isPrimitive tp) (-> 0 (entity/mk-constant tp) (insn/mk-insn tp))
+         :else entity/insn-null))))
+  
+  (defn mk-binary-shift ^Invocable [^Opcode base-opc]
+    (let [op (OpSpec. type/int type/long base-opc nil 0)]
+      (^Invocable fn [form args]
+       (let [args (take-args form args 2)
+             warg0 (integral-type form args 0)
+             warg1 (integer-type form args 1)]
+         (-> (op-2 op (.primitive-id warg0) (.primitive-id warg1)
+                   (insn/emitter args 0) (insn/emitter args 1))
+             (insn/mk-insn (.class-primitive warg0)))))))
   
   (defn mk-binary-compare ^Invocable [^int cmp-opcd] ;FIXME... drop?
     (^Invocable fn [form args]
-     (let [args (take-args form args 2)]
-       (if-some [tp-top (top-numeric-of type/int (.expr-types args))]
-         (if (type/same? Integer/TYPE tp-top)
-           (condgen/icmp (.get args 0) (.get args 1) cmp-opcd)
-           (assert false))
-         (throw (info-two-numeric-args form args))))))
+     (let [args (take-args form args 2)
+           wtop (top-numeric-of form args)]
+       (if (identical? type/int wtop)
+         (condgen/icmp (.get args 0) (.get args 1) cmp-opcd)
+         (assert false)))))
 
   (def binary-identical
     (^Invocable fn [form args]
@@ -387,8 +426,8 @@
 (def primitive-nmsp-globals
   (letfn [(assoc-prim ^map [^map acc ^String nm ^Invocable inv]
             (assoc acc nm (entity/global-binding inv cfg/primitive-ns-str nm)))
-          (assoc-nary ^map [^map acc ^String nm ^NumericOp num-op]
-            (assoc-prim acc nm (mk-nary-numeric num-op)))
+          (assoc-nary ^map [^map acc ^String nm ^OpSpec op]
+            (assoc-prim acc nm (mk-nary-numeric op)))
           (assoc-conversions ^map [^map acc]
             (-> (reduce (fn ^map [^map acc ^Wrapper wtp]
                           (let [tp (.class-primitive wtp)
@@ -400,13 +439,31 @@
                 (assoc-prim "object" convert-to-object)))]
     (-> {}
         (assoc-conversions)
-        (assoc-nary "+" (numeric-op type/int Opcode/IADD entity/insn-int-zero))
-        (assoc-nary "-" (numeric-op type/int Opcode/ISUB entity/insn-int-zero))
-        (assoc-nary "*" (numeric-op type/int Opcode/IMUL entity/insn-int-one))
-        (assoc-nary "/" (numeric-op type/float Opcode/IDIV entity/insn-float-one))
+        (assoc-nary "+" (numeric-op type/int Opcode/IADD
+                                    entity/insn-int-zero entity/insn-int-zero))
+        (assoc-nary "-" (numeric-op type/int Opcode/ISUB
+                                    nil entity/insn-int-zero))
+        (assoc-nary "*" (numeric-op type/int Opcode/IMUL
+                                    entity/insn-int-one entity/insn-int-one))
+        (assoc-nary "/" (numeric-op type/float Opcode/IDIV
+                                    nil entity/insn-float-one))
+        (assoc-prim "quot" (-> (numeric-op type/int Opcode/IDIV
+                                           nil entity/insn-int-one)
+                               (mk-binary-xdiv-integral)))
+        (assoc-prim "rem" (-> (numeric-op type/int Opcode/IREM
+                                          nil entity/insn-int-one)
+                              (mk-binary-numeric)))
+
+        (assoc-nary "bit-and" (bitset-op Opcode/IAND entity/insn-int-m1))
+        (assoc-nary "bit-or" (bitset-op Opcode/IOR entity/insn-int-zero))
+        (assoc-nary "bit-xor" (bitset-op Opcode/IXOR entity/insn-int-zero))
+        (assoc-prim "bit-not" unary-bit-not)
+        (assoc-prim "xdefault" unary-xdefault)
+        (assoc-prim "bit-shift-left" (mk-binary-shift Opcode/ISHL))
+        (assoc-prim "bit-shift-right" (mk-binary-shift Opcode/ISHR))
+        (assoc-prim "unsigned-bit-shift-right" (mk-binary-shift Opcode/IUSHR))
         
-        (assoc-prim "quot" binary-xdiv-integral)
-        (assoc-prim "rem" (mk-binary-numeric type/int Opcode/IREM))
-        (assoc-prim "identical?" binary-identical)
         (assoc-prim "<" (mk-binary-compare condgen/cmp-lt))
+        
+        (assoc-prim "identical?" binary-identical)
         (assoc-prim "str" string-concat))))
