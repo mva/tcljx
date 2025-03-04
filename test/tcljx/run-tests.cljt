@@ -11,10 +11,11 @@
    (tcljx.parser reader-test namespace-test error-test redirection-test)
    (tcljx.classgen bootstrap-test invoke-test unreachable-test
                    const-test conv-test prim-conv-test dot-form-test new-test
-                   arith-test let-test quote-test meta-test str-test bits-test)
+                   arith-test let-test quote-test meta-test str-test bits-test
+                   array-test clone-test)
    
    (tcljx #_switch-test #_cond-test
-          #_try-test #_array-test #_loop-test #_logic-test #_clone-test #_xcmp-test
+          #_try-test #_loop-test #_logic-test #_xcmp-test
           #_unboxing-test #_boxing-test #_fn-member-test
 
           #_namespace-test #_fn-test #_itf-fn-test #_variadic-test #_macro-test
@@ -51,14 +52,14 @@
     tcljx.classgen.meta-test
     tcljx.classgen.str-test
     tcljx.classgen.bits-test
+    tcljx.classgen.array-test
+    tcljx.classgen.clone-test
     
     #_tcljx.classgen.switch-test
     #_tcljx.classgen.cond-test
     #_tcljx.classgen.try-test
-    #_tcljx.classgen.array-test
     #_tcljx.classgen.loop-test
     #_tcljx.classgen.logic-test
-    #_tcljx.classgen.clone-test
     #_tcljx.classgen.xcmp-test
     #_tcljx.classgen.unboxing-test
     #_tcljx.classgen.boxing-test

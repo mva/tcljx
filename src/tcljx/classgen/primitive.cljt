@@ -11,17 +11,25 @@
    (tcljx.data.type Wrapper)
    (tcljx.data.model Expr Exprs CodeEmitter Constant Invocable)
    (tcljx.classgen.insn Insn Insns)
-   (java.lang.classfile Opcode CodeBuilder)
+   (java.lang.classfile Opcode CodeBuilder TypeKind)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
    (java.lang.classfile.instruction OperatorInstruction)
    (java.lang.constant ConstantDescs MethodTypeDesc)))
 
-(defn take-args ^Insns [^seq form ^Exprs xs ^int n]
-  (when-not (= (.length xs) n)
-    (throw (wrong/wr-info (str (wrong/q (first form)) " takes " n
-                               " argument" (when-not (= 1 n) "s")
-                               (wrong/got-int (.length xs))))))
-  xs)
+(defn take-args
+  (^Insns [^seq form ^Exprs xs ^int n]
+   (if (= (.length xs) n)
+     xs
+     (throw (wrong/wr-info (str (wrong/q (first form)) " takes " n
+                                " argument" (when-not (= 1 n) "s")
+                                (wrong/got-int (.length xs)))))))
+  (^Insns [^seq form ^Exprs xs ^int n-min ^int n-max]
+   (cond
+     (= n-min n-max) (take-args form xs n-max)
+     (<= n-min (.length xs) n-max) xs
+     :else (throw (wrong/wr-info (str (wrong/q (first form)) " takes " n-min
+                                      " to " n-max " arguments"
+                                      (wrong/got-int (.length xs))))))))
 (defn take-arg ^Insn [^seq form ^Exprs xs]
   (.get (take-args form xs 1) 0))
 
@@ -210,6 +218,13 @@
         (integer-type ^Wrapper [form ^Insns args ^int i]
           (or (consumed-as type/int args i)
               (throw (info-type-mismatch form args i "integer"))))
+        (array-type-at-0 ^Class [form ^Insns args]
+          (if (zero? (.length args))
+            (throw (wrong/wr-info "expect array argument"))
+            (let [tp (insn/expr-type args 0)]
+              (if (.isArray tp)
+                tp
+                (throw (info-type-mismatch form args 0 "array"))))))
         (info-two-reference-args ^Throwable [form ^Insns args]
           (-> (str (wrong/q (first form)) " expects two reference arguments"
                    (wrong/got-types (insn/expr-types args)))
@@ -263,7 +278,20 @@
                 wop-type (top-numeric-of form args)
                 opcd (.primitive-id wop-type)]
             (-> (op-2 op opcd opcd (insn/emitter args 0) (insn/emitter args 1))
-                (insn/mk-insn (.class-primitive wop-type)))))]
+                (insn/mk-insn (.class-primitive wop-type)))))
+
+        (emit-array-gets ^Class [^CodeBuilder xb ^int line ^Insns args ^int n]
+          (let [atp (insn/expr-type args 0)]
+            (when (emit/insn? xb line atp (insn/emitter args 0) false)
+              (loop [tp atp, i 1]
+                (if (<= i n)
+                  (when (emit/insn? xb line Integer/TYPE
+                                    (insn/emitter args i) false)
+                    (let [ctp (.componentType tp)]
+                      (.lineNumber xb line)
+                      (.arrayLoad xb (TypeKind/from ctp))
+                      (recur ctp (inc i))))
+                  tp)))))]
   
   (defn mk-nary-numeric ^Invocable [^OpSpec op]
     (^Invocable fn [form args]
@@ -336,7 +364,62 @@
      (let [args (take-args form args 2)]
        (if (type/any-primitive? (.expr-types args))
          (throw (info-two-reference-args form args))
-         (condgen/acmp (.get args 0) (.get args 1) condgen/cmp-eq))))))
+         (condgen/acmp (.get args 0) (.get args 1) condgen/cmp-eq)))))
+
+  (def array-length
+    (^Invocable fn [form args]
+     (let [atp (array-type-at-0 form args)
+           arg (take-arg form args)]
+       (-> (^CodeEmitter fn [xb line _ _]
+            (when (emit/insn? xb line atp (.emitter arg) false)
+              (.arraylength xb)
+              Integer/TYPE))
+           (insn/mk-insn Integer/TYPE)))))
+  (def nary-array-load
+    (^Invocable fn [form args]
+     (let [atp (array-type-at-0 form args)
+           args (take-args form args 2 (inc (type/type-dimensions atp)))
+           n (dec (.length args))]
+       (dotimes [i n]
+         (integer-type form args (inc i)))
+       (-> (^CodeEmitter fn [xb line _ _]
+            (emit-array-gets xb line args n))
+           (insn/mk-insn (type/component-type atp n))))))
+  (def nary-array-store
+    (^Invocable fn [form args]
+     (let [atp (array-type-at-0 form args)
+           args (take-args form args 3 (+ (type/type-dimensions atp) 2))
+           n-gets (- (.length args) 3)
+           tp-set (type/component-type atp (inc n-gets))
+           ce-set (insn/emitter args (dec (.length args)))]
+       (dotimes [i (inc n-gets)]
+         (integer-type form args (inc i)))
+       (insn/ensure-assignable tp-set args (dec (.length args)))
+       (-> (^CodeEmitter fn [xb line consumed-type _]
+            (when-some [atp (emit-array-gets xb line args n-gets)]
+              (when (emit/insn? xb line Integer/TYPE
+                                (insn/emitter args (inc n-gets)) false)
+                (when (emit/insn? xb line tp-set ce-set false)
+                  (let [void? (identical? Void/TYPE consumed-type)
+                        tk (TypeKind/from tp-set)]
+                    (.lineNumber xb line)
+                    (when-not void?
+                      (if (= (.slotSize tk) 1) (.dup_x2 xb) (.dup2_x2 xb)))
+                    (.arrayStore xb tk)
+                    (if void? Void/TYPE tp-set))))))
+           (insn/mk-insn tp-set)))))
+  (def array-clone
+    (^Invocable fn [form args]
+     (let [atp (array-type-at-0 form args)
+           arg (take-arg form args)]
+       (-> (^CodeEmitter fn [xb line _ _]
+            (when (emit/insn? xb line atp (.emitter arg) false)
+              (let [cld (reflect/describe-class atp)]
+                (.invokevirtual xb cld "clone"
+                                (MethodTypeDesc/of ConstantDescs/CD_Object))
+                (.checkcast xb cld)
+                atp)))
+           (insn/mk-insn atp))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -464,6 +547,11 @@
         (assoc-prim "unsigned-bit-shift-right" (mk-binary-shift Opcode/IUSHR))
         
         (assoc-prim "<" (mk-binary-compare condgen/cmp-lt))
-        
+
+        (assoc-prim "alength" array-length)
+        (assoc-prim "aget" nary-array-load)
+        (assoc-prim "aset" nary-array-store)
+        (assoc-prim "aclone" array-clone)
+
         (assoc-prim "identical?" binary-identical)
         (assoc-prim "str" string-concat))))

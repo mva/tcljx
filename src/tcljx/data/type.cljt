@@ -69,6 +69,12 @@
       (recur (inc n) (.componentType tp))
       n)))
 
+(defn component-type ^Class [^Class tp ^int i]
+  (loop [tp tp, i i]
+    (if (zero? i)
+      tp
+      (recur (.componentType tp) (dec i)))))
+
 (defn array-type-of-class ^Class [^Class cl ^int array-rank]
   (if (zero? array-rank)
     cl
