@@ -4,16 +4,16 @@
     [config :as cfg] [type :as type] [resolve :as resolve] [reflect :as reflect]
     [model :as model] [wrong :as wrong])
    (tcljx.classgen
-    [emit :as emit] [insn :as insn] [entity :as entity] [runtime :as rt]
-    [constgen :as constgen] [condgen :as condgen])
+    [classfile :as classfile] [emit :as emit] [insn :as insn] [entity :as entity]
+    [runtime :as rt] [constgen :as constgen] [condgen :as condgen])
    (tinyclj [string :as str]))
   (:import
    (tcljx.data.type Wrapper)
    (tcljx.data.model Expr Exprs CodeEmitter Constant Invocable)
    (tcljx.classgen.insn Insn Insns)
+   (tcljx.classgen.condgen Branching)
    (java.lang.classfile Opcode CodeBuilder TypeKind)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
-   (java.lang.classfile.instruction OperatorInstruction)
    (java.lang.constant ConstantDescs MethodTypeDesc)))
 
 (defn take-args
@@ -82,15 +82,6 @@
          (insn/cast-to (.class-reference (type/of arg-tp))))))))
 
 ;;; ------------------------------------------------------------------------
-
-(def ^:private op-instr (new OperatorInstruction/1 (- #_iinc 132 #_iadd 96)))
-(let [opcodes (Opcode/values)]
-  (dotimes [i (alength opcodes)]
-    (let [opcode (aget opcodes i)]
-      (when (and (<= #_iadd 96 (.bytecode opcode))
-                 (< (.bytecode opcode) #_iinc 132))
-        (aset op-instr (- i #_iadd 96) (OperatorInstruction/of opcode))))))
-
 
 (deftype OpSpec [^Wrapper bottom-type ;arguments are at least widened to this
                  ^Wrapper top-type    ;... and at most widened to this
@@ -202,21 +193,21 @@
                    (throw (info-top-type top-type form args i))))))))
         (top-numeric-of ^Wrapper [form ^Insns args]
           (top-type-of type/int type/double form args))
-
-        (consumed-as ^Wrapper [^Wrapper target ^Insns args ^int i]
+        
+        (consumed-as-numeric ^Wrapper [^Wrapper target ^Insns args ^int i]
           ;; pre: `target` is numeric type
           (let [tp (insn/expr-type args i)]
             (when (.isPrimitive tp)
               (let [wtp (type/of tp)]
                 (when (type/primitive-assignable-from? target wtp)
-                  (if (> (.primitive-id wtp) 3)
+                  (if (type/computational-int? wtp)
                     type/int   ;byte and short are computationally int
                     wtp))))))  ;int, long, float, or double
         (integral-type ^Wrapper [form ^Insns args ^int i]
-          (or (consumed-as type/long args i)
+          (or (consumed-as-numeric type/long args i)
               (throw (info-type-mismatch form args i "integral"))))
         (integer-type ^Wrapper [form ^Insns args ^int i]
-          (or (consumed-as type/int args i)
+          (or (consumed-as-numeric type/int args i)
               (throw (info-type-mismatch form args i "integer"))))
         (array-type-at-0 ^Class [form ^Insns args]
           (if (zero? (.length args))
@@ -241,7 +232,7 @@
                    ;; [il]div and [il]rem can raise a division by zero
                    ;; exception, so provide a line number for div & rem
                    (emit/line-number xb line))
-                 (.with xb (aget op-instr (- bytecode #_iadd 96)))
+                 (classfile/with-operator xb bytecode)
                  tp0)))))
         (op-2 ^CodeEmitter [^OpSpec op ^int opcd0 ^int opcd1
                             ^CodeEmitter ce0 ^CodeEmitter ce1]
@@ -276,7 +267,7 @@
         (binary-numeric-insn ^Insn [^OpSpec op form ^Insns args]
           (let [args (take-args form args 2)
                 wop-type (top-numeric-of form args)
-                opcd (.primitive-id wop-type)]
+                opcd (.computational-id wop-type)]
             (-> (op-2 op opcd opcd (insn/emitter args 0) (insn/emitter args 1))
                 (insn/mk-insn (.class-primitive wop-type)))))
 
@@ -300,8 +291,8 @@
            op-type (.class-primitive wop-type)]
        (-> (case (.length args)
              0 (entity/mk-constant (.right-identity op) op-type)
-             1 (unary op (.primitive-id wop-type) (insn/emitter args 0))
-             #_else (op-n op (.primitive-id wop-type) (.emitters args)))
+             1 (unary op (.computational-id wop-type) (insn/emitter args 0))
+             #_else (op-n op (.computational-id wop-type) (.emitters args)))
            (insn/mk-insn op-type)))))
 
   (defn mk-binary-numeric ^Invocable [^OpSpec op]
@@ -327,12 +318,15 @@
     (^Invocable fn [form args]
      (let [arg (take-arg form args)
            wop-type (integral-type form args 0)
-           opcd (.primitive-id wop-type)]
+           opcd (.computational-id wop-type)]
        (-> (op-2 (bitset-op Opcode/IXOR entity/insn-int-zero)
                  opcd opcd (.emitter arg) (.emitter entity/insn-int-m1))
            (insn/mk-insn (.class-primitive wop-type))))))
-  
-  (def unary-xdefault ;FIXME... only use is shifted-one; find something better?
+
+  ;; FIXME... Only used for shifted-one.  Better alternative: add
+  ;; primitive implementations of bit-set, bit-clear, bit-flip, and
+  ;; bit-test.  Then get rid of shifted-one and xdefault.
+  (def unary-xdefault 
     (^Invocable fn [form args]
      (let [arg (take-arg form args)
            tp (.expr-type arg)]
@@ -347,18 +341,35 @@
        (let [args (take-args form args 2)
              warg0 (integral-type form args 0)
              warg1 (integer-type form args 1)]
-         (-> (op-2 op (.primitive-id warg0) (.primitive-id warg1)
+         (-> (op-2 op (.computational-id warg0) (.computational-id warg1)
                    (insn/emitter args 0) (insn/emitter args 1))
              (insn/mk-insn (.class-primitive warg0)))))))
   
-  (defn mk-binary-compare ^Invocable [^int cmp-opcd] ;FIXME... drop?
+  (defn mk-nary-compare ^Invocable [^int cmp-opcd]
     (^Invocable fn [form args]
-     (let [args (take-args form args 2)
-           wtop (top-numeric-of form args)]
-       (if (identical? type/int wtop)
-         (condgen/icmp (.get args 0) (.get args 1) cmp-opcd)
-         (assert false)))))
+     (let [args ^Insns args
+           wtop (or (when (= cmp-opcd condgen/cmp-eq)
+                      (type/of-all (.expr-types args)))
+                    (top-numeric-of form args))]
+       (case (.length args)
+         0 (throw (wrong/wr-info "missing argument"))
+         1 (insn/progn args entity/insn-true) ;FIXME... drop unary?
+         2 (condgen/xcmp-2 wtop (.get args 0) (.get args 1) cmp-opcd)
+         #_ else (condgen/xcmp-n wtop args cmp-opcd)))))
 
+  (def nary-equiv
+    (^Invocable fn [form args]
+     (let [args ^Insns args]
+       (if (type/all-monomorphic-primitive? (.expr-types args))
+         ;; all arguments are non-void primitive: fall back to number compare
+         (.invoke* (mk-nary-compare condgen/cmp-eq) form args)
+         
+         (case (.length args)
+           0 (throw (wrong/wr-info "missing argument"))
+           1 (insn/progn args entity/insn-true) ;FIXME... drop unary?
+           2 (condgen/xcmp-2 nil (.get args 0) (.get args 1) -1)
+           #_ else (condgen/xcmp-n nil args -1))))))
+  
   (def binary-identical
     (^Invocable fn [form args]
      (let [args (take-args form args 2)]
@@ -419,7 +430,13 @@
                                 (MethodTypeDesc/of ConstantDescs/CD_Object))
                 (.checkcast xb cld)
                 atp)))
-           (insn/mk-insn atp))))))
+           (insn/mk-insn atp)))))
+
+  (def unary-not
+    (^Invocable fn [form args]
+     (let [arg (take-arg form args)]
+       (-> (condgen/negation (.emitter (condgen/logical-truth arg)))
+           (insn/mk-insn Boolean/TYPE))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -507,51 +524,57 @@
 ;;; ------------------------------------------------------------------------
 
 (def primitive-nmsp-globals
-  (letfn [(assoc-prim ^map [^map acc ^String nm ^Invocable inv]
+  (letfn [(primitive ^map [^map acc ^String nm ^Invocable inv]
             (assoc acc nm (entity/global-binding inv cfg/primitive-ns-str nm)))
-          (assoc-nary ^map [^map acc ^String nm ^OpSpec op]
-            (assoc-prim acc nm (mk-nary-numeric op)))
-          (assoc-conversions ^map [^map acc]
+          (nary-numeric ^map [^map acc ^String nm ^OpSpec op]
+            (primitive acc nm (mk-nary-numeric op)))
+          (conversions ^map [^map acc]
             (-> (reduce (fn ^map [^map acc ^Wrapper wtp]
                           (let [tp (.class-primitive wtp)
                                 nm (.getSimpleName tp)]
-                            (assoc-prim acc nm (mk-convert-to-primitive wtp))))
+                            (primitive acc nm (mk-convert-to-primitive wtp))))
                         acc type/primitive-types)
                 ;; provide Clojure rules for (boolean ...)
-                (assoc-prim "boolean" convert-to-logical-truth)
-                (assoc-prim "object" convert-to-object)))]
+                (primitive "boolean" convert-to-logical-truth)
+                (primitive "object" convert-to-object)))]
     (-> {}
-        (assoc-conversions)
-        (assoc-nary "+" (numeric-op type/int Opcode/IADD
-                                    entity/insn-int-zero entity/insn-int-zero))
-        (assoc-nary "-" (numeric-op type/int Opcode/ISUB
-                                    nil entity/insn-int-zero))
-        (assoc-nary "*" (numeric-op type/int Opcode/IMUL
-                                    entity/insn-int-one entity/insn-int-one))
-        (assoc-nary "/" (numeric-op type/float Opcode/IDIV
-                                    nil entity/insn-float-one))
-        (assoc-prim "quot" (-> (numeric-op type/int Opcode/IDIV
-                                           nil entity/insn-int-one)
-                               (mk-binary-xdiv-integral)))
-        (assoc-prim "rem" (-> (numeric-op type/int Opcode/IREM
+        (conversions)
+        (nary-numeric "+" (numeric-op type/int Opcode/IADD
+                                      entity/insn-int-zero entity/insn-int-zero))
+        (nary-numeric "-" (numeric-op type/int Opcode/ISUB
+                                      nil entity/insn-int-zero))
+        (nary-numeric "*" (numeric-op type/int Opcode/IMUL
+                                      entity/insn-int-one entity/insn-int-one))
+        (nary-numeric "/" (numeric-op type/float Opcode/IDIV
+                                      nil entity/insn-float-one))
+        (primitive "quot" (-> (numeric-op type/int Opcode/IDIV
                                           nil entity/insn-int-one)
-                              (mk-binary-numeric)))
+                              (mk-binary-xdiv-integral)))
+        (primitive "rem" (-> (numeric-op type/int Opcode/IREM
+                                         nil entity/insn-int-one)
+                             (mk-binary-numeric)))
 
-        (assoc-nary "bit-and" (bitset-op Opcode/IAND entity/insn-int-m1))
-        (assoc-nary "bit-or" (bitset-op Opcode/IOR entity/insn-int-zero))
-        (assoc-nary "bit-xor" (bitset-op Opcode/IXOR entity/insn-int-zero))
-        (assoc-prim "bit-not" unary-bit-not)
-        (assoc-prim "xdefault" unary-xdefault)
-        (assoc-prim "bit-shift-left" (mk-binary-shift Opcode/ISHL))
-        (assoc-prim "bit-shift-right" (mk-binary-shift Opcode/ISHR))
-        (assoc-prim "unsigned-bit-shift-right" (mk-binary-shift Opcode/IUSHR))
+        (nary-numeric "bit-and" (bitset-op Opcode/IAND entity/insn-int-m1))
+        (nary-numeric "bit-or" (bitset-op Opcode/IOR entity/insn-int-zero))
+        (nary-numeric "bit-xor" (bitset-op Opcode/IXOR entity/insn-int-zero))
+        (primitive "bit-not" unary-bit-not)
+        (primitive "xdefault" unary-xdefault)
+        (primitive "bit-shift-left" (mk-binary-shift Opcode/ISHL))
+        (primitive "bit-shift-right" (mk-binary-shift Opcode/ISHR))
+        (primitive "unsigned-bit-shift-right" (mk-binary-shift Opcode/IUSHR))
         
-        (assoc-prim "<" (mk-binary-compare condgen/cmp-lt))
+        (primitive "=" nary-equiv)
+        (primitive "==" (mk-nary-compare condgen/cmp-eq))
+        (primitive "<" (mk-nary-compare condgen/cmp-lt))
+        (primitive ">=" (mk-nary-compare condgen/cmp-ge))
+        (primitive ">" (mk-nary-compare condgen/cmp-gt))
+        (primitive "<=" (mk-nary-compare condgen/cmp-le))
+        
+        (primitive "alength" array-length)
+        (primitive "aget" nary-array-load)
+        (primitive "aset" nary-array-store)
+        (primitive "aclone" array-clone)
 
-        (assoc-prim "alength" array-length)
-        (assoc-prim "aget" nary-array-load)
-        (assoc-prim "aset" nary-array-store)
-        (assoc-prim "aclone" array-clone)
-
-        (assoc-prim "identical?" binary-identical)
-        (assoc-prim "str" string-concat))))
+        (primitive "not" unary-not)
+        (primitive "identical?" binary-identical)
+        (primitive "str" string-concat))))

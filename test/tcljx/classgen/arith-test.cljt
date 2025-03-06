@@ -163,8 +163,12 @@
   (is (= '[(LDC2_W -1.0) (DRETURN)] (asm-expr (quot -3.0 2.0))))
   (is (= '[(LDC2_W -1.0) (DRETURN)] (asm-expr (rem -3.0 2.0)))))
 
-
 (deftest add-zero-test
+  ;; Note: Getting rid of "offset+0" or "v>>0" may conflict with very
+  ;; low-level optimizations of the C2 HotSpot compiler like
+  ;; https://bugs.openjdk.org/browse/JDK-8318446 (via
+  ;; https://www.youtube.com/watch?v=xFb_LcapbXw&t=1457s) -- *if* they
+  ;; match on *exactly* the source code level instruction pattern.
   (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
          (asm-expr [^int x] (+ x 0))))
   (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]

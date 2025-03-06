@@ -24,12 +24,16 @@
 
 (def insn-null (insn/mk-insn (mk-constant ConstantDescs/NULL Object)
                               type/poly-reference))
-(def insn-true (insn/mk-insn (mk-constant 1 Boolean/TYPE) Boolean/TYPE))
-(def insn-false (insn/mk-insn (mk-constant 0 Boolean/TYPE) Boolean/TYPE))
+
+(def emitter-false (mk-constant 0 Boolean/TYPE))
+(def emitter-true (mk-constant 1 Boolean/TYPE))
+(def insn-false (insn/mk-insn emitter-false Boolean/TYPE))
+(def insn-true (insn/mk-insn emitter-true Boolean/TYPE))
 (defn insn-boolean ^Insn [^boolean value] (if value insn-true insn-false))
 
+(def emitter-int-zero (mk-constant 0 Integer/TYPE))
+(def insn-int-zero (insn/mk-insn emitter-int-zero Integer/TYPE))
 (def insn-int-one (insn/mk-insn (mk-constant 1 Integer/TYPE) Integer/TYPE))
-(def insn-int-zero (insn/mk-insn (mk-constant 0 Integer/TYPE) Integer/TYPE))
 (def insn-int-m1 (insn/mk-insn (mk-constant -1 Integer/TYPE) Integer/TYPE))
 (def insn-float-one (insn/mk-insn (mk-constant 1.0f Float/TYPE) Float/TYPE))
 

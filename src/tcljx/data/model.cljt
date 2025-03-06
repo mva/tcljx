@@ -339,7 +339,16 @@
   ;; ### basics
   
   (progn-expr ^Expr [^Exprs xs ^Expr x])
+
+  ;; Test, followed by the "true" path, optionally followed by
+  ;; the "false" path.
   (if-expr ^Expr [^Exprs xs])
+  
+  ;; If the program provides a default path, then `paths-and-default`
+  ;; has one more element than `guards`.
+  (case-expr ^Expr [^Expr select ^Exprs/1 guards ^Exprs paths-and-default
+                    ^seq/1 error-contexts])
+
   (invoke ^Expr [^Object form ^Invocable inv ^Exprs args])
   
   ;; ### bindings

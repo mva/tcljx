@@ -1,12 +1,13 @@
 (ns tcljx.data.type
   (:import (java.lang.classfile CodeBuilder TypeKind)
-           (java.lang.constant ConstantDesc)
-           (java.util.function BiConsumer))
+           (java.lang.constant ConstantDesc))
   (:refer-clojure :exclude [symbol keyword vector map set list
                             byte short int long float double char boolean void]))
 
 (defn same? ^boolean [^Class a ^Class b]
   (identical? a b))
+(defn same-name? ^boolean [^Class a ^Class b] ;if from different loaders
+  (identical? (.getName a) (.getName b)))
 
 #_(defn numeric? ^boolean [^Class tp]
     (and (.isPrimitive tp) (not (or (identical? Character/TYPE tp)
@@ -60,6 +61,11 @@
     (cond (< i start) false
           (monomorphic-primitive? (aget types i)) true
           :else (recur (dec i)))))
+(defn all-monomorphic-primitive? ^boolean [^Class/1 types]
+  (loop [i (dec (alength types))]
+    (cond (< i 0) true
+          (monomorphic-primitive? (aget types i)) (recur (dec i))
+          :else false)))
 
 ;;; ------------------------------------------------------------------------
 
@@ -98,19 +104,20 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- primitive-id ^int [^Class tp]    ;pre: (.isPrimitive tp)
+(defn- primitive-id ^byte [^Class tp]   ;pre: (.isPrimitive tp)
   ;; numbering follows xa(load|store), with the exception of boolean and void
-  (condp identical? tp 
-    Integer/TYPE #_int 0                ;iaload and iastore
-    Long/TYPE #_long 1                  ;laload and lastore
-    Float/TYPE #_float 2                ;faload and fastore
-    Double/TYPE #_double 3              ;daload and dastore
-    Boolean/TYPE #_boolean 4            ;takes place of aaload/aastore
-    Byte/TYPE #_byte 5                  ;baload and bastore
-    Character/TYPE #_char 6             ;caload and castore
-    Short/TYPE #_short 7                ;saload and sastore
-    Void/TYPE #_void 8                  ;arbitrary
-    #_else (throw (IllegalArgumentException.))))
+  (-> (condp identical? tp 
+        Integer/TYPE #_int 0            ;iaload and iastore
+        Long/TYPE #_long 1              ;laload and lastore
+        Float/TYPE #_float 2            ;faload and fastore
+        Double/TYPE #_double 3          ;daload and dastore
+        Boolean/TYPE #_boolean 4        ;takes place of aaload/aastore
+        Byte/TYPE #_byte 5              ;baload and bastore
+        Character/TYPE #_char 6         ;caload and castore
+        Short/TYPE #_short 7            ;saload and sastore
+        Void/TYPE #_void 8              ;arbitrary
+        #_else (throw (IllegalArgumentException.)))
+      (tinyclj.core/byte)))
 
 ;;; Like the primitive equivalent, the reference class of a box type
 ;;; is final.  This means, that an `isAssignableFrom` check reduces to
@@ -122,113 +129,43 @@
 ;;; target type.
 (deftype Wrapper [^Class class-primitive
                   ^Class class-reference
-                  ^Class class-computational
+                  ^TypeKind type-kind   ;of class-primitive
                   ^boolean numeric?
                   ^short mask-assignable-from
-                  ^int primitive-id     ;4 for boolean, 8 for void
-                  ^BiConsumer convert-from]
+                  ^byte primitive-id      ;4 for boolean, 8 for void
+                  ^byte computational-id] ;0 to 3, except -1 for void
   java.lang.Record)
+
+(defn computational-int? ^boolean [^Wrapper wtp]
+  (zero? (.computational-id wtp)))
 
 (letfn [(wrapper ^Wrapper [^Class class-primitive
                            ^Class class-reference
-                           ^Class class-computational
-                           ^Wrapper assignable-from
-                           ^BiConsumer convert-to]
+                           ^Wrapper assignable-from]
           (let [prim-id (primitive-id class-primitive)]
-            (Wrapper. class-primitive class-reference class-computational
+            (Wrapper. class-primitive class-reference
+                      (TypeKind/from class-primitive)
                       (.isAssignableFrom Number class-reference)
                       (tinyclj.core/short
-                       (cond-> (bit-set 0 prim-id)
+                       ;; can assign from itself and from void
+                       (cond-> (-> 0 (bit-set prim-id) (bit-set 8))
                          (some? assignable-from)
                          (bit-or (.mask-assignable-from assignable-from))))
-                      prim-id convert-to)))]
-  (def byte
-    (wrapper Byte/TYPE Byte Integer/TYPE nil
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.primitive-id from)
-                (#_int 0 #_char 6 #_short 7) (-> xb .i2b)
-                #_long 1 (-> xb .l2i .i2b)
-                #_float 2 (-> xb .f2i .i2b)
-                #_double 3 (-> xb .d2i .i2b)
-                (#_byte 5 #_boolean 4) nil
-                #_else_void (-> xb .iconst_0)))))
-  (def short
-    (wrapper Short/TYPE Short Integer/TYPE byte
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.primitive-id from)
-                (#_int 0 #_char 6) (-> xb .i2s)
-                #_long 1 (-> xb .l2i .i2s)
-                #_float 2 (-> xb .f2i .i2s)
-                #_double 3 (-> xb .d2i .i2s)
-                (#_byte 5 #_short 7 #_boolean 4) nil
-                #_else_void (-> xb .iconst_0)))))
-  (def int
-    (wrapper Integer/TYPE Integer Integer/TYPE short
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.primitive-id from)
-                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) nil
-                #_long 1 (-> xb .l2i)
-                #_float 2 (-> xb .f2i)
-                #_double 3 (-> xb .d2i)
-                #_else_void (-> xb .iconst_0)))))
-  (def long
-    (wrapper Long/TYPE Long Long/TYPE int
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.primitive-id from)
-                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) (-> xb .i2l)
-                #_long 1 nil
-                #_float 2 (-> xb .f2l)
-                #_double 3 (-> xb .d2l)
-                #_else_void (-> xb .lconst_0)))))
-  (def float
-    (wrapper Float/TYPE Float Float/TYPE long
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.primitive-id from)
-                #_long 1 (-> xb .l2f)
-                #_float 2 nil
-                #_double 3 (-> xb .d2f)
-                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) (-> xb .i2f)
-                #_else_void (-> xb .fconst_0)))))
-  (def double
-    (wrapper Double/TYPE Double Double/TYPE float
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.primitive-id from)
-                (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) (-> xb .i2d)
-                #_long 1 (-> xb .l2d)
-                #_float 2 (-> xb .f2d)
-                #_double 3 nil
-                #_else_void (-> xb .dconst_0)))))
-  
-  (def boolean
-    (wrapper Boolean/TYPE Boolean Integer/TYPE nil
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (letfn [#_(mask-int ^CodeBuilder [^CodeBuilder xb]
-                          (-> xb (.iconst_1) (.iand)))]
-                (case (.primitive-id from)
-                  #_boolean 4 nil
-                  ;; #_float 2 (-> xb .f2i (mask-int))
-                  ;; #_double 3 (-> xb .d2i (mask-int))
-                  ;; (#_char 6 #_byte 5 #_short 7 #_int 0) (-> xb (mask-int))
-                  ;; #_long 1 (-> xb .l2i (mask-int))
-                  #_else_void (-> xb .iconst_0))))))
-  
-  (def char
-    (wrapper Character/TYPE Character Integer/TYPE nil ;not numeric in Clojure
-             (^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-              (case (.primitive-id from)
-                (#_int 0 #_byte 5 #_short 7 #_boolean 4) (-> xb .i2c)
-                #_long 1 (-> xb .l2i .i2c)
-                #_float 2 (-> xb .f2i .i2c)
-                #_double 3 (-> xb .d2i .i2c)
-                #_char 6 nil
-                #_else_void (-> xb .iconst_0)))))
-  (def void
-    (Wrapper. Void/TYPE Void Void/TYPE false (tinyclj.core/short -1) 9
-              nil #_(^BiConsumer fn ^void [^CodeBuilder xb ^Wrapper from]
-                     (assert false)))))
+                      prim-id
+                      (if (> prim-id 3) (tinyclj.core/byte 0) prim-id))))]
+  (def byte (wrapper Byte/TYPE Byte nil))
+  (def short (wrapper Short/TYPE Short byte))
+  (def int (wrapper Integer/TYPE Integer short))
+  (def long (wrapper Long/TYPE Long int))
+  (def float (wrapper Float/TYPE Float long))
+  (def double (wrapper Double/TYPE Double float))
+  (def boolean (wrapper Boolean/TYPE Boolean nil))
+  (def char (wrapper Character/TYPE Character nil)) ;not numeric in Clojure
+  (def void (Wrapper. Void/TYPE Void (TypeKind/from Void/TYPE)
+                      false (tinyclj.core/short -1) (primitive-id Void/TYPE)
+                      (tinyclj.core/byte -1))))
 
-(def primitive-types   ;arbitrary, follow `aload-astore-delta` for now
-  [void int long float double #_reference byte char short boolean])
+(def primitive-types [int long float double boolean byte char short void])
 
 (defn primitive-assignable-from? ^boolean [^Wrapper ptype ^Wrapper atype]
   (bit-test (.mask-assignable-from ptype) (.primitive-id atype)))
@@ -245,6 +182,88 @@
     Double/TYPE double
     Void/TYPE void))
 
+(defn of-all ^Wrapper [^Class/1 types]
+  (when (pos? (alength types))
+    (let [tp (aget types (dec (alength types)))]
+      (loop [i (- (alength types) 2)]
+        (cond (neg? i) (of tp)
+              (same? tp (aget types i)) (recur (dec i))
+              :else nil)))))
+
+(defn primitive-convert-from ^void [^CodeBuilder xb ^Wrapper wto ^Wrapper wfrom]
+  (letfn [(convert-to-int ^void [^int from]
+            (case from
+              (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) nil
+              #_long 1 (-> xb .l2i)
+              #_float 2 (-> xb .f2i)
+              #_double 3 (-> xb .d2i)
+              #_else_void (-> xb .iconst_0)))
+          (convert-to-long ^void [^int from]
+            (case from
+              (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) (-> xb .i2l)
+              #_long 1 nil
+              #_float 2 (-> xb .f2l)
+              #_double 3 (-> xb .d2l)
+              #_else_void (-> xb .lconst_0)))
+          (convert-to-float ^void [^int from]
+            (case from
+              #_long 1 (-> xb .l2f)
+              #_float 2 nil
+              #_double 3 (-> xb .d2f)
+              (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) (-> xb .i2f)
+              #_else_void (-> xb .fconst_0)))
+          (convert-to-double ^void [^int from]
+            (case from
+              (#_int 0 #_byte 5 #_char 6 #_short 7 #_boolean 4) (-> xb .i2d)
+              #_long 1 (-> xb .l2d)
+              #_float 2 (-> xb .f2d)
+              #_double 3 nil
+              #_else_void (-> xb .dconst_0)))
+          (convert-to-boolean ^void [^int from]
+            (letfn [#_(mask-int ^CodeBuilder [^CodeBuilder xb]
+                        (-> xb (.iconst_1) (.iand)))]
+              (case from
+                #_boolean 4 nil
+                ;; #_float 2 (-> xb .f2i (mask-int))
+                ;; #_double 3 (-> xb .d2i (mask-int))
+                ;; (#_char 6 #_byte 5 #_short 7 #_int 0) (-> xb (mask-int))
+                ;; #_long 1 (-> xb .l2i (mask-int))
+                #_else_void (-> xb .iconst_0))))
+          (convert-to-byte ^void [^int from]
+            (case from
+              (#_int 0 #_char 6 #_short 7) (-> xb .i2b)
+              #_long 1 (-> xb .l2i .i2b)
+              #_float 2 (-> xb .f2i .i2b)
+              #_double 3 (-> xb .d2i .i2b)
+              (#_byte 5 #_boolean 4) nil
+              #_else_void (-> xb .iconst_0)))
+          (convert-to-char ^void [^int from]
+            (case from
+              (#_int 0 #_byte 5 #_short 7 #_boolean 4) (-> xb .i2c)
+              #_long 1 (-> xb .l2i .i2c)
+              #_float 2 (-> xb .f2i .i2c)
+              #_double 3 (-> xb .d2i .i2c)
+              #_char 6 nil
+              #_else_void (-> xb .iconst_0)))
+          (convert-to-short ^void [^int from]
+            (case from
+              (#_int 0 #_char 6) (-> xb .i2s)
+              #_long 1 (-> xb .l2i .i2s)
+              #_float 2 (-> xb .f2i .i2s)
+              #_double 3 (-> xb .d2i .i2s)
+              (#_byte 5 #_short 7 #_boolean 4) nil
+              #_else_void (-> xb .iconst_0)))]
+    (let [from (.primitive-id wfrom)]
+      (case (.primitive-id wto)
+        #_int 0 (convert-to-int from)
+        #_long 1 (convert-to-long from)
+        #_float 2 (convert-to-float from)
+        #_double 3 (convert-to-double from)
+        #_boolean 4 (convert-to-boolean from)
+        #_byte 5 (convert-to-byte from)
+        #_char 6 (convert-to-char from)
+        #_short 7 (convert-to-short from)))))
+
 (defn convert-from-constant ^ConstantDesc [^Class target-type ^Number n]
   ;; pre: `target-type` is monomorphic primitive type
   (let [prim-id (primitive-id target-type)]
@@ -257,7 +276,7 @@
       (-> (case prim-id        ;conversion to computationally int type
             #_boolean 4 (tinyclj.core/int (not= (.intValue n) 0))
             #_byte 5 (tinyclj.core/int (.byteValue n))
-            #_character 6 (tinyclj.core/int (tinyclj.core/char (.intValue n)))
+            #_char 6 (tinyclj.core/int (tinyclj.core/char (.intValue n)))
             #_short 7 (tinyclj.core/int (.shortValue n)))
           (object)))))
 

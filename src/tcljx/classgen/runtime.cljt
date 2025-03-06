@@ -53,6 +53,9 @@
                            [Lookup String Class ObjectArray]))
 (def bsm-static-fn (mhd-static [BootstrapMethod "createStaticFn"] StaticFn
                                [Lookup String Class MethodHandleArray]))
+(def bsm-clause-code
+  (mhd-static [BootstrapMethod "bsmCaseClauseCode"]
+              CallSite [Lookup String MethodType ObjectArray]))
 
 ;;; ------------------------------------------------------------------------
 

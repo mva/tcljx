@@ -83,10 +83,14 @@
          (asm-expr (int (throw (Throwable/new)))))))
 
 (deftest binary-operator-with-throw-test
-  (is (thrown-with-msg? WrongInfo #"expects numeric.* argument"
-                        (asm-expr (- (throw (Throwable/new)) 2))))
-  (is (thrown-with-msg? WrongInfo #"expects numeric.* argument"
-                        (asm-expr (- (System/gc) (throw (Throwable/new)))))))
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (- (throw (Throwable/new)) 2))))
+  (is (= '[(INVOKESTATIC System "gc" "()V")
+           (ICONST_0)
+           (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (- (System/gc) (throw (Throwable/new)))))))
 
 (deftest string-concat-with-throw-test
   (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")

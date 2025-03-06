@@ -5,8 +5,8 @@
     [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen
     [classfile :as classfile] [runtime :as rt] [emit :as emit] [insn :as insn]
-    [entity :as entity] [condgen :as condgen] [defgen :as defgen]
-    [segmgen :as segmgen] [methodgen :as methodgen]))
+    [entity :as entity] [condgen :as condgen] [switchgen :as switchgen]
+    [defgen :as defgen] [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import
    (tcljx.data.model Expr Exprs ExprFactory CodeEmitter ArityType
                      NamespaceBuilder)
@@ -164,6 +164,29 @@
                            (insn/emitter xs 2)
                            (.emitter insn/insn-empty)))
           (insn/mk-insn tp))))
+  (case-expr [this select guards paths-and-default error-contexts]
+    (let [select-tp (switchgen/adjust-numeric-type (insn/expr-type select))
+          n-paths (.length paths-and-default)
+          join-tp (-> (Insns/.expr-types paths-and-default)
+                      (condgen/join-type 0 n-paths))
+          default-path (if (= (alength guards) n-paths)
+                         ;; Important: This evaluates the select
+                         ;; expression a second time!  One possible
+                         ;; idea: dup the select, consume it in the
+                         ;; error path, and pop it immediately after
+                         ;; the end-of-switch label.
+                         (->> (switchgen/invoke-no-matching-clause select)
+                              (.throw-expr this))
+                         (.get paths-and-default (dec n-paths)))]
+      (switchgen/validate-guards select-tp guards error-contexts)
+      (-> (if (switchgen/switch-on-int? select-tp)
+            (switchgen/switch-int (.emitter select) guards
+                                  (Insns/.emitters paths-and-default)
+                                  (.emitter default-path))
+            (switchgen/switch-map (.emitter select) guards
+                                  (Insns/.emitters paths-and-default)
+                                  (.emitter default-path)))
+          (insn/mk-insn join-tp))))
   (invoke [this form inv args]
     (.invoke* inv form args))
   
@@ -207,7 +230,7 @@
       (letfn [(wr-info-invalid-cast ^Throwable []
                 (wrong/wr-info (str "cannot cast to " (wrong/q-type target-type)
                                     (wrong/got-type arg-tp))))
-              (checkcast ^Insn [^Class ref-target ^Insn ref-arg]
+              (checkcast ^Insn [^Insn ref-arg ^Class ref-target]
                 (let [arg-tp (insn/expr-type ref-arg)]
                   (if (or (.isInterface ref-target)
                           (.isAssignableFrom ref-target arg-tp) ;empty
@@ -219,7 +242,7 @@
         (cond
           (or (type/polymorphic? target-type) ;force void context
               (type/polymorphic? arg-tp))
-          (insn/cast-to arg target-type)
+          (-> arg (insn/cast-to target-type))
 
           (type/same? target-type arg-tp)
           arg
@@ -227,14 +250,14 @@
           (.isPrimitive target-type)
           (if (.isPrimitive arg-tp)
             (throw (wr-info-invalid-cast)) ;no cast between different primitives
-            (checkcast arg-tp (box-arg-into target-type)))
+            (-> (box-arg-into target-type) (insn/cast-to target-type)))
           
           ;; here holds: `target-type` is reference
           (.isPrimitive arg-tp)
-          (checkcast target-type (box-arg-into arg-tp))
+          (-> (box-arg-into arg-tp) (checkcast target-type))
           
           ;; here holds: both `target-type` and `arg-tp` are reference
-          :else (checkcast target-type arg)))))
+          :else (-> arg (checkcast target-type))))))
   (invoke-constructor [_ owner args]
     (let [args ^Insns args
           mnm resolve/constructor-name

@@ -1,0 +1,175 @@
+(ns tcljx.classgen.switchgen
+  (:require
+   (tcljx.data [type :as type] [wrong :as wrong] [resolve :as resolve]
+               [model :as model])
+   (tcljx.classgen [runtime :as rt] [emit :as emit] [insn :as insn]
+                   [constgen :as constgen]))
+  (:import
+   (tcljx.data.model Exprs CodeEmitter)
+   (tcljx.classgen.insn Insn Insns)
+   (java.lang.classfile CodeBuilder Label)
+   (java.lang.classfile.constantpool ConstantPoolBuilder)
+   (java.lang.classfile.instruction SwitchCase)
+   (java.lang.constant MethodTypeDesc ConstantDescs)
+   (java.util ArrayList)
+   #_(java.util.function Consumer)))
+
+(letfn [(validate-path-guards ^set [^set seen ^Class select-tp ^Exprs guards
+                                    ^seq error-context]
+          (wrong/with-line-context error-context
+            (loop [seen seen, i 0]
+              (if (< i (.length guards))
+                (let [guard-tp (insn/expr-type guards i)
+                      guard-val (constgen/constant-literal-of (.get guards i))]
+                  (when-not (type/assignable-from? select-tp guard-tp)
+                    (-> (str "guard " guard-val " not compatible with select "
+                             "expression " (wrong/q-type select-tp)
+                             (wrong/got-type guard-tp))
+                        (wrong/wr-info)
+                        (throw)))
+                  (when (contains? seen guard-val)
+                    (-> (str "duplicate guard value " guard-val)
+                         (wrong/wr-info)
+                         (throw)))
+                  (recur (conj seen guard-val) (inc i)))
+                seen))))]
+  
+  (defn validate-guards ^void [^Class select-tp ^Exprs/1 guards
+                               ^seq/1 error-contexts]
+    (loop [seen #{}, i 0]
+      (when (< i (alength guards))
+        (recur (validate-path-guards seen select-tp (aget guards i)
+                                     (aget error-contexts i))
+               (inc i))))))
+
+(defn adjust-numeric-type ^Class [^Class select-tp]
+  (let [tp (type/expr-to-logical select-tp)]
+    (if (or (type/same? Short/TYPE tp) (type/same? Byte/TYPE tp))
+      Integer/TYPE ;to make integer guard values compatible with select
+      tp)))
+
+(defn switch-on-int? ^boolean [^Class select-tp]
+  (and (.isPrimitive select-tp)
+       (type/computational-int? (type/of select-tp))))
+
+
+(def ^:private no-matching-clause
+  (resolve/runtime-method tinyclj.lang.RT "noMatchingClause"
+                          (doto (new Class/1 1) (aset 0 Object))))
+(defn invoke-no-matching-clause ^Insn [^Insn select]
+  (insn/invoke-member no-matching-clause nil (insn/insns-of select)))
+
+(deftype SwitchLayout [^Label/1 start-of-branch ^ArrayList scs
+                       ^int low ^int high ^boolean table?])
+(letfn [(table-switch? ^boolean [^int lo ^int hi ^int nlabels]
+          (or (= (inc (- hi lo)) nlabels) ;no gaps, e.g. boolean
+              ;; com/sun/tools/javac/jvm/Gen.java
+              (let [table-space-cost (+ 5 (- hi lo)) ;words
+                    table-time-cost 3                ;comparisons
+                    lookup-space-cost (+ 3 (* 2 nlabels))
+                    lookup-time-cost nlabels]
+                (<= (+ table-space-cost (* 3 table-time-cost))
+                    (+ lookup-space-cost (* 3 lookup-time-cost))))))
+        (low-case-value ^int [^ArrayList scs]
+          (loop [acc Integer/MAX_VALUE, i (dec (.size scs))]
+            (if (neg? i)
+              acc
+              (recur (min acc (SwitchCase/.caseValue (.get scs i))) (dec i)))))
+        (high-case-value ^int [^ArrayList scs]
+          (loop [acc Integer/MIN_VALUE, i (dec (.size scs))]
+            (if (neg? i)
+              acc
+              (recur (max acc (SwitchCase/.caseValue (.get scs i))) (dec i)))))
+        
+        (mk-targets ^Label/1 [^CodeBuilder xb ^int n]
+          (let [a (new Label/1 n)]
+            (dotimes [i n]
+              (aset a i (.newLabel xb)))
+            a))
+        (guards-to-switch-cases
+          (^SwitchLayout [^CodeBuilder xb ^Exprs/1 guards]
+           (let [targets (mk-targets xb (alength guards))
+                 scs (ArrayList.)]
+             (dotimes [i (alength guards)]
+               (guards-to-switch-cases scs (.emitters ^Insns (aget guards i))
+                                       (aget targets i)))
+             (let [low (low-case-value scs)
+                   high (high-case-value scs)]
+               (SwitchLayout. targets scs low high
+                              (table-switch? low high (.size scs))))))
+          (^void [^ArrayList a ^CodeEmitter/1 ces ^Label target]
+           (dotimes [i (alength ces)]
+             (let [cv ^int (model/ce-const-value (aget ces i))]
+               (.add a (SwitchCase/of cv target))))))
+        (indexes-to-switch-cases ^SwitchLayout [^CodeBuilder xb ^Exprs/1 guards]
+          (let [targets (mk-targets xb (alength guards))
+                n (alength targets)
+                scs (ArrayList. n)]
+            (dotimes [i n]
+              (.add scs (SwitchCase/of i (aget targets i))))
+            (SwitchLayout. targets scs 0 (dec n) true))) ;elided when empty
+
+        (guard-const-desc [^Insns xs]
+          (let [n (.length xs)]
+            (if (= n 1)
+              (-> (.get xs 0) (constgen/typed-constant-description-of))
+              (let [a (new Object/1 n)]
+                (dotimes [i (alength a)]
+                  (aset a i (-> (.get xs i)
+                                (constgen/typed-constant-description-of))))
+                (seq a)))))]
+
+  (defn- switch-int* ^Class [^SwitchLayout layout ^CodeEmitter/1 paths
+                             ^CodeEmitter default-path
+                             ^CodeBuilder xb ^int line ^Class consumed-type
+                             ^boolean then-leave?]
+    (let [n (alength (.start-of-branch layout))
+          default-target (.newLabel xb)
+          end-of-switch (.newLabel xb)]
+
+      (if (pos? n)
+        (if (.table? layout)
+          (.tableswitch xb (.low layout) (.high layout) default-target
+                        (.scs layout))
+          (.lookupswitch xb default-target (.scs layout)))
+        (.pop xb))
+      
+      (loop [reaches-end? false, i 0]
+        (if (< i n)
+          (if (do (.labelBinding xb (aget (.start-of-branch layout) i))
+                  (emit/insn? xb line consumed-type
+                              (aget paths i) then-leave?))
+            (do (.goto_ xb end-of-switch) (recur true (inc i)))
+            (recur reaches-end? (inc i)))
+          
+          ;; emit default path and bind the end-of-switch target
+          (when (or (do (.labelBinding xb default-target)
+                        (emit/insn? xb line consumed-type
+                                    default-path then-leave?))
+                    reaches-end?)
+            (.labelBinding xb end-of-switch)
+            consumed-type)))))
+
+  (defn switch-int ^CodeEmitter [^CodeEmitter select ^Exprs/1 guards
+                                 ^CodeEmitter/1 paths ^CodeEmitter default-path]
+    (^CodeEmitter fn [xb line consumed-type then-leave?]
+     (when (emit/insn? xb line Integer/TYPE select false)
+       (switch-int* (guards-to-switch-cases xb guards) paths default-path
+                    xb line consumed-type then-leave?))))
+
+  (defn switch-map ^CodeEmitter [^CodeEmitter select ^Exprs/1 guards
+                                 ^CodeEmitter/1 paths ^CodeEmitter default-path]
+    (^CodeEmitter fn [xb line consumed-type then-leave?]
+     (when (emit/insn? xb line Object select false)
+       (let [cpb (.constantPool xb)
+             mhe (.methodHandleEntry cpb rt/bsm-clause-code)
+             bsm (->> (for [^Insns xs guards]
+                        (constgen/loadable-entry cpb (guard-const-desc xs)))
+                      (.bsmEntry cpb mhe))
+             mtd (MethodTypeDesc/of ConstantDescs/CD_int
+                                    ConstantDescs/CD_Object)
+             nat (.nameAndTypeEntry cpb ConstantDescs/DEFAULT_NAME mtd)]
+         (-> (emit/line-number xb line)
+             (.invokedynamic (.invokeDynamicEntry cpb bsm nat)))
+         (switch-int* (indexes-to-switch-cases xb guards) paths default-path
+                      xb line consumed-type then-leave?))))))

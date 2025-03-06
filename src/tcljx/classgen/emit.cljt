@@ -80,8 +80,8 @@
           ;; pre: `consumed-type` is not void
           (cond
             (.isPrimitive consumed-type)
-            (classfile/accept-> xb (.convert-from (type/of consumed-type))
-                                (type/of on-stack-type))
+            (type/primitive-convert-from xb (type/of consumed-type)
+                                         (type/of on-stack-type))
             ;; here holds: requested type is reference
                 
             (identical? Void/TYPE on-stack-type)

@@ -61,6 +61,34 @@
               (syntax/some-first (next formr)) ;test and first path exist?
               (syntax/empty-tail 3 formr) ;nothing after test and two paths?
               (.if-expr expr-factory (parse-forms formr)))
+            (parse-case*-guard ^Exprs [form]
+              (if (seq? form)           ;accept empty list!
+                (let [gs (.new-exprs expr-factory (count form))]
+                  (loop [xs form, i 0]
+                    (when (< i (.length gs))
+                      (.set gs i (parse-quoted-form (first xs)))
+                      (recur (rest xs) (inc i))))
+                  gs)
+                (doto (.new-exprs expr-factory 1)
+                  (.set 0 (parse-quoted-form form)))))
+            (parse-case* ^Expr [[_ & formr :as form]]
+              (let [select (.parse-form this (syntax/some-first formr))
+                    n (- (count formr) 1)
+                    has-default? (odd? n)
+                    n-paths (quot n 2)
+                    gs (new Exprs/1 n-paths)
+                    ps (.new-exprs expr-factory (+ n-paths (int has-default?)))
+                    ecs (new seq/1 n-paths)]
+                (loop [[g p & gpr :as gps] (next formr), i 0]
+                  (if (< i n-paths)
+                    (do (aset gs i (parse-case*-guard g))
+                        (.set ps i (.parse-form this p))
+                        (aset ecs i (or (when (seq? g) g) (when (seq? p) p)
+                                        form))
+                        (recur gpr (inc i)))
+                    (do (when has-default?
+                          (.set ps i (.parse-form this g)))
+                        (.case-expr expr-factory select gs ps ecs))))))
             (parse-do ^Expr [[_ & forms]]
               (if (nil? forms)
                 (.empty-expr expr-factory)
@@ -148,7 +176,7 @@
                       ;; loop* (loop*-form form)
                       ;; recur (recur-form form)
                       "if" (parse-if form)
-                      ;; case* (case*-form form)
+                      "case*" (parse-case* form)
                       "let*" (let/parse-let* this form)
                       ;; letfn* (letfn*-form form)
                       "do" (parse-do form)

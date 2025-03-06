@@ -332,44 +332,44 @@
                                x
                                "foo")))]))))
 
-;; (deftest checkcast-switch-test
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[STATIC . "f~2" "(ILjava/lang/Object;)Ljava/lang/String;"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "f~2" "(ILjava/lang/Object;)Ljava/lang/String;")
-;;              ["LOCAL 0: int n"]
-;;              ["LOCAL 1: Object x"]
-;;              (ILOAD_0)
-;;              (LOOKUPSWITCH L:2 [0 1] [L:0 L:1])
-;;              [L:0]
-;;              (ALOAD_1)
-;;              (CHECKCAST String)
-;;              (ARETURN)
-;;              [L:1]
-;;              (LDC "foo")
-;;              (ARETURN)
-;;              [L:2]
-;;              (ILOAD_0)
-;;              (INVOKESTATIC Integer "valueOf" "(I)Ljava/lang/Integer;")
-;;              (INVOKESTATIC RT "noMatchingClause" "(Ljava/lang/Object;)Ljava/lang/Exception;")
-;;              (ATHROW)]
+(deftest checkcast-switch-test
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~2" "(ILjava/lang/Object;)Ljava/lang/String;"]]])
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f~2" "(ILjava/lang/Object;)Ljava/lang/String;")
+             ["LOCAL 0: int n"]
+             ["LOCAL 1: Object x"]
+             (ILOAD_0)
+             (TABLESWITCH 0 1 L:2 [L:0 L:1])
+             [L:0]
+             (ALOAD_1)
+             (CHECKCAST String)
+             (ARETURN)
+             [L:1]
+             (LDC "foo")
+             (ARETURN)
+             [L:2]
+             (ILOAD_0)
+             (INVOKESTATIC Integer "valueOf" "(I)Ljava/lang/Integer;")
+             (INVOKESTATIC RT "noMatchingClause" "(Ljava/lang/Object;)Ljava/lang/Exception;")
+             (ATHROW)]
 
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
 
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (def f (fn* f ^String [^int n ^Object x]
-;;                              (case* n
-;;                                     0 x
-;;                                     1 "foo")))]))))
+         (nmsp '[(ns pkg.ns0)
+                 (def f (fn* f ^String [^int n ^Object x]
+                             (case* n
+                                    0 x
+                                    1 "foo")))]))))
 
 ;; (deftest checkcast-loop-test
 ;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
