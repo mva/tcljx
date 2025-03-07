@@ -4,7 +4,8 @@
     [meta :as meta] [wrong :as wrong] [type :as type] [model :as model])
    (tcljx.parser
     [interop :as interop] [syntax :as syntax] [context :as context] [def :as def]
-    [let :as let] [fn :as fn] [new :as new] [constant :as constant]))
+    [let :as let] [fn :as fn] [new :as new] [constant :as constant]
+    [trycatch :as trycatch]))
   (:import
    (tcljx.data.model Resolver Expr Exprs ExprFactory Invocable Scope)
    (clojure.lang IMeta)))
@@ -100,10 +101,6 @@
                         (do (.set prefix i x) (recur (inc i) formr))
                         (.progn-expr expr-factory prefix x)))))))
             
-            (type-expression ^Class [^Expr x form] ;nil if no type expression
-              (when-some [value (model/const-value x)]
-                (when (and (class? value) (symbol? form))
-                  value)))
             (parse-throw ^Expr [[_ & args]]
               (let [x (.parse-form this (syntax/some-first args))]
                 (syntax/empty-tail (next args))
@@ -111,7 +108,7 @@
             (parse-instanceof* ^Expr [[_ & args]]
               (let [xs (context/parse-args this args)]
                 (syntax/empty-tail 2 args)
-                (if-some [tp (type-expression (.get xs 0) (first args))]
+                (if-some [tp (model/type-expression (.get xs 0) (first args))]
                   (.instanceof-expr expr-factory tp (.get xs 1))
                   (.invoke-virtual-member expr-factory (.get xs 0) "isInstance"
                                           (.drop xs 1)))))
@@ -136,7 +133,7 @@
                     fnm (when (and (> (.length mnm) 1) (= (.charAt mnm 0) \-)
                                    (.empty? xs))
                           (.substring mnm 1))]
-                (if-some [owner (type-expression owner-expr owner)]
+                (if-some [owner (model/type-expression owner-expr owner)]
                   (if fnm
                     (.get-static-field expr-factory owner fnm)
                     (.invoke-static-member expr-factory false owner mnm xs))
@@ -188,7 +185,7 @@
                       ;; set! (set!-form form)
                       ;; deftype* (deftype*-form form)
                       ;; reify* (reify*-form form)
-                      ;; try (try-form form) ;note: finally & catch are not specials
+                      "try" (trycatch/parse-try this form) ;no finally or catch
                       "throw" (parse-throw form)
                       ;; monitor-enter (monitor-form Opcode/MONITORENTER form)
                       ;; monitor-exit (monitor-form Opcode/MONITOREXIT form)
@@ -257,7 +254,7 @@
               (wrong/info-unresolved "undefined type symbol " sym))
             (parse-type-symbol ^Class [^symbol sym]
               (if-some [x (lookup-class-symbol sym)]
-                (if-some [tp (type-expression x sym)]
+                (if-some [tp (model/type-expression x sym)]
                   tp
                   (throw (syntax/info "expected type expression" sym)))
                 (throw (wr-info-unresolved-type sym))))

@@ -127,9 +127,10 @@
     (if (or (and (model/ce-const? ce)
                  (let [value (model/ce-const-value ce)]
                    (if (model/null? value)
-                     (do (assert (not (.isPrimitive consumed-type)))
-                         (.aconst_null xb)
-                         true)
+                     (or (type/same? Void/TYPE consumed-type)
+                         (do (assert (not (.isPrimitive consumed-type)))
+                             (.aconst_null xb)
+                             true))
                      (and (instance? Number value)
                           (type/monomorphic-primitive? consumed-type)
                           (emit-number? xb consumed-type value)))))

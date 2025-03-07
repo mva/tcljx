@@ -1,0 +1,71 @@
+(ns tcljx.parser.trycatch
+  (:require
+   (tcljx.data [wrong :as wrong] [model :as model])
+   (tcljx.parser [syntax :as syntax] [interop :as interop] [context :as context])
+   (tcljx.classgen [insn :as insn]))
+  (:import
+   (tcljx.data.model CodeEmitter Expr Binding Scope)
+   (tcljx.classgen.insn Insn)))
+
+(deftype CatchBinding [^Insn bnd-x ^Class ctp]) ;FIXME... Valhalla value
+(letfn [(finally-form? ^boolean [x]
+          (and (seq? x) (= (first x) 'finally)))
+        (catch-form? ^boolean [x]
+          (and (seq? x) (= (first x) 'catch)))
+        (body-form? ^boolean [x]
+          (not (catch-form? x)))
+
+        (parse-finally ^Insn [^Scope scope ^seq form]
+          (when (some? form)
+            (wrong/with-line-context form
+              (context/parse-progn scope (next form)))))
+        (parse-binding ^CatchBinding [^Scope scope [_ tp nm :as form]]
+          (when-not (catch-form? form)
+            (throw (syntax/info "expect catch clause" form)))
+          (let [ctp (-> (context/parse-form scope tp)
+                        (model/type-expression tp))]
+            (when (or (nil? ctp) (not (.isAssignableFrom Throwable ctp)))
+              (throw (syntax/info "expect caught exception type" tp)))
+            (CatchBinding. (.new-local (.expr-factory scope) ctp
+                                       (syntax/simple-symbol-str nm)
+                                       (-> (^CodeEmitter fn [_ _ _ _] ctp)
+                                           (insn/mk-insn ctp)))
+                           ctp)))
+        (block-handler ^Insn [^Scope scope ^Insn bnd-x ^seq body]
+          ;; `block-let` implies that there is no information during
+          ;; code generation whether `body` throws
+          (.block-let (.expr-factory scope) (insn/insns-of bnd-x)
+                      (-> (context/with-local-binding scope bnd-x)
+                          (context/parse-progn body))))
+        (parse-try-catch ^Insn [^Scope scope ^seq formr ^seq finally-form]
+          (let [[body-forms catch-forms] (split-with body-form? formr)
+                body (context/parse-progn scope body-forms)]
+            (cond
+              (seq catch-forms)
+              (let [ctps (new Class/1 (count catch-forms))
+                    b+cs (context/new-exprs scope (inc (alength ctps)))]
+                (.set b+cs 0 body)
+                (loop [[catch-form & catch-formr] catch-forms, i 1]
+                  (when (< i (.length b+cs))
+                    (wrong/with-line-context catch-formr
+                      (let [cb (parse-binding scope catch-form)
+                            body (nthnext catch-form 3)]
+                        (aset ctps (dec i) (.ctp cb))
+                        (.set b+cs i (block-handler scope (.bnd-x cb) body))))
+                    (recur catch-formr (inc i))))
+                (.try-catch-finally (.expr-factory scope)
+                                    b+cs ctps
+                                    (parse-finally scope finally-form)))
+
+              (some? finally-form)
+              (.try-catch-finally (.expr-factory scope)
+                                  (insn/insns-of body) (new Class/1 0)
+                                  (parse-finally scope finally-form))
+
+              :else body)))]
+  
+  (defn parse-try ^Expr [^Scope scope [_ & formr]]
+    (let [lst (last formr)]
+      (if (finally-form? lst)
+        (parse-try-catch scope (butlast formr) lst)
+        (parse-try-catch scope formr nil)))))

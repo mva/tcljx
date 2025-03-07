@@ -11,8 +11,7 @@
    (java.lang.classfile.constantpool ConstantPoolBuilder)
    (java.lang.classfile.instruction SwitchCase)
    (java.lang.constant MethodTypeDesc ConstantDescs)
-   (java.util ArrayList)
-   #_(java.util.function Consumer)))
+   (java.util ArrayList)))
 
 (letfn [(validate-path-guards ^set [^set seen ^Class select-tp ^Exprs guards
                                     ^seq error-context]

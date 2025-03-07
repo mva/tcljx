@@ -130,6 +130,11 @@
   (^Object [^Exprs xs ^int i]        ;nil if `xs[i]` is not a Constant
    (ce-const-value (.emitter xs i))))
 
+(defn type-expression ^Class [^Expr x form] ;nil if no type expression
+  (when-some [value (const-value x)]
+    (when (and (class? value) (symbol? form))
+      value)))
+
 ;;; ------------------------------------------------------------------------
 
 ;;; Description of an arity's signature.  Basically the information
@@ -358,6 +363,8 @@
   (new-parameter ^Expr [^int param-no ^String name ^Class type])
   (new-local ^Expr [^Class opt-type ^String name init-or-binding])
   (block-let ^Expr [^Exprs bindings ^Expr body])
+  (try-catch-finally ^Expr [^Exprs body+catches ^Class/1 catch-types
+                            ^Expr finally])
   
   ;; ### functions
   

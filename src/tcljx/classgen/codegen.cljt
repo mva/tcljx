@@ -6,7 +6,8 @@
    (tcljx.classgen
     [classfile :as classfile] [runtime :as rt] [emit :as emit] [insn :as insn]
     [entity :as entity] [condgen :as condgen] [switchgen :as switchgen]
-    [defgen :as defgen] [segmgen :as segmgen] [methodgen :as methodgen]))
+    [trygen :as trygen] [defgen :as defgen]
+    [segmgen :as segmgen] [methodgen :as methodgen]))
   (:import
    (tcljx.data.model Expr Exprs ExprFactory CodeEmitter ArityType
                      NamespaceBuilder)
@@ -206,6 +207,14 @@
            (when-not then-leave?     ;can the insn? above return true?
              consumed-type))
           (insn/mk-insn (insn/expr-type block)))))
+  (try-catch-finally [_ body+catches catch-types finally]
+    (let [insns ^Insns body+catches
+          tp (condgen/join-type (.expr-types insns) 0 (.length insns))]
+      (-> (if (some? finally)
+            (trygen/try-catch-finally (.emitters insns) catch-types
+                                      (.emitter finally))
+            (trygen/try-catch (.emitters insns) catch-types))
+          (insn/mk-insn tp))))
   
   (new-function [this mangled-name arity-types arity-bodies arity-redirections]
     ;; update body expressions to match return types and overwrite any

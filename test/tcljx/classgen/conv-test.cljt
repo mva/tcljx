@@ -404,39 +404,39 @@
 ;;                                       (recur)
 ;;                                       x))))]))))
 
-;; (deftest checkcast-try-test
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[STATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/String;"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "f~1" "(Ljava/lang/Object;)Ljava/lang/String;")
-;;              ["LOCAL 0: Object x"]
-;;              [L:0]
-;;              (ALOAD_0)
-;;              (CHECKCAST String)
-;;              (ARETURN)
-;;              (EXCEPTION_CATCH L:0 L:1 L:1 Exception)
-;;              [L:1]
-;;              (ASTORE_1)
-;;              ["LOCAL 1: Exception _"]
-;;              (LDC "foo")
-;;              (ARETURN)]
+(deftest checkcast-try-test
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/String;"]]])
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(Ljava/lang/Object;)Ljava/lang/String;")
+             ["LOCAL 0: Object x"]
+             [L:0]
+             (ALOAD_0)
+             (CHECKCAST String)
+             (ARETURN)
+             (EXCEPTION_CATCH L:0 L:1 L:1 Exception)
+             [L:1]
+             (ASTORE_1)
+             ["LOCAL 1: Exception _"]
+             (LDC "foo")
+             (ARETURN)]
 
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (def f (fn* f ^String [^Object x]
-;;                              (try
-;;                                x
-;;                                (catch Exception _
-;;                                  "foo"))))]))))
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def f (fn* f ^String [^Object x]
+                             (try
+                               x
+                               (catch Exception _
+                                 "foo"))))]))))
 
 ;; ;;; (int <boolean>) is a non-Clojure/non-Java extension that helps
 ;; ;;; with certain patterns of branchless code.  The alternative is to
