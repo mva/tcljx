@@ -5,11 +5,11 @@
     [model :as model] [wrong :as wrong])
    (tcljx.classgen
     [classfile :as classfile] [emit :as emit] [insn :as insn] [entity :as entity]
-    [runtime :as rt] [constgen :as constgen] [condgen :as condgen])
+    [runtime :as rt] [condgen :as condgen])
    (tinyclj [string :as str]))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.model Expr Exprs CodeEmitter Constant Invocable)
+   (tcljx.data.model Expr Exprs CodeEmitter Loadable Constant Invocable)
    (tcljx.classgen.insn Insn Insns)
    (tcljx.classgen.condgen Branching)
    (java.lang.classfile Opcode CodeBuilder TypeKind)
@@ -457,7 +457,7 @@
                 (let [insn (insn/cast-to-logical args' i)
                       tp (insn/expr-type insn)]
                   (.set args' i
-                        (if (or (.isPrimitive tp) (model/const? insn))
+                        (if (or (.isPrimitive tp) (model/loadable? insn))
                           insn ;note: *all* constants are passed through
                           (-> (^CodeEmitter fn [xb line _ _]
                                (when (emit/insn? xb line tp (.emitter insn) false)
@@ -470,7 +470,7 @@
             args'))
         (consts-to-lces ^java.util.List [^ConstantPoolBuilder cpb insns]
           (for [^Insn insn insns]
-            (constgen/loadable-entry cpb (constgen/typed-constant-description-of insn))))
+            (Loadable/.loadable-entry (.emitter insn) cpb true)))
         (insn-str ^Insn [^String rstr ^Insns inv-args ^seq const-args]
           (let [recipe (entity/new-constant rstr String)]
             (cond
@@ -511,8 +511,8 @@
                      (reverse const-args))
            
            (let [x ^Insn (.get args i)]
-             (if (model/const? x)
-               (let [s (constgen/constant-literal-str x)
+             (if (model/loadable? x)
+               (let [s (str (Loadable/.datafy (.emitter x)))
                      x-str (entity/new-constant s String)]
                  (if (re-find re-marks s)
                    (recur (cons const-mark rparts) dyn-args

@@ -4,23 +4,91 @@
                [reflect :as reflect])
    (tcljx.classgen [emit :as emit] [insn :as insn] [constgen :as constgen]))
   (:import
-   (tcljx.data.model Expr CodeEmitter Binding Entity Constant)
+   (tcljx.data.model Expr CodeEmitter Binding Entity Loadable Constant)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile CodeBuilder TypeKind)
-   (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)))
+   (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)))
 
-(deftype ConstantImpl [^Object const-value ^Class type]
+(deftype LoadableImpl [^Object loadable-value ^Class opnd-type
+                       ^boolean associate-meta?]
+  java.lang.Record
+  Loadable
+  (emit-insn* [this xb line consumed-type _]
+    (insn/with-void-empty-if-requested consumed-type
+      (.ldc xb (.loadable-entry this (.constantPool xb) false))
+      opnd-type))
+  (emit-setup-code [this xb line consumed-type _]
+    Void/TYPE)
+  (loadable-entry [_ cpb logical-type?]
+    (if (instance? CodeEmitter/1 loadable-value)
+      (if associate-meta?
+        (constgen/with-meta-entry cpb opnd-type loadable-value)
+        (constgen/collection-entry cpb opnd-type loadable-value))
+      (constgen/loadable-entry cpb loadable-value)))
+  (datafy [_]
+    (letfn [(value-seq ^seq [^CodeEmitter/1 a]
+              (list* (map Loadable/.datafy a)))] ;wrap LazySeq
+      (cond
+        (seq? loadable-value) (list* loadable-value) ;wrap LazySeq
+        
+        (instance? CodeEmitter/1 loadable-value)
+        (let [a ^CodeEmitter/1 loadable-value]
+          (if associate-meta?
+            (with-meta (Loadable/.datafy (aget a 0))
+              (Loadable/.datafy (aget a 1)))
+            (condp identical? opnd-type
+              type/vector (vec (value-seq a))
+              type/map (apply array-map (value-seq a))
+              type/set (set (value-seq a))
+              type/list (value-seq a))))
+        
+        :else loadable-value))))
+
+(def mk-loadable LoadableImpl/new)
+
+(defn loadables? ^boolean [^Insns insns]
+  (loop [i (dec (.length insns))]
+    (cond (neg? i) true
+          (model/loadable? insns i) (recur (dec i))
+          :else false)))
+
+;;; ------------------------------------------------------------------------
+
+(deftype ConstantImpl [^Object computational-value ^Class type]
   java.lang.Record
   Constant
-  (emit-insn* [_ xb line consumed-type _]
+  (emit-insn* [this xb line consumed-type _]
     (insn/with-void-empty-if-requested consumed-type
-      (constgen/load xb const-value)
+      (if (instance? ConstantDesc computational-value)
+        (.loadConstant xb ^ConstantDesc computational-value)
+        (.ldc xb (.loadable-entry this (.constantPool xb) false)))
       type))
   (emit-setup-code [this xb line consumed-type _]
-    (.emit-insn* this xb line consumed-type false)))
+    Void/TYPE)
+  (loadable-entry [this cpb logical-type?]
+    (constgen/loadable-entry cpb (if logical-type?
+                                   (.datafy this)
+                                   computational-value)))
+  (datafy [_]
+    (cond
+      (identical? ConstantDescs/NULL computational-value)
+      nil
+      
+      (instance? Integer computational-value)
+      (let [x ^int computational-value]
+        (condp identical? type
+          Integer/TYPE computational-value
+          Boolean/TYPE (object (not= x 0))
+          Character/TYPE (object (char x))
+          Byte/TYPE (object (byte x))
+          Short/TYPE (object (short x))))
+      
+      :else computational-value)))
 
-(defn mk-constant ^ConstantImpl [^Object const-value ^Class type]
-  (ConstantImpl/new const-value type))
+(defn mk-constant ^ConstantImpl [^Object computational-value ^Class type]
+  (assert (or (instance? java.lang.constant.ConstantDesc computational-value)
+              (instance? Class computational-value)))
+  (ConstantImpl/new computational-value type))
 
 (def insn-null (insn/mk-insn (mk-constant ConstantDescs/NULL Object)
                               type/poly-reference))
@@ -49,18 +117,6 @@
     (insn-boolean (not (zero? ^int value))) ;enforce singletons
     
     :else (insn/mk-insn (mk-constant value expr-type) expr-type)))
-
-(defn constants? ^boolean [^Insns insns]
-  (loop [i (dec (.length insns))]
-    (cond (neg? i) true
-          (model/const? insns i) (recur (dec i))
-          :else false)))
-
-(defn as-typed-constant-descriptions ^Object/1 [^Insns insns]
-  (let [a (new Object/1 (.length insns))]
-    (dotimes [i (.length insns)]
-      (aset a i (constgen/typed-constant-description-of insns i)))
-    a))
 
 ;;; ------------------------------------------------------------------------
 

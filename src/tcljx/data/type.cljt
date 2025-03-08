@@ -352,7 +352,7 @@
 (def list clojure.lang.IPersistentList)
 (def seq clojure.lang.ISeq)
 
-(defn of-quoted-form ^Class [form] ;pre: (instance? IMeta form)
+(defn of-quoted-form ^Class [form]      ;pre: (instance? IMeta form)
   (cond
     (vector? form) vector
     (map? form) map

@@ -146,7 +146,9 @@
           ;; DynamicConstantDesc) always describe some literal and
           ;; known to be non-null value.
           (let [c (model/const-value x)]
-            (cond (nil? c) nil                 ;may be null
+            (cond (nil? c) (if (model/loadable? x)
+                             Boolean/FALSE     ;is never null
+                             nil)              ;may be null
                   (model/null? c) Boolean/TRUE ;is always null
                   :else Boolean/FALSE)))]      ;is never null
   

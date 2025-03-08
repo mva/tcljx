@@ -1,7 +1,10 @@
 (ns tcljx.data.model
-  (:require (tcljx.data [config :as cfg] [reflect :as reflect]))
-  (:import (java.lang.constant MethodHandleDesc MethodTypeDesc ConstantDescs)
-           (java.util Arrays))
+  (:require
+   (tcljx.data [config :as cfg] [reflect :as reflect]))
+  (:import
+   (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry)
+   (java.lang.constant MethodHandleDesc MethodTypeDesc ConstantDescs)
+   (java.util Arrays))
   (:refer-clojure :exclude [zero?]))
 
 ;;; Emit instruction code into the CodeBuilder instance.  Return the
@@ -92,8 +95,31 @@
   (^Binding [^Exprs xs ^int i]
    (.emitter xs i)))
 
-
 ;;; ------------------------------------------------------------------------
+
+;;; Any entity that can be turned into either an LDC instruction as
+;;; part of a method's code attribute, or into a loadable entry inside
+;;; the constant pool.  The method `emit-insn*` emits an LDC or
+;;; equivalent instruction, and `emit-setup-code` is empty.
+(definterface Loadable
+  :extends [Entity]
+  ;; If `logical-type?` is true, then make sure the entry materializes
+  ;; as the actual logical type of the loadable, instead of its
+  ;; computational type.  Only makes a difference to computational int
+  ;; types other than int: boolean, character, byte, and short.
+  (loadable-entry ^LoadableConstantEntry [^ConstantPoolBuilder cpb
+                                          ^boolean logical-type?])
+  
+  ;; Return the compile time data structure representation of this
+  ;; loadable.
+  (datafy ^Object []))
+
+(defn loadable?
+  (^boolean [^Expr x]
+   (instance? Loadable (.emitter x)))
+  (^boolean [^Exprs xs ^int i]
+   (instance? Loadable (.emitter xs i))))
+
 
 ;;; Constant values must be visible to the parser, because type
 ;;; expression literals (for example `Classname` or `Classname/1`) are
@@ -101,8 +127,8 @@
 ;;; visible to the code generator to support bottom up constant
 ;;; folding while building the expression tree.
 (definterface Constant
-  :extends [Entity]
-  (const-value ^Object []))             ;never nil
+  :extends [Loadable]
+  (computational-value ^Object [])) ;ConstantDesc or Class, and never nil
 
 (defn const?
   (^boolean [^Expr x]
@@ -118,7 +144,7 @@
   (instance? Constant ce))
 (defn ce-const-value ^Object [^CodeEmitter ce]
   (when (ce-const? ce)
-    (Constant/.const-value ce)))
+    (Constant/.computational-value ce)))
 (defn ce-null? ^boolean [^CodeEmitter ce]
   (and (ce-const? ce) (null? (ce-const-value ce))))
 (defn ce-zero? ^boolean [^CodeEmitter ce]
@@ -331,8 +357,16 @@
   ;; is accepted for `value`: instances of ConstantDesc, instances of
   ;; Constable, and structured values provided by Clojure (symbol,
   ;; keyword, vector, and so on).
-  (new-constant ^Expr [^Class expr-type ^Object value])
-
+  (new-constant ^Expr [^Class expr-type ^Object value]) ;ConstantDesc or Class
+  
+  ;; Create a symbol, a keyword, a collection, or a regex Pattern.
+  ;; `value` usually is the compile time data structure as provided by
+  ;; the reader.  Alternatively and only for collections (incl. the
+  ;; with-meta construction), `value` can be an array `CodeEmitter/1`
+  ;; of constant folded expressions, i.e. instances of `Loadable`.
+  ;; Non-Constant loadables are never nil.
+  (new-loadable ^Expr [^Class expr-type ^Object value])
+  
   ;; These methods return a constant expression when possible:
   (attach-meta-to ^Expr [^Expr meta ^Expr arg])
   (new-vector ^Expr [^Exprs args])

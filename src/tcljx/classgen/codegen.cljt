@@ -103,40 +103,37 @@
   
   (new-constant [_ expr-type value]
     (entity/new-constant value expr-type))
+  (new-loadable [_ expr-type value]
+    (-> value (entity/mk-loadable expr-type false) (insn/mk-insn expr-type)))
 
   (attach-meta-to [this meta arg]
-    (if (and (model/const? arg) (model/const? meta))
-      (->> (with-meta (model/const-value arg) (model/const-value meta))
-           (.new-constant this (insn/expr-type arg)))
+    (if (and (model/loadable? arg) (model/loadable? meta))
+      (let [tp (insn/expr-type arg)]
+        (-> (doto (new CodeEmitter/1 2)
+              (aset 0 (.emitter arg))
+              (aset 1 (.emitter meta)))
+            (entity/mk-loadable tp true)
+            (insn/mk-insn tp)))
       (insn/invoke-member literal-with-meta nil (insn/insns-of arg meta))))
   (new-vector [this args]
     (let [args ^Insns args]
-      (if (entity/constants? args)
-        (->> (entity/as-typed-constant-descriptions args)
-             (vec)
-             (.new-constant this type/vector))
+      (if (entity/loadables? args)
+        (.new-loadable this type/vector (.emitters args))
         (insn/invoke-member literal-vector nil args))))
   (new-map [this args]
     (let [args ^Insns args]
-      (if (entity/constants? args)
-        (->> (entity/as-typed-constant-descriptions args)
-             (apply array-map)
-             (.new-constant this type/map))
+      (if (entity/loadables? args)
+        (.new-loadable this type/map (.emitters args))
         (insn/invoke-member literal-map nil args))))
   (new-set [this args]
     (let [args ^Insns args]
-      (if (entity/constants? args)
-        (->> (entity/as-typed-constant-descriptions args)
-             (set)
-             (.new-constant this type/set))
+      (if (entity/loadables? args)
+        (.new-loadable this type/set (.emitters args))
         (insn/invoke-member literal-set nil args))))
   (new-list [this args]
     (let [args ^Insns args]
-      (if (entity/constants? args)
-        (.new-constant this type/list
-                       (-> (entity/as-typed-constant-descriptions args)
-                           (seq)
-                           (or ())))
+      (if (entity/loadables? args)
+        (.new-loadable this type/list (.emitters args))
         (insn/invoke-member literal-list nil args))))
   (new-array [_ array-type dims]
     (let [dims ^Insns dims]

@@ -39,7 +39,7 @@
       (.new-constant ef (primitive-type-of (.getClass form)) form)
       
       (keyword? form)
-      (.new-constant ef type/keyword form)
+      (.new-loadable ef type/keyword form)
       
       (boolean? form)
       (.new-constant ef Boolean/TYPE (int ^boolean form))
@@ -47,17 +47,20 @@
       (char? form)
       (.new-constant ef Character/TYPE (int ^char form))
       
-      (number? form)       ;any non-ClassDesc number: Byte and Short
+      (number? form)         ;any non-ClassDesc number: Byte and Short
       (.new-constant ef (primitive-type-of (.getClass form))
                      (.intValue ^Number form))
+
+      (class? form)
+      (.new-constant ef Class form)
       
       :else
-      ;; Class and Pattern, using the *reference* object's class as
+      ;; Pattern, using the *reference* object's class as
       ;; type (anything Constable works as well during emit)
-      (.new-constant ef (class form) form))))
+      (.new-loadable ef (class form) form))))
 
 (defn regex-literal ^Expr [^Scope scope ^String pattern]
   (try
-    (.new-constant (.expr-factory scope) Pattern (Pattern/compile pattern))
+    (.new-loadable (.expr-factory scope) Pattern (Pattern/compile pattern))
     (catch PatternSyntaxException e
       (throw (wrong/wr-info (str "invalid regex " (wrong/q pattern)) {} e)))))

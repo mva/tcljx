@@ -2,10 +2,10 @@
   (:require
    (tcljx.data [type :as type] [wrong :as wrong] [resolve :as resolve]
                [model :as model])
-   (tcljx.classgen [runtime :as rt] [emit :as emit] [insn :as insn]
-                   [constgen :as constgen]))
+   (tcljx.classgen [runtime :as rt] [emit :as emit] [entity :as entity]
+                   [insn :as insn]))
   (:import
-   (tcljx.data.model Exprs CodeEmitter)
+   (tcljx.data.model Exprs CodeEmitter Loadable)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile CodeBuilder Label)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
@@ -19,7 +19,7 @@
             (loop [seen seen, i 0]
               (if (< i (.length guards))
                 (let [guard-tp (insn/expr-type guards i)
-                      guard-val (constgen/constant-literal-of (.get guards i))]
+                      guard-val (Loadable/.datafy (insn/emitter guards i))]
                   (when-not (type/assignable-from? select-tp guard-tp)
                     (-> (str "guard " guard-val " not compatible with select "
                              "expression " (wrong/q-type select-tp)
@@ -106,17 +106,7 @@
                 scs (ArrayList. n)]
             (dotimes [i n]
               (.add scs (SwitchCase/of i (aget targets i))))
-            (SwitchLayout. targets scs 0 (dec n) true))) ;elided when empty
-
-        (guard-const-desc [^Insns xs]
-          (let [n (.length xs)]
-            (if (= n 1)
-              (-> (.get xs 0) (constgen/typed-constant-description-of))
-              (let [a (new Object/1 n)]
-                (dotimes [i (alength a)]
-                  (aset a i (-> (.get xs i)
-                                (constgen/typed-constant-description-of))))
-                (seq a)))))]
+            (SwitchLayout. targets scs 0 (dec n) true)))] ;elided when empty
 
   (defn- switch-int* ^Class [^SwitchLayout layout ^CodeEmitter/1 paths
                              ^CodeEmitter default-path
@@ -162,9 +152,12 @@
      (when (emit/insn? xb line Object select false)
        (let [cpb (.constantPool xb)
              mhe (.methodHandleEntry cpb rt/bsm-clause-code)
-             bsm (->> (for [^Insns xs guards]
-                        (constgen/loadable-entry cpb (guard-const-desc xs)))
-                      (.bsmEntry cpb mhe))
+             les (for [^Insns xs guards]
+                   (-> (if (= (.length xs) 1)
+                         (insn/emitter xs 0)
+                         (entity/mk-loadable (.emitters xs) type/list false))
+                       (Loadable/.loadable-entry cpb false)))
+             bsm (.bsmEntry cpb mhe les)
              mtd (MethodTypeDesc/of ConstantDescs/CD_int
                                     ConstantDescs/CD_Object)
              nat (.nameAndTypeEntry cpb ConstantDescs/DEFAULT_NAME mtd)]

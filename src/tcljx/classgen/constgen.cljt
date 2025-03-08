@@ -1,9 +1,10 @@
 (ns tcljx.classgen.constgen
   (:require
-   (tcljx.data [config :as cfg ][meta :as meta] [reflect :as reflect]
-               [model :as model])
+   (tcljx.data [config :as cfg ] [meta :as meta] [reflect :as reflect]
+               [type :as type] [model :as model])
    (tcljx.classgen [runtime :as rt] [insn :as insn]))
   (:import
+   (tcljx.data.model CodeEmitter Loadable)
    (tcljx.classgen.insn Insn Insns)
    (clojure.lang Named IMeta)
    (java.lang.classfile CodeBuilder)
@@ -74,44 +75,26 @@
         (.constantDynamicEntry cpb bsm nat))
       (entry-nometa c))))
 
-;;; Convert the entity `value` into something that can be loaded as a
-;;; constant, then emit the LDC instruction (or something equivalent)
-;;; for it.
-(defn load ^CodeBuilder [^CodeBuilder xb ^Object value]
-  (if (instance? ConstantDesc value)
-    (.loadConstant xb ^ConstantDesc value)
-    (let [ldbl (loadable-entry (.constantPool xb) value)]
-      (.ldc xb ldbl)) ))
+(defn collection-entry ^LoadableConstantEntry [^ConstantPoolBuilder cpb
+                                               ^Class tp ^CodeEmitter/1 ldbls]
+  (letfn [(cde-coll ^ConstantDynamicEntry [^DirectMethodHandleDesc mhd]
+            (let [bs-args (for [^Loadable ldbl ldbls]
+                            (.loadable-entry ldbl cpb true))
+                  bsm (.bsmEntry cpb (.methodHandleEntry cpb rt/bsm-quote)
+                                 ^java.util.List bs-args)
+                  nat (.nameAndTypeEntry cpb (.methodName mhd)
+                                         (-> mhd .invocationType .returnType))]
+              (.constantDynamicEntry cpb bsm nat)))]
+    (condp identical? tp
+      type/vector (cde-coll rt/mhd-vector)
+      type/map (cde-coll rt/mhd-map)
+      type/set (cde-coll rt/mhd-set)
+      type/list (cde-coll rt/mhd-list))))
 
-(defn constant-literal-of
-  (^Object [^Insn x]
-   (constant-literal-of (.expr-type x) (model/const-value x)))
-  (^Object [^Class expr-type ^Object value]
-   (when-not (identical? ConstantDescs/NULL value)
-     (if (and (instance? Integer value)
-              (not (identical? Integer/TYPE expr-type)))
-       (let [x ^int value]
-         (condp identical? expr-type
-           Boolean/TYPE (object (not= x 0))
-           Byte/TYPE (object (byte x))
-           Short/TYPE (object (short x))
-           Character/TYPE (object (char x))))
-       value))))
-
-(defn constant-literal-str ^String [^Insn x]
-  (let [c (constant-literal-of x)]
-    (str (cond-> c (seq? c) (list*))))) ;wrap LazySeq
-
-(letfn [(apply-expr-type [^Class expr-type ^Object value]
-          (if (and (instance? Integer value)
-                   (not (identical? Integer/TYPE expr-type)))
-            (reflect/describe (constant-literal-of expr-type value))
-            value))]
-  
-  ;; Embed accurate type information for a non-int but "computationally
-  ;; int" value by materializing its DynamicConstantDesc description.
-  (defn typed-constant-description-of
-    (^Object [^Insn insn]
-     (apply-expr-type (insn/expr-type insn) (model/const-value insn)))
-    (^Object [^Insns insn ^int i]
-     (apply-expr-type (insn/expr-type insn i) (model/const-value insn i)))))
+(defn with-meta-entry ^LoadableConstantEntry [^ConstantPoolBuilder cpb
+                                              ^Class tp ^CodeEmitter/1 ldbls]
+  (let [bsm (.bsmEntry cpb (.methodHandleEntry cpb rt/bsm-quote)
+                       ^java.util.List (for [^Loadable ldbl ldbls]
+                                         (.loadable-entry ldbl cpb true)))
+        nat (.nameAndTypeEntry cpb "with-meta" (reflect/describe-class tp))]
+    (.constantDynamicEntry cpb bsm nat)))
