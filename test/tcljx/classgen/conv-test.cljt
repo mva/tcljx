@@ -148,6 +148,15 @@
            (ARETURN)]
          (asm-expr (let* [i 123] ^Object i)))))
 
+(deftest cast-from-nil-test
+  (is (= '[(ACONST_NULL)
+           (ARETURN)]
+         (asm-expr ^Integer (identity nil))))
+  (is (= '[(ACONST_NULL)
+           (INVOKEVIRTUAL Integer "intValue" "()I")
+           (IRETURN)]
+         (asm-expr ^int (identity nil)))))
+
 (deftest object-conv-test
   (is (= '[["LOCAL 0: int x"]
            (ILOAD_0)

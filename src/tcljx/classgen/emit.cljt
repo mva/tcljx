@@ -20,14 +20,13 @@
           (.return_ xb (TypeKind/from on-stack-type))
           false)
 
-        (pop-operand ^boolean [^CodeBuilder xb ^Class on-stack-type]
+        (pop-operand ^void [^CodeBuilder xb ^Class on-stack-type]
           ;; pre: `on-stack-type` is not Void/TYPE
           (if (or (identical? Long/TYPE on-stack-type)
                   (identical? Double/TYPE on-stack-type))
             (-> xb .pop2)
-            (-> xb .pop))
-          true)
-
+            (-> xb .pop)))
+        
         (unbox-reference ^void [^CodeBuilder xb ^int line
                                 ^Class consumed-type ^Class on-stack-type]
           ;; pre: (.isPrimitive consumed-type)
@@ -43,12 +42,12 @@
                   (.invokevirtual ConstantDescs/CD_Number mnm mtd))
               ;; type cast from box type to primitive type
               (do (when-not (type/same? box-type on-stack-type)
-                    (cast-from-reference xb line box-type on-stack-type))
+                    (cast-from-reference* xb line box-type on-stack-type))
                   (-> (line-number xb line)
                       (.invokevirtual (reflect/describe-class box-type) mnm
                                       mtd))))))
-        (cast-from-reference ^void [^CodeBuilder xb ^int line
-                                    ^Class consumed-type ^Class on-stack-type]
+        (cast-from-reference* ^void [^CodeBuilder xb ^int line
+                                     ^Class consumed-type ^Class on-stack-type]
           ;; pre: `on-stack-type` is reference type
           ;; pre: `on-stack-type` is not Void/TYPE
           ;; pre: `consumed-type` is not void
@@ -73,9 +72,11 @@
             (.invokestatic xb cd-box "valueOf" mtd)
             ;; there should be no scenario where the additonal cast
             ;; fails, so drop the line number for now
-            (cast-from-reference xb cfg/no-line-number consumed-type box-type)))
-        (convert-from-primitive ^void [^CodeBuilder xb ^Class consumed-type
-                                       ^Class on-stack-type]
+            (cast-from-reference* xb cfg/no-line-number consumed-type box-type)))
+
+        (convert-from-primitive* ^void [^CodeBuilder xb ^Class consumed-type
+                                        ^Class on-stack-type]
+          ;; pre: (not (identical? consumed-type on-stack-type))
           ;; pre: `on-stack-type` is primitive type including void
           ;; pre: `consumed-type` is not void
           (cond
@@ -88,58 +89,42 @@
             (-> xb .aconst_null)
                 
             :else
-            (box-primitive xb consumed-type on-stack-type)))
+            (box-primitive xb consumed-type on-stack-type)))]
 
-        ;; Emits instruction to `xb` and adapts the operand stack
-        ;; entry it produces to `consumed-type`.  Returns false if
-        ;; the instruction is known to return from the current method,
-        ;; and true otherwise.  Note: The true case "instruction may
-        ;; complete normally" is only an approximation, because this
-        ;; is not known with certainty across instances of
-        ;; CodeBuilder.block().
-        (adapt-stack? ^boolean [^CodeBuilder xb ^int line
-                                ^Class consumed-type ^Class on-stack-type]
-          (cond
-            (nil? on-stack-type)
-            false
-            
-            (identical? on-stack-type consumed-type)
-            true
-            
-            (identical? Void/TYPE consumed-type)
-            (pop-operand xb on-stack-type)
-            
-            ;; here holds: this function leaves an operand on the stack
-            :else (do (if (.isPrimitive on-stack-type)
-                        (convert-from-primitive xb consumed-type
-                                                on-stack-type)
-                        (cast-from-reference xb line consumed-type
-                                             on-stack-type))
-                      true)))
+  (defn convert-from-primitive ^void [^CodeBuilder xb ^Class consumed-type
+                                      ^Class on-stack-type]
+    (when-not (identical? consumed-type on-stack-type)
+      (convert-from-primitive* xb consumed-type on-stack-type)))
 
-        (emit-number? ^boolean [^CodeBuilder xb ^Class consumed-type
-                                ^Number value]
-          (.loadConstant xb (type/convert-from-constant consumed-type value))
-          true)]
+  (defn cast-from-reference ^void [^CodeBuilder xb ^int line
+                                   ^Class consumed-type ^Class on-stack-type]
+    (when-not (identical? consumed-type on-stack-type)
+      (cast-from-reference* xb line consumed-type on-stack-type)))
   
+  ;; Emits instructions that adapt the top operand stack entry from
+  ;; `on-stack-type` to `consumed-type`.
+  (defn adapt-stack ^void [^CodeBuilder xb ^int line
+                           ^Class consumed-type ^Class on-stack-type]
+    ;; pre: (some? on-stack-type)
+    (when-not (identical? on-stack-type consumed-type)
+      (cond
+        (identical? Void/TYPE consumed-type)
+        (pop-operand xb on-stack-type)
+        ;; here holds: this function leaves an operand on the stack
+        
+        (.isPrimitive on-stack-type)
+        (convert-from-primitive* xb consumed-type on-stack-type)
+        
+        :else
+        (cast-from-reference* xb line consumed-type on-stack-type))))
+
   (defn insn? ^boolean [^CodeBuilder xb ^int line ^Class consumed-type
                         ^CodeEmitter ce ^boolean then-leave?]
-    (if (or (and (model/ce-const? ce)
-                 (let [value (model/ce-const-value ce)]
-                   (if (model/null? value)
-                     (or (type/same? Void/TYPE consumed-type)
-                         (do (assert (not (.isPrimitive consumed-type)))
-                             (.aconst_null xb)
-                             true))
-                     (and (instance? Number value)
-                          (type/monomorphic-primitive? consumed-type)
-                          (emit-number? xb consumed-type value)))))
-          
-            (adapt-stack? xb line consumed-type
-                          (.emit-insn* ce xb line consumed-type then-leave?)))
-      (if then-leave?
-        (return-from-method? xb consumed-type)
-        true)
+    (if-some [on-stack-type (.emit-insn* ce xb line consumed-type then-leave?)]
+      (do (adapt-stack xb line consumed-type on-stack-type)
+          (if then-leave?
+            (return-from-method? xb consumed-type)
+            true))
       false)))
 
 (defn insns?

@@ -14,9 +14,10 @@
   java.lang.Record
   Loadable
   (emit-insn* [this xb line consumed-type _]
-    (insn/with-void-empty-if-requested consumed-type
+    (when-not (type/same? Void/TYPE consumed-type)
       (.ldc xb (.loadable-entry this (.constantPool xb) false))
-      opnd-type))
+      (emit/cast-from-reference xb line consumed-type opnd-type))
+    consumed-type)
   (emit-setup-code [this xb line consumed-type _]
     Void/TYPE)
   (loadable-entry [_ cpb logical-type?]
@@ -58,32 +59,43 @@
   java.lang.Record
   Constant
   (emit-insn* [this xb line consumed-type _]
-    (insn/with-void-empty-if-requested consumed-type
-      (if (instance? ConstantDesc computational-value)
-        (.loadConstant xb ^ConstantDesc computational-value)
-        (.ldc xb (.loadable-entry this (.constantPool xb) false)))
-      type))
+    (when-not (type/same? Void/TYPE consumed-type)
+      (cond
+        (model/null? computational-value)
+        (.aconst_null xb)              ;elide any additional checkcast
+        
+        (type/same? type consumed-type)
+        (if (instance? ConstantDesc computational-value)
+          (.loadConstant xb ^ConstantDesc computational-value)
+          (.ldc xb (.loadable-entry this (.constantPool xb) false)))
+        
+        (instance? Number computational-value)
+        (if (.isPrimitive consumed-type) ;cannot be void
+          (->> (type/convert-from-constant consumed-type computational-value)
+               (.loadConstant xb))
+          (-> (.loadConstant xb ^ConstantDesc computational-value)
+              (emit/convert-from-primitive consumed-type type)))
+        
+        :else
+        (do (.ldc xb (.loadable-entry this (.constantPool xb) false))
+            (emit/cast-from-reference xb line consumed-type type))))
+    consumed-type)
   (emit-setup-code [this xb line consumed-type _]
     Void/TYPE)
   (loadable-entry [this cpb logical-type?]
-    (constgen/loadable-entry cpb (if logical-type?
-                                   (.datafy this)
-                                   computational-value)))
+    (->> (if logical-type? (.datafy this) computational-value)
+         (constgen/loadable-entry cpb)))
   (datafy [_]
-    (cond
-      (identical? ConstantDescs/NULL computational-value)
-      nil
-      
-      (instance? Integer computational-value)
-      (let [x ^int computational-value]
-        (condp identical? type
-          Integer/TYPE computational-value
-          Boolean/TYPE (object (not= x 0))
-          Character/TYPE (object (char x))
-          Byte/TYPE (object (byte x))
-          Short/TYPE (object (short x))))
-      
-      :else computational-value)))
+    (when-not (model/null? computational-value)
+      (if (instance? Integer computational-value)
+        (let [x ^int computational-value]
+          (condp identical? type
+            Integer/TYPE computational-value
+            Boolean/TYPE (object (not= x 0))
+            Character/TYPE (object (char x))
+            Byte/TYPE (object (byte x))
+            Short/TYPE (object (short x))))
+        computational-value))))
 
 (defn mk-constant ^ConstantImpl [^Object computational-value ^Class type]
   (assert (or (instance? java.lang.constant.ConstantDesc computational-value)

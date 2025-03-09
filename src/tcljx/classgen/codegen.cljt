@@ -240,7 +240,8 @@
                 (let [arg-tp (insn/expr-type ref-arg)]
                   (if (or (.isInterface ref-target)
                           (.isAssignableFrom ref-target arg-tp) ;empty
-                          (.isAssignableFrom arg-tp ref-target)) ;checkcast
+                          (.isAssignableFrom arg-tp ref-target) ;checkcast
+                          (type/poly-reference? arg-tp)) ;cast from nil
                     (insn/cast-to ref-arg ref-target)
                     (throw (wr-info-invalid-cast)))))
               (box-arg-into ^Insn [^Class prim-tp]
