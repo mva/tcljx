@@ -226,8 +226,8 @@
           (^CodeEmitter fn [xb line _ _]
            (let [tp0 (op-type opcd0), tp1 (op-type opcd1)
                  bytecode (+ base-bytecode opcd0)]
-             (when (emit/insn? xb line tp0 ce0 false)
-               (when (or (nil? ce1) (emit/insn? xb line tp1 ce1 false))
+             (when (emit/insn? xb line tp0 ce0)
+               (when (or (nil? ce1) (emit/insn? xb line tp1 ce1))
                  (when (<= #_idiv 108 bytecode #_drem 115)
                    ;; [il]div and [il]rem can raise a division by zero
                    ;; exception, so provide a line number for div & rem
@@ -273,11 +273,10 @@
 
         (emit-array-gets ^Class [^CodeBuilder xb ^int line ^Insns args ^int n]
           (let [atp (insn/expr-type args 0)]
-            (when (emit/insn? xb line atp (insn/emitter args 0) false)
+            (when (emit/insn? xb line atp (insn/emitter args 0))
               (loop [tp atp, i 1]
                 (if (<= i n)
-                  (when (emit/insn? xb line Integer/TYPE
-                                    (insn/emitter args i) false)
+                  (when (emit/insn? xb line Integer/TYPE (insn/emitter args i))
                     (let [ctp (.componentType tp)]
                       (.lineNumber xb line)
                       (.arrayLoad xb (TypeKind/from ctp))
@@ -382,7 +381,7 @@
      (let [atp (array-type-at-0 form args)
            arg (take-arg form args)]
        (-> (^CodeEmitter fn [xb line _ _]
-            (when (emit/insn? xb line atp (.emitter arg) false)
+            (when (emit/insn? xb line atp (.emitter arg))
               (.arraylength xb)
               Integer/TYPE))
            (insn/mk-insn Integer/TYPE)))))
@@ -409,8 +408,8 @@
        (-> (^CodeEmitter fn [xb line consumed-type _]
             (when-some [atp (emit-array-gets xb line args n-gets)]
               (when (emit/insn? xb line Integer/TYPE
-                                (insn/emitter args (inc n-gets)) false)
-                (when (emit/insn? xb line tp-set ce-set false)
+                                (insn/emitter args (inc n-gets)))
+                (when (emit/insn? xb line tp-set ce-set)
                   (let [void? (identical? Void/TYPE consumed-type)
                         tk (TypeKind/from tp-set)]
                     (.lineNumber xb line)
@@ -424,7 +423,7 @@
      (let [atp (array-type-at-0 form args)
            arg (take-arg form args)]
        (-> (^CodeEmitter fn [xb line _ _]
-            (when (emit/insn? xb line atp (.emitter arg) false)
+            (when (emit/insn? xb line atp (.emitter arg))
               (let [cld (reflect/describe-class atp)]
                 (.invokevirtual xb cld "clone"
                                 (MethodTypeDesc/of ConstantDescs/CD_Object))
@@ -460,7 +459,7 @@
                         (if (or (.isPrimitive tp) (model/loadable? insn))
                           insn ;note: *all* constants are passed through
                           (-> (^CodeEmitter fn [xb line _ _]
-                               (when (emit/insn? xb line tp (.emitter insn) false)
+                               (when (emit/insn? xb line tp (.emitter insn))
                                  (-> (.ldc xb "")
                                      (.invokestatic cd-Objects "toString"
                                                     mtd-String-Object-String))

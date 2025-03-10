@@ -43,12 +43,12 @@
     (let [start-false (.newLabel xb), end-false (.newLabel xb)]
       (when (.emit-branch-if-false? branch xb line start-false)
         
-        (let [return-t? (emit/insn? xb line consumed-type if-true then-leave?)]
+        (let [return-t? (emit/then-leave? xb line consumed-type if-true then-leave?)]
           (when return-t?
             (.goto_ xb end-false))
           
           (.labelBinding xb start-false)
-          (let [return-f? (emit/insn? xb line consumed-type if-false then-leave?)]
+          (let [return-f? (emit/then-leave? xb line consumed-type if-false then-leave?)]
             (.labelBinding xb end-false)
             (when (or return-t? return-f?)
               consumed-type))))))))
@@ -70,7 +70,7 @@
     :else
     (reify CodeEmitter Negatable
       (emit-insn* [_ xb line _ _]
-        (when (emit/insn? xb line Boolean/TYPE ce false)
+        (when (emit/insn? xb line Boolean/TYPE ce)
           (-> xb (.loadConstant 1) (.ixor))
           Boolean/TYPE))
       (negate [_]
@@ -182,8 +182,8 @@
                      ConstantDescs/CD_Object ConstantDescs/CD_Object))
 (defn- equiv ^Insn [^CodeEmitter ce0 ^CodeEmitter ce1]
   (-> (^CodeEmitter fn [xb line consumed-type _]
-       (when (emit/insn? xb line Object ce0 false)
-         (when (emit/insn? xb line Object ce1 false)
+       (when (emit/insn? xb line Object ce0)
+         (when (emit/insn? xb line Object ce1)
            (.invokestatic xb (ClassDesc/of "clojure.lang.Util")
                           "equiv" mtd-util-equiv)
            Boolean/TYPE)))
@@ -216,8 +216,8 @@
       (entity/mk-constant c Integer/TYPE)
       
       (^CodeEmitter fn [xb line _ _]
-       (when (emit/insn? xb line arg-type ce0 false)
-         (when (emit/insn? xb line arg-type ce1 false)
+       (when (emit/insn? xb line arg-type ce0)
+         (when (emit/insn? xb line arg-type ce1)
            (classfile/with-operator xb bytecode)
            Integer/TYPE))))))
 
@@ -274,7 +274,7 @@
                      (if (or (= i (dec n)) (model/ce-const? ce))
                        ce
                        (^CodeEmitter fn [xb line consumed-type _]
-                        (when (emit/insn? xb line consumed-type ce false)
+                        (when (emit/insn? xb line consumed-type ce)
                           (classfile/dup-and-store-local xb tk temp)
                           consumed-type))))
                    (aset ce-right i)))

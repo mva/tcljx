@@ -126,15 +126,15 @@
       (loop [reaches-end? false, i 0]
         (if (< i n)
           (if (do (.labelBinding xb (aget (.start-of-branch layout) i))
-                  (emit/insn? xb line consumed-type
-                              (aget paths i) then-leave?))
+                  (emit/then-leave? xb line consumed-type
+                                    (aget paths i) then-leave?))
             (do (.goto_ xb end-of-switch) (recur true (inc i)))
             (recur reaches-end? (inc i)))
           
           ;; emit default path and bind the end-of-switch target
           (when (or (do (.labelBinding xb default-target)
-                        (emit/insn? xb line consumed-type
-                                    default-path then-leave?))
+                        (emit/then-leave? xb line consumed-type
+                                          default-path then-leave?))
                     reaches-end?)
             (.labelBinding xb end-of-switch)
             consumed-type)))))
@@ -142,14 +142,14 @@
   (defn switch-int ^CodeEmitter [^CodeEmitter select ^Exprs/1 guards
                                  ^CodeEmitter/1 paths ^CodeEmitter default-path]
     (^CodeEmitter fn [xb line consumed-type then-leave?]
-     (when (emit/insn? xb line Integer/TYPE select false)
+     (when (emit/insn? xb line Integer/TYPE select)
        (switch-int* (guards-to-switch-cases xb guards) paths default-path
                     xb line consumed-type then-leave?))))
 
   (defn switch-map ^CodeEmitter [^CodeEmitter select ^Exprs/1 guards
                                  ^CodeEmitter/1 paths ^CodeEmitter default-path]
     (^CodeEmitter fn [xb line consumed-type then-leave?]
-     (when (emit/insn? xb line Object select false)
+     (when (emit/insn? xb line Object select)
        (let [cpb (.constantPool xb)
              mhe (.methodHandleEntry cpb rt/bsm-clause-code)
              les (for [^Insns xs guards]

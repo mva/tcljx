@@ -144,7 +144,7 @@
         (.getstatic xb owner fnm type-cld)
         type)
       (emit-setup-code [_ xb line consumed-type init]
-        (when (emit/insn? xb line type init false)
+        (when (emit/insn? xb line type init)
           (if (identical? Void/TYPE consumed-type)
             (do (.putstatic xb owner fnm type-cld) Void/TYPE)
             (do (-> xb (dup type) (.putstatic owner fnm type-cld)) type)))))))
@@ -167,7 +167,7 @@
       type))
   (emit-setup-code [_ xb line consumed-type init]
     (let [tk (TypeKind/from type), label (.newLabel xb)]
-      (when (emit/insn? xb line type init false)
+      (when (emit/insn? xb line type init)
         (set! slot (.allocateLocal xb tk))
         (-> (.storeLocal xb tk slot)
             (.labelBinding label)

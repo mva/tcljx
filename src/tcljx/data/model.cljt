@@ -13,7 +13,7 @@
 ;;; be either the original expression type baked into the emitter, or
 ;;; the provided `consumed-type` expected by the instruction that the
 ;;; consumes the operand.  If the returned operand type differs from
-;;; `consumed-type`, then `emit/insn?` adapts the on stack value to
+;;; `consumed-type`, then `emit/then-leave?` adapts the on stack value to
 ;;; match the `consumed-type`.
 ;;;
 ;;; If `then-leave?` is set, then the emitted code may end with a

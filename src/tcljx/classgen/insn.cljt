@@ -144,15 +144,13 @@
     insn-n
     (-> (^CodeEmitter fn [xb line consumed-type then-leave?]
          (when (emit/insns? xb line Void/TYPE (.emitters insns))
-           (when (emit/insn? xb line consumed-type (.emitter insn-n) then-leave?)
+           (when (emit/then-leave? xb line consumed-type (.emitter insn-n) then-leave?)
              consumed-type)))
         (mk-insn (expr-type insn-n)))))
 
 (letfn [(materialize-as ^CodeEmitter [^CodeEmitter ce ^Class target-type]
-          (^CodeEmitter fn [xb line consumed-type then-leave?]
-           (when (emit/insn? xb line target-type ce
-                             (and then-leave?
-                                  (identical? consumed-type target-type)))
+          (^CodeEmitter fn [xb line consumed-type _]
+           (when (emit/insn? xb line target-type ce)
              target-type)))]
   
   ;; Note: Casting to primitive numeric from either primitive numeric or
@@ -187,12 +185,12 @@
       (mk-insn array-type)))
 
 (defn emit-return ^void [^CodeBuilder xb ^Class return-type ^Insn body]
-  (emit/insn? xb cfg/no-line-number return-type (.emitter body) true))
+  (emit/then-leave? xb cfg/no-line-number return-type (.emitter body) true))
 
 ;;; ------------------------------------------------------------------------
 
 (defn emit-insn-logical? ^boolean [^CodeBuilder xb ^Insn insn]
-  (emit/insn? xb cfg/no-line-number (logical-type insn) (.emitter insn) false))
+  (emit/insn? xb cfg/no-line-number (logical-type insn) (.emitter insn)))
 
 (defn- emit-new-array ^CodeBuilder [^CodeBuilder xb ^Class component-type
                                     ^int length]
@@ -210,7 +208,7 @@
       (if (< i end)
         (let [ce (aget ces i)]
           (-> xb (.dup) (.loadConstant (- i start)))
-          (when (emit/insn? xb cfg/no-line-number component-type ce false)
+          (when (emit/insn? xb cfg/no-line-number component-type ce)
             (.arrayStore xb component-tk)
             (recur (inc i))))
         true))))

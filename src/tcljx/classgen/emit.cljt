@@ -16,11 +16,7 @@
   ;; CodeBuilder/.lineNumber
   (cond-> xb (not= line cfg/no-line-number) (.lineNumber line)))
 
-(letfn [(return-from-method? ^boolean [^CodeBuilder xb ^Class on-stack-type]
-          (.return_ xb (TypeKind/from on-stack-type))
-          false)
-
-        (pop-operand ^void [^CodeBuilder xb ^Class on-stack-type]
+(letfn [(pop-operand ^void [^CodeBuilder xb ^Class on-stack-type]
           ;; pre: `on-stack-type` is not Void/TYPE
           (if (or (identical? Long/TYPE on-stack-type)
                   (identical? Double/TYPE on-stack-type))
@@ -119,13 +115,20 @@
         (cast-from-reference* xb line consumed-type on-stack-type))))
 
   (defn insn? ^boolean [^CodeBuilder xb ^int line ^Class consumed-type
-                        ^CodeEmitter ce ^boolean then-leave?]
-    (if-some [on-stack-type (.emit-insn* ce xb line consumed-type then-leave?)]
+                        ^CodeEmitter ce]
+    (if-some [on-stack-type (.emit-insn* ce xb line consumed-type false)]
       (do (adapt-stack xb line consumed-type on-stack-type)
-          (if then-leave?
-            (return-from-method? xb consumed-type)
-            true))
-      false)))
+          true)
+      false))
+  
+  (defn then-leave? ^boolean [^CodeBuilder xb ^int line ^Class consumed-type
+                              ^CodeEmitter ce ^boolean then-leave?]
+    (if then-leave?
+      (do (when-some [on-stack-type (.emit-insn* ce xb line consumed-type true)]
+            (adapt-stack xb line consumed-type on-stack-type)
+            (.return_ xb (TypeKind/from consumed-type)))
+          false)
+      (insn? xb line consumed-type ce))))
 
 (defn insns?
   (^boolean [^CodeBuilder xb ^int line ^Class consumed-type
@@ -135,7 +138,7 @@
              ^CodeEmitter/1 ces ^int start ^int end]
    (loop [i start]
      (or (>= i end)
-         (and (insn? xb line consumed-type (aget ces i) false)
+         (and (insn? xb line consumed-type (aget ces i))
               (recur (inc i)))))))
 
 (defn typed-insns?
@@ -146,5 +149,5 @@
              ^CodeEmitter/1 ces ^int start ^int end]
    (loop [i start]
      (or (>= i end)
-         (and (insn? xb line (aget consumed-types i) (aget ces i) false)
+         (and (insn? xb line (aget consumed-types i) (aget ces i))
               (recur (inc i)))))))

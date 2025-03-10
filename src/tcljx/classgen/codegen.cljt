@@ -37,7 +37,7 @@
 
 (defn- with-line-number ^Insn [^Insn insn ^int line]
   (-> (^CodeEmitter fn [xb _ consumed-type then-leave?]
-       (when (emit/insn? xb line consumed-type (.emitter insn) then-leave?)
+       (when (emit/then-leave? xb line consumed-type (.emitter insn) then-leave?)
          consumed-type))
       (insn/mk-insn (insn/expr-type insn))))
 
@@ -200,8 +200,8 @@
            ;; FIXME... emit lineNumber here?
            (.block xb (^Consumer fn ^void [^CodeBuilder xb]
                        ;; FIXME... or emit lineNumber here?
-                       (emit/insn? xb line consumed-type (.emitter block) then-leave?)))
-           (when-not then-leave?     ;can the insn? above return true?
+                       (emit/then-leave? xb line consumed-type (.emitter block) then-leave?)))
+           (when-not then-leave?     ;can the then-leave? above return true?
              consumed-type))
           (insn/mk-insn (insn/expr-type block)))))
   (try-catch-finally [_ body+catches catch-types finally]
@@ -316,7 +316,7 @@
     (let [arg ^Insn arg]
       (if (.isAssignableFrom Throwable (insn/logical-type arg))
         (-> (^CodeEmitter fn [xb line _ _]
-             (when (emit/insn? xb line Throwable (.emitter arg) false)
+             (when (emit/insn? xb line Throwable (.emitter arg))
                (-> xb (emit/line-number line) (.athrow))
                nil))                  ;type seen by the code generator
             (insn/mk-insn Void/TYPE)) ;type seen by the parser
