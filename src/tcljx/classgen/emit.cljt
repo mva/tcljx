@@ -92,11 +92,6 @@
     (when-not (identical? consumed-type on-stack-type)
       (convert-from-primitive* xb consumed-type on-stack-type)))
 
-  (defn cast-from-reference ^void [^CodeBuilder xb ^int line
-                                   ^Class consumed-type ^Class on-stack-type]
-    (when-not (identical? consumed-type on-stack-type)
-      (cast-from-reference* xb line consumed-type on-stack-type)))
-  
   ;; Emits instructions that adapt the top operand stack entry from
   ;; `on-stack-type` to `consumed-type`.
   (defn adapt-stack ^void [^CodeBuilder xb ^int line
