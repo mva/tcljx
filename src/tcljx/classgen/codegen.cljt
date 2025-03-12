@@ -180,6 +180,7 @@
   
   (new-parameter [_ param-no name type]
     (Insn. (entity/parameter-binding param-no name type) Void/TYPE))
+  
   (new-local [_ fctx opt-type name init-or-binding]
     (when opt-type    ;presence of type tag means this is not an alias
       (insn/ensure-assignable opt-type init-or-binding))
@@ -196,6 +197,11 @@
            (when-not then-leave? ;can the then-leave? above return true?
              consumed-type))
           (insn/mk-insn (insn/expr-type block)))))
+  
+  (new-catching-local [_ fctx type name]
+    (let [ex-provider (insn/mk-insn (^CodeEmitter fn [_ _ _] type) type)]
+      (-> (entity/local-binding type name ex-provider fctx)
+          (insn/mk-insn Void/TYPE))))
   (try-catch-finally [_ fctx body+catches catch-types finally]
     (let [insns ^Insns body+catches
           tp (condgen/join-type (.expr-types insns) 0 (.length insns))]

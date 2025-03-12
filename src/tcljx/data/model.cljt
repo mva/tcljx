@@ -397,8 +397,11 @@
   (assignment ^Expr [^Binding bnd ^Expr value])
 
   (new-parameter ^Expr [^int param-no ^String name ^Class type])
+  
   (new-local ^Expr [^long fctx ^Class opt-type ^String name init-or-binding])
   (block-let ^Expr [^long fctx ^Exprs bindings ^Expr body])
+
+  (new-catching-local ^Expr [^long fctx ^Class type ^String name])
   (try-catch-finally ^Expr [^long fctx ^Exprs body+catches ^Class/1 catch-types
                             ^Expr finally])
   

@@ -1,13 +1,11 @@
 (ns tcljx.parser.trycatch
   (:require
    (tcljx.data [wrong :as wrong] [model :as model])
-   (tcljx.parser [syntax :as syntax] [interop :as interop] [context :as context])
-   (tcljx.classgen [insn :as insn]))
+   (tcljx.parser [syntax :as syntax] [interop :as interop] [context :as context]))
   (:import
-   (tcljx.data.model CodeEmitter Expr Binding Scope)
-   (tcljx.classgen.insn Insn)))
+   (tcljx.data.model CodeEmitter Expr Binding Scope)))
 
-(deftype CatchBinding [^Insn bnd-x ^Class ctp]) ;FIXME... Valhalla value
+(deftype CatchBinding [^Expr bnd-x ^Class ctp]) ;FIXME... Valhalla value
 (letfn [(finally-form? ^boolean [x]
           (and (seq? x) (= (first x) 'finally)))
         (catch-form? ^boolean [x]
@@ -15,7 +13,7 @@
         (body-form? ^boolean [x]
           (not (catch-form? x)))
 
-        (parse-finally ^Insn [^Scope scope ^long fctx ^seq form]
+        (parse-finally ^Expr [^Scope scope ^long fctx ^seq form]
           (when (some? form)
             (wrong/with-line-from-list [fctx  form]
               (context/parse-progn scope fctx (next form)))))
@@ -26,18 +24,18 @@
                         (model/type-expression tp))]
             (when (or (nil? ctp) (not (.isAssignableFrom Throwable ctp)))
               (throw (syntax/info "expect caught exception type" tp)))
-            (CatchBinding. (.new-local (.expr-factory scope) fctx ctp
-                                       (syntax/simple-symbol-str nm)
-                                       (-> (^CodeEmitter fn [_ _ _] ctp)
-                                           (insn/mk-insn ctp)))
-                           ctp)))
-        (block-handler ^Insn [^Scope scope ^Insn bnd-x ^long fctx ^seq body]
+            (-> (.new-catching-local (.expr-factory scope) fctx ctp
+                                     (syntax/simple-symbol-str nm))
+                (CatchBinding. ctp))))
+        (block-handler ^Expr [^Scope scope ^Expr bnd-x ^long fctx ^seq body]
           ;; `block-let` implies that there is no information during
           ;; code generation whether `body` throws
-          (.block-let (.expr-factory scope) fctx (insn/insns-of bnd-x)
-                      (-> (context/with-local-binding scope bnd-x)
-                          (context/parse-progn fctx body))))
-        (parse-try-catch ^Insn [^Scope scope ^long fctx ^seq formr
+          (let [bnd-xs (context/new-exprs scope 1)]
+            (.set bnd-xs 0 bnd-x)
+            (.block-let (.expr-factory scope) fctx bnd-xs
+                        (-> (context/with-local-binding scope bnd-x)
+                            (context/parse-progn fctx body)))))
+        (parse-try-catch ^Expr [^Scope scope ^long fctx ^seq formr
                                 ^seq finally-form]
           (let [[body-forms catch-forms] (split-with body-form? formr)
                 body (context/parse-progn scope fctx body-forms)]
@@ -59,9 +57,11 @@
                                     (parse-finally scope fctx finally-form)))
 
               (some? finally-form)
-              (.try-catch-finally (.expr-factory scope) fctx
-                                  (insn/insns-of body) (new Class/1 0)
-                                  (parse-finally scope fctx finally-form))
+              (let [body-xs (context/new-exprs scope 1)]
+                (.set body-xs 0 body)
+                (.try-catch-finally (.expr-factory scope) fctx
+                                    body-xs (new Class/1 0)
+                                    (parse-finally scope fctx finally-form)))
 
               :else body)))]
   
