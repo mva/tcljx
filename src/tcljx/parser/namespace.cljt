@@ -42,7 +42,7 @@
                                            (first spec))))
               (Require. ns-str alias refer rename exclude error-context))))
         (flatten-requires ^seq [^seq rrequires ^String prefix ^seq specs
-                                ^seq error-context]
+                                ^long fctx ^seq error-context]
           (letfn [(flatten-require ^seq [^seq rrequires spec]
                     (cond
                       (symbol? spec)
@@ -60,20 +60,20 @@
                       (and (= prefix "") (seq? spec))
                       (let [prefix (syntax/prefixed-nmsp-str (first spec) prefix)]
                         (flatten-requires rrequires (str prefix ".")
-                                          (rest spec) spec))
+                                          (rest spec) fctx spec))
                       
                       :else
                       (throw (syntax/info "expect symbol, vector, or list" spec))))]
-            (wrong/with-line-context error-context
+            (wrong/with-line-from-list [fctx error-context]
               (reduce flatten-require rrequires specs))))
         
-        (parse-refer-cljs ^Require [^seq rrefer-cljs]
+        (parse-refer-cljs ^Require [^long fctx ^seq rrefer-cljs]
           (when (some? (nnext rrefer-cljs))
             (throw (syntax/info "multiple :refer-clojure clauses")))
           
           (let [refer-clj (first rrefer-cljs)]
             ;; pre: (first refer-clj) is :refer-clojure
-            (wrong/with-line-context refer-clj
+            (wrong/with-line-from-list [fctx refer-clj]
               (loop [^vector refer nil, exclude [], rename {}
                      specs (next refer-clj)]
                 (if (some? specs)
@@ -89,16 +89,16 @@
                   (Require. cfg/core-lib nil refer rename exclude
                             refer-clj))))))
 
-        (process-require ^NamespaceBuilder [^NamespaceBuilder nmsp
+        (process-require ^NamespaceBuilder [^NamespaceBuilder nmsp ^long fctx
                                             ^Require require
                                             ^ProvidedNamespace provided]
-          (wrong/with-line-context (.error-context require)
+          (wrong/with-line-from-list [fctx (.error-context require)]
             (if (nil? provided)
               (throw (wrong/info-unresolved "no such namespace:"
                                             (model/required-ns-sym require)))
               (.process-require nmsp require provided))))
         (process-requires ^NamespaceBuilder [^NamespaceBuilder nmsp
-                                             ^seq requires]
+                                             ^long fctx ^seq requires]
           (let [arequires ^Require/1 (into-array Require requires)
                 ans-strs (new String/1 (alength arequires))]
             (dotimes [i (alength ans-strs)]
@@ -108,11 +108,11 @@
               (loop [nmsp nmsp, i 0]
                 (if (< i (alength provided))
                   (-> nmsp
-                      (process-require (aget arequires i) (aget provided i))
+                      (process-require fctx (aget arequires i) (aget provided i))
                       (recur (inc i)))
                   nmsp)))))
 
-        (ns-form ^NamespaceBuilder [^NamespaceBuilder nmsp
+        (ns-form ^NamespaceBuilder [^NamespaceBuilder nmsp ^long fctx
                                     [_ ns-sym & formr :as ^seq form]]
           ;; pre: (first form) is 'ns
           (when-not (= ns-sym (model/ns-sym nmsp))
@@ -126,7 +126,7 @@
             (if-some [[[tag :as clause] & clauses'] clauses]
               (case tag
                 :require
-                (recur (flatten-requires rrequires "" (next clause) clause)
+                (recur (flatten-requires rrequires "" (next clause) fctx clause)
                        rimports rrefer-cljs clauses')
                 
                 :import
@@ -145,14 +145,15 @@
                                (cons model/require-core-lib-default requires)
                                (= rrefer-cljs '((:refer-clojure :none)))
                                requires
-                               :else
-                               (cons (parse-refer-cljs rrefer-cljs) requires))]
-                (-> (process-requires nmsp requires)
+                               :else (cons (parse-refer-cljs fctx rrefer-cljs)
+                                           requires))]
+                (-> (process-requires nmsp fctx requires)
                     (.process-imports (reverse rimports)))))))
-        (require-form ^NamespaceBuilder [^NamespaceBuilder nmsp ^seq form]
+        (require-form ^NamespaceBuilder [^NamespaceBuilder nmsp
+                                         ^long fctx ^seq form]
           (let [specs (map syntax/strip-quote (rest form))
-                rrequires (flatten-requires nil "" specs form)]
-            (process-requires nmsp (reverse rrequires))))
+                rrequires (flatten-requires nil "" specs fctx form)]
+            (process-requires nmsp fctx (reverse rrequires))))
         (load-form ^NamespaceBuilder [^NamespaceBuilder nmsp ^seq form]
           (reduce NamespaceBuilder/.load-file nmsp (rest form)))
         (in-ns-form ^NamespaceBuilder [^NamespaceBuilder nmsp
@@ -165,17 +166,18 @@
                               "namespace " (wrong/q (model/ns-sym nmsp))
                               (wrong/got-q ns-sym)))))]
   
-  (defn parse-top-level-form ^NamespaceBuilder [^NamespaceBuilder nmsp form]
+  (defn parse-top-level-form ^NamespaceBuilder [^NamespaceBuilder nmsp
+                                                ^long fctx form]
     ;; pre: caller provides wrong/with-line-context for `form`
     (if (seq? form)
-      (wrong/with-line-context form
+      (wrong/with-line-from-list [fctx form]
         (case (first form)
-          ns (ns-form nmsp form)
-          require (require-form nmsp form)
+          ns (ns-form nmsp fctx form)
+          require (require-form nmsp fctx form)
           load (load-form nmsp form)
           in-ns (in-ns-form nmsp form)
-          #_else (.process-init-form nmsp form)))
-      (.process-init-form nmsp form)))
+          #_else (.process-init-form nmsp fctx form)))
+      (.process-init-form nmsp fctx form)))
 
   ;; Note: Does not establish error context for the file.
   (defn parse-top-level-forms ^NamespaceBuilder [^NamespaceBuilder nmsp
@@ -187,13 +189,14 @@
                       ln (cond
                            (seq? form) (meta/line-of form)
                            (symbol? form) line-at-end ;any single line form
-                           :else line-at-push)]
-                  (wrong/decorate-with-line-number* ex ln)))]
+                           :else line-at-push)
+                      fctx (meta/update-line meta/fctx-initial ln)]
+                  (wrong/decorate-with-fctx ex fctx)))]
         (if (neg? pos')
           nmsp
           (let [form (.pop fb)]
             (-> (try
-                  (parse-top-level-form nmsp form)
+                  (parse-top-level-form nmsp meta/fctx-initial form)
                   (catch Throwable ex
                     (throw (with-line-number ex form))))
                 (recur pos' fb))))))))

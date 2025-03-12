@@ -1,7 +1,7 @@
 (ns tcljx.classgen.entity
   (:require
-   (tcljx.data [wrong :as wrong] [type :as type] [model :as model]
-               [reflect :as reflect])
+   (tcljx.data [wrong :as wrong] [type :as type] [meta :as meta]
+               [model :as model] [reflect :as reflect])
    (tcljx.classgen [emit :as emit] [insn :as insn] [constgen :as constgen]))
   (:import
    (tcljx.data.model Expr CodeEmitter Binding Entity Loadable Constant)
@@ -13,13 +13,13 @@
                        ^boolean associate-meta?]
   java.lang.Record
   Loadable
-  (emit-insn* [this xb _ consumed-type _]
+  (emit-insn* [this xb consumed-type _]
     (if (type/same? Void/TYPE consumed-type)
       Void/TYPE
       (do (.ldc xb (.loadable-entry this (.constantPool xb) false))
           opnd-type)))
-  (emit-setup-code [this xb _ _ _]
-    Void/TYPE)
+  (emit-setup-code? [this xb _]
+    true)
   (loadable-entry [_ cpb logical-type?]
     (if (instance? CodeEmitter/1 loadable-value)
       (if associate-meta?
@@ -58,7 +58,7 @@
 (deftype ConstantImpl [^Object computational-value ^Class opnd-type]
   java.lang.Record
   Constant
-  (emit-insn* [this xb _ consumed-type _]
+  (emit-insn* [this xb consumed-type _]
     (cond
       (type/same? Void/TYPE consumed-type)
       Void/TYPE
@@ -84,8 +84,8 @@
       :else
       (do (.ldc xb (.loadable-entry this (.constantPool xb) false))
           opnd-type)))
-  (emit-setup-code [this xb _ _ _]
-    Void/TYPE)
+  (emit-setup-code? [this xb _]
+    true)
   (loadable-entry [this cpb logical-type?]
     (->> (if logical-type? (.datafy this) computational-value)
          (constgen/loadable-entry cpb)))
@@ -144,58 +144,58 @@
 (defn static-field ^Entity [^ClassDesc owner ^String fnm ^Class type]
   (let [type-cld (reflect/describe-class type)]
     (reify Entity
-      (emit-insn* [_ xb _ _ _]
+      (emit-insn* [_ xb _ _]
         (.getstatic xb owner fnm type-cld)
         type)
-      (emit-setup-code [_ xb line consumed-type init]
-        (when (emit/insn? xb line type init)
-          (if (identical? Void/TYPE consumed-type)
-            (do (.putstatic xb owner fnm type-cld) Void/TYPE)
-            (do (-> xb (dup type) (.putstatic owner fnm type-cld)) type)))))))
+      (emit-setup-code? [_ xb init]
+        (when (emit/insn? xb meta/fctx-none type init)
+          (.putstatic xb owner fnm type-cld)
+          true)))))
 
 (defn static-method ^Entity [^ClassDesc owner ^String mnm ^Class type]
   (let [mtd (MethodTypeDesc/of (reflect/describe-class type))]
     (reify Entity
-      (emit-insn* [_ xb _ _ _]
+      (emit-insn* [_ xb _ _]
         (.invokestatic xb owner mnm mtd)
         type)
-      (emit-setup-code [_ xb line consumed-type init]
-        Void/TYPE))))
+      (emit-setup-code? [_ xb init]
+        true))))
 
 (deftype LocalVariable [^String name ^Class type
                         ^:unsynchronized-mutable ^int slot]
   Entity
-  (emit-insn* [_ xb line consumed-type _]
+  (emit-insn* [_ xb consumed-type _]
     (insn/with-void-empty-if-requested consumed-type
       (.loadLocal xb (TypeKind/from type) slot)
       type))
-  (emit-setup-code [_ xb line consumed-type init]
+  (emit-setup-code? [_ xb init]
     (let [tk (TypeKind/from type), label (.newLabel xb)]
-      (when (emit/insn? xb line type init)
+      (when-some [on-stack-type (.emit-insn* init xb type false)]
+        (assert (identical? type on-stack-type))
         (set! slot (.allocateLocal xb tk))
         (-> (.storeLocal xb tk slot)
             (.labelBinding label)
             (.localVariable slot name (reflect/describe-class type)
                             label (.endLabel xb)))
-        Void/TYPE))))
+        true))))
 
-(defn local-variable ^Entity [^String name ^Class type]
+(defn- local-variable ^Entity [^String name ^Class type]
   (LocalVariable. name type -1))
 
 (deftype Parameter [^String name ^Class type ^int param-no
                     ^:unsynchronized-mutable ^int slot]
   Entity
-  (emit-insn* [_ xb line consumed-type _]
+  (emit-insn* [_ xb consumed-type _]
     (insn/with-void-empty-if-requested consumed-type
       (.loadLocal xb (TypeKind/from type) slot)
       type))
-  (emit-setup-code [_ xb line consumed-type _]
+  (emit-setup-code? [_ xb _]
     (set! slot (.parameterSlot xb param-no))
     (.localVariable xb slot name (reflect/describe-class type)
                     (.startLabel xb) (.endLabel xb))
-    Void/TYPE))
+    true))
 
-(defn parameter ^Entity [^String name ^Class type ^int param-no]
+(defn- parameter ^Entity [^String name ^Class type ^int param-no]
   (Parameter. name type param-no -1))
 
 ;;; ------------------------------------------------------------------------
@@ -205,11 +205,11 @@
                       ^CodeEmitter initialize-with]
   java.lang.Record
   Binding
-  (emit-insn* [this xb line consumed-type _]
-    (if initialize-with
-      ;; skip setup if this binding is an alias, the bound entity is a
-      ;; constant, or the entity's value is provided by other means
-      (.emit-setup-code bound-to xb line consumed-type initialize-with)
+  (emit-insn* [this xb consumed-type _]
+    ;; skip setup if this binding is an alias, the bound entity is a
+    ;; constant, or the entity's value is provided by other means
+    (when (or (nil? initialize-with)
+              (.emit-setup-code? bound-to xb initialize-with))
       Void/TYPE)))
 
 (defn- mk-binding ^Binding [^Entity bound-to ^Insn bound-value
@@ -221,15 +221,16 @@
   (let [ent (parameter name type param-no)]
     (mk-binding ent (insn/mk-insn ent type) nil name insn/emitter-empty)))
 
-(defn local-binding ^Binding [^Class opt-type ^String name init-or-bnd]
+(defn local-binding ^Binding [^Class opt-type ^String name
+                              init-or-bnd ^long fctx]
   (letfn [(non-alias-local ^Binding [^Insn init]
             (let [ce (insn/emitter init)
                   tp (or opt-type (insn/logical-type init))]
               (if (and (model/ce-const? ce) (nil? opt-type))
                 (mk-binding ce init nil name nil)
-                (let [ent (local-variable name tp)]
-                  (mk-binding ent (insn/mk-insn ent tp) nil name
-                              (.emitter init))))))]
+                (let [ent (local-variable name tp)
+                      ce (-> init (insn/cast-to tp fctx) .emitter)]
+                  (mk-binding ent (insn/mk-insn ent tp) nil name ce)))))]
     (if (instance? Insn init-or-bnd)
       (non-alias-local init-or-bnd)
       (let [bnd ^Binding init-or-bnd]

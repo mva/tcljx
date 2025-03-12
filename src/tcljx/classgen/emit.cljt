@@ -1,6 +1,6 @@
 (ns tcljx.classgen.emit
   (:require
-   (tcljx.data [config :as cfg] [type :as type] [model :as model]
+   (tcljx.data [config :as cfg] [meta :as meta] [type :as type] [model :as model]
                [reflect :as reflect])
    (tcljx.classgen [classfile :as classfile]))
   (:import
@@ -9,12 +9,24 @@
    (java.lang.classfile CodeBuilder TypeKind)
    (java.lang.constant MethodTypeDesc ConstantDesc ConstantDescs)))
 
-(defn line-number ^CodeBuilder [^CodeBuilder xb ^int line]
+;;; Line numbers are written to enable accurate stack traces.  Any
+;;; instruction that may cause a stack trace (in other words: that may
+;;; raise an exception) should have a line number, as well as any
+;;; instruction that appears as an ancestor stack trace element (that
+;;; is, almost every invoke instruction).
+;;;
+;;; The form context `fctx` of an instruction of interest refers to
+;;; the Clojure list form from which it was compiled.  Its line number
+;;; is taken from the opening parenthesis of the list.  Type adaption
+;;; instructions take a `consumer-fctx`, which refers to the *parent*
+;;; expression that consumes the adapted value, *not* the `fctx` of
+;;; the on stack value being adapted.
+(defn with-line-number ^CodeBuilder [^CodeBuilder xb ^long fctx]
   ;; Note: Writing only line number of zero triggers output of an
-  ;; empty "LineNumberTable" attribute.  Probably pointless to
-  ;; suppress this special case.  FIXME... set this to
-  ;; CodeBuilder/.lineNumber
-  (cond-> xb (not= line cfg/no-line-number) (.lineNumber line)))
+  ;; empty "LineNumberTable" attribute.  For example invocations of
+  ;; runtime methods are emitted without any line number.
+  (let [line (meta/fctx-line fctx)]
+    (cond-> xb (pos? line) (.lineNumber (meta/fctx-line fctx)))))
 
 (letfn [(pop-operand ^void [^CodeBuilder xb ^Class on-stack-type]
           ;; pre: `on-stack-type` is not Void/TYPE
@@ -23,7 +35,7 @@
             (-> xb .pop2)
             (-> xb .pop)))
         
-        (unbox-reference ^void [^CodeBuilder xb ^int line
+        (unbox-reference ^void [^CodeBuilder xb ^long consumer-fctx
                                 ^Class consumed-type ^Class on-stack-type]
           ;; pre: (.isPrimitive consumed-type)
           (let [box-type (.class-reference (type/of consumed-type))
@@ -34,28 +46,29 @@
               ;; FIXME... does conversion via Number.xxxValue() make
               ;; RT.longCast(Object) etc. redundant, at least as far
               ;; as tcljx is concerned?
-              (-> (line-number xb line)
+              (-> (with-line-number xb consumer-fctx)
                   (.invokevirtual ConstantDescs/CD_Number mnm mtd))
               ;; type cast from box type to primitive type
               (do (when-not (type/same? box-type on-stack-type)
-                    (cast-from-reference* xb line box-type on-stack-type))
-                  (-> (line-number xb line)
+                    (cast-from-reference* xb consumer-fctx
+                                          box-type on-stack-type))
+                  (-> (with-line-number xb consumer-fctx)
                       (.invokevirtual (reflect/describe-class box-type) mnm
                                       mtd))))))
-        (cast-from-reference* ^void [^CodeBuilder xb ^int line
+        (cast-from-reference* ^void [^CodeBuilder xb ^long consumer-fctx
                                      ^Class consumed-type ^Class on-stack-type]
           ;; pre: `on-stack-type` is reference type
           ;; pre: `on-stack-type` is not Void/TYPE
           ;; pre: `consumed-type` is not void
           (cond
             (.isPrimitive consumed-type)
-            (unbox-reference xb line consumed-type on-stack-type)
+            (unbox-reference xb consumer-fctx consumed-type on-stack-type)
 
             (.isAssignableFrom consumed-type on-stack-type)
             nil
                 
             :else
-            (-> (line-number xb line)
+            (-> (with-line-number xb consumer-fctx)
                 (.checkcast (reflect/describe-class consumed-type)))))
 
         (box-primitive ^void [^CodeBuilder xb ^Class consumed-type
@@ -94,7 +107,7 @@
 
   ;; Emits instructions that adapt the top operand stack entry from
   ;; `on-stack-type` to `consumed-type`.
-  (defn adapt-stack ^void [^CodeBuilder xb ^int line
+  (defn adapt-stack ^void [^CodeBuilder xb ^long consumer-fctx
                            ^Class consumed-type ^Class on-stack-type]
     ;; pre: (some? on-stack-type)
     (when-not (identical? on-stack-type consumed-type)
@@ -107,42 +120,57 @@
         (convert-from-primitive* xb consumed-type on-stack-type)
         
         :else
-        (cast-from-reference* xb line consumed-type on-stack-type))))
+        (cast-from-reference* xb consumer-fctx consumed-type on-stack-type))))
 
-  (defn insn? ^boolean [^CodeBuilder xb ^int line ^Class consumed-type
-                        ^CodeEmitter ce]
-    (if-some [on-stack-type (.emit-insn* ce xb line consumed-type false)]
-      (do (adapt-stack xb line consumed-type on-stack-type)
-          true)
-      false))
+  (defn- statm? ^boolean [^CodeBuilder xb ^CodeEmitter ce]
+    (when-some [on-stack-type (.emit-insn* ce xb Void/TYPE false)]
+      (when-not (identical? Void/TYPE on-stack-type)
+        (pop-operand xb on-stack-type))
+      true))
   
-  (defn then-leave? ^boolean [^CodeBuilder xb ^int line ^Class consumed-type
-                              ^CodeEmitter ce ^boolean then-leave?]
+  ;; FIXME... move argument `ce` to second position?
+  (defn insn? ^boolean [^CodeBuilder xb ^long consumer-fctx
+                        ^Class consumed-type ^CodeEmitter ce]
+    (when-some [on-stack-type (.emit-insn* ce xb consumed-type false)]
+      (adapt-stack xb (meta/fctx-line consumer-fctx) consumed-type
+                   on-stack-type)
+      true))
+  
+  ;; FIXME... move argument `ce` to second position?
+  (defn then-leave? ^boolean [^CodeBuilder xb ^long consumer-fctx
+                              ^Class consumed-type ^CodeEmitter ce
+                              ^boolean then-leave?]
     (if then-leave?
-      (do (when-some [on-stack-type (.emit-insn* ce xb line consumed-type true)]
-            (adapt-stack xb line consumed-type on-stack-type)
+      (do (when-some [on-stack-type (.emit-insn* ce xb consumed-type true)]
+            (adapt-stack xb (meta/fctx-line consumer-fctx) consumed-type
+                         on-stack-type)
             (.return_ xb (TypeKind/from consumed-type)))
           false)
-      (insn? xb line consumed-type ce))))
+      (insn? xb consumer-fctx consumed-type ce))))
+
+(defn statms? ^boolean [^CodeBuilder xb ^CodeEmitter/1 ces]
+  (loop [i 0]
+    (or (>= i (alength ces)) (and (statm? xb (aget ces i)) (recur (inc i))))))
 
 (defn insns?
-  (^boolean [^CodeBuilder xb ^int line ^Class consumed-type
+  (^boolean [^CodeBuilder xb ^long consumer-fctx ^Class consumed-type
              ^CodeEmitter/1 ces]
-   (insns? xb line consumed-type ces 0 (alength ces)))
-  (^boolean [^CodeBuilder xb ^int line ^Class consumed-type
+   (insns? xb consumer-fctx consumed-type ces 0 (alength ces)))
+  (^boolean [^CodeBuilder xb ^long consumer-fctx ^Class consumed-type
              ^CodeEmitter/1 ces ^int start ^int end]
    (loop [i start]
      (or (>= i end)
-         (and (insn? xb line consumed-type (aget ces i))
+         (and (insn? xb consumer-fctx consumed-type (aget ces i))
               (recur (inc i)))))))
 
 (defn typed-insns?
-  (^boolean [^CodeBuilder xb ^int line ^Class/1 consumed-types
+  (^boolean [^CodeBuilder xb ^long consumer-fctx ^Class/1 consumed-types
              ^CodeEmitter/1 ces]
-   (typed-insns? xb line consumed-types ces 0 (alength consumed-types)))
-  (^boolean [^CodeBuilder xb ^int line ^Class/1 consumed-types
+   (typed-insns? xb consumer-fctx consumed-types ces
+                 0 (alength consumed-types)))
+  (^boolean [^CodeBuilder xb ^long consumer-fctx ^Class/1 consumed-types
              ^CodeEmitter/1 ces ^int start ^int end]
    (loop [i start]
      (or (>= i end)
-         (and (insn? xb line (aget consumed-types i) (aget ces i))
+         (and (insn? xb consumer-fctx (aget consumed-types i) (aget ces i))
               (recur (inc i)))))))

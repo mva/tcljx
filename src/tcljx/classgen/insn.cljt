@@ -1,6 +1,6 @@
 (ns tcljx.classgen.insn
   (:require
-   (tcljx.data [config :as cfg] [wrong :as wrong] [type :as type]
+   (tcljx.data [config :as cfg] [wrong :as wrong] [meta :as meta] [type :as type]
                [model :as model] [reflect :as reflect] [resolve :as resolve])
    (tcljx.classgen [emit :as emit]))
   (:import
@@ -31,7 +31,7 @@
   Expr)
 
 (def mk-insn Insn/new)
-(def emitter-empty (^CodeEmitter fn [xb _ _ _] Void/TYPE))
+(def emitter-empty (^CodeEmitter fn [xb _ _] Void/TYPE))
 (def insn-empty (mk-insn emitter-empty type/polymorphic))
 
 ;;; Compilation centers around arrays of types and arrays of code
@@ -142,55 +142,39 @@
 (defn progn ^Insn [^Insns insns ^Insn insn-n]
   (if (identical? empty-insns insns)
     insn-n
-    (-> (^CodeEmitter fn [xb line consumed-type then-leave?]
-         (when (emit/insns? xb line Void/TYPE (.emitters insns))
-           (when (emit/then-leave? xb line consumed-type (.emitter insn-n) then-leave?)
-             consumed-type)))
+    (-> (^CodeEmitter fn [xb consumed-type then-leave?]
+         (when (emit/statms? xb (.emitters insns))
+           (.emit-insn* (.emitter insn-n) xb consumed-type then-leave?)))
         (mk-insn (expr-type insn-n)))))
 
-(letfn [(materialize-as ^CodeEmitter [^CodeEmitter ce ^Class target-type]
-          (^CodeEmitter fn [xb line consumed-type _]
-           (when (emit/insn? xb line target-type ce)
-             target-type)))]
-  
-  ;; Note: Casting to primitive numeric from either primitive numeric or
-  ;; reference Number is a type conversion.
-  (defn cast-to ^Insn [^Insn arg ^Class target-type]
-    (let [x-tp (.expr-type arg)]
-      (if (identical? target-type x-tp)
-        ;; this elides the cast even if `arg` may be a signature
-        ;; polymorphic method invocation
-        arg
-        (-> (.emitter ^Insn arg)
-            (materialize-as target-type)
-            (mk-insn target-type))))))
+;; Note: Casting to primitive numeric from either primitive numeric or
+;; reference Number is a type conversion.
+(defn cast-to ^Insn [^Insn arg ^Class target-type ^long fctx]
+  (let [x-tp (.expr-type arg)]
+    (if (identical? target-type x-tp)
+      ;; this elides the cast even if `arg` may be a signature
+      ;; polymorphic method invocation
+      arg
+      (-> (^CodeEmitter fn [xb consumed-type _]
+           (when (emit/insn? xb fctx target-type (.emitter ^Insn arg))
+             target-type))
+          (mk-insn target-type)))))
 
 (defn cast-to-logical
   (^Insn [^Insn insn]
-   (cast-to insn (type/expr-to-logical (expr-type insn))))
+   (cast-to insn (type/expr-to-logical (expr-type insn)) meta/fctx-none))
   (^Insn [^Insns insns ^int i]
    (cast-to-logical (.get insns i))))
-
-(defn new-array ^Insn [^Class array-type ^Insns dims]
-  (-> (^CodeEmitter fn [xb line _ _]
-       (when (emit/insns? xb line Integer/TYPE (.emitters dims))
-         (if (= (.length dims) 1)
-           (let [component-type (.getComponentType array-type)]
-             (if (.isPrimitive component-type)
-               (.newarray xb (TypeKind/from component-type))
-               (.anewarray xb (reflect/describe-class component-type))))
-           (.multianewarray xb (reflect/describe-class array-type)
-                            (.length dims)))
-         array-type))
-      (mk-insn array-type)))
 
 (defn emit-return ^void [^CodeBuilder xb ^Class return-type ^Insn body]
   (emit/then-leave? xb cfg/no-line-number return-type (.emitter body) true))
 
 ;;; ------------------------------------------------------------------------
 
+;;; Emit `insn` using its own logical type, without any applying any
+;;; additional conversion or cast instructions on top.
 (defn emit-insn-logical? ^boolean [^CodeBuilder xb ^Insn insn]
-  (emit/insn? xb cfg/no-line-number (logical-type insn) (.emitter insn)))
+  (emit/insn? xb meta/fctx-none (logical-type insn) (.emitter insn)))
 
 (defn- emit-new-array ^CodeBuilder [^CodeBuilder xb ^Class component-type
                                     ^int length]
@@ -225,14 +209,14 @@
      (MethodTypeDesc/of (reflect/describe-class return-type)
                         (reflect/describe-class* ptypes)))))
 
-(defn invoke-member ^Insn [^Match m ^Insn receiver ^Insns args]
-  (-> (^CodeEmitter fn [xb line consumed-type _]
+(defn invoke-member ^Insn [^Match m ^Insn receiver ^Insns args ^long fctx]
+  (-> (^CodeEmitter fn [xb consumed-type _]
        (letfn [(invoke-polymorphic ^Class [^int fixed]
-                 (when (emit/typed-insns? xb line (.expr-types args)
+                 (when (emit/typed-insns? xb fctx (.expr-types args)
                                           (.emitters args) fixed (.length args))
                    (let [mtd (mtd-of-poly consumed-type (.parameter-types m)
                                           fixed (.expr-types args))]
-                     (-> (emit/line-number xb line)
+                     (-> (emit/with-line-number xb fctx)
                          (reflect/invoke-member (.owner m) (.member m) mtd))
                      consumed-type)))]
          (let [fixed (resolve/end-of-fixed-parameters m)
@@ -243,7 +227,7 @@
            ;; instance field or method require receiver argument
            (when (or (nil? receiver) (emit-insn-logical? xb receiver))
              ;; all fixed (i.e. non-vararg) arguments
-             (when (emit/typed-insns? xb line (.parameter-types m)
+             (when (emit/typed-insns? xb fctx (.parameter-types m)
                                       (.emitters args) 0 fixed)
                (if (neg? (.invocation-mode m))
                  (invoke-polymorphic fixed)
@@ -253,10 +237,14 @@
                            (emit-array-of? xb (.getComponentType varargs-tp)
                                            (.emitters args) fixed))
                    ;; the actual invoke instruction
-                   (-> (emit/line-number xb line)
+                   (-> (emit/with-line-number xb fctx)
                        (reflect/invoke-member (.owner m) (.member m)))
                    (.return-type m))))))))
       (mk-insn (.return-type m))))
+
+;;; Invoke static runtime method without line number information.
+(defn invoke-runtime ^Insn [^Match m ^Insns args]
+  (invoke-member m nil args meta/fctx-none))
 
 ;;; ------------------------------------------------------------------------
 

@@ -5,12 +5,12 @@
   (:import
    (tcljx.data.model Expr Scope)))
 
-(defn parse-new ^Expr [^Scope scope ^Class owner [_ _ & args]]
+(defn parse-new ^Expr [^Scope scope ^Class owner ^long fctx [_ _ & args]]
   (let [n (type/type-dimensions owner)]
     (if (zero? n)                       ;constructor
       (-> (.expr-factory scope)
-          (.invoke-constructor owner (context/parse-args scope args)))
-      (let [dims (context/parse-args scope args)]
+          (.invoke-constructor fctx owner (context/parse-args scope fctx args)))
+      (let [dims (context/parse-args scope fctx args)]
         (syntax/some-first args)        ;at least one dimentions is provided
         (syntax/empty-tail n args)
-        (.new-array (.expr-factory scope) owner dims)))))
+        (.new-array (.expr-factory scope) fctx owner dims)))))

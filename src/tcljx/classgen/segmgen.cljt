@@ -1,6 +1,6 @@
 (ns tcljx.classgen.segmgen
   (:require
-   (tcljx.data [config :as cfg] [files :as files] [type :as type]
+   (tcljx.data [config :as cfg] [files :as files] [type :as type] [meta :as meta]
                [model :as model] [resolve :as resolve])
    (tcljx.classgen [runtime :as rt] [loader :as loader] [classfile :as classfile]
                    [emit :as emit] [insn :as insn] [entity :as entity])
@@ -36,7 +36,8 @@
 (defn clinit-prologue ^Insn [^String ns-str ^int segm-id]
   (if (= segm-id first-segm-id)
     (insn/invoke-member rt-create-namespace nil
-                        (insn/insns-of (entity/new-constant ns-str String)))
+                        (insn/insns-of (entity/new-constant ns-str String))
+                        meta/fctx-none)
     insn/insn-empty))
 
 (def ^:private rt-mark-core-initialization
@@ -47,7 +48,8 @@
     (let [cld (segment-cld pkg-build segm-id)
           clnm (str (.packageName cld) "." (.displayName cld))]
       (insn/invoke-member rt-mark-core-initialization nil
-                          (insn/insns-of (entity/new-constant clnm String))))
+                          (insn/insns-of (entity/new-constant clnm String))
+                          meta/fctx-none))
     insn/insn-empty))
 
 ;;; ------------------------------------------------------------------------

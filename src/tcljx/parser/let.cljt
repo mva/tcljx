@@ -6,7 +6,7 @@
   (:import
    (tcljx.data.model Expr Binding Scope)))
 
-(defn parse-let* ^Expr [^Scope scope [_ bindings & body :as form]]
+(defn parse-let* ^Expr [^Scope scope ^long fctx [_ bindings & body :as form]]
   (let [bindings (syntax/vector bindings true)
         n (quot (count bindings) 2)
         ef (.expr-factory scope)
@@ -17,9 +17,9 @@
               nm (syntax/simple-symbol-str nm-sym)
               init (nth bindings (inc (* i 2)))
               opt-type (interop/resolve-tag (.resolver scope) nm-sym nil)
-              bnd-x (.new-local ef opt-type nm
+              bnd-x (.new-local ef fctx opt-type nm
                                 (or (context/lookup-if-alias nm-sym scope init)
-                                    (context/parse-form scope init)))]
+                                    (context/parse-form scope fctx init)))]
           (.set bnd-xs i bnd-x)
           (recur (context/with-local-binding scope bnd-x) (inc i)))
-        (.block-let ef bnd-xs (context/parse-progn scope body))))))
+        (.block-let ef fctx bnd-xs (context/parse-progn scope fctx body))))))

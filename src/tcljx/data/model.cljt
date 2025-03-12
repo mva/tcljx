@@ -2,6 +2,7 @@
   (:require
    (tcljx.data [config :as cfg] [reflect :as reflect]))
   (:import
+   (java.lang.classfile CodeBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry)
    (java.lang.constant MethodHandleDesc MethodTypeDesc ConstantDescs)
    (java.util Arrays))
@@ -11,21 +12,23 @@
 ;;; actual type of the value pushed onto operand stack, or nil if
 ;;; control leaves the current method.  The produced operand type can
 ;;; be either the original expression type baked into the emitter, or
-;;; the provided `consumed-type` expected by the instruction that the
-;;; consumes the operand.  If the returned operand type differs from
-;;; `consumed-type`, then `emit/then-leave?` adapts the on stack value to
-;;; match the `consumed-type`.
+;;; the provided `consumed-type` expected by the instruction that
+;;; consumes the pushed operand.  If the returned operand type differs
+;;; from `consumed-type`, then `emit/insn?` and `emit/then-leave?`
+;;; adapt the on stack value to match the `consumed-type`.
 ;;;
-;;; If `then-leave?` is set, then the emitted code may end with a
-;;; return instruction.  In this case the returned type is nil.
+;;; If `then-leave?` is set, then the emitted code is permitted to
+;;; close with a return instruction.  In this case the returned type
+;;; is nil.
 ;;; 
-;;; Right now, line numbers are only written to decorate stack traces.
-;;; A bytecode instruction must emit a line number pseudo instruction
-;;; before its own opcode only if an exception may be raised during
-;;; the opcode's execution.
+;;; No line number is passed to the method.  This limits any adapting
+;;; instructions to get to `consumed-type` to "safe" ones that are
+;;; known to never raise an exception.  `insn?` and `then-leave?` must
+;;; close over the consumer form's line number to perform throwing
+;;; adaptions like CHECKCAST.
 (definterface CodeEmitter
-  (emit-insn* ^Class [^java.lang.classfile.CodeBuilder xb ^int line
-                      ^Class consumed-type ^boolean then-leave?]))
+  (emit-insn* ^Class [^CodeBuilder xb ^Class consumed-type
+                      ^boolean then-leave?]))
 
 
 ;;; A named entity on the level of the code generator that exists at
@@ -41,8 +44,8 @@
 ;;; compilation.
 (definterface Entity
   :extends [CodeEmitter]
-  (emit-setup-code ^Class [^java.lang.classfile.CodeBuilder xb ^int line
-                           ^Class consumed-type ^CodeEmitter init]))
+  ;; Returns false if control then leaves the method.
+  (emit-setup-code? ^boolean [^CodeBuilder xb ^CodeEmitter init]))
 
 
 
@@ -221,7 +224,7 @@
 
 (definterface Invocable
   :extends [Entity]
-  (invoke* ^Expr [^seq form ^Exprs xs]))
+  (invoke* ^Expr [^long fctx ^seq form ^Exprs xs]))
 
 (defn bound-invocable ^Invocable [^Binding bnd]
   (when (instance? Invocable (.bound-to bnd))
@@ -321,7 +324,7 @@
   ;; -> MultiFn.java -> tinyclj.core fns
   (load-file ^NamespaceBuilder [^String path-str])
 
-  (process-init-form ^NamespaceBuilder [form])
+  (process-init-form ^NamespaceBuilder [^long fctx form])
   (finish ^ProvidedNamespace []))
 
 (definterface SegmentBuilder
@@ -344,8 +347,7 @@
 (definterface ExprFactory
   (empty-expr ^Expr [])
   (new-exprs ^Exprs [^int length])
-  (line-number ^Expr [^Integer line ^Expr x])
-
+  
   ;; Create an expression denoting the constant `value` of type
   ;; `expr-type`.  For the most part, there is a one-to-one
   ;; correspondence between the primitive (when possible) class of
@@ -373,7 +375,7 @@
   (new-map ^Expr [^Exprs args])
   (new-set ^Expr [^Exprs args])
   (new-list ^Expr [^Exprs args])
-  (new-array ^Expr [^Class array-type ^Exprs dims])
+  (new-array ^Expr [^long fctx ^Class array-type ^Exprs dims])
 
   ;; ### basics
   
@@ -381,23 +383,23 @@
 
   ;; Test, followed by the "true" path, optionally followed by
   ;; the "false" path.
-  (if-expr ^Expr [^Exprs xs])
+  (if-expr ^Expr [^long fctx ^Exprs xs])
   
   ;; If the program provides a default path, then `paths-and-default`
   ;; has one more element than `guards`.
   (case-expr ^Expr [^Expr select ^Exprs/1 guards ^Exprs paths-and-default
-                    ^seq/1 error-contexts])
+                    ^long fctx ^seq/1 error-contexts])
 
-  (invoke ^Expr [^Object form ^Invocable inv ^Exprs args])
+  (invoke ^Expr [^long fctx ^Object form ^Invocable inv ^Exprs args])
   
   ;; ### bindings
 
   (assignment ^Expr [^Binding bnd ^Expr value])
 
   (new-parameter ^Expr [^int param-no ^String name ^Class type])
-  (new-local ^Expr [^Class opt-type ^String name init-or-binding])
-  (block-let ^Expr [^Exprs bindings ^Expr body])
-  (try-catch-finally ^Expr [^Exprs body+catches ^Class/1 catch-types
+  (new-local ^Expr [^long fctx ^Class opt-type ^String name init-or-binding])
+  (block-let ^Expr [^long fctx ^Exprs bindings ^Expr body])
+  (try-catch-finally ^Expr [^long fctx ^Exprs body+catches ^Class/1 catch-types
                             ^Expr finally])
   
   ;; ### functions
@@ -411,23 +413,24 @@
   
   ;; ### interop
 
-  (type-cast ^Expr [^Class target-type ^Expr arg])
+  (type-cast ^Expr [^long fctx ^Class target-type ^Expr arg])
   
-  (invoke-constructor ^Expr [^Class owner ^Exprs args])
+  (invoke-constructor ^Expr [^long fctx ^Class owner ^Exprs args])
   
   ;; Invoke static public method or field `mnm` of class `owner`.
   ;; Note: Invoking a field actually means to invoke the field's value
   ;; as a function, instead of just getting its value.
-  (invoke-static-member ^Expr [^boolean invoke-value-of-field?
+  (invoke-static-member ^Expr [^long fctx ^boolean invoke-value-of-field?
                                ^Class owner ^String mnm ^Exprs args])
   
-  (invoke-virtual-member ^Expr [^Expr receiver ^String mnm ^Exprs args])
+  (invoke-virtual-member ^Expr [^long fctx ^Expr receiver ^String mnm
+                                ^Exprs args])
 
-  (get-static-field ^Expr [^Class owner ^String mnm])
-  (get-virtual-field ^Expr [^Expr receiver ^String mnm])
+  (get-static-field ^Expr [^long fctx ^Class owner ^String mnm])
+  (get-virtual-field ^Expr [^long fctx ^Expr receiver ^String mnm])
 
-  (instanceof-expr ^Expr [^Class type ^Expr arg])
-  (throw-expr ^Expr [^Expr arg])
+  (instanceof-expr ^Expr [^long fctx ^Class type ^Expr arg])
+  (throw-expr ^Expr [^long fctx ^Expr arg])
   
   ;; ### misc
   
@@ -440,7 +443,7 @@
     xs))
 
 (definterface Scope
-  (parse-form ^Expr [form])
+  (parse-form ^Expr [^long fctx form])
 
   ;; Frequency of change: very low.
   (resolver ^Resolver [])

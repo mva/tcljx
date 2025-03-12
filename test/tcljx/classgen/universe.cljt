@@ -1,8 +1,8 @@
 (ns tcljx.classgen.universe
   (:require
    (tcljx.data
-    [config :as cfg] [files :as files] [resolve :as resolve] [model :as model]
-    [wrong :as wrong])
+    [config :as cfg] [files :as files] [resolve :as resolve] [meta :as meta]
+    [model :as model] [wrong :as wrong])
    (tcljx.parser
     [context :as context] [form :as form] [namespace :as namespace])
    (tcljx.classgen
@@ -82,7 +82,7 @@
   (load-file [this path-str]
     (assert false))
   
-  (process-init-form [this form]
+  (process-init-form [this fctx form]
     ;; This method is only called for expression forms that do not
     ;; manipulate `known-ns` or `ns-alias`.  The `globals` at start is
     ;; stored as part of of `scope`.
@@ -90,14 +90,14 @@
           imports-at-start imports
           segment-elements-at-start (.size segment-elements)
           expr (try
-                 (context/parse-form scope form)
+                 (context/parse-form scope fctx form)
                  (catch ImplementationUnavailableException _
                    ;; flush current segment into a class file, revert
                    ;; state, and try again to parse `form`
                    (.commit-segment-and-revert
                     this segment-elements-at-start
                     (.bindings* scope) imports-at-start)
-                   (context/parse-form scope form)))]
+                   (context/parse-form scope fctx form)))]
       (.add segment-elements expr)
       (when-not (.isEmpty pending-functions)
         (codegen/process-functions! segment-elements pending-functions))
@@ -156,10 +156,12 @@
                                   source-file segmgen/first-segm-id)))
             
             (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]
-              (-> (reduce namespace/parse-top-level-form
-                          (mk-nmsp-builder ns-str)
-                          ns-forms)
-                  (NamespaceBuilder/.finish)))]
+              (loop [acc (mk-nmsp-builder ns-str), forms (seq ns-forms)]
+                (if (nil? forms)
+                  (.finish acc)
+                  (recur (namespace/parse-top-level-form acc meta/fctx-initial
+                                                         (first forms))
+                         (next forms)))))]
       
       (let [a (new ProvidedNamespace/1 (alength ns-strs))]
         (dotimes [i (alength a)]

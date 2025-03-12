@@ -14,34 +14,33 @@
 (defn new-exprs ^Exprs [^Scope scope ^int n]
   (.new-exprs (.expr-factory scope) n))
 
-(defn parse-form ^Expr [^Scope scope form]
-  (.parse-form scope form))
-(defn parse-args ^Exprs [^Scope scope ^seq forms]
+(defn parse-form ^Expr [^Scope scope ^long fctx form]
+  (.parse-form scope fctx form))
+(defn parse-args ^Exprs [^Scope scope ^long fctx ^seq forms]
   (let [xs (new-exprs scope (count forms))]
     (loop [i 0, forms (seq forms)]
       (when (some? forms)
-        (.set xs i (parse-form scope (first forms)))
+        (.set xs i (parse-form scope fctx (first forms)))
         (recur (inc i) (next forms))))
     xs))
 
-(defn- parse-progn* ^Expr [^Scope scope ^seq forms] ;pre: `forms` is nil if empty
+(defn- parse-progn* ^Expr [^Scope scope ^long fctx ^seq forms]
+  ;; pre: `forms` is nil if empty
   (if (some? forms)
     (let [n (count forms), xs (new-exprs scope (dec n))]
       (loop [i 0, forms forms]
-        (let [x (parse-form scope (first forms))]
+        (let [x (parse-form scope fctx (first forms))]
           (if (< i (.length xs))
             (do (.set xs i x)
                 (recur (inc i) (rest forms)))
             (.progn-expr (.expr-factory scope) xs x)))))
     (.empty-expr (.expr-factory scope))))
 (defn parse-progn
-  (^Expr [^Scope scope ^seq forms]
-   (parse-progn* scope (seq forms)))
-  (^Expr [^Scope scope ^seq error-context ^seq forms]
-   (let [line (meta/line-of error-context)]
-     (->> (wrong/with-line-context line
-            (parse-progn* scope (seq forms)))
-          (.line-number (.expr-factory scope) line)))))
+  (^Expr [^Scope scope ^long fctx ^seq forms]
+   (parse-progn* scope fctx (seq forms)))
+  (^Expr [^Scope scope ^seq error-context ^long fctx ^seq forms]
+   (wrong/with-line-from-list [fctx error-context]
+     (parse-progn* scope fctx (seq forms)))))
 
 ;;; Anything outside of a function or a class definition (that is
 ;;; definterface, deftype, reify, etc.) happens in the namespace

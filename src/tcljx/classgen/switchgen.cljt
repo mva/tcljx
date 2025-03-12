@@ -14,8 +14,8 @@
    (java.util ArrayList)))
 
 (letfn [(validate-path-guards ^set [^set seen ^Class select-tp ^Exprs guards
-                                    ^seq error-context]
-          (wrong/with-line-context error-context
+                                    ^long fctx ^seq error-context]
+          (wrong/with-line-from-list [fctx error-context]
             (loop [seen seen, i 0]
               (if (< i (.length guards))
                 (let [guard-tp (insn/expr-type guards i)
@@ -34,11 +34,11 @@
                 seen))))]
   
   (defn validate-guards ^void [^Class select-tp ^Exprs/1 guards
-                               ^seq/1 error-contexts]
+                               ^long fctx ^seq/1 error-contexts]
     (loop [seen #{}, i 0]
       (when (< i (alength guards))
         (recur (validate-path-guards seen select-tp (aget guards i)
-                                     (aget error-contexts i))
+                                     fctx (aget error-contexts i))
                (inc i))))))
 
 (defn adjust-numeric-type ^Class [^Class select-tp]
@@ -55,8 +55,8 @@
 (def ^:private no-matching-clause
   (resolve/runtime-method tinyclj.lang.RT "noMatchingClause"
                           (doto (new Class/1 1) (aset 0 Object))))
-(defn invoke-no-matching-clause ^Insn [^Insn select]
-  (insn/invoke-member no-matching-clause nil (insn/insns-of select)))
+(defn invoke-no-matching-clause ^Insn [^Insn select ^long fctx]
+  (insn/invoke-member no-matching-clause nil (insn/insns-of select) fctx))
 
 (deftype SwitchLayout [^Label/1 start-of-branch ^ArrayList scs
                        ^int low ^int high ^boolean table?])
@@ -110,7 +110,7 @@
 
   (defn- switch-int* ^Class [^SwitchLayout layout ^CodeEmitter/1 paths
                              ^CodeEmitter default-path
-                             ^CodeBuilder xb ^int line ^Class consumed-type
+                             ^CodeBuilder xb ^long fctx ^Class consumed-type
                              ^boolean then-leave?]
     (let [n (alength (.start-of-branch layout))
           default-target (.newLabel xb)
@@ -126,30 +126,32 @@
       (loop [reaches-end? false, i 0]
         (if (< i n)
           (if (do (.labelBinding xb (aget (.start-of-branch layout) i))
-                  (emit/then-leave? xb line consumed-type
+                  (emit/then-leave? xb fctx consumed-type
                                     (aget paths i) then-leave?))
             (do (.goto_ xb end-of-switch) (recur true (inc i)))
             (recur reaches-end? (inc i)))
           
           ;; emit default path and bind the end-of-switch target
           (when (or (do (.labelBinding xb default-target)
-                        (emit/then-leave? xb line consumed-type
+                        (emit/then-leave? xb fctx consumed-type
                                           default-path then-leave?))
                     reaches-end?)
             (.labelBinding xb end-of-switch)
             consumed-type)))))
 
   (defn switch-int ^CodeEmitter [^CodeEmitter select ^Exprs/1 guards
-                                 ^CodeEmitter/1 paths ^CodeEmitter default-path]
-    (^CodeEmitter fn [xb line consumed-type then-leave?]
-     (when (emit/insn? xb line Integer/TYPE select)
+                                 ^CodeEmitter/1 paths ^CodeEmitter default-path
+                                 ^long fctx]
+    (^CodeEmitter fn [xb consumed-type then-leave?]
+     (when (emit/insn? xb fctx Integer/TYPE select)
        (switch-int* (guards-to-switch-cases xb guards) paths default-path
-                    xb line consumed-type then-leave?))))
+                    xb fctx consumed-type then-leave?))))
 
   (defn switch-map ^CodeEmitter [^CodeEmitter select ^Exprs/1 guards
-                                 ^CodeEmitter/1 paths ^CodeEmitter default-path]
-    (^CodeEmitter fn [xb line consumed-type then-leave?]
-     (when (emit/insn? xb line Object select)
+                                 ^CodeEmitter/1 paths ^CodeEmitter default-path
+                                 ^long fctx]
+    (^CodeEmitter fn [xb consumed-type then-leave?]
+     (when (emit/insn? xb fctx Object select)
        (let [cpb (.constantPool xb)
              mhe (.methodHandleEntry cpb rt/bsm-clause-code)
              les (for [^Insns xs guards]
@@ -161,7 +163,7 @@
              mtd (MethodTypeDesc/of ConstantDescs/CD_int
                                     ConstantDescs/CD_Object)
              nat (.nameAndTypeEntry cpb ConstantDescs/DEFAULT_NAME mtd)]
-         (-> (emit/line-number xb line)
+         (-> (emit/with-line-number xb fctx)
              (.invokedynamic (.invokeDynamicEntry cpb bsm nat)))
          (switch-int* (indexes-to-switch-cases xb guards) paths default-path
-                      xb line consumed-type then-leave?))))))
+                      xb fctx consumed-type then-leave?))))))

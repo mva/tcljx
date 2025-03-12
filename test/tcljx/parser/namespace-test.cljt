@@ -7,7 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.namespace-test
   (:require
-   (tcljx.data [wrong :as wrong] [model :as model])
+   (tcljx.data [wrong :as wrong] [meta :as meta] [model :as model])
    (tcljx.parser [reader :as reader] [context :as context]
                  [form :as form] [namespace :as namespace])
    [tcljx.alpha.ptest :refer :all])
@@ -20,7 +20,7 @@
 (deftype EmitterData [form]
   java.lang.Record
   Entity
-  (emit-insn* [_ xb line consumed-type then-leave?]
+  (emit-insn* [_ xb consumed-type then-leave?]
     (throw (UnsupportedOperationException.))))
 
 (deftype ExprStub [^CodeEmitter data]
@@ -44,7 +44,7 @@
 (deftype BindingStub [^String namespace ^String name ^Entity bound-to]
   java.lang.Record
   CodeEmitter
-  (emit-insn* [_ xb line consumed-type then-leave?]
+  (emit-insn* [_ xb consumed-type then-leave?]
     (throw (UnsupportedOperationException.)))
   Binding
   (bound-value [this]
@@ -68,17 +68,14 @@
 (deftype InvocableStub []
   java.lang.Record
   Invocable
-  (invoke* [_ form args]
-    (mk-expr (into [:invoke form] (exprs-data args)))))
+  (invoke* [_ fctx form args]
+    (mk-expr (into [:invoke (meta/fctx-line fctx) form] (exprs-data args)))))
 
 (deftype ExprFactoryStub [^java.util.ArrayList forms]
   ExprFactory
   (new-exprs [_ n]
     (ExprsStub. (new ExprStub/1 n)))
-  (line-number [_ line value]
-    (if (some? line)
-      (mk-expr [:line-number line (expr-data value)])
-      value))
+  
   
   (new-constant [_ expr-type value]
     (mk-expr [:constant value (class-data value)]))
@@ -86,8 +83,8 @@
   (progn-expr [_ xs x]
     (mk-expr (-> (reduce (comp conj expr-data) [:progn] xs)
                  (conj (expr-data x)))))
-  (invoke [this form inv args]
-    (.invoke* inv form args))
+  (invoke [this fctx form inv args]
+    (.invoke* inv fctx form args))
   
   (assignment [_ bnd init]
     (mk-expr [:assignment (model/binding-name bnd) (expr-data init)]))
@@ -156,10 +153,10 @@
     (.add segment-forms [:load path-str])
     this)
 
-  (process-init-form [this form]
+  (process-init-form [this fctx form]
     (let [ef (ExprFactoryStub. segment-forms)
           scope (form/mk-scope ef this {})]
-      (.add segment-forms (expr-data (context/parse-form scope form)))
+      (.add segment-forms (expr-data (context/parse-form scope fctx form)))
       this)))
 
 (defn mk-nmsp-builder ^NamespaceBuilder []
@@ -176,22 +173,22 @@
         (.segment-forms)
         (vec))))
 (defn parse-forms ^vector [^vector formv]
-  (let [nmsp (mk-nmsp-builder)]
-    (-> ^NmspBuilderStub (reduce namespace/parse-top-level-form nmsp formv)
-        (.segment-forms)
-        (vec))))
+  (loop [acc (mk-nmsp-builder), forms (seq formv)]
+    (if (nil? forms)
+      (vec (NmspBuilderStub/.segment-forms acc))
+      (recur (namespace/parse-top-level-form acc meta/fctx-initial (first forms))
+             (next forms)))))
 
 (deftest parse-forms-test
   ;; use parse-forms-string, going through tcljx.parser.reader
   (is (= '[]
          (parse-forms-string "")))
-  (is (= '[[:line-number 1
-            [:invoke (some form) [:bound-value nmsp.expected/form]]]]
+  (is (= '[[:invoke 1 (some form) [:bound-value nmsp.expected/form]]]
          (parse-forms-string "(some form)")))
   ;; use parse-forms, relying on the host compiler's form processing
   (is (= '[]
          (parse-forms '[])))
-  (is (= '[[:invoke (some form) [:bound-value nmsp.expected/form]]]
+  (is (= '[[:invoke 0 (some form) [:bound-value nmsp.expected/form]]]
          (parse-forms '[(some form)]))))
 
 ;;; ------------------------------------------------------------------------

@@ -13,7 +13,7 @@
 
 (definterface Branching
   :extends [CodeEmitter]
-  (emit-branch-if-false? ^boolean [^CodeBuilder xb ^int line ^Label target]))
+  (emit-branch-if-false? ^boolean [^CodeBuilder xb ^Label target]))
 
 (definterface Negatable
   (negate ^CodeEmitter []))
@@ -36,24 +36,28 @@
     (4 5) (- cmp-opcd 2)))              ;gt -> lt, le -> ge
 
 (defn- conditional
-  (^CodeEmitter [^Branching branch]
-   (conditional branch entity/emitter-true entity/emitter-false))
-  (^CodeEmitter [^Branching branch ^CodeEmitter if-true ^CodeEmitter if-false]
-   (^CodeEmitter fn [xb line consumed-type then-leave?]
+  (^CodeEmitter [^Branching branch ^long fctx]
+   (conditional branch entity/emitter-true entity/emitter-false fctx))
+  (^CodeEmitter [^Branching branch ^CodeEmitter if-true ^CodeEmitter if-false
+                 ^long fctx]
+   (^CodeEmitter fn [xb consumed-type then-leave?]
     (let [start-false (.newLabel xb), end-false (.newLabel xb)]
-      (when (.emit-branch-if-false? branch xb line start-false)
+      (when (.emit-branch-if-false? branch xb start-false)
         
-        (let [return-t? (emit/then-leave? xb line consumed-type if-true then-leave?)]
+        (let [return-t? (emit/then-leave? xb fctx consumed-type
+                                          if-true then-leave?)]
           (when return-t?
             (.goto_ xb end-false))
           
           (.labelBinding xb start-false)
-          (let [return-f? (emit/then-leave? xb line consumed-type if-false then-leave?)]
+          (let [return-f? (emit/then-leave? xb fctx consumed-type
+                                            if-false then-leave?)]
             (.labelBinding xb end-false)
             (when (or return-t? return-f?)
               consumed-type))))))))
 
-(defn negation ^CodeEmitter [^CodeEmitter ce] ;pre: `ce` is boolean
+(defn negation ^CodeEmitter [^CodeEmitter ce ^long fctx]
+  ;; pre: `ce` is boolean
   (cond
     (identical? entity/emitter-false ce)
     entity/emitter-true
@@ -65,25 +69,26 @@
     (.negate ^Negatable ce)
     
     (instance? Branching ce)
-    (conditional ce entity/emitter-false entity/emitter-true)
+    (conditional ce entity/emitter-false entity/emitter-true fctx)
 
     :else
     (reify CodeEmitter Negatable
-      (emit-insn* [_ xb line _ _]
-        (when (emit/insn? xb line Boolean/TYPE ce)
+      (emit-insn* [_ xb _ _]
+        (when (emit/insn? xb fctx Boolean/TYPE ce)
           (-> xb (.loadConstant 1) (.ixor))
           Boolean/TYPE))
       (negate [_]
         ce))))
 
-(defn- mk-branch* ^Branching [^int opcode-eq ^int cmp-opcd
-                              ^Class arg-type ^CodeEmitter/1 args]
+(defn- mk-branch* ^Branching [^int opcode-eq ^int cmp-opcd ^Class arg-type
+                              ^CodeEmitter/1 args ^long fctx]
   (let [bytecode (+ opcode-eq (negate-test cmp-opcd))]
     (reify Branching Negatable
-      (emit-insn* [this xb line consumed-type then-leave?]
-        (.emit-insn* (conditional this) xb line consumed-type then-leave?))
-      (emit-branch-if-false? [_ xb line target]
-        (when (emit/insns? xb line arg-type args)
+      (emit-insn* [this xb consumed-type then-leave?]
+        (.emit-insn* (conditional this fctx)
+                     xb consumed-type then-leave?))
+      (emit-branch-if-false? [_ xb target]
+        (when (emit/insns? xb fctx arg-type args)
           (case bytecode
             153 (.ifeq xb target)
             154 (.ifne xb target)
@@ -103,10 +108,11 @@
             199 (.ifnonnull xb target))
           true))
       (negate [_]
-        (mk-branch* opcode-eq (negate-test cmp-opcd) arg-type args)))))
+        (mk-branch* opcode-eq (negate-test cmp-opcd) arg-type args
+                    fctx)))))
 
-(defn- mk-branch ^Branching [^Opcode eq-opc ^int cmp-opcd
-                             ^Class arg-type ^CodeEmitter/1 args]
+(defn- mk-branch ^Branching [^Opcode eq-opc ^int cmp-opcd ^Class arg-type
+                             ^CodeEmitter/1 args ^long fctx]
   (loop [opcd cmp-opcd
          left (aget args 0)
          right (aget args 1)]
@@ -114,14 +120,14 @@
     (cond
       (model/ce-zero? right)            ;slide if_icmpeq to ifeq
       (mk-branch* (- (.bytecode eq-opc) 6) opcd arg-type
-                  (doto (new CodeEmitter/1 1) (aset 0 left)))
+                  (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
       
       (model/ce-zero? left)
       (recur (swap-cmp opcd) right left)
                   
       (model/ce-null? right)            ;slide if_acmpeq to ifnull
       (mk-branch* (+ (.bytecode eq-opc) 33) opcd arg-type
-                  (doto (new CodeEmitter/1 1) (aset 0 left)))
+                  (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
       
       (model/ce-null? left)
       (recur (swap-cmp opcd) right left)
@@ -130,12 +136,14 @@
       (mk-branch* (.bytecode eq-opc) opcd arg-type
                   (doto (new CodeEmitter/1 2)
                     (aset 0 left)
-                    (aset 1 right))))))
+                    (aset 1 right))
+                  fctx))))
 
-(defn cmp-insn ^Insn [^Opcode eq-opc ^int cmp-opcd
-                      ^Class arg-type ^CodeEmitter ce0 ^CodeEmitter ce1]
+(defn cmp-insn ^Insn [^Opcode eq-opc ^int cmp-opcd ^Class arg-type
+                      ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
   (-> (mk-branch eq-opc cmp-opcd arg-type (doto (new CodeEmitter/1 2)
-                                            (aset 0 ce0) (aset 1 ce1)))
+                                            (aset 0 ce0) (aset 1 ce1))
+                 fctx)
       (insn/mk-insn Boolean/TYPE)))
 
 ;;; ------------------------------------------------------------------------
@@ -152,17 +160,17 @@
                   (model/null? c) Boolean/TRUE ;is always null
                   :else Boolean/FALSE)))]      ;is never null
   
-  (defn acmp ^Insn [^Insn arg0 ^Insn arg1 ^int cmp-opcd]
+  (defn acmp ^Insn [^Insn arg0 ^Insn arg1 ^int cmp-opcd ^long fctx]
     (or (when-some [c0 (null-value-pred arg0)]
           (when-some [c1 (null-value-pred arg1)]
             (let [c0 ^boolean c0, c1 ^boolean c1]
               (when (or c0 c1)       ;both non-null means "don't know"
                 (entity/insn-boolean (not= (= cmp-opcd cmp-ne) (and c0 c1)))))))
         (cmp-insn Opcode/IF_ACMPEQ cmp-opcd Object (.emitter arg0)
-                  (.emitter arg1)))))
+                  (.emitter arg1) fctx))))
 
 (defn- icmp ^Insn [^Class arg-type ^CodeEmitter ce0 ^CodeEmitter ce1
-                   ^int cmp-opcd]
+                   ^int cmp-opcd ^long fctx]
   (or (when-some [c0 ^Integer (model/ce-const-value ce0)]
         (when-some [c1 ^Integer (model/ce-const-value ce1)]
           (let [n0 ^int c0, n1 ^int c1]
@@ -175,22 +183,22 @@
                     #_gt 4 (> n0 n1)
                     #_le 5 (<= n0 n1))
                   (entity/insn-boolean))))))
-      (cmp-insn Opcode/IF_ICMPEQ cmp-opcd arg-type ce0 ce1)))
+      (cmp-insn Opcode/IF_ICMPEQ cmp-opcd arg-type ce0 ce1 fctx)))
 
 (def ^:private mtd-util-equiv
   (MethodTypeDesc/of ConstantDescs/CD_boolean
                      ConstantDescs/CD_Object ConstantDescs/CD_Object))
-(defn- equiv ^Insn [^CodeEmitter ce0 ^CodeEmitter ce1]
-  (-> (^CodeEmitter fn [xb line consumed-type _]
-       (when (emit/insn? xb line Object ce0)
-         (when (emit/insn? xb line Object ce1)
+(defn- equiv ^Insn [^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
+  (-> (^CodeEmitter fn [xb consumed-type _]
+       (when (emit/insn? xb fctx Object ce0)
+         (when (emit/insn? xb fctx Object ce1)
            (.invokestatic xb (ClassDesc/of "clojure.lang.Util")
                           "equiv" mtd-util-equiv)
            Boolean/TYPE)))
       (insn/mk-insn Boolean/TYPE)))
 
 (defn- xcmp-signum ^CodeEmitter [^int bytecode ^Class arg-type
-                                 ^CodeEmitter ce0 ^CodeEmitter ce1 ]
+                                 ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
   (let [signum #(object (Integer/signum ^int %))
         c (when-some [c0 (model/ce-const-value ce0)]
             (when-some [c1 (model/ce-const-value ce1)]
@@ -215,20 +223,20 @@
     (if (some? c)
       (entity/mk-constant c Integer/TYPE)
       
-      (^CodeEmitter fn [xb line _ _]
-       (when (emit/insn? xb line arg-type ce0)
-         (when (emit/insn? xb line arg-type ce1)
+      (^CodeEmitter fn [xb _ _]
+       (when (emit/insn? xb fctx arg-type ce0)
+         (when (emit/insn? xb fctx arg-type ce1)
            (classfile/with-operator xb bytecode)
            Integer/TYPE))))))
 
 (letfn [(xcmp-2* ^Insn [^Wrapper wtop ^CodeEmitter ce0 ^CodeEmitter ce1
-                        ^int cmp-opcd] ;negative `cmp-opcd` maps to equiv
+                        ^int cmp-opcd ^long fctx]
           (cond
-            (neg? cmp-opcd)
-            (equiv ce0 ce1)
+            (neg? cmp-opcd)        ;negative `cmp-opcd` maps to equiv!
+            (equiv ce0 ce1 fctx)
             
             (type/computational-int? wtop)
-            (icmp (.class-primitive wtop) ce0 ce1 cmp-opcd)
+            (icmp (.class-primitive wtop) ce0 ce1 cmp-opcd fctx)
 
             :else
             (letfn [(nan-opcode ^int [^int g ^int l]
@@ -237,48 +245,23 @@
                                        1 #_lcmp 148
                                        2 (nan-opcode #_fcmpg 150 #_fcmpl 149)
                                        3 (nan-opcode #_dcmpg 152 #_dcmpl 151))
-                                     (.class-primitive wtop) ce0 ce1)]
-                (icmp Integer/TYPE ce0 entity/emitter-int-zero cmp-opcd)))))
+                                     (.class-primitive wtop) ce0 ce1 fctx)]
+                (icmp Integer/TYPE ce0 entity/emitter-int-zero cmp-opcd fctx)))))
         (xcmp-n-branch-if-false ^void [^Wrapper wtop ^CodeEmitter/1 ce-left
                                        ^CodeEmitter/1 ce-right ^int cmp-opcd
-                                       ^CodeBuilder xb ^int line ^Label target]
+                                       ^CodeBuilder xb ^long fctx ^Label target]
           (loop [i 0]
             (when (< i (alength ce-left))
               (let [cmp (.emitter (xcmp-2* wtop (aget ce-left i)
-                                           (aget ce-right i) cmp-opcd))]
+                                           (aget ce-right i) cmp-opcd fctx))]
                 (cond
                   (identical? entity/emitter-false cmp)
                   (.goto_ xb target)
                   (identical? entity/emitter-true cmp)
                   (recur (inc i))
-                  :else (when (.emit-branch-if-false? ^Branching cmp
-                                                      xb line target)
+                  :else (when (.emit-branch-if-false? ^Branching cmp xb target)
                           (recur (inc i))))))))
-        (load-left ^CodeEmitter/1 [^CodeEmitter/1 ces ^TypeKind tk ^int temp]
-          (let [n (dec (alength ces))
-                ce-left (new CodeEmitter/1 n)]
-            (dotimes [i n]
-              (->> (let [ce (aget ces i)]
-                     (if (or (zero? i) (model/ce-const? ce))
-                       ce
-                       (^CodeEmitter fn [xb line consumed-type _]
-                        (.loadLocal xb tk temp)
-                        consumed-type)))
-                   (aset ce-left i)))
-            ce-left))
-        (load-right ^CodeEmitter/1 [^CodeEmitter/1 ces ^TypeKind tk ^int temp]
-          (let [n (dec (alength ces))
-                ce-right (new CodeEmitter/1 n)]
-            (dotimes [i n]
-              (->> (let [ce (aget ces (inc i))]
-                     (if (or (= i (dec n)) (model/ce-const? ce))
-                       ce
-                       (^CodeEmitter fn [xb line consumed-type _]
-                        (when (emit/insn? xb line consumed-type ce)
-                          (classfile/dup-and-store-local xb tk temp)
-                          consumed-type))))
-                   (aset ce-right i)))
-            ce-right))
+        
 
         (singleton-type? ^boolean [^Insn arg]
           (let [tp (.expr-type arg)]
@@ -286,29 +269,54 @@
                 (.isAssignableFrom java.lang.Enum tp)
                 (type/same-name? clojure.lang.Keyword tp))))]
 
-  (defn xcmp-2 ^Insn [^Wrapper wtop ^Insn arg0 ^Insn arg1 ^int cmp-opcd]
+  (defn xcmp-2 ^Insn [^Wrapper wtop ^Insn arg0 ^Insn arg1 ^int cmp-opcd
+                      ^long fctx]
     (if (and (neg? cmp-opcd)        ;negative `cmp-opcd` maps to equiv
              (or (singleton-type? arg0) (singleton-type? arg1)))
-      (acmp arg0 arg1 cmp-eq)
-      (xcmp-2* wtop (.emitter arg0) (.emitter arg1) cmp-opcd)))
+      (acmp arg0 arg1 cmp-eq fctx)
+      (xcmp-2* wtop (.emitter arg0) (.emitter arg1) cmp-opcd fctx)))
   
-  (defn xcmp-n ^Insn [^Wrapper wtop ^Insns args ^int cmp-opcd]
+  (defn xcmp-n ^Insn [^Wrapper wtop ^Insns args ^int cmp-opcd ^long fctx]
     ;; pre: there are at least two arguments
-    (let [ces (.emitters args)]
-      (-> (reify Branching ;produces dead code if the whole thing is constant
-            (emit-insn* [this xb line consumed-type then-leave?]
-              (-> (conditional this)
-                  (.emit-insn* xb line consumed-type then-leave?)))
-            (emit-branch-if-false? [_ xb line target]
-              (->> (^java.util.function.Consumer fn ^void [^CodeBuilder xb]
-                    (let [tk (.type-kind wtop)
-                          temp (.allocateLocal xb tk)]
-                      (xcmp-n-branch-if-false wtop (load-left ces tk temp)
-                                              (load-right ces tk temp) cmp-opcd
-                                              xb line target)))
-                   (.block xb))
-              true)) ;nested block: must assume control doesn't leave method
-          (insn/mk-insn Boolean/TYPE)))))
+    (letfn [(load-left ^CodeEmitter/1 [^CodeEmitter/1 ces ^int temp]
+              (let [n (dec (alength ces))
+                    ce-left (new CodeEmitter/1 n)]
+                (dotimes [i n]
+                  (->> (let [ce (aget ces i)]
+                         (if (or (zero? i) (model/ce-const? ce))
+                           ce
+                           (^CodeEmitter fn [xb consumed-type _]
+                            (.loadLocal xb (.type-kind wtop) temp)
+                            consumed-type)))
+                       (aset ce-left i)))
+                ce-left))
+            (load-right ^CodeEmitter/1 [^CodeEmitter/1 ces ^int temp]
+              (let [n (dec (alength ces))
+                    ce-right (new CodeEmitter/1 n)]
+                (dotimes [i n]
+                  (->> (let [ce (aget ces (inc i))]
+                         (if (or (= i (dec n)) (model/ce-const? ce))
+                           ce
+                           (^CodeEmitter fn [xb consumed-type _]
+                            (when (emit/insn? xb fctx consumed-type ce)
+                              (classfile/dup-and-store-local xb (.type-kind wtop) temp)
+                              consumed-type))))
+                       (aset ce-right i)))
+                ce-right))]
+      (let [ces (.emitters args)]
+        (-> (reify Branching ;produces dead code if the whole thing is constant
+              (emit-insn* [this xb consumed-type then-leave?]
+                (-> (conditional this fctx)
+                    (.emit-insn* xb consumed-type then-leave?)))
+              (emit-branch-if-false? [_ xb target]
+                (->> (^java.util.function.Consumer fn ^void [^CodeBuilder xb]
+                      (let [temp (.allocateLocal xb (.type-kind wtop))]
+                        (xcmp-n-branch-if-false wtop (load-left ces temp)
+                                                (load-right ces temp)
+                                                cmp-opcd xb fctx target)))
+                     (.block xb))
+                true)) ;nested block: must assume control doesn't leave method
+            (insn/mk-insn Boolean/TYPE))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -389,7 +397,7 @@
                           (doto (new Class/1 1) (aset 0 Object))))
 
 ;; Implements Clojure's idea of a "logically true" expression.
-(defn logical-truth ^Insn [^Insn arg]
+(defn logical-truth ^Insn [^Insn arg ^long fctx]
   (let [arg-tp (insn/expr-type arg)]
     (if (.isPrimitive arg-tp)
       (cond
@@ -403,12 +411,12 @@
         ;; (model/ce-null? (.emitter arg)) ;argument is literal nil
         ;; entity/insn-false
         (.isAssignableFrom arg-tp Boolean) ;argument may be Boolean instance
-        (insn/invoke-member rt-boolean-cast nil (insn/insns-of arg))
+        (insn/invoke-runtime rt-boolean-cast (insn/insns-of arg))
         :else   ;any reference that is a non-Boolean subtype of Object
-        (acmp arg entity/insn-null cmp-ne)))))
+        (acmp arg entity/insn-null cmp-ne fctx)))))
 
 (defn mk-if ^CodeEmitter [^CodeEmitter test
-                          ^CodeEmitter if-true ^CodeEmitter if-false]
+                          ^CodeEmitter if-true ^CodeEmitter if-false ^long fctx]
   (cond
     (identical? entity/emitter-true test)
     if-true
@@ -422,5 +430,6 @@
           (mk-branch Opcode/IF_ICMPEQ cmp-ne Boolean/TYPE ;compare to zero!
                      (doto (new CodeEmitter/1 2)
                        (aset 0 test)      ;the boolean value to test
-                       (aset 1 (.emitter entity/insn-false))))) 
-        (conditional if-true if-false))))
+                       (aset 1 (.emitter entity/insn-false)))
+                     fctx)) 
+        (conditional if-true if-false fctx))))

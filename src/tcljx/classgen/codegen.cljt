@@ -1,8 +1,8 @@
 (ns tcljx.classgen.codegen
   (:require
    (tcljx.data
-    [config :as cfg] [wrong :as wrong] [type :as type] [model :as model]
-    [resolve :as resolve] [reflect :as reflect])
+    [config :as cfg] [wrong :as wrong] [meta :as meta] [type :as type]
+    [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen
     [classfile :as classfile] [runtime :as rt] [emit :as emit] [insn :as insn]
     [entity :as entity] [condgen :as condgen] [switchgen :as switchgen]
@@ -35,12 +35,6 @@
                               (aset 0 clojure.lang.IObj)
                               (aset 1 clojure.lang.IPersistentMap)))))
 
-(defn- with-line-number ^Insn [^Insn insn ^int line]
-  (-> (^CodeEmitter fn [xb _ consumed-type then-leave?]
-       (when (emit/then-leave? xb line consumed-type (.emitter insn) then-leave?)
-         consumed-type))
-      (insn/mk-insn (insn/expr-type insn))))
-
 ;;; ------------------------------------------------------------------------
 
 (defn process-functions! ^void [^ArrayList segment-elements
@@ -61,10 +55,10 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- invoke-single-match ^Insn [^seq ms ^Insn receiver ^Insns args]
+(defn- invoke-single-match ^Insn [^seq ms ^Insn receiver ^Insns args ^long fctx]
   (when (nil? (next ms))
     (when-some [m (first ms)]
-      (insn/invoke-member m receiver args))))
+      (insn/invoke-member m receiver args fctx))))
 
 (defn- info-unresolved-member ^Throwable [^seq ms ^Class owner ^String mnm
                                           ^Insns args ^String label]
@@ -96,10 +90,6 @@
     (if (zero? n)
       insn/empty-insns
       (Insns. (new CodeEmitter/1 n) (new Class/1 n))))
-  (line-number [_ line insn]
-    (cond-> insn ;preserve visibility of constant `insn` by not wrapping it
-      (and (some? line) (not (model/const? insn)))
-      (with-line-number ^int line)))
   
   (new-constant [_ expr-type value]
     (entity/new-constant value expr-type))
@@ -114,33 +104,33 @@
               (aset 1 (.emitter meta)))
             (entity/mk-loadable tp true)
             (insn/mk-insn tp)))
-      (insn/invoke-member literal-with-meta nil (insn/insns-of arg meta))))
+      (insn/invoke-runtime literal-with-meta (insn/insns-of arg meta))))
   (new-vector [this args]
     (let [args ^Insns args]
       (if (entity/loadables? args)
         (.new-loadable this type/vector (.emitters args))
-        (insn/invoke-member literal-vector nil args))))
+        (insn/invoke-runtime literal-vector args))))
   (new-map [this args]
     (let [args ^Insns args]
       (if (entity/loadables? args)
         (.new-loadable this type/map (.emitters args))
-        (insn/invoke-member literal-map nil args))))
+        (insn/invoke-runtime literal-map args))))
   (new-set [this args]
     (let [args ^Insns args]
       (if (entity/loadables? args)
         (.new-loadable this type/set (.emitters args))
-        (insn/invoke-member literal-set nil args))))
+        (insn/invoke-runtime literal-set args))))
   (new-list [this args]
     (let [args ^Insns args]
       (if (entity/loadables? args)
         (.new-loadable this type/list (.emitters args))
-        (insn/invoke-member literal-list nil args))))
-  (new-array [_ array-type dims]
+        (insn/invoke-runtime literal-list args))))
+  (new-array [_ fctx array-type dims]
     (let [dims ^Insns dims]
       (dotimes [i (.length dims)]
         (insn/ensure-assignable Integer/TYPE dims i))
-      (-> (^CodeEmitter fn [xb line _ _]
-           (when (emit/insns? xb line Integer/TYPE (.emitters dims))
+      (-> (^CodeEmitter fn [xb _ _]
+           (when (emit/insns? xb fctx Integer/TYPE (.emitters dims))
              (if (= (.length dims) 1)
                (let [component-type (.getComponentType array-type)]
                  (if (.isPrimitive component-type)
@@ -153,16 +143,16 @@
   
   (progn-expr [_ xs x]
     (insn/progn xs x))
-  (if-expr [_ xs]
+  (if-expr [_ fctx xs]
     (let [xs ^Insns xs
-          tp (condgen/join-type (.expr-types xs) 1 (.length xs))]
-      (-> (condgen/mk-if (.emitter (condgen/logical-truth (.get xs 0)))
-                         (insn/emitter xs 1)
-                         (if (= (.length xs) 3)
-                           (insn/emitter xs 2)
-                           (.emitter insn/insn-empty)))
+          tp (condgen/join-type (.expr-types xs) 1 (.length xs))
+          ce-false (if (= (.length xs) 3)
+                     (insn/emitter xs 2)
+                     (.emitter insn/insn-empty))]
+      (-> (.emitter (condgen/logical-truth (.get xs 0) fctx))
+          (condgen/mk-if (insn/emitter xs 1) ce-false fctx)
           (insn/mk-insn tp))))
-  (case-expr [this select guards paths-and-default error-contexts]
+  (case-expr [this select guards paths-and-default fctx error-contexts]
     (let [select-tp (switchgen/adjust-numeric-type (insn/expr-type select))
           n-paths (.length paths-and-default)
           join-tp (-> (Insns/.expr-types paths-and-default)
@@ -173,44 +163,46 @@
                          ;; idea: dup the select, consume it in the
                          ;; error path, and pop it immediately after
                          ;; the end-of-switch label.
-                         (->> (switchgen/invoke-no-matching-clause select)
-                              (.throw-expr this))
+                         (->> (switchgen/invoke-no-matching-clause select fctx)
+                              (.throw-expr this fctx))
                          (.get paths-and-default (dec n-paths)))]
-      (switchgen/validate-guards select-tp guards error-contexts)
+      (switchgen/validate-guards select-tp guards fctx error-contexts)
       (-> (if (switchgen/switch-on-int? select-tp)
             (switchgen/switch-int (.emitter select) guards
                                   (Insns/.emitters paths-and-default)
-                                  (.emitter default-path))
+                                  (.emitter default-path) fctx)
             (switchgen/switch-map (.emitter select) guards
                                   (Insns/.emitters paths-and-default)
-                                  (.emitter default-path)))
+                                  (.emitter default-path) fctx))
           (insn/mk-insn join-tp))))
-  (invoke [this form inv args]
-    (.invoke* inv form args))
+  (invoke [this fctx form inv args]
+    (.invoke* inv fctx form args))
   
   (new-parameter [_ param-no name type]
     (Insn. (entity/parameter-binding param-no name type) Void/TYPE))
-  (new-local [_ opt-type name init-or-binding]
+  (new-local [_ fctx opt-type name init-or-binding]
     (when opt-type    ;presence of type tag means this is not an alias
       (insn/ensure-assignable opt-type init-or-binding))
-    (insn/mk-insn (entity/local-binding opt-type name init-or-binding) Void/TYPE))
-  (block-let [_ bindings body]
+    (-> (entity/local-binding opt-type name init-or-binding fctx)
+        (insn/mk-insn Void/TYPE)))
+  (block-let [_ fctx bindings body]
     (let [block (insn/progn bindings body)]
-      (-> (^CodeEmitter fn [xb line consumed-type then-leave?]
+      (-> (^CodeEmitter fn [xb consumed-type then-leave?]
            ;; FIXME... emit lineNumber here?
            (.block xb (^Consumer fn ^void [^CodeBuilder xb]
                        ;; FIXME... or emit lineNumber here?
-                       (emit/then-leave? xb line consumed-type (.emitter block) then-leave?)))
-           (when-not then-leave?     ;can the then-leave? above return true?
+                       (emit/then-leave? xb fctx consumed-type
+                                         (.emitter block) then-leave?)))
+           (when-not then-leave? ;can the then-leave? above return true?
              consumed-type))
           (insn/mk-insn (insn/expr-type block)))))
-  (try-catch-finally [_ body+catches catch-types finally]
+  (try-catch-finally [_ fctx body+catches catch-types finally]
     (let [insns ^Insns body+catches
           tp (condgen/join-type (.expr-types insns) 0 (.length insns))]
       (-> (if (some? finally)
             (trygen/try-catch-finally (.emitters insns) catch-types
-                                      (.emitter finally))
-            (trygen/try-catch (.emitters insns) catch-types))
+                                      (.emitter finally) fctx)
+            (trygen/try-catch (.emitters insns) catch-types fctx))
           (insn/mk-insn tp))))
   
   (new-function [this mangled-name arity-types arity-bodies arity-redirections]
@@ -231,7 +223,7 @@
         (.new-constant this tinyclj.lang.StaticFn
                        (methodgen/static-fn-desc owner fn-literal)))))
   
-  (type-cast [this target-type arg]
+  (type-cast [this fctx target-type arg]
     (let [arg-tp (insn/expr-type arg)]
       (letfn [(wr-info-invalid-cast ^Throwable []
                 (wrong/wr-info (str "cannot cast to " (wrong/q-type target-type)
@@ -242,14 +234,15 @@
                           (.isAssignableFrom ref-target arg-tp) ;empty
                           (.isAssignableFrom arg-tp ref-target) ;checkcast
                           (type/poly-reference? arg-tp)) ;cast from nil
-                    (insn/cast-to ref-arg ref-target)
+                    (insn/cast-to ref-arg ref-target fctx)
                     (throw (wr-info-invalid-cast)))))
-              (box-arg-into ^Insn [^Class prim-tp]
-                (insn/cast-to arg (.class-reference (type/of prim-tp))))]
+              (boxed-arg ^Insn [^Class prim-tp]
+                (insn/cast-to arg (.class-reference (type/of prim-tp))
+                              meta/fctx-none))]
         (cond
           (or (type/polymorphic? target-type) ;force void context
               (type/polymorphic? arg-tp))
-          (-> arg (insn/cast-to target-type))
+          (-> arg (insn/cast-to target-type fctx))
 
           (type/same? target-type arg-tp)
           arg
@@ -257,69 +250,70 @@
           (.isPrimitive target-type)
           (if (.isPrimitive arg-tp)
             (throw (wr-info-invalid-cast)) ;no cast between different primitives
-            (-> (box-arg-into target-type) (insn/cast-to target-type)))
+            (-> (boxed-arg target-type) (insn/cast-to target-type fctx)))
           
           ;; here holds: `target-type` is reference
           (.isPrimitive arg-tp)
-          (-> (box-arg-into arg-tp) (checkcast target-type))
+          (-> (boxed-arg arg-tp) (checkcast target-type))
           
           ;; here holds: both `target-type` and `arg-tp` are reference
           :else (-> arg (checkcast target-type))))))
-  (invoke-constructor [_ owner args]
+  (invoke-constructor [_ fctx owner args]
     (let [args ^Insns args
           mnm resolve/constructor-name
           ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
-      (or (invoke-single-match ms nil args)
+      (or (invoke-single-match ms nil args fctx)
           (throw (info-unresolved-member ms owner mnm args "constructor")))))
-  (invoke-static-member [_ invoke-member-if-field? owner mnm args]
+  (invoke-static-member [_ fctx invoke-member-if-field? owner mnm args]
     (let [args ^Insns args
           ms (resolve/members-by-arg-types true owner mnm (.expr-types args))]
       ;; (prn :et (seq (.expr-types args)))
       ;; (prn :ms (seq ms))
       ;; (prn :invoke-member-if-field? invoke-member-if-field?)
-      (or (when-some [insn (invoke-single-match ms nil args)]
+      (or (when-some [insn (invoke-single-match ms nil args fctx)]
             (if (and invoke-member-if-field?
                      (instance? Field (.member ^Match (first ms))))
               (assert false "not yet implemented")
               insn))
           (throw (info-unresolved-member ms owner mnm args "static")))))
-  (invoke-virtual-member [_ receiver mnm args]
+  (invoke-virtual-member [_ fctx receiver mnm args]
     (let [receiver ^Insn receiver
           args ^Insns args
           owner (insn/expr-type receiver)
           ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
-      (or (invoke-single-match ms receiver args)
+      (or (invoke-single-match ms receiver args fctx)
           (throw (info-unresolved-member ms owner mnm args "virtual")))))
 
-  (get-static-field [_ owner mnm]
+  (get-static-field [_ fctx owner mnm]
     (let [args insn/empty-insns
           ms (resolve/field-exact nil true owner mnm resolve/empty-class-array)]
-      (or (invoke-single-match ms nil args)
+      (or (invoke-single-match ms nil args fctx)
           (throw (info-unresolved-member ms owner mnm args "static")))))
-  (get-virtual-field [_ receiver mnm]
+  (get-virtual-field [_ fctx receiver mnm]
     (let [receiver ^Insn receiver
           args insn/empty-insns
           owner (insn/expr-type receiver)
           ms (resolve/field-exact nil false owner mnm (.expr-types args))]
-      (or (invoke-single-match ms receiver args)
+      (or (invoke-single-match ms receiver args fctx)
           (throw (wrong/wr-info (str "no virtual field matching "
                                      (wrong/q-as-symbol owner mnm)))))))
 
-  (instanceof-expr [_ type arg]
+  (instanceof-expr [_ fctx type arg]
     (let [arg ^Insn arg]
-      (-> (^CodeEmitter fn [xb line _ _]
-           (when (insn/emit-insn-logical? xb arg)
-             (.instanceOf xb (reflect/describe-class type))
+      (-> (^CodeEmitter fn [xb _ _]
+           (when (emit/insn? xb meta/fctx-none Object (.emitter arg))
+             (-> (emit/with-line-number xb fctx)
+                 (.instanceOf (reflect/describe-class type)))
              Boolean/TYPE))
           (insn/mk-insn Boolean/TYPE))))
-  (throw-expr [_ arg]
+  (throw-expr [_ fctx arg]
     (let [arg ^Insn arg]
       (if (.isAssignableFrom Throwable (insn/logical-type arg))
-        (-> (^CodeEmitter fn [xb line _ _]
-             (when (emit/insn? xb line Throwable (.emitter arg))
-               (-> xb (emit/line-number line) (.athrow))
-               nil))                  ;type seen by the code generator
-            (insn/mk-insn Void/TYPE)) ;type seen by the parser
+        (-> (^CodeEmitter fn [xb _ _]
+             (when (insn/emit-insn-logical? xb arg)
+               (-> xb (emit/with-line-number fctx) (.athrow))
+               nil))         ;operand type reported when emitting code
+            (insn/mk-insn Void/TYPE))   ;type used while parsing
         (throw (insn/info-type "expect instance of Throwable" arg)))))
   
   (mk-expr [_ form]

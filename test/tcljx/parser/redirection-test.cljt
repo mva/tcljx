@@ -7,7 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.redirection-test
   (:require
-   (tcljx.data [model :as model])
+   (tcljx.data [meta :as meta] [model :as model])
    (tcljx.parser [interop :as interop] [fn :as fn])
    [tcljx.classgen.classdata :as classdata]
    [tcljx.alpha.ptest :refer :all])
@@ -21,7 +21,7 @@
               (lookup-class [_ nm]
                 (get {"clojure.lang.ISeq" clojure.lang.ISeq
                       "clojure.lang.RT" clojure.lang.RT} nm)))
-        at (interop/parse-arity-type rsv arity-sig body-form)]
+        at (interop/parse-arity-type rsv meta/fctx-initial arity-sig body-form)]
     (when-some [mhd (fn/redirection rsv at body-form)]
       (classdata/constant-desc mhd nil))))
 

@@ -92,17 +92,18 @@
 ;;; ------------------------------------------------------------------------
 
 (defn parse-arity-body ^Expr [^Scope scope ^seq error-context
-                              ^Exprs param-bindings ^seq body]
+                              ^Exprs param-bindings ^long fctx ^seq body]
   (.progn-expr (.expr-factory scope) param-bindings
                (-> (context/with-local-bindings scope param-bindings)
-                   (context/parse-progn error-context body))))
+                   (context/parse-progn error-context fctx body))))
 
-(defn parse-fn* ^Expr [^Scope scope [_ fn-nm paramv & body :as ^seq form]]
+(defn parse-fn* ^Expr [^Scope scope ^long fctx
+                       [_ fn-nm paramv & body :as ^seq form]]
   (let [fn-nm (syntax/simple-symbol-str fn-nm)
         mangled-nm (context/pick-unique-name scope fn-nm)
-        at (interop/parse-arity-type (.resolver scope) paramv form)
+        at (interop/parse-arity-type (.resolver scope) fctx paramv form)
         pbnds (model/parameter-bindings scope at)
-        code (parse-arity-body scope form pbnds body)
+        code (parse-arity-body scope form pbnds fctx body)
         redir (when (nil? (next body))
                 (let [form (first body)]
                   (when (and (and  (seq? form)) (nil? (interop/tag-of form)))

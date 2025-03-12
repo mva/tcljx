@@ -20,12 +20,22 @@
           m'))
       m)))
 
-;; ;;; Copy `form`'s :line to `x` if it has no line number of its own.
-;; (defn with-line [x form]
-;;   (let [m (meta x)]
-;;     (if (and (seq? x) (not (contains? m :line)))
-;;       (if-some [line (-> form (meta) :line)]
-;;         (with-meta x (assoc m :line line))
-;;         x)
-;;       x)))
+;;; ------------------------------------------------------------------------
 
+(def fctx-initial 0l)
+(def fctx-none 0l)           ;used as placeholder for "no line number"
+
+(defn fctx-line ^int [^long fctx]
+  (int fctx))
+
+(defn- mk-fctx ^long [^int line]
+  line)
+
+(defn update-line [^long fctx ^int line]
+  (mk-fctx line))
+(defn update-line-from-meta ^long [^long fctx form-meta]
+  (if (some? form-meta)
+    (if-some [line (.valAt ^map form-meta :line nil)]
+      (update-line fctx line)
+      fctx)
+    fctx))

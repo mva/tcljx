@@ -68,13 +68,15 @@
 ;;; If a `WrongInfo` is decorated with a ex-cause value, then it
 ;;; is assumed that this Throwable originates outside of the control
 ;;; of the compiler (e.g. during macro expansion).
+(defn push-line-number* ^WrongInfo [^WrongInfo ex ^int line]
+  (cond-> ex
+    (and (pos? line) (not (contains? (wr-data ex) :form/line-of)))
+    (update-wr-data assoc :form/line-of line)))
 (defn push-line-number ^WrongInfo [^WrongInfo ex seq-form-or-line]
   (let [ln (if (seq? seq-form-or-line)
              (meta/line-of seq-form-or-line)
              ^Integer seq-form-or-line)]
-    (cond-> ex
-      (and (some? ln) (not (contains? (wr-data ex) :form/line-of)))
-      (update-wr-data assoc :form/line-of ln))))
+    (cond-> ex (some? ln) (push-line-number* ^int ln))))
 
 ;; (defn rethrow-with-line-number ^void [^WrongInfo e ^Integer ln]
 ;;   (throw (push-line-number e ln)))
@@ -202,24 +204,33 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn decorate-with-line-number* ^Throwable [^Throwable ex seq-form-or-line]
+(defn decorate-with-fctx ^Throwable [^Throwable ex ^long fctx]
   (letfn [(no-class-def-found ^WrongInfo [^Throwable e]
             (let [nm (symbol nil (.replace (ex-message e) \/ \.))]
               (wr-info (str "failed to load class " (q nm)) {} e)))]
-    (condp instance? ex
-      NoClassDefFoundError
-      (-> ex (no-class-def-found) (push-line-number seq-form-or-line))
-      WrongInfo
-      (-> ex (push-line-number seq-form-or-line))
-      #_else ex)))
+    (let [line (meta/fctx-line fctx)]
+      (condp instance? ex
+        NoClassDefFoundError
+        (-> ex (no-class-def-found) (push-line-number* line))
+        WrongInfo
+        (-> ex (push-line-number* line))
+        #_else ex))))
 
-(defmacro with-line-context [seq-form-or-line & body]
-  `(try
-     ~@body
-     (catch Throwable ex#
-       (throw (decorate-with-line-number* ex# ~seq-form-or-line)))))
+(defmacro with-line-from-meta [[fctx-sym form-meta :as binding] & body]
+  (assert (vector? binding))
+  (assert (symbol? fctx-sym))
+  `(let [~fctx-sym (meta/update-line-from-meta ~fctx-sym ~form-meta)]
+     (try
+       ~@body
+       (catch Throwable ex#
+         (throw (decorate-with-fctx ex# ~fctx-sym))))))
 
-;; ;;; ------------------------------------------------------------------------
+(defmacro with-line-from-list [[fctx-sym seq-form :as binding] & body]
+  (assert (vector? binding))
+  (assert (symbol? fctx-sym))
+  `(with-line-from-meta ~(vector fctx-sym `(meta ~seq-form)) ~@body))
+
+;;; ------------------------------------------------------------------------
 
 ;; (defn check-argc
 ;;   ([^int n form]

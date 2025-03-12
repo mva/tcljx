@@ -1,8 +1,8 @@
 (ns tcljx.classgen.primitive
   (:require
    (tcljx.data
-    [config :as cfg] [type :as type] [resolve :as resolve] [reflect :as reflect]
-    [model :as model] [wrong :as wrong])
+    [config :as cfg] [meta :as meta] [type :as type] [resolve :as resolve]
+    [reflect :as reflect] [model :as model] [wrong :as wrong])
    (tcljx.classgen
     [classfile :as classfile] [emit :as emit] [insn :as insn] [entity :as entity]
     [runtime :as rt] [condgen :as condgen])
@@ -42,15 +42,15 @@
             (-> (type/convert-from-constant target-type c)
                 (entity/new-constant target-type))))]
 
-  (defn- convert-to-primitive ^Insn [^Insn arg ^Class target-type]
+  (defn- convert-to-primitive ^Insn [^Insn arg ^Class target-type ^long fctx]
     (or (when-some [c (model/const-value arg)]
           (fold-cast-from target-type c))
-        (insn/cast-to arg target-type)))
+        (insn/cast-to arg target-type fctx)))
   
   (defn- mk-convert-to-primitive ^Invocable [^Wrapper target]
     (let [target-type (.class-primitive target)
           numeric? (.numeric? target)]
-      (^Invocable fn [form args]
+      (^Invocable fn [fctx form args]
        (let [arg (-> (take-arg form args) (insn/cast-to-logical))
              arg-type (insn/expr-type arg)]
          (cond
@@ -58,28 +58,28 @@
            arg      ;elide conversion from primitive to same primitive
            
            (.isPrimitive arg-type)
-           (convert-to-primitive arg target-type)
+           (convert-to-primitive arg target-type fctx)
            
            :else           ;here holds: `arg-type` is a reference type
            (insn/cast-to (cond-> arg
                            (and numeric?
                                 (not (.isAssignableFrom Number arg-type)))
-                           (insn/cast-to Number))
-                         target-type))))))
+                           (insn/cast-to Number fctx))
+                         target-type fctx))))))
 
   (def ^:private convert-to-logical-truth
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (-> (take-arg form args)
          (insn/cast-to-logical)
-         (condgen/logical-truth))))
+         (condgen/logical-truth fctx))))
 
   (def ^:private convert-to-object
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [arg (-> (take-arg form args) (insn/cast-to-logical))
            arg-tp (insn/expr-type arg)]
        (cond-> arg
          (.isPrimitive arg-tp)
-         (insn/cast-to (.class-reference (type/of arg-tp))))))))
+         (insn/cast-to (.class-reference (type/of arg-tp)) fctx))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -222,20 +222,20 @@
               (wrong/wr-info)))
         
         (op-2* ^CodeEmitter [^int base-bytecode ^int opcd0 ^int opcd1
-                             ^CodeEmitter ce0 ^CodeEmitter ce1]
-          (^CodeEmitter fn [xb line _ _]
+                             ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
+          (^CodeEmitter fn [xb _ _]
            (let [tp0 (op-type opcd0), tp1 (op-type opcd1)
                  bytecode (+ base-bytecode opcd0)]
-             (when (emit/insn? xb line tp0 ce0)
-               (when (or (nil? ce1) (emit/insn? xb line tp1 ce1))
+             (when (emit/insn? xb fctx tp0 ce0)
+               (when (or (nil? ce1) (emit/insn? xb fctx tp1 ce1))
                  (when (<= #_idiv 108 bytecode #_drem 115)
                    ;; [il]div and [il]rem can raise a division by zero
                    ;; exception, so provide a line number for div & rem
-                   (emit/line-number xb line))
+                   (emit/with-line-number xb fctx))
                  (classfile/with-operator xb bytecode)
                  tp0)))))
         (op-2 ^CodeEmitter [^OpSpec op ^int opcd0 ^int opcd1
-                            ^CodeEmitter ce0 ^CodeEmitter ce1]
+                            ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
           (let [c0 (model/ce-const-value ce0)
                 c1 (model/ce-const-value ce1)]
             (cond
@@ -246,61 +246,62 @@
               (and (some? c0) (some? c1))
               (folded-constant op opcd0 c0 c1)
               :else
-              (op-2* (-> op .base-opcode .bytecode) opcd0 opcd1 ce0 ce1))))
-        (op-n ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter/1 ces]
+              (op-2* (-> op .base-opcode .bytecode) opcd0 opcd1 ce0 ce1 fctx))))
+        (op-n ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter/1 ces ^long fctx]
           (loop [acc (aget ces 0), i 1]
             (if (< i (alength ces))
-              (recur (op-2 op opcd opcd acc (aget ces i)) (inc i))
+              (recur (op-2 op opcd opcd acc (aget ces i) fctx) (inc i))
               acc)))
 
-        (unary ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter ce]
+        (unary ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter ce ^long fctx]
           (condp identical? (.base-opcode op)
             Opcode/ISUB
             (if-some [c (model/ce-const-value ce)]
               (folded-constant op opcd (.right-identity op) c)
-              (op-2* (.bytecode Opcode/INEG) opcd opcd ce nil))
+              (op-2* (.bytecode Opcode/INEG) opcd opcd ce nil fctx))
             Opcode/IDIV
             (if-some [c (model/ce-const-value ce)]
               (folded-constant op opcd (.right-identity op) c)
-              (op-2 op opcd opcd (.emitter entity/insn-int-one) ce))
+              (op-2 op opcd opcd (.emitter entity/insn-int-one) ce fctx))
             #_else ce))
-        (binary-numeric-insn ^Insn [^OpSpec op form ^Insns args]
+        (binary-numeric-insn ^Insn [^OpSpec op form ^Insns args ^long fctx]
           (let [args (take-args form args 2)
                 wop-type (top-numeric-of form args)
                 opcd (.computational-id wop-type)]
-            (-> (op-2 op opcd opcd (insn/emitter args 0) (insn/emitter args 1))
+            (-> (op-2 op opcd opcd (insn/emitter args 0) (insn/emitter args 1)
+                      fctx)
                 (insn/mk-insn (.class-primitive wop-type)))))
 
-        (emit-array-gets ^Class [^CodeBuilder xb ^int line ^Insns args ^int n]
+        (emit-array-gets ^Class [^CodeBuilder xb ^long fctx ^Insns args ^int n]
           (let [atp (insn/expr-type args 0)]
-            (when (emit/insn? xb line atp (insn/emitter args 0))
+            (when (emit/insn? xb fctx atp (insn/emitter args 0))
               (loop [tp atp, i 1]
                 (if (<= i n)
-                  (when (emit/insn? xb line Integer/TYPE (insn/emitter args i))
+                  (when (emit/insn? xb fctx Integer/TYPE (insn/emitter args i))
                     (let [ctp (.componentType tp)]
-                      (.lineNumber xb line)
+                      (emit/with-line-number xb fctx)
                       (.arrayLoad xb (TypeKind/from ctp))
                       (recur ctp (inc i))))
                   tp)))))]
   
   (defn mk-nary-numeric ^Invocable [^OpSpec op]
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [args ^Insns args
            wop-type (top-type-of op form args)
            op-type (.class-primitive wop-type)]
        (-> (case (.length args)
              0 (entity/mk-constant (.right-identity op) op-type)
-             1 (unary op (.computational-id wop-type) (insn/emitter args 0))
-             #_else (op-n op (.computational-id wop-type) (.emitters args)))
+             1 (unary op (.computational-id wop-type) (insn/emitter args 0) fctx)
+             #_else (op-n op (.computational-id wop-type) (.emitters args) fctx))
            (insn/mk-insn op-type)))))
 
   (defn mk-binary-numeric ^Invocable [^OpSpec op]
-    (^Invocable fn [form args]
-     (binary-numeric-insn op form args)))
+    (^Invocable fn [fctx form args]
+     (binary-numeric-insn op form args fctx)))
   
   (defn mk-binary-xdiv-integral [^OpSpec op] ;aka 'quot
-    (^Invocable fn [form args]
-     (let [insn (binary-numeric-insn op form args)
+    (^Invocable fn [fctx form args]
+     (let [insn (binary-numeric-insn op form args fctx)
            op-type (.expr-type insn)]
        ;; FIXME... this does not work if the result is out of range of
        ;; long; maybe better: truncate with something along the line of
@@ -310,23 +311,23 @@
        ;; ceil/floor variant if out of range)
        (cond-> insn
          (or (identical? Float/TYPE op-type) (identical? Double/TYPE op-type))
-         (-> (convert-to-primitive Long/TYPE)
-             (convert-to-primitive op-type))))))
+         (-> (convert-to-primitive Long/TYPE fctx)
+             (convert-to-primitive op-type fctx))))))
 
   (def unary-bit-not
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [arg (take-arg form args)
            wop-type (integral-type form args 0)
            opcd (.computational-id wop-type)]
        (-> (op-2 (bitset-op Opcode/IXOR entity/insn-int-zero)
-                 opcd opcd (.emitter arg) (.emitter entity/insn-int-m1))
+                 opcd opcd (.emitter arg) (.emitter entity/insn-int-m1) fctx)
            (insn/mk-insn (.class-primitive wop-type))))))
 
   ;; FIXME... Only used for shifted-one.  Better alternative: add
   ;; primitive implementations of bit-set, bit-clear, bit-flip, and
   ;; bit-test.  Then get rid of shifted-one and xdefault.
   (def unary-xdefault 
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [arg (take-arg form args)
            tp (.expr-type arg)]
        (cond
@@ -336,16 +337,16 @@
   
   (defn mk-binary-shift ^Invocable [^Opcode base-opc]
     (let [op (OpSpec. type/int type/long base-opc nil 0)]
-      (^Invocable fn [form args]
+      (^Invocable fn [fctx form args]
        (let [args (take-args form args 2)
              warg0 (integral-type form args 0)
              warg1 (integer-type form args 1)]
          (-> (op-2 op (.computational-id warg0) (.computational-id warg1)
-                   (insn/emitter args 0) (insn/emitter args 1))
+                   (insn/emitter args 0) (insn/emitter args 1) fctx)
              (insn/mk-insn (.class-primitive warg0)))))))
   
   (defn mk-nary-compare ^Invocable [^int cmp-opcd]
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [args ^Insns args
            wtop (or (when (= cmp-opcd condgen/cmp-eq)
                       (type/of-all (.expr-types args)))
@@ -353,50 +354,50 @@
        (case (.length args)
          0 (throw (wrong/wr-info "missing argument"))
          1 (insn/progn args entity/insn-true) ;FIXME... drop unary?
-         2 (condgen/xcmp-2 wtop (.get args 0) (.get args 1) cmp-opcd)
-         #_ else (condgen/xcmp-n wtop args cmp-opcd)))))
+         2 (condgen/xcmp-2 wtop (.get args 0) (.get args 1) cmp-opcd fctx)
+         #_ else (condgen/xcmp-n wtop args cmp-opcd fctx)))))
 
   (def nary-equiv
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [args ^Insns args]
        (if (type/all-monomorphic-primitive? (.expr-types args))
          ;; all arguments are non-void primitive: fall back to number compare
-         (.invoke* (mk-nary-compare condgen/cmp-eq) form args)
+         (.invoke* (mk-nary-compare condgen/cmp-eq) fctx form args)
          
          (case (.length args)
            0 (throw (wrong/wr-info "missing argument"))
            1 (insn/progn args entity/insn-true) ;FIXME... drop unary?
-           2 (condgen/xcmp-2 nil (.get args 0) (.get args 1) -1)
-           #_ else (condgen/xcmp-n nil args -1))))))
+           2 (condgen/xcmp-2 nil (.get args 0) (.get args 1) -1 fctx)
+           #_ else (condgen/xcmp-n nil args -1 fctx))))))
   
   (def binary-identical
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [args (take-args form args 2)]
        (if (type/any-primitive? (.expr-types args))
          (throw (info-two-reference-args form args))
-         (condgen/acmp (.get args 0) (.get args 1) condgen/cmp-eq)))))
+         (condgen/acmp (.get args 0) (.get args 1) condgen/cmp-eq fctx)))))
 
   (def array-length
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [atp (array-type-at-0 form args)
            arg (take-arg form args)]
-       (-> (^CodeEmitter fn [xb line _ _]
-            (when (emit/insn? xb line atp (.emitter arg))
+       (-> (^CodeEmitter fn [xb _ _]
+            (when (emit/insn? xb fctx atp (.emitter arg))
               (.arraylength xb)
               Integer/TYPE))
            (insn/mk-insn Integer/TYPE)))))
   (def nary-array-load
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [atp (array-type-at-0 form args)
            args (take-args form args 2 (inc (type/type-dimensions atp)))
            n (dec (.length args))]
        (dotimes [i n]
          (integer-type form args (inc i)))
-       (-> (^CodeEmitter fn [xb line _ _]
-            (emit-array-gets xb line args n))
+       (-> (^CodeEmitter fn [xb _ _]
+            (emit-array-gets xb fctx args n))
            (insn/mk-insn (type/component-type atp n))))))
   (def nary-array-store
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [atp (array-type-at-0 form args)
            args (take-args form args 3 (+ (type/type-dimensions atp) 2))
            n-gets (- (.length args) 3)
@@ -405,25 +406,25 @@
        (dotimes [i (inc n-gets)]
          (integer-type form args (inc i)))
        (insn/ensure-assignable tp-set args (dec (.length args)))
-       (-> (^CodeEmitter fn [xb line consumed-type _]
-            (when-some [atp (emit-array-gets xb line args n-gets)]
-              (when (emit/insn? xb line Integer/TYPE
+       (-> (^CodeEmitter fn [xb consumed-type _]
+            (when-some [atp (emit-array-gets xb fctx args n-gets)]
+              (when (emit/insn? xb fctx Integer/TYPE
                                 (insn/emitter args (inc n-gets)))
-                (when (emit/insn? xb line tp-set ce-set)
+                (when (emit/insn? xb fctx tp-set ce-set)
                   (let [void? (identical? Void/TYPE consumed-type)
                         tk (TypeKind/from tp-set)]
-                    (.lineNumber xb line)
+                    (emit/with-line-number xb fctx)
                     (when-not void?
                       (if (= (.slotSize tk) 1) (.dup_x2 xb) (.dup2_x2 xb)))
                     (.arrayStore xb tk)
                     (if void? Void/TYPE tp-set))))))
            (insn/mk-insn tp-set)))))
   (def array-clone
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [atp (array-type-at-0 form args)
            arg (take-arg form args)]
-       (-> (^CodeEmitter fn [xb line _ _]
-            (when (emit/insn? xb line atp (.emitter arg))
+       (-> (^CodeEmitter fn [xb _ _]
+            (when (emit/insn? xb fctx atp (.emitter arg))
               (let [cld (reflect/describe-class atp)]
                 (.invokevirtual xb cld "clone"
                                 (MethodTypeDesc/of ConstantDescs/CD_Object))
@@ -432,9 +433,10 @@
            (insn/mk-insn atp)))))
 
   (def unary-not
-    (^Invocable fn [form args]
+    (^Invocable fn [fctx form args]
      (let [arg (take-arg form args)]
-       (-> (condgen/negation (.emitter (condgen/logical-truth arg)))
+       (-> (.emitter (condgen/logical-truth arg fctx))
+           (condgen/negation fctx)
            (insn/mk-insn Boolean/TYPE))))))
 
 ;;; ------------------------------------------------------------------------
@@ -446,7 +448,7 @@
 (def ^:private mtd-String-Object-String
   (MethodTypeDesc/of ConstantDescs/CD_String
                      ConstantDescs/CD_Object ConstantDescs/CD_String))
-(letfn [(prepare-concat-args ^Insns [^Insns args]
+(letfn [(prepare-concat-args ^Insns [^Insns args ^long fctx]
           ;; arguments are converted to their logical types and, if
           ;; they are of reference type, are then passed through
           ;; a "nil to empty string" filter
@@ -458,8 +460,8 @@
                   (.set args' i
                         (if (or (.isPrimitive tp) (model/loadable? insn))
                           insn ;note: *all* constants are passed through
-                          (-> (^CodeEmitter fn [xb line _ _]
-                               (when (emit/insn? xb line tp (.emitter insn))
+                          (-> (^CodeEmitter fn [xb _ _]
+                               (when (emit/insn? xb fctx tp (.emitter insn))
                                  (-> (.ldc xb "")
                                      (.invokestatic cd-Objects "toString"
                                                     mtd-String-Object-String))
@@ -470,7 +472,8 @@
         (consts-to-lces ^java.util.List [^ConstantPoolBuilder cpb insns]
           (for [^Insn insn insns]
             (Loadable/.loadable-entry (.emitter insn) cpb true)))
-        (insn-str ^Insn [^String rstr ^Insns inv-args ^seq const-args]
+        (insn-str ^Insn [^String rstr ^Insns inv-args ^seq const-args
+                         ^long fctx]
           (let [recipe (entity/new-constant rstr String)]
             (cond
               (and (empty? const-args) (.empty? inv-args))
@@ -484,7 +487,7 @@
               (first const-args)
 
               :else
-              (-> (^CodeEmitter fn [xb line _ _]
+              (-> (^CodeEmitter fn [xb _ _]
                    (let [cpb (.constantPool xb)
                          atypes (.expr-types inv-args) ;only logical types
                          mhe (.methodHandleEntry cpb rt/bsm-concat)
@@ -493,21 +496,21 @@
                          mtd (insn/mtd-of-poly String atypes)
                          nat (.nameAndTypeEntry cpb ConstantDescs/DEFAULT_NAME
                                                 mtd)]
-                     (when (emit/typed-insns? xb line atypes
+                     (when (emit/typed-insns? xb fctx atypes
                                               (.emitters inv-args))
-                       (-> (emit/line-number xb line)
+                       (-> (emit/with-line-number xb fctx)
                            (.invokedynamic (.invokeDynamicEntry cpb bsm nat)))
                        String)))
                   (insn/mk-insn String)))))]
   
   (def string-concat
-    (^Invocable fn [form args]
-     (let [args (prepare-concat-args args)]
+    (^Invocable fn [fctx form args]
+     (let [args (prepare-concat-args args fctx)]
        (loop [rparts nil, dyn-args nil, const-args nil, i 0]
          (if (= i (.length args))
            (insn-str (str/join "" (reverse rparts))
                      (insn/insns-of* (reverse dyn-args))
-                     (reverse const-args))
+                     (reverse const-args) fctx)
            
            (let [x ^Insn (.get args i)]
              (if (model/loadable? x)

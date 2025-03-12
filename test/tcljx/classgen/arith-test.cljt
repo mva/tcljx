@@ -169,6 +169,8 @@
   ;; https://bugs.openjdk.org/browse/JDK-8318446 (via
   ;; https://www.youtube.com/watch?v=xFb_LcapbXw&t=1457s) -- *if* they
   ;; match on *exactly* the source code level instruction pattern.
+  ;; But https://bugs.openjdk.org/browse/JDK-8347405 suggests that
+  ;; plain "offset" and "v" may work as well.
   (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
          (asm-expr [^int x] (+ x 0))))
   (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]

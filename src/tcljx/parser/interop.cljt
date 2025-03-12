@@ -49,8 +49,9 @@
 
 ;;; If `paramv` is tagged with `auto-return-type`, then the arity's
 ;;; return type is set to the temporary `auto-return-marker`.
-(defn parse-arity-type ^ArityType [^Resolver rsv paramv ^seq error-context]
-  (wrong/with-line-context error-context
+(defn parse-arity-type ^ArityType [^Resolver rsv ^long fctx paramv
+                                   ^seq error-context]
+  (wrong/with-line-from-list [fctx error-context]
     (let [paramv (syntax/vector paramv)
           n (count paramv)
           ptypes (new Class/1 n)
