@@ -571,12 +571,38 @@
         (primitive ">=" (mk-nary-compare condgen/cmp-ge))
         (primitive ">" (mk-nary-compare condgen/cmp-gt))
         (primitive "<=" (mk-nary-compare condgen/cmp-le))
-        
+
         (primitive "alength" array-length)
         (primitive "aget" nary-array-load)
         (primitive "aset" nary-array-store)
         (primitive "aclone" array-clone)
 
+        ;; FIXME... Add dedicated implementations of "and"/"or", both
+        ;; for the "all boolean" case, as well as the unconstrained
+        ;; arguments version?  Experience with nary compare shows that
+        ;; they can be encoded in a more concise way.  These must be
+        ;; special forms, because it is possible to use recur in tail
+        ;; position.
+        ;;
+        ;; The "all boolean" variant should be able to encode the
+        ;; result via control flow, in which case no temporary storage
+        ;; is required.  Small difference from compare: the general
+        ;; implementation needs to deal with arguments of a common
+        ;; join type, similar to cond.  Still, it might be possible to
+        ;; use a single temporary local of join type, adapting tested
+        ;; values to the join type *before* computing their logical
+        ;; truth value.  Small wrinkle: `logical-truth` should work on
+        ;; the basis of the original type of the value, not the join
+        ;; type of the temporary local.  But this may be solved by
+        ;; testing a properly typed DUP, instead of a more generally
+        ;; typed LOAD.
+        ;;
+        ;; The control flow of "and" seems to fit the branch-if-false
+        ;; setup nicely.  For the boolean case, replacing "(or ...)"
+        ;; with "(not (not (and ...))" and using De Morgan is an
+        ;; option.  But not for the general case, because it produces
+        ;; values of arbitrary types.  Which unfortunately means 2*2
+        ;; different code paths in total.
         (primitive "not" unary-not)
         (primitive "identical?" binary-identical)
         (primitive "str" string-concat))))
