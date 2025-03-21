@@ -1,7 +1,7 @@
 (ns tcljx.parser.form
   (:require
    (tcljx.data
-    [meta :as meta] [wrong :as wrong] [type :as type] [model :as model])
+    [wrong :as wrong] [type :as type] [model :as model])
    (tcljx.parser
     [interop :as interop] [syntax :as syntax] [context :as context] [def :as def]
     [let :as let] [fn :as fn] [new :as new] [constant :as constant]
@@ -20,25 +20,20 @@
     #_(binding [*print-meta* #_false true]
         (prn :parse-expression form))
     
-    (letfn [(parse-args ^Exprs [^long fctx ^seq args]
-              (context/parse-args this fctx args))
-            (parse-forms ^Exprs [^long fctx ^seq forms]
-              ;; FIXME... expand this later?
-              (context/parse-args this fctx forms))
-            (parse-meta ^Expr [^long fctx ^map form-meta]
+    (letfn [(parse-meta ^Expr [^long fctx ^map form-meta]
               (when form-meta
                 (parse-collection-literal fctx form-meta (meta form-meta))))
             (parse-collection-literal-nometa ^Expr [^long fctx form]
               (cond
                 (vector? form)
-                (.new-vector expr-factory (parse-args fctx (seq form)))
+                (.new-vector expr-factory (context/parse-args this fctx (seq form)))
                 (map? form)
                 (let [forms (mapcat identity form)]
-                  (.new-map expr-factory (parse-args fctx forms)))
+                  (.new-map expr-factory (context/parse-args this fctx forms)))
                 (set? form)
-                (.new-set expr-factory (parse-args fctx (seq form)))
+                (.new-set expr-factory (context/parse-args this fctx (seq form)))
                 (seq? form)
-                (.new-list expr-factory (parse-args fctx (seq form)))
+                (.new-list expr-factory (context/parse-args this fctx (seq form)))
                 :else
                 (throw (IllegalStateException. (str (class form))))))
             (parse-collection-literal ^Expr [^long fctx form ^map form-meta]
@@ -62,7 +57,12 @@
             (parse-if ^Expr [^long fctx [_ & formr]]
               (syntax/some-first (next formr)) ;test and first path exist?
               (syntax/empty-tail 3 formr) ;nothing after test and two paths?
-              (.if-expr expr-factory fctx (parse-forms fctx formr)))
+              (let [xs (.new-exprs expr-factory (count formr))]
+                (.set xs 0 (context/parse-arg this fctx (first formr)))
+                (.set xs 1 (context/parse-form this fctx (first (next formr))))
+                (when (= (.length xs) 3)
+                  (.set xs 2 (context/parse-form this fctx (first (nnext formr)))))
+                (.if-expr expr-factory fctx xs)))
             (parse-case*-guard ^Exprs [form]
               (if (seq? form)           ;accept empty list!
                 (let [gs (.new-exprs expr-factory (count form))]
@@ -74,7 +74,7 @@
                 (doto (.new-exprs expr-factory 1)
                   (.set 0 (parse-quoted-form form)))))
             (parse-case* ^Expr [^long fctx [_ & formr :as form]]
-              (let [select (.parse-form this fctx (syntax/some-first formr))
+              (let [select (context/parse-arg this fctx (syntax/some-first formr))
                     n (- (count formr) 1)
                     has-default? (odd? n)
                     n-paths (quot n 2)
@@ -84,26 +84,18 @@
                 (loop [[g p & gpr :as gps] (next formr), i 0]
                   (if (< i n-paths)
                     (do (aset gs i (parse-case*-guard g))
-                        (.set ps i (.parse-form this fctx p))
+                        (.set ps i (context/parse-form this fctx p))
                         (aset ecs i (or (when (seq? g) g) (when (seq? p) p)
                                         form))
                         (recur gpr (inc i)))
                     (do (when has-default?
-                          (.set ps i (.parse-form this fctx g)))
+                          (.set ps i (context/parse-form this fctx g)))
                         (.case-expr expr-factory select gs ps fctx ecs))))))
             (parse-do ^Expr [^long fctx [_ & forms]]
-              (if (nil? forms)
-                (.empty-expr expr-factory)
-                (let [n (count forms)
-                      prefix (.new-exprs expr-factory (dec n))]
-                  (loop [i 0, [form & formr] forms]
-                    (let [x (.parse-form this fctx form)]
-                      (if (some? formr)
-                        (do (.set prefix i x) (recur (inc i) formr))
-                        (.progn-expr expr-factory prefix x)))))))
+              (context/parse-progn this fctx forms))
             
             (parse-throw ^Expr [^long fctx [_ & args]]
-              (let [x (.parse-form this fctx (syntax/some-first args))]
+              (let [x (context/parse-arg this fctx (syntax/some-first args))]
                 (syntax/empty-tail (next args))
                 (.throw-expr expr-factory fctx x)))
             (parse-instanceof* ^Expr [^long fctx [_ & args]]
@@ -129,8 +121,8 @@
             (parse-dot ^Expr [^long fctx [_ owner & formr]]
               (let [[member & args] (unpack-member-args formr)
                     mnm (syntax/simple-symbol-str member) ;implies owner exists
-                    owner-expr (.parse-form this fctx owner)
-                    xs (parse-args fctx args)
+                    owner-expr (context/parse-arg this fctx owner)
+                    xs (context/parse-args this fctx args)
                     fnm (when (and (> (.length mnm) 1) (= (.charAt mnm 0) \-)
                                    (.empty? xs))
                           (.substring mnm 1))]
@@ -149,8 +141,8 @@
                              (nnext formr))
                      (parse-dot fctx))
                 (let [mnm (.substring nm 1)
-                      receiver (.parse-form this fctx (syntax/some-first formr))
-                      xs (parse-args fctx (rest formr))]
+                      receiver (context/parse-arg this fctx (syntax/some-first formr))
+                      xs (context/parse-args this fctx (rest formr))]
                   (.invoke-virtual-member expr-factory fctx receiver mnm xs))))
             (parse-class-dot ^Expr [^String nm ^long fctx [_ & formr]]
               (let [clnm (.substring nm 0 (dec (.length nm)))]
@@ -169,7 +161,7 @@
                     (case nm
                       ;; FIXME... implement these as proper primitive
                       ;; functions
-                      "identity" (.parse-form this fctx (second form))
+                      "identity" (context/parse-arg this fctx (second form))
                       
                       "def" (def/parse-def this fctx form)
                       ;; loop* (loop*-form form)
@@ -213,7 +205,7 @@
                         (if-some [bnd (context/lookup this op)]
                           (if-some [inv (model/bound-invocable bnd)]
                             (.invoke expr-factory fctx form inv
-                                     (parse-args fctx (rest form)))
+                                     (context/parse-args this fctx (rest form)))
                             (assert false))
                           (throw (wrong/info-unresolved op)))))
 
@@ -223,7 +215,7 @@
                       bnd
                       (if-some [cl (context/lookup-class this nmsp)]
                         (.invoke-static-member expr-factory fctx true cl nm
-                                               (parse-args fctx (rest form)))
+                                               (context/parse-args this fctx (rest form)))
                         (condp = op
                           tcljx.data.config/sym-regex-literal
                           ;; FIXME... drop this later

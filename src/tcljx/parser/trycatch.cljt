@@ -15,8 +15,7 @@
 
         (parse-finally ^Expr [^Scope scope ^long fctx ^seq form]
           (when (some? form)
-            (wrong/with-line-from-list [fctx  form]
-              (context/parse-progn scope fctx (next form)))))
+            (context/parse-progn scope form fctx (next form))))
         (parse-binding ^CatchBinding [^Scope scope ^long fctx [_ tp nm :as form]]
           (when-not (catch-form? form)
             (throw (syntax/info "expect catch clause" form)))

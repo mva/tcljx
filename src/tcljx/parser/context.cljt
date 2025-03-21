@@ -11,36 +11,79 @@
 
 ;;; ------------------------------------------------------------------------
 
+;;; If set in a form context, then a `recur` is possible.  This means
+;;; that the form is in tail position with respect to the
+;;; function (method, enclosing loop): there are no instructions
+;;; between the recur and the end of the function (method, enclosing
+;;; loop).  Put differently, the form is neither directly nor
+;;; indirectly providing an argument value to an expression *and* the
+;;; form is neither directly nor indirectly part of the butlast part
+;;; of a progn block.
+(def flag-can-recur (bit-shift-left 1l 32))
+
+;;; If set in a form context, then this form is in global statement
+;;; position with respect to the function or method: the operand stack
+;;; is known to be empty.  This is used to decide whether a `try`
+;;; expression can be inlined, or should be turned into a closure.
+;;; The technical reason for this is that exception handlers clear the
+;;; operand stack on entry, which prevents a translated
+;;; try-catch-finally from appearing in arbitrary expression position.
+;;; The body of a function or method is always in statement position.
+(def flag-statm-position (bit-shift-left 1l 33))
+
+
 (defn new-exprs ^Exprs [^Scope scope ^int n]
   (.new-exprs (.expr-factory scope) n))
 
-(defn parse-form ^Expr [^Scope scope ^long fctx form]
-  (.parse-form scope fctx form))
-(defn parse-args ^Exprs [^Scope scope ^long fctx ^seq forms]
-  (let [xs (new-exprs scope (count forms))]
+;; Takes a single form `form` and translates it to Expr using the
+;; given form context `fctx`.  This is the workhorse of the parser.
+;; Other methods delegate to it with adjusted `fctx` flags.
+(def parse-form Scope/.parse-form)
+
+;; Takes a single form and parses it as an argument of the given
+;; parent context `parent-fctx`: the form pushes a value to the
+;; operand stack that is subsequently consumed by an instruction
+;; emitted by the parent form.  Delegates to `parse-form` with
+;; `flag-can-recur` and `flag-statm-position` cleared from the
+;; parent context `parent-fctx`.
+(defn parse-arg ^Expr [^Scope scope ^long parent-fctx form]
+  (let [fctx' (bit-and-not parent-fctx (bit-or flag-can-recur
+                                               flag-statm-position))]
+    (parse-form scope fctx' form)))
+
+;; Takes a seq of forms, each of which is parsed as if by `parse-arg`.
+(defn parse-args ^Exprs [^Scope scope ^long parent-fctx ^seq forms]
+  (let [fctx' (bit-and-not parent-fctx (bit-or flag-can-recur
+                                               flag-statm-position))
+        xs (new-exprs scope (count forms))]
     (loop [i 0, forms (seq forms)]
       (when (some? forms)
-        (.set xs i (parse-form scope fctx (first forms)))
+        (.set xs i (parse-form scope fctx' (first forms)))
         (recur (inc i) (next forms))))
     xs))
 
-(defn- parse-progn* ^Expr [^Scope scope ^long fctx ^seq forms]
-  ;; pre: `forms` is nil if empty
-  (if (some? forms)
-    (let [n (count forms), xs (new-exprs scope (dec n))]
-      (loop [i 0, forms forms]
-        (let [x (parse-form scope fctx (first forms))]
-          (if (< i (.length xs))
-            (do (.set xs i x)
-                (recur (inc i) (rest forms)))
-            (.progn-expr (.expr-factory scope) xs x)))))
-    (.empty-expr (.expr-factory scope))))
+;; Takes a seq of forms, where only the last form pushes a value to
+;; the operand stack.  Delegates to `parse-form`, clearing
+;; `flag-can-recur` for the butlast elements of `forms`.  The last
+;; element is parsed using the unmodified `parent-fctx`.
 (defn parse-progn
-  (^Expr [^Scope scope ^long fctx ^seq forms]
-   (parse-progn* scope fctx (seq forms)))
+  (^Expr [^Scope scope ^long parent-fctx ^seq forms]
+   (let [n (count forms)]
+     (if (zero? n)
+       (.empty-expr (.expr-factory scope))
+       (let [fctx' (bit-and-not parent-fctx flag-can-recur)
+             xs (new-exprs scope (dec n))]
+         (loop [i 0, forms forms]
+           (if (< i (.length xs))
+             (do (.set xs i (parse-form scope fctx' (first forms)))
+                 (recur (inc i) (rest forms)))
+             (let [x (parse-form scope parent-fctx (first forms))]
+               (.progn-expr (.expr-factory scope) xs x))))))))
   (^Expr [^Scope scope ^seq error-context ^long fctx ^seq forms]
    (wrong/with-line-from-list [fctx error-context]
-     (parse-progn* scope fctx (seq forms)))))
+     (parse-progn scope fctx (seq forms)))))
+
+;;; ------------------------------------------------------------------------
 
 ;;; Anything outside of a function or a class definition (that is
 ;;; definterface, deftype, reify, etc.) happens in the namespace

@@ -18,12 +18,12 @@
                 (let [init (first init-forms)]
                   (if-some [bnd (aliased-def init)]
                     (.new-def-alias nmsp nm bnd)
-                    (.new-def-init nmsp nm (context/parse-form scope fctx init))))
+                    (.new-def-init nmsp nm (context/parse-arg scope fctx init))))
                 (.new-def-init nmsp nm nil))))
           (assign-to-def ^Expr [^Binding bnd ^seq init-forms]
             (let [init (syntax/some-first init-forms)]
               (-> (.expr-factory scope)
-                  (.assignment bnd (context/parse-form scope fctx init)))))]
+                  (.assignment bnd (context/parse-arg scope fctx init)))))]
     
     (let [nm (syntax/simple-symbol-str nm-sym)
           prior-def (.lookup-def (.resolver scope) nil nm)]

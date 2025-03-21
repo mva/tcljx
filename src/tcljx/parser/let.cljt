@@ -19,7 +19,7 @@
               opt-type (interop/resolve-tag (.resolver scope) nm-sym nil)
               bnd-x (.new-local ef fctx opt-type nm
                                 (or (context/lookup-if-alias nm-sym scope init)
-                                    (context/parse-form scope fctx init)))]
+                                    (context/parse-arg scope fctx init)))]
           (.set bnd-xs i bnd-x)
           (recur (context/with-local-binding scope bnd-x) (inc i)))
         (.block-let ef fctx bnd-xs (context/parse-progn scope fctx body))))))
