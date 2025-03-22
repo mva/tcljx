@@ -1,9 +1,10 @@
 (ns tcljx.parser.form
   (:require
    (tcljx.data
-    [wrong :as wrong] [type :as type] [model :as model])
+    [meta :as meta] [wrong :as wrong] [type :as type] [context :as context]
+    [model :as model])
    (tcljx.parser
-    [interop :as interop] [syntax :as syntax] [context :as context] [def :as def]
+    [interop :as interop] [syntax :as syntax] [def :as def]
     [let :as let] [fn :as fn] [new :as new] [constant :as constant]
     [trycatch :as trycatch]))
   (:import
@@ -260,7 +261,7 @@
 
       (if (instance? IMeta form)
         (let [form-meta (.meta ^IMeta form)
-              form-tag (interop/get-tag form-meta)]
+              form-tag (meta/get-tag form-meta)]
           (-> (cond
                 ;; reference to global def, local binding, defined
                 ;; class, or instance field (when in a deftype)
@@ -268,7 +269,7 @@
                 
                 ;; special form, macro form, or some function call variant
                 (and (seq? form) (some? (seq form)))
-                (wrong/with-line-from-meta [fctx form-meta]
+                (context/with-line-from-meta [fctx form-meta]
                   (parse-invocation (first form) fctx form))
                 
                 ;; vector, map, set, or empty list

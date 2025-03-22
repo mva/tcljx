@@ -1,7 +1,7 @@
 (ns tcljx.parser.trycatch
   (:require
-   (tcljx.data [wrong :as wrong] [model :as model])
-   (tcljx.parser [syntax :as syntax] [interop :as interop] [context :as context]))
+   (tcljx.data [context :as context] [model :as model])
+   (tcljx.parser [syntax :as syntax] [interop :as interop]))
   (:import
    (tcljx.data.model CodeEmitter Expr Binding Scope)))
 
@@ -45,7 +45,7 @@
                 (.set b+cs 0 body)
                 (loop [[catch-form & catch-formr] catch-forms, i 1]
                   (when (< i (.length b+cs))
-                    (wrong/with-line-from-list [fctx catch-formr]
+                    (context/with-line-from-list [fctx catch-formr]
                       (let [cb (parse-binding scope fctx catch-form)
                             body (nthnext catch-form 3)]
                         (aset ctps (dec i) (.ctp cb))

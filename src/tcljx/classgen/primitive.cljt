@@ -1,7 +1,7 @@
 (ns tcljx.classgen.primitive
   (:require
    (tcljx.data
-    [config :as cfg] [meta :as meta] [type :as type] [resolve :as resolve]
+    [config :as cfg] [type :as type] [resolve :as resolve]
     [reflect :as reflect] [model :as model] [wrong :as wrong])
    (tcljx.classgen
     [classfile :as classfile] [emit :as emit] [insn :as insn] [entity :as entity]

@@ -1,7 +1,7 @@
 (ns tcljx.parser.def
   (:require
-   (tcljx.data [wrong :as wrong] [model :as model])
-   (tcljx.parser [syntax :as syntax] [context :as context]))
+   (tcljx.data [wrong :as wrong] [context :as context] [model :as model])
+   (tcljx.parser [syntax :as syntax]))
   (:import
    (tcljx.data.model Expr Binding Scope)))
 

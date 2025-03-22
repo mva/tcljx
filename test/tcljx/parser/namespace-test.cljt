@@ -7,9 +7,8 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.namespace-test
   (:require
-   (tcljx.data [wrong :as wrong] [meta :as meta] [model :as model])
-   (tcljx.parser [reader :as reader] [context :as context]
-                 [form :as form] [namespace :as namespace])
+   (tcljx.data [wrong :as wrong] [context :as context] [model :as model])
+   (tcljx.parser [reader :as reader] [form :as form] [namespace :as namespace])
    [tcljx.alpha.ptest :refer :all])
   (:import
    (tcljx.data.model NamespaceBuilder ProvidedNamespace NamespaceProvider
@@ -69,7 +68,7 @@
   java.lang.Record
   Invocable
   (invoke* [_ fctx form args]
-    (mk-expr (into [:invoke (meta/fctx-line fctx) form] (exprs-data args)))))
+    (mk-expr (into [:invoke (context/fctx-line fctx) form] (exprs-data args)))))
 
 (deftype ExprFactoryStub [^java.util.ArrayList forms]
   ExprFactory
@@ -176,7 +175,7 @@
   (loop [acc (mk-nmsp-builder), forms (seq formv)]
     (if (nil? forms)
       (vec (NmspBuilderStub/.segment-forms acc))
-      (recur (namespace/parse-top-level-form acc meta/fctx-initial (first forms))
+      (recur (namespace/parse-top-level-form acc context/fctx-initial (first forms))
              (next forms)))))
 
 (deftest parse-forms-test

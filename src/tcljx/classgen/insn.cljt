@@ -1,7 +1,8 @@
 (ns tcljx.classgen.insn
   (:require
-   (tcljx.data [config :as cfg] [wrong :as wrong] [meta :as meta] [type :as type]
-               [model :as model] [reflect :as reflect] [resolve :as resolve])
+   (tcljx.data
+    [config :as cfg] [wrong :as wrong] [context :as context] [type :as type]
+    [model :as model] [reflect :as reflect] [resolve :as resolve])
    (tcljx.classgen [emit :as emit]))
   (:import
    (tcljx.data.model Expr Exprs CodeEmitter Entity)
@@ -162,7 +163,7 @@
 
 (defn cast-to-logical
   (^Insn [^Insn insn]
-   (cast-to insn (type/expr-to-logical (expr-type insn)) meta/fctx-none))
+   (cast-to insn (type/expr-to-logical (expr-type insn)) context/fctx-none))
   (^Insn [^Insns insns ^int i]
    (cast-to-logical (.get insns i))))
 
@@ -174,7 +175,7 @@
 ;;; Emit `insn` using its own logical type, without any applying any
 ;;; additional conversion or cast instructions on top.
 (defn emit-insn-logical? ^boolean [^CodeBuilder xb ^Insn insn]
-  (emit/insn? xb meta/fctx-none (logical-type insn) (.emitter insn)))
+  (emit/insn? xb context/fctx-none (logical-type insn) (.emitter insn)))
 
 (defn- emit-new-array ^CodeBuilder [^CodeBuilder xb ^Class component-type
                                     ^int length]
@@ -244,7 +245,7 @@
 
 ;;; Invoke static runtime method without line number information.
 (defn invoke-runtime ^Insn [^Match m ^Insns args]
-  (invoke-member m nil args meta/fctx-none))
+  (invoke-member m nil args context/fctx-none))
 
 ;;; ------------------------------------------------------------------------
 

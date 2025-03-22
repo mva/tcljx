@@ -1,7 +1,7 @@
 (ns tcljx.classgen.codegen
   (:require
    (tcljx.data
-    [config :as cfg] [wrong :as wrong] [meta :as meta] [type :as type]
+    [config :as cfg] [wrong :as wrong] [context :as context] [type :as type]
     [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen
     [classfile :as classfile] [runtime :as rt] [emit :as emit] [insn :as insn]
@@ -244,7 +244,7 @@
                     (throw (wr-info-invalid-cast)))))
               (boxed-arg ^Insn [^Class prim-tp]
                 (insn/cast-to arg (.class-reference (type/of prim-tp))
-                              meta/fctx-none))]
+                              context/fctx-none))]
         (cond
           (or (type/polymorphic? target-type) ;force void context
               (type/polymorphic? arg-tp))
@@ -307,7 +307,7 @@
   (instanceof-expr [_ fctx type arg]
     (let [arg ^Insn arg]
       (-> (^CodeEmitter fn [xb _ _]
-           (when (emit/insn? xb meta/fctx-none Object (.emitter arg))
+           (when (emit/insn? xb context/fctx-none Object (.emitter arg))
              (-> (emit/with-line-number xb fctx)
                  (.instanceOf (reflect/describe-class type)))
              Boolean/TYPE))

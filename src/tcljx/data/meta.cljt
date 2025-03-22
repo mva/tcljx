@@ -4,10 +4,15 @@
 (defn get-line ^Integer [^map form-meta] ;nil if no line number present
   (when (some? form-meta)
     (.valAt form-meta :line nil)))
-
 (defn line-of ^Integer [form]           ;nil if no line number present
   (when (instance? IMeta form)
     (get-line (.meta ^IMeta form))))
+
+(defn get-tag [^map form-meta]
+  (when (some? form-meta)
+    ;; Note: using `valAt` is slightly more direct than IFn.invoke()
+    ;; or RT.get().
+    (.valAt form-meta :tag nil)))
 
 ;;; Return the source code meta information of `x`.  For non-empty
 ;;; list `x`, first strip :line/:column information added by the
@@ -19,23 +24,3 @@
         (when (pos? (count m'))
           m'))
       m)))
-
-;;; ------------------------------------------------------------------------
-
-(def fctx-initial 0l)
-(def fctx-none 0l)           ;used as placeholder for "no line number"
-
-(defn fctx-line ^int [^long fctx]
-  (int fctx))
-
-(defn- mk-fctx ^long [^int line]
-  line)
-
-(defn update-line [^long fctx ^int line]
-  (mk-fctx line))
-(defn update-line-from-meta ^long [^long fctx form-meta]
-  (if (some? form-meta)
-    (if-some [line (.valAt ^map form-meta :line nil)]
-      (update-line fctx line)
-      fctx)
-    fctx))

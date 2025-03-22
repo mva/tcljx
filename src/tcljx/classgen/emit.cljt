@@ -1,7 +1,7 @@
 (ns tcljx.classgen.emit
   (:require
-   (tcljx.data [config :as cfg] [meta :as meta] [type :as type] [model :as model]
-               [reflect :as reflect])
+   (tcljx.data [config :as cfg] [context :as context] [type :as type]
+               [model :as model] [reflect :as reflect])
    (tcljx.classgen [classfile :as classfile]))
   (:import
    (tcljx.data.type Wrapper)
@@ -25,8 +25,8 @@
   ;; Note: Writing only line number of zero triggers output of an
   ;; empty "LineNumberTable" attribute.  For example invocations of
   ;; runtime methods are emitted without any line number.
-  (let [line (meta/fctx-line fctx)]
-    (cond-> xb (pos? line) (.lineNumber (meta/fctx-line fctx)))))
+  (let [line (context/fctx-line fctx)]
+    (cond-> xb (pos? line) (.lineNumber (context/fctx-line fctx)))))
 
 (letfn [(pop-operand ^void [^CodeBuilder xb ^Class on-stack-type]
           ;; pre: `on-stack-type` is not Void/TYPE
@@ -132,7 +132,7 @@
   (defn insn? ^boolean [^CodeBuilder xb ^long consumer-fctx
                         ^Class consumed-type ^CodeEmitter ce]
     (when-some [on-stack-type (.emit-insn* ce xb consumed-type false)]
-      (adapt-stack xb (meta/fctx-line consumer-fctx) consumed-type
+      (adapt-stack xb (context/fctx-line consumer-fctx) consumed-type
                    on-stack-type)
       true))
   
@@ -142,7 +142,7 @@
                               ^boolean then-leave?]
     (if then-leave?
       (do (when-some [on-stack-type (.emit-insn* ce xb consumed-type true)]
-            (adapt-stack xb (meta/fctx-line consumer-fctx) consumed-type
+            (adapt-stack xb (context/fctx-line consumer-fctx) consumed-type
                          on-stack-type)
             (.return_ xb (TypeKind/from consumed-type)))
           false)

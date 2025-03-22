@@ -1,8 +1,7 @@
 (ns tcljx.parser.namespace
   (:require (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
-                        [model :as model])
-            (tcljx.parser [reader :as reader]
-                          [syntax :as syntax] [context :as context]))
+                        [context :as context] [model :as model])
+            (tcljx.parser [reader :as reader] [syntax :as syntax]))
   (:import (tcljx.parser.reader FormBuilder)
            (tcljx.data.model NamespaceBuilder ProvidedNamespace Require)))
 
@@ -64,7 +63,7 @@
                       
                       :else
                       (throw (syntax/info "expect symbol, vector, or list" spec))))]
-            (wrong/with-line-from-list [fctx error-context]
+            (context/with-line-from-list [fctx error-context]
               (reduce flatten-require rrequires specs))))
         
         (parse-refer-cljs ^Require [^long fctx ^seq rrefer-cljs]
@@ -73,7 +72,7 @@
           
           (let [refer-clj (first rrefer-cljs)]
             ;; pre: (first refer-clj) is :refer-clojure
-            (wrong/with-line-from-list [fctx refer-clj]
+            (context/with-line-from-list [fctx refer-clj]
               (loop [^vector refer nil, exclude [], rename {}
                      specs (next refer-clj)]
                 (if (some? specs)
@@ -92,7 +91,7 @@
         (process-require ^NamespaceBuilder [^NamespaceBuilder nmsp ^long fctx
                                             ^Require require
                                             ^ProvidedNamespace provided]
-          (wrong/with-line-from-list [fctx (.error-context require)]
+          (context/with-line-from-list [fctx (.error-context require)]
             (if (nil? provided)
               (throw (wrong/info-unresolved "no such namespace:"
                                             (model/required-ns-sym require)))
@@ -170,7 +169,7 @@
                                                 ^long fctx form]
     ;; pre: caller provides wrong/with-line-context for `form`
     (if (seq? form)
-      (wrong/with-line-from-list [fctx form]
+      (context/with-line-from-list [fctx form]
         (case (first form)
           ns (ns-form nmsp fctx form)
           require (require-form nmsp fctx form)
@@ -190,13 +189,13 @@
                            (seq? form) (meta/line-of form)
                            (symbol? form) line-at-end ;any single line form
                            :else line-at-push)
-                      fctx (meta/update-line meta/fctx-initial ln)]
-                  (wrong/decorate-with-fctx ex fctx)))]
+                      fctx (context/update-line context/fctx-initial ln)]
+                  (context/decorate-with-fctx ex fctx)))]
         (if (neg? pos')
           nmsp
           (let [form (.pop fb)]
             (-> (try
-                  (parse-top-level-form nmsp meta/fctx-initial form)
+                  (parse-top-level-form nmsp context/fctx-initial form)
                   (catch Throwable ex
                     (throw (with-line-number ex form))))
                 (recur pos' fb))))))))

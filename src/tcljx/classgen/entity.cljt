@@ -1,6 +1,6 @@
 (ns tcljx.classgen.entity
   (:require
-   (tcljx.data [wrong :as wrong] [type :as type] [meta :as meta]
+   (tcljx.data [wrong :as wrong] [type :as type] [context :as context]
                [model :as model] [reflect :as reflect])
    (tcljx.classgen [emit :as emit] [insn :as insn] [constgen :as constgen]))
   (:import
@@ -148,7 +148,7 @@
         (.getstatic xb owner fnm type-cld)
         type)
       (emit-setup-code? [_ xb init]
-        (when (emit/insn? xb meta/fctx-none type init)
+        (when (emit/insn? xb context/fctx-none type init)
           (.putstatic xb owner fnm type-cld)
           true)))))
 

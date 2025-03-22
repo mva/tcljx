@@ -1,7 +1,7 @@
 (ns tcljx.classgen.switchgen
   (:require
-   (tcljx.data [type :as type] [wrong :as wrong] [resolve :as resolve]
-               [model :as model])
+   (tcljx.data [type :as type] [wrong :as wrong] [context :as context]
+               [resolve :as resolve] [model :as model])
    (tcljx.classgen [runtime :as rt] [emit :as emit] [entity :as entity]
                    [insn :as insn]))
   (:import
@@ -15,7 +15,7 @@
 
 (letfn [(validate-path-guards ^set [^set seen ^Class select-tp ^Exprs guards
                                     ^long fctx ^seq error-context]
-          (wrong/with-line-from-list [fctx error-context]
+          (context/with-line-from-list [fctx error-context]
             (loop [seen seen, i 0]
               (if (< i (.length guards))
                 (let [guard-tp (insn/expr-type guards i)

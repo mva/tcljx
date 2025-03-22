@@ -1,6 +1,7 @@
 (ns tcljx.parser.interop
   (:require
-   (tcljx.data [wrong :as wrong] [type :as type] [model :as model])
+   (tcljx.data [meta :as meta] [type :as type] [wrong :as wrong]
+               [context :as context] [model :as model])
    (tcljx.parser [syntax :as syntax]))
   (:import
    (tcljx.data.model Resolver ArityType ArityTypeImpl)
@@ -21,13 +22,8 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn get-tag [^map form-meta]
-  (when (some? form-meta)
-    ;; Note: using `valAt` is slightly more direct than IFn.invoke()
-    ;; or RT.get().
-    (.valAt form-meta :tag nil)))
 (defn tag-of ^symbol [form]
-  (when-some [tag (get-tag (meta form))]
+  (when-some [tag (meta/get-tag (meta form))]
     (syntax/symbol tag)))
 (defn resolve-tag* ^Class [^Resolver rsv ^symbol tag ^Class or-else]
   (if (some? tag)
@@ -51,7 +47,7 @@
 ;;; return type is set to the temporary `auto-return-marker`.
 (defn parse-arity-type ^ArityType [^Resolver rsv ^long fctx paramv
                                    ^seq error-context]
-  (wrong/with-line-from-list [fctx error-context]
+  (context/with-line-from-list [fctx error-context]
     (let [paramv (syntax/vector paramv)
           n (count paramv)
           ptypes (new Class/1 n)

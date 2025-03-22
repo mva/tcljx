@@ -2,9 +2,9 @@
   (:require
    (tcljx.data
     [config :as cfg] [files :as files] [resolve :as resolve] [meta :as meta]
-    [model :as model] [wrong :as wrong])
+    [wrong :as wrong] [context :as context] [model :as model])
    (tcljx.parser
-    [context :as context] [form :as form] [namespace :as namespace])
+     [form :as form] [namespace :as namespace])
    (tcljx.classgen
     [loader :as loader] [runtime :as rt] [classfile :as classfile]
     [emit :as emit] [insn :as insn] [segmgen :as segmgen] [codegen :as codegen]
@@ -159,7 +159,7 @@
               (loop [acc (mk-nmsp-builder ns-str), forms (seq ns-forms)]
                 (if (nil? forms)
                   (.finish acc)
-                  (recur (namespace/parse-top-level-form acc meta/fctx-initial
+                  (recur (namespace/parse-top-level-form acc context/fctx-initial
                                                          (first forms))
                          (next forms)))))]
       

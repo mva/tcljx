@@ -1,13 +1,59 @@
-(ns tcljx.parser.context
-  (:require (tcljx.data [meta :as meta] [wrong :as wrong] [model :as model])
-            (tcljx.parser [interop :as interop]))
-  
+(ns tcljx.data.context
+  (:require (tcljx.data [meta :as meta] [wrong :as wrong] [model :as model]))
   (:import (tcljx.data.model Resolver NamespaceBuilder Binding
-                             Expr Exprs ExprFactory Scope)))
+                             Expr Exprs ExprFactory Scope)
+           (tcljx.data.wrong WrongInfo)))
 
 ;;; Some form of "cannot do this at this position" error message.
 (defn wrong [^String msg]
   (throw (wrong/wr-info msg)))
+
+;;; ------------------------------------------------------------------------
+
+(def fctx-initial 0l)
+(def fctx-none 0l)           ;used as placeholder for "no line number"
+
+(defn fctx-line ^int [^long fctx]
+  (int fctx))
+
+(defn- mk-fctx ^long [^int line]
+  line)
+
+(defn update-line [^long fctx ^int line]
+  (mk-fctx line))
+(defn update-line-from-meta ^long [^long fctx form-meta]
+  (if (some? form-meta)
+    (if-some [line (.valAt ^map form-meta :line nil)]
+      (update-line fctx line)
+      fctx)
+    fctx))
+
+
+(defn decorate-with-fctx ^Throwable [^Throwable ex ^long fctx]
+  (letfn [(no-class-def-found ^WrongInfo [^Throwable e]
+            (let [nm (symbol nil (.replace (ex-message e) \/ \.))]
+              (wrong/wr-info (str "failed to load class " (wrong/q nm)) {} e)))]
+    (let [line (fctx-line fctx)]
+      (condp instance? ex
+        NoClassDefFoundError
+        (-> ex (no-class-def-found) (wrong/push-line-number* line))
+        WrongInfo
+        (-> ex (wrong/push-line-number* line))
+        #_else ex))))
+
+(defmacro with-line-from-meta [[fctx-sym form-meta :as binding] & body]
+  (assert (vector? binding))
+  (assert (symbol? fctx-sym))
+  `(let [~fctx-sym (update-line-from-meta ~fctx-sym ~form-meta)]
+     (try
+       ~@body
+       (catch Throwable ex#
+         (throw (decorate-with-fctx ex# ~fctx-sym))))))
+
+(defmacro with-line-from-list [[fctx-sym seq-form :as binding] & body]
+  (assert (vector? binding))
+  (assert (symbol? fctx-sym))
+  `(with-line-from-meta ~(vector fctx-sym `(meta ~seq-form)) ~@body))
 
 ;;; ------------------------------------------------------------------------
 
@@ -80,7 +126,7 @@
              (let [x (parse-form scope parent-fctx (first forms))]
                (.progn-expr (.expr-factory scope) xs x))))))))
   (^Expr [^Scope scope ^seq error-context ^long fctx ^seq forms]
-   (wrong/with-line-from-list [fctx error-context]
+   (with-line-from-list [fctx error-context]
      (parse-progn scope fctx (seq forms)))))
 
 ;;; ------------------------------------------------------------------------
@@ -105,7 +151,7 @@
 
 (defn lookup-if-alias ^Binding [^symbol sink ^Scope scope form]
   (when (and (symbol? form) (nil? (.meta ^symbol form))
-             (nil? (interop/get-tag (.meta sink))))
+             (nil? (meta/get-tag (.meta sink))))
     (lookup scope form)))
 
 ;;; Returns nil if `nm` does not resolve to a class name.

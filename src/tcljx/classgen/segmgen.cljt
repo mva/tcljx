@@ -1,7 +1,7 @@
 (ns tcljx.classgen.segmgen
   (:require
-   (tcljx.data [config :as cfg] [files :as files] [type :as type] [meta :as meta]
-               [model :as model] [resolve :as resolve])
+   (tcljx.data [config :as cfg] [files :as files] [type :as type]
+               [context :as context] [model :as model] [resolve :as resolve])
    (tcljx.classgen [runtime :as rt] [loader :as loader] [classfile :as classfile]
                    [emit :as emit] [insn :as insn] [entity :as entity])
    [tinyclj.string :as str])
@@ -37,7 +37,7 @@
   (if (= segm-id first-segm-id)
     (insn/invoke-member rt-create-namespace nil
                         (insn/insns-of (entity/new-constant ns-str String))
-                        meta/fctx-none)
+                        context/fctx-none)
     insn/insn-empty))
 
 (def ^:private rt-mark-core-initialization
@@ -49,7 +49,7 @@
           clnm (str (.packageName cld) "." (.displayName cld))]
       (insn/invoke-member rt-mark-core-initialization nil
                           (insn/insns-of (entity/new-constant clnm String))
-                          meta/fctx-none))
+                          context/fctx-none))
     insn/insn-empty))
 
 ;;; ------------------------------------------------------------------------
