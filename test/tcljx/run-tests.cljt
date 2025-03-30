@@ -13,9 +13,9 @@
                    const-test conv-test prim-conv-test dot-form-test new-test
                    arith-test let-test quote-test meta-test str-test bits-test
                    array-test clone-test switch-test cond-test logic-test
-                   xcmp-test try-test)
+                   xcmp-test try-test loop-test)
    
-   (tcljx #_loop-test #_unboxing-test #_boxing-test #_fn-member-test
+   (tcljx #_unboxing-test #_boxing-test #_fn-member-test
 
           #_namespace-test #_fn-test #_itf-fn-test #_variadic-test #_macro-test
           #_deftype-test #_record-test #_set-test #_definterface-test #_closure-test
@@ -58,8 +58,8 @@
     tcljx.classgen.logic-test
     tcljx.classgen.xcmp-test
     tcljx.classgen.try-test
+    tcljx.classgen.loop-test
     
-    #_tcljx.classgen.loop-test
     #_tcljx.classgen.unboxing-test
     #_tcljx.classgen.boxing-test
     #_tcljx.classgen.fn-member-test

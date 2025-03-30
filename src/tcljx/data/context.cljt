@@ -66,6 +66,8 @@
 ;;; form is neither directly nor indirectly part of the butlast part
 ;;; of a progn block.
 (def flag-can-recur (bit-shift-left 1l 32))
+(defn can-recur? ^boolean [^long fctx]
+  (not (zero? (bit-and flag-can-recur fctx))))
 
 ;;; If set in a form context, then this form is in global statement
 ;;; position with respect to the function or method: the operand stack

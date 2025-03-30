@@ -105,14 +105,58 @@
            (model/const-value identity) (model/const-value identity)))
 
 
-(letfn [(op-type ^Class [^int opcd]
-          (case opcd
-            0 Integer/TYPE
-            1 Long/TYPE
-            2 Float/TYPE
-            3 Double/TYPE))
+(defn- op-type ^Class [^int opcd]
+  (case opcd
+    0 Integer/TYPE
+    1 Long/TYPE
+    2 Float/TYPE
+    3 Double/TYPE))
         
-        (const-fold-int ^int [^int bytecode ^Number c0 ^Number c1]
+        
+;;; Arithmetic operations export their internals to enable IINC
+;;; rewrite when generating code for `recur`.  `ce1` is optional.
+(deftype Op2 [^int bytecode ^int opcd0 ^int opcd1
+              ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
+  java.lang.Record
+  CodeEmitter
+  (emit-insn* [_ xb consumed-type then-leave?]
+    (let [tp0 (op-type opcd0), tp1 (op-type opcd1)]
+      (when (emit/insn? xb fctx tp0 ce0)
+        (when (or (nil? ce1) (emit/insn? xb fctx tp1 ce1))
+          (when (<= #_idiv 108 bytecode #_drem 115)
+            ;; [il]div and [il]rem can raise a division by zero
+            ;; exception, so provide a line number for div & rem
+            (emit/with-line-number xb fctx))
+          (classfile/with-operator xb bytecode)
+          tp0)))))
+
+(def ^:private no-iinc Integer/MIN_VALUE) ;outside range of IINC instruction
+(defn iinc-delta ^int [^CodeEmitter entity ^CodeEmitter ce]
+  (letfn [(delta ^int [^CodeEmitter arg]
+            (if-some [c (model/ce-const-value arg)]
+              (.intValue ^Number c)  ;accept any number representation
+              no-iinc))]
+    (cond
+      (identical? entity ce)      ;is entity passed through unchanged?
+      0                  ;note: entity can be of any type in this case
+      
+      (instance? Op2 ce)
+      (let [op2 ^Op2 ce]
+        (case (.bytecode op2)
+          #_iadd 96 (cond
+                      (identical? entity (.ce0 op2)) (delta (.ce1 op2))
+                      (identical? entity (.ce1 op2)) (delta (.ce0 op2))
+                      :else no-iinc)
+          #_isub 100 (if (identical? entity (.ce0 op2))
+                       (- (delta (.ce1 op2))) ;ignore overflow: outside of short
+                       no-iinc)
+          #_else no-iinc))
+      
+      :else no-iinc)))
+(defn valid-iinc-const? ^boolean [^int c]
+  (= (short c) c))
+
+(letfn [(const-fold-int ^int [^int bytecode ^Number c0 ^Number c1]
           (let [a0 (.intValue c0), a1 (.intValue c1)]
             (case bytecode
               #_iadd 96 (+ a0 a1)
@@ -221,19 +265,6 @@
                    (wrong/got-types (insn/expr-types args)))
               (wrong/wr-info)))
         
-        (op-2* ^CodeEmitter [^int base-bytecode ^int opcd0 ^int opcd1
-                             ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
-          (^CodeEmitter fn [xb _ _]
-           (let [tp0 (op-type opcd0), tp1 (op-type opcd1)
-                 bytecode (+ base-bytecode opcd0)]
-             (when (emit/insn? xb fctx tp0 ce0)
-               (when (or (nil? ce1) (emit/insn? xb fctx tp1 ce1))
-                 (when (<= #_idiv 108 bytecode #_drem 115)
-                   ;; [il]div and [il]rem can raise a division by zero
-                   ;; exception, so provide a line number for div & rem
-                   (emit/with-line-number xb fctx))
-                 (classfile/with-operator xb bytecode)
-                 tp0)))))
         (op-2 ^CodeEmitter [^OpSpec op ^int opcd0 ^int opcd1
                             ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
           (let [c0 (model/ce-const-value ce0)
@@ -246,7 +277,8 @@
               (and (some? c0) (some? c1))
               (folded-constant op opcd0 c0 c1)
               :else
-              (op-2* (-> op .base-opcode .bytecode) opcd0 opcd1 ce0 ce1 fctx))))
+              (Op2. (+ (-> op .base-opcode .bytecode) opcd0)
+                    opcd0 opcd1 ce0 ce1 fctx))))
         (op-n ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter/1 ces ^long fctx]
           (loop [acc (aget ces 0), i 1]
             (if (< i (alength ces))
@@ -258,7 +290,7 @@
             Opcode/ISUB
             (if-some [c (model/ce-const-value ce)]
               (folded-constant op opcd (.right-identity op) c)
-              (op-2* (.bytecode Opcode/INEG) opcd opcd ce nil fctx))
+              (Op2. (+ (.bytecode Opcode/INEG) opcd) opcd opcd ce nil fctx))
             Opcode/IDIV
             (if-some [c (model/ce-const-value ce)]
               (folded-constant op opcd (.right-identity op) c)

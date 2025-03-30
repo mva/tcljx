@@ -302,13 +302,13 @@
   (is (= '[["LOCAL 0: int x"] (RETURN)]
          (asm-expr ^void [^int x] ^void x))))
 
-;; (deftest checkcast-null-test
-;;   (is (= '[(ACONST_NULL)
-;;            (ASTORE_0)
-;;            ["LOCAL 0: String x"]
-;;            (ALOAD_0)
-;;            (ARETURN)]
-;;          (asm-expr ^String [] (loop* [^String x nil] x)))))
+(deftest checkcast-null-test
+  (is (= '[(ACONST_NULL)
+           (ASTORE_0)
+           ["LOCAL 0: String x"]
+           (ALOAD_0)
+           (ARETURN)]
+         (asm-expr ^String [] (loop* [^String x nil] x)))))
 
 (deftest checkcast-join-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
@@ -380,38 +380,38 @@
                                     0 x
                                     1 "foo")))]))))
 
-;; (deftest checkcast-loop-test
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[STATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/String;"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "f~1" "(Ljava/lang/Object;)Ljava/lang/String;")
-;;              ["LOCAL 0: Object x"]
-;;              [L:0]
-;;              (ALOAD_0)
-;;              (IFNONNULL L:1)
-;;              (GOTO L:0)
-;;              [L:1]
-;;              (ALOAD_0)
-;;              (CHECKCAST String)
-;;              (ARETURN)]
+(deftest checkcast-loop-test
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/String;"]]])
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(Ljava/lang/Object;)Ljava/lang/String;")
+             ["LOCAL 0: Object x"]
+             [L:0]
+             (ALOAD_0)
+             (IFNONNULL L:1)
+             (GOTO L:0)
+             [L:1]
+             (ALOAD_0)
+             (CHECKCAST String)
+             (ARETURN)]
 
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
 
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (def f (fn* f ^String [^Object x]
-;;                              (loop* []
-;;                                     (if (identical? x nil)
-;;                                       (recur)
-;;                                       x))))]))))
+         (nmsp '[(ns pkg.ns0)
+                 (def f (fn* f ^String [^Object x]
+                             (loop* []
+                                    (if (identical? x nil)
+                                      (recur)
+                                      x))))]))))
 
 (deftest checkcast-try-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")

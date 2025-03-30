@@ -16,7 +16,7 @@
               nm (syntax/simple-symbol-str nm-sym)
               init (nth bindings (inc (* i 2)))
               opt-type (interop/resolve-tag (.resolver scope) nm-sym nil)
-              bnd-x (.new-local ef fctx opt-type nm
+              bnd-x (.new-local ef fctx false opt-type nm
                                 (or (context/lookup-if-alias nm-sym scope init)
                                     (context/parse-arg scope fctx init)))]
           (.set bnd-xs i bnd-x)

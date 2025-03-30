@@ -147,15 +147,27 @@
          (when (emit/statms? xb (.emitters insns))
            (.emit-insn* (.emitter insn-n) xb consumed-type then-leave?)))
         (mk-insn (expr-type insn-n)))))
+(defn prog2 ^Insn [^Insn statm ^Insn insn-n]
+  (if (model/const? statm)
+    insn-n            ;constant `statm` does not have any side effects
+    (progn (insns-of statm) insn-n)))
 
 ;; Note: Casting to primitive numeric from either primitive numeric or
 ;; reference Number is a type conversion.
 (defn cast-to ^Insn [^Insn arg ^Class target-type ^long fctx]
   (let [x-tp (.expr-type arg)]
-    (if (identical? target-type x-tp)
+    (cond
+      (identical? target-type x-tp)
       ;; this elides the cast even if `arg` may be a signature
       ;; polymorphic method invocation
       arg
+
+      (and (model/ce-null? (.emitter arg))
+           #_(type/poly-reference? x-tp)
+           #_(not (.isPrimitive target-type)))
+      (mk-insn (.emitter arg) target-type)
+      
+      :else
       (-> (^CodeEmitter fn [xb consumed-type _]
            (when (emit/insn? xb fctx target-type (.emitter ^Insn arg))
              target-type))
@@ -163,7 +175,7 @@
 
 (defn cast-to-logical
   (^Insn [^Insn insn]
-   (cast-to insn (type/expr-to-logical (expr-type insn)) context/fctx-none))
+   (cast-to insn (logical-type insn) context/fctx-none))
   (^Insn [^Insns insns ^int i]
    (cast-to-logical (.get insns i))))
 

@@ -399,21 +399,23 @@
 ;; Implements Clojure's idea of a "logically true" expression.
 (defn logical-truth ^Insn [^Insn arg ^long fctx]
   (let [arg-tp (insn/expr-type arg)]
-    (if (.isPrimitive arg-tp)
-      (cond
-        (type/same? Boolean/TYPE arg-tp)
-        arg                    ;identity if `arg` is primitive boolean
-        (type/polymorphic? arg-tp)
-        entity/insn-false             ;polymorphic (aka void) is false
-        :else
-        entity/insn-true) ;all other primitive types are true
-      (cond               ;important: any nil value is logically false
-        ;; (model/ce-null? (.emitter arg)) ;argument is literal nil
-        ;; entity/insn-false
-        (.isAssignableFrom arg-tp Boolean) ;argument may be Boolean instance
-        (insn/invoke-runtime rt-boolean-cast (insn/insns-of arg))
-        :else   ;any reference that is a non-Boolean subtype of Object
-        (acmp arg entity/insn-null cmp-ne fctx)))))
+    (cond
+      (type/same? Boolean/TYPE arg-tp)
+      arg                      ;identity if `arg` is primitive boolean
+      
+      (.isPrimitive arg-tp)
+      ;; polymorphic (aka void) is false, all other primitive types are true
+      (insn/prog2 arg (entity/insn-boolean (not (type/polymorphic? arg-tp))))
+
+      ;; arg is reference; important: any nil value is logically false
+      (model/ce-null? (.emitter arg))   ;argument is literal nil
+      entity/insn-false
+      
+      (.isAssignableFrom arg-tp Boolean) ;argument may be Boolean instance
+      (insn/invoke-runtime rt-boolean-cast (insn/insns-of arg))
+      
+      :else     ;any reference that is a non-Boolean subtype of Object
+      (acmp arg entity/insn-null cmp-ne fctx))))
 
 (defn mk-if ^CodeEmitter [^CodeEmitter test
                           ^CodeEmitter if-true ^CodeEmitter if-false ^long fctx]

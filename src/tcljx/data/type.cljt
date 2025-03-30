@@ -44,8 +44,7 @@
 ;;; Maps a Clojure expression type to the logical Java type to be used
 ;;; in a class file element.  The returned value is never `void`.
 (defn expr-to-logical ^Class [^Class expr-type]
-  (if (or (polymorphic? expr-type)
-          #_(poly-reference? expr-type))
+  (if (or (polymorphic? expr-type) (poly-reference? expr-type))
     Object
     expr-type))
 

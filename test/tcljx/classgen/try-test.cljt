@@ -358,38 +358,38 @@
                      (finally
                        (.println System/out "Finally...")))))))
 
-;; (deftest finally-duplicates-local-1
-;;   (is (= '[(ICONST_2)
-;;            (ANEWARRAY "Object[]")
-;;            (ASTORE_0)
-;;            ["LOCAL 0: Object[] aframe"]
+(deftest finally-duplicates-local-1
+  (is (= '[(ICONST_2)
+           (ANEWARRAY "Object[]")
+           (ASTORE_0)
+           ["LOCAL 0: Object[] aframe"]
            
-;;            [L:0]
-;;            (ACONST_NULL)
-;;            (GOTO L:2)
+           [L:0]
+           (ACONST_NULL)
+           (GOTO L:2)
            
-;;            #_catch-any (EXCEPTION_CATCH L:0 L:1 L:1 any) [L:1]
-;;            (ALOAD_0)
-;;            (INVOKESTATIC RT "seq" "(Ljava/lang/Object;)Lclojure/lang/ISeq;")
-;;            (ASTORE_1)
-;;            ["LOCAL 1: ISeq seq_126"]
-;;            #_["POP 1: seq_126"]
-;;            (ATHROW)
+           #_catch-any (EXCEPTION_CATCH L:0 L:1 L:1 any) [L:1]
+           (ALOAD_0)
+           (INVOKESTATIC RT "seq" "(Ljava/lang/Object;)Lclojure/lang/ISeq;")
+           (ASTORE_1)
+           ["LOCAL 1: ISeq seq_126"]
+           #_["POP 1: seq_126"]
+           (ATHROW)
            
-;;            #_finally [L:2]
-;;            (ALOAD_0)
-;;            (INVOKESTATIC RT "seq" "(Ljava/lang/Object;)Lclojure/lang/ISeq;")
-;;            (ASTORE_1)
-;;            ["LOCAL 1: ISeq seq_126"]
-;;            #_["POP 1: seq_126"]
-;;            (ARETURN)
-;;            #_["POP 0: aframe"]]
-;;          (asm-expr (let* [aframe (new Object/1 2)]
-;;                      (try
-;;                        nil
-;;                        (finally
-;;                          (loop* [seq_126 (clojure.lang.RT/seq aframe)]
-;;                                 nil))))))))
+           #_finally [L:2]
+           (ALOAD_0)
+           (INVOKESTATIC RT "seq" "(Ljava/lang/Object;)Lclojure/lang/ISeq;")
+           (ASTORE_1)
+           ["LOCAL 1: ISeq seq_126"]
+           #_["POP 1: seq_126"]
+           (ARETURN)
+           #_["POP 0: aframe"]]
+         (asm-expr (let* [aframe (new Object/1 2)]
+                     (try
+                       nil
+                       (finally
+                         (loop* [seq_126 (clojure.lang.RT/seq aframe)]
+                                nil))))))))
 
 (deftest finally-duplicates-local-2
   (is (= '[[L:0]
@@ -516,37 +516,43 @@
 ;;                           (catch Exception _ (f) nil)
 ;;                           (catch Throwable _ (f) nil)))]))))
 
-;; (deftest try-finally-around-no-return-body
-;;   (is (= '[[L:0]
-;;            (GOTO L:0)
-;;            (EXCEPTION_CATCH L:0 L:1 L:1 any)
-;;            [L:1]
-;;            (GETSTATIC System "out" "Ljava/io/PrintStream;")
-;;            (LDC "Finally...")
-;;            (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
-;;            (ATHROW)]
-;;          (asm-expr (try
-;;                      (loop* [] (recur))
-;;                      (finally
-;;                        (.println System/out "Finally..."))))))
+(deftest try-finally-around-no-return-body
+  (is (= '[[L:0]
+           (GOTO L:0)
+           (EXCEPTION_CATCH L:0 L:1 L:2 any)
+           [L:1]
+           (NOP) (NOP) (ATHROW)         ;dead code
+           [L:2]
+           (GETSTATIC System "out" "Ljava/io/PrintStream;")
+           (LDC "Finally...")
+           (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
+           (ATHROW)
+           (NOP) (NOP) (NOP) (NOP) (NOP) (NOP) (NOP) (NOP) (ATHROW)] ;dead code
+         (asm-expr (try
+                     (loop* [] (recur))
+                     (finally
+                       (.println System/out "Finally..."))))))
   
-;;   (is (= '[(NEW FileInputStream)
-;;            (DUP)
-;;            (LDC "foo")
-;;            (INVOKESPECIAL FileInputStream "<init>" "(Ljava/lang/String;)V")
-;;            (ASTORE_0)
-;;            ["LOCAL 0: FileInputStream out"]
-;;            [L:0]
-;;            (GOTO L:0)
-;;            (EXCEPTION_CATCH L:0 L:1 L:1 any)
-;;            [L:1]
-;;            (ALOAD_0)
-;;            (INVOKEVIRTUAL FileInputStream "close" "()V")
-;;            (ATHROW)]
-;;          (asm-expr ^Object []
-;;                    (let* [out (java.io.FileInputStream. "foo")]
-;;                      (try
-;;                        (loop* [] (recur))
-;;                        (finally
-;;                          (.close out))))))))
+  (is (= '[(NEW FileInputStream)
+           (DUP)
+           (LDC "foo")
+           (INVOKESPECIAL FileInputStream "<init>" "(Ljava/lang/String;)V")
+           (ASTORE_0)
+           ["LOCAL 0: FileInputStream out"]
+           [L:0]
+           (GOTO L:0)
+           (EXCEPTION_CATCH L:0 L:1 L:2 any)
+           [L:1]
+           (NOP) (NOP) (ATHROW)         ;dead
+           [L:2]
+           (ALOAD_0)
+           (INVOKEVIRTUAL FileInputStream "close" "()V")
+           (ATHROW)
+           (NOP) (NOP) (NOP) (NOP) (ATHROW)] ;dead
+         (asm-expr ^Object []
+                   (let* [out (java.io.FileInputStream. "foo")]
+                     (try
+                       (loop* [] (recur))
+                       (finally
+                         (.close out))))))))
 

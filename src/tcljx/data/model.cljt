@@ -44,6 +44,14 @@
 ;;; compilation.
 (definterface Entity
   :extends [CodeEmitter]
+  ;; The type of the value to load from or store in the entity.
+  (entity-type ^Class [])
+
+  ;; Emits code taking one operand from the stack and overwrites the
+  ;; entity's current value with it.
+  (emit-store ^CodeBuilder [^CodeBuilder xb])
+  (emit-iinc ^CodeBuilder [^CodeBuilder xb ^int const]) ;optional
+  
   ;; Returns false if control then leaves the method.
   (emit-setup-code? ^boolean [^CodeBuilder xb ^CodeEmitter init]))
 
@@ -398,9 +406,14 @@
 
   (new-parameter ^Expr [^int param-no ^String name ^Class type])
   
-  (new-local ^Expr [^long fctx ^Class opt-type ^String name init-or-binding])
+  (new-local ^Expr [^long fctx ^boolean fresh-entity? ^Class opt-type
+                    ^String name init-or-binding])
   (block-let ^Expr [^long fctx ^Exprs bindings ^Expr body])
-
+  
+  (with-recur-parameters ^ExprFactory [^Exprs parameters])
+  (block-loop ^Expr [^long fctx ^Expr body])
+  (recur-expr ^Expr [^long fctx ^Exprs args])
+  
   (new-catching-local ^Expr [^long fctx ^Class type ^String name])
   (try-catch-finally ^Expr [^long fctx ^Exprs body+catches ^Class/1 catch-types
                             ^Expr finally])
@@ -451,16 +464,17 @@
   ;; Frequency of change: very low.
   (resolver ^Resolver [])
 
-  ;; Frequency of change: does not change at all.
+  ;; Frequency of change: one for every `loop*` expression.
   (expr-factory ^ExprFactory [])
-
+  
   ;; Maps simple name string to its associated binding.  The map can
   ;; be incomplete if a namespace `def` was parsed after creation of
   ;; the scope instance.  In this case, a second lookup using
   ;; `resolver` must be done to get an accurate picture of all `def`s.
   ;; Frequency of change: moderate.
   (bindings* ^map [])
-  (with-bindings* ^Scope [^map bindings]))
+  (with-bindings* ^Scope [^map bindings])
+  (with-recur-parameters ^Scope [^Exprs parameters]))
 
 (defn parameter-bindings ^Exprs [^Scope scope ^ArityType at]
   (let [ef (.expr-factory scope)
