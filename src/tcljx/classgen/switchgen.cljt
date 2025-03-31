@@ -139,17 +139,18 @@
             (.labelBinding xb end-of-switch)
             consumed-type)))))
 
-  (defn switch-int ^CodeEmitter [^CodeEmitter select ^Exprs/1 guards
-                                 ^CodeEmitter/1 paths ^CodeEmitter default-path
-                                 ^long fctx]
-    (^CodeEmitter fn [xb consumed-type then-leave?]
-     (when (emit/insn? xb fctx Integer/TYPE select)
-       (switch-int* (guards-to-switch-cases xb guards) paths default-path
-                    xb fctx consumed-type then-leave?))))
+  (defn switch-int ^CodeEmitter [^CodeEmitter select ^Class produced-type
+                                 ^Exprs/1 guards ^CodeEmitter/1 paths
+                                 ^CodeEmitter default-path ^long fctx]
+    (emit/with-adaption-barrier produced-type
+      (^CodeEmitter fn [xb consumed-type then-leave?]
+       (when (emit/insn? xb fctx Integer/TYPE select)
+         (switch-int* (guards-to-switch-cases xb guards) paths default-path
+                      xb fctx consumed-type then-leave?)))))
 
-  (defn switch-map ^CodeEmitter [^CodeEmitter select ^Exprs/1 guards
-                                 ^CodeEmitter/1 paths ^CodeEmitter default-path
-                                 ^long fctx]
+  (defn switch-map ^CodeEmitter [^CodeEmitter select ^Class produced-type
+                                 ^Exprs/1 guards ^CodeEmitter/1 paths
+                                 ^CodeEmitter default-path ^long fctx]
     (^CodeEmitter fn [xb consumed-type then-leave?]
      (when (emit/insn? xb fctx Object select)
        (let [cpb (.constantPool xb)
@@ -166,4 +167,4 @@
          (-> (emit/with-line-number xb fctx)
              (.invokedynamic (.invokeDynamicEntry cpb bsm nat)))
          (switch-int* (indexes-to-switch-cases xb guards) paths default-path
-                      xb fctx consumed-type then-leave?))))))
+                      xb fctx produced-type then-leave?))))))

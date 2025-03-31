@@ -28,6 +28,18 @@
   (let [line (context/fctx-line fctx)]
     (cond-> xb (pos? line) (.lineNumber (context/fctx-line fctx)))))
 
+;;; Do not push a reference as "consumed type" into a code emitter
+;;; that natively produces a primitive value.  The emitter must
+;;; materialize the primitive to trigger any NPE, before the known to
+;;; be non-nil consumed value is produced.
+(defn with-adaption-barrier ^CodeEmitter [^Class produced-type ^CodeEmitter ce]
+  (^CodeEmitter fn [xb consumed-type then-leave?]
+   (if (or (identical? Void/TYPE consumed-type)
+           (identical? produced-type consumed-type)
+           (= (.isPrimitive produced-type) (.isPrimitive consumed-type)))
+     (.emit-insn* ce xb consumed-type then-leave?)
+     (.emit-insn* ce xb produced-type false))))
+
 (letfn [(pop-operand ^void [^CodeBuilder xb ^Class on-stack-type]
           ;; pre: `on-stack-type` is not Void/TYPE
           (if (or (identical? Long/TYPE on-stack-type)

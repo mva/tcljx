@@ -168,7 +168,7 @@
                      (insn/emitter xs 2)
                      (.emitter insn/insn-empty))]
       (-> (.emitter (condgen/logical-truth (.get xs 0) fctx))
-          (condgen/mk-if (insn/emitter xs 1) ce-false fctx)
+          (condgen/mk-if tp (insn/emitter xs 1) ce-false fctx)
           (insn/mk-insn tp))))
   (case-expr [this select guards paths-and-default fctx error-contexts]
     (let [select-tp (switchgen/adjust-numeric-type (insn/expr-type select))
@@ -186,10 +186,10 @@
                          (.get paths-and-default (dec n-paths)))]
       (switchgen/validate-guards select-tp guards fctx error-contexts)
       (-> (if (switchgen/switch-on-int? select-tp)
-            (switchgen/switch-int (.emitter select) guards
+            (switchgen/switch-int (.emitter select) join-tp guards
                                   (Insns/.emitters paths-and-default)
                                   (.emitter default-path) fctx)
-            (switchgen/switch-map (.emitter select) guards
+            (switchgen/switch-map (.emitter select) join-tp guards
                                   (Insns/.emitters paths-and-default)
                                   (.emitter default-path) fctx))
           (insn/mk-insn join-tp))))
@@ -255,7 +255,7 @@
                 (wrong/wr-info)
                 (throw)))))
 
-      (-> (^CodeEmitter fn [xb consumed-type then-leave?]
+      (-> (^CodeEmitter fn [xb _ _]
            (let [iinc-deltas (recur-iinc-deltas entities ces)]
              (loop [i 0]
                (if (< i (alength ces))
@@ -286,9 +286,9 @@
     (let [insns ^Insns body+catches
           tp (condgen/join-type (.expr-types insns) 0 (.length insns))]
       (-> (if (some? finally)
-            (trygen/try-catch-finally (.emitters insns) catch-types
+            (trygen/try-catch-finally tp (.emitters insns) catch-types
                                       (.emitters ^Insns finally) fctx)
-            (trygen/try-catch (.emitters insns) catch-types fctx))
+            (trygen/try-catch tp (.emitters insns) catch-types fctx))
           (insn/mk-insn tp))))
   
   (new-function [this mangled-name arity-types arity-bodies arity-redirections]

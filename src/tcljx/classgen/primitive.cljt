@@ -119,7 +119,7 @@
               ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
   java.lang.Record
   CodeEmitter
-  (emit-insn* [_ xb consumed-type then-leave?]
+  (emit-insn* [_ xb _ then-leave?]
     (let [tp0 (op-type opcd0), tp1 (op-type opcd1)]
       (when (emit/insn? xb fctx tp0 ce0)
         (when (or (nil? ce1) (emit/insn? xb fctx tp1 ce1))

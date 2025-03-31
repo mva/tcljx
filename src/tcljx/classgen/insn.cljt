@@ -9,7 +9,6 @@
    (tcljx.data.resolve Match)
    (java.lang.classfile CodeBuilder TypeKind)
    (java.lang.constant MethodTypeDesc)
-   (java.lang.reflect #_Member Constructor #_Field)
    (java.util Arrays)))
 
 ;;; The code generator's implementation of Expr.  The class in
@@ -168,7 +167,7 @@
       (mk-insn (.emitter arg) target-type)
       
       :else
-      (-> (^CodeEmitter fn [xb consumed-type _]
+      (-> (^CodeEmitter fn [xb _ _]
            (when (emit/insn? xb fctx target-type (.emitter ^Insn arg))
              target-type))
           (mk-insn target-type)))))
@@ -235,7 +234,7 @@
          (let [fixed (resolve/end-of-fixed-parameters m)
                varargs-tp (resolve/varargs-parameter-type m)]
            ;; new-dup-dance when creating a new instance of `owner`
-           (when (instance? Constructor (.member m))
+           (when (instance? java.lang.reflect.Constructor (.member m))
              (-> xb (.new_ (reflect/describe-class (.owner m))) (.dup)))
            ;; instance field or method require receiver argument
            (when (or (nil? receiver) (emit-insn-logical? xb receiver))

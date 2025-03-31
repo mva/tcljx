@@ -527,7 +527,7 @@
            (LDC "Finally...")
            (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
            (ATHROW)
-           (NOP) (NOP) (NOP) (NOP) (NOP) (NOP) (NOP) (NOP) (ATHROW)] ;dead code
+           (NOP) (NOP) (NOP) (NOP) (NOP) (NOP) (NOP) (NOP) (NOP) (ATHROW)] ;dead
          (asm-expr (try
                      (loop* [] (recur))
                      (finally
@@ -548,7 +548,7 @@
            (ALOAD_0)
            (INVOKEVIRTUAL FileInputStream "close" "()V")
            (ATHROW)
-           (NOP) (NOP) (NOP) (NOP) (ATHROW)] ;dead
+           (NOP) (NOP) (NOP) (NOP) (NOP) (ATHROW)] ;dead
          (asm-expr ^Object []
                    (let* [out (java.io.FileInputStream. "foo")]
                      (try
