@@ -416,7 +416,7 @@
   
   (new-catching-local ^Expr [^long fctx ^Class type ^String name])
   (try-catch-finally ^Expr [^long fctx ^Exprs body+catches ^Class/1 catch-types
-                            ^Expr finally])
+                            ^Exprs finally])
   
   ;; ### functions
   

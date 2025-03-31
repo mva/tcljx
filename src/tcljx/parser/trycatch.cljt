@@ -3,7 +3,7 @@
    (tcljx.data [context :as context] [model :as model])
    (tcljx.parser [syntax :as syntax] [interop :as interop]))
   (:import
-   (tcljx.data.model CodeEmitter Expr Binding Scope)))
+   (tcljx.data.model CodeEmitter Expr Exprs Binding Scope)))
 
 (deftype CatchBinding [^Expr bnd-x ^Class ctp]) ;FIXME... Valhalla value
 (letfn [(finally-form? ^boolean [x]
@@ -13,9 +13,16 @@
         (body-form? ^boolean [x]
           (not (catch-form? x)))
 
-        (parse-finally ^Expr [^Scope scope ^long fctx ^seq form]
+        (parse-finally ^Exprs [^Scope scope ^long fctx ^seq form]
           (when (some? form)
-            (context/parse-progn scope form fctx (next form))))
+            (let [fctx (bit-and-not fctx context/flag-statm-position)
+                  xs (context/new-exprs scope 2)]
+              ;; parse finally twice: first copy is attached to the
+              ;; end of the `try`'s body, the second is placed in the
+              ;; wildcard exception handler before the ATHROW
+              (.set xs 0 (context/parse-progn scope form fctx (next form)))
+              (.set xs 1 (context/parse-progn scope form fctx (next form)))
+              xs)))
         (parse-binding ^CatchBinding [^Scope scope ^long fctx [_ tp nm :as form]]
           (when-not (catch-form? form)
             (throw (syntax/info "expect catch clause" form)))
@@ -65,7 +72,8 @@
               :else body)))]
   
   (defn parse-try ^Expr [^Scope scope ^long fctx [_ & formr]]
-    (let [lst (last formr)]
+    (let [fctx (bit-and-not fctx context/flag-can-recur) ;assume closure
+          lst (last formr)]
       (if (finally-form? lst)
         (parse-try-catch scope fctx (butlast formr) lst)
         (parse-try-catch scope fctx formr nil)))))
