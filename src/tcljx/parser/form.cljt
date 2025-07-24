@@ -280,6 +280,10 @@
         ;; or (via expansion) a class instance
         (constant/parse-constant-nometa this form))))
 
+  (new-function [this fn-nm parse-arity-body arity-specs]
+    (let [mangled-nm (.pick-unique-name resolver (name fn-nm))]
+      (.new-function* expr-factory mangled-nm parse-arity-body arity-specs)))
+  
   (with-bindings* [_ bindings]
     (ScopeImpl. expr-factory resolver bindings))
   (with-recur-parameters [_ parameters]

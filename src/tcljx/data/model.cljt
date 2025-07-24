@@ -5,7 +5,8 @@
    (java.lang.classfile CodeBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry)
    (java.lang.constant MethodHandleDesc MethodTypeDesc ConstantDescs)
-   (java.util Arrays))
+   (java.util Arrays)
+   (java.util.function Function))
   (:refer-clojure :exclude [zero?]))
 
 ;;; Emit instruction code into the CodeBuilder instance.  Return the
@@ -229,6 +230,9 @@
   (MethodTypeDesc/of (reflect/describe-class (.return-type at))
                      (reflect/describe-class* (.parameter-types at))))
 
+(deftype AritySpec [^ArityType at ^seq body ^MethodHandleDesc redirection
+                    ^seq error-context ^Expr code]) ;`code` is initially nil
+
 
 (definterface Invocable
   :extends [Entity]
@@ -422,10 +426,8 @@
   
   ;; Replaces any arity return types `auto-return-marker` with their
   ;; corresponding body's expression type.
-  (new-function ^Expr [^String mangled-name
-                       ^ArityType/1 arity-types
-                       ^Exprs arity-bodies
-                       ^MethodHandleDesc/1 arity-redirections])
+  (new-function* ^Expr [^String mangled-nm ^Function parse-arity-body
+                        ^AritySpec/1 arity-specs])
   
   ;; ### interop
 
@@ -460,7 +462,9 @@
 
 (definterface Scope
   (parse-form ^Expr [^long fctx form])
-
+  (new-function ^Expr [^symbol fn-nm ^Function parse-arity-body
+                       ^AritySpec/1 arity-specs])
+  
   ;; Frequency of change: very low.
   (resolver ^Resolver [])
 

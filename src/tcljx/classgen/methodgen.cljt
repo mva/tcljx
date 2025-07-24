@@ -3,16 +3,13 @@
    (tcljx.data [model :as model])
    (tcljx.classgen [runtime :as rt] [insn :as insn]))
   (:import
-   (tcljx.data.model Invocable ArityType)
+   (tcljx.data.model Invocable ArityType AritySpec)
    (tcljx.classgen.insn Insns)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDesc DirectMethodHandleDesc DynamicConstantDesc
                        ConstantDescs DirectMethodHandleDesc$Kind)))
 
-(deftype FnLiteral [^String mangled-name
-                    ^ArityType/1 arity-types
-                    ^Insns arity-bodies
-                    ^MethodHandleDesc/1 arity-redirections]
+(deftype FnLiteral [^String mangled-name ^AritySpec/1 arity-specs]
   java.lang.Record
   Invocable)
 
@@ -26,12 +23,13 @@
 
 (defn static-fn-desc ^DynamicConstantDesc [^ClassDesc owner
                                            ^FnLiteral fn-literal]
-  (let [ats (.arity-types fn-literal)
-        a (new ConstantDesc/1 (alength ats))
+  (let [specs (.arity-specs fn-literal)
+        a (new ConstantDesc/1 (alength specs))
         mnm (.mangled-name fn-literal)]
     (dotimes [i (alength a)]
-      (let [at (aget ats i)
-            mhd (or (aget (.arity-redirections fn-literal) i)
+      (let [spec (aget specs i)
+            at (.at spec)
+            mhd (or (.redirection spec)
                     (static-arity-mhd owner (str mnm "~" (.parameter-count at))
                                       at))]
         (aset a i mhd)))

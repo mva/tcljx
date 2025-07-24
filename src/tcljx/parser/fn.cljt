@@ -4,10 +4,11 @@
                [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.parser [syntax :as syntax] [interop :as interop]))
   (:import
-   (tcljx.data.model Expr Exprs ExprFactory ArityType Scope Resolver)
+   (tcljx.data.model Expr Exprs ExprFactory ArityType AritySpec Scope Resolver)
    (tcljx.data.resolve Match)
    (java.lang.constant MethodHandleDesc ConstantDescs)
-   (java.lang.reflect Method Constructor Field)))
+   (java.lang.reflect Method Constructor Field)
+   (java.util.function Function)))
 
 #_(definterface ArityMethod
   (at ^ArityType [])
@@ -90,26 +91,20 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn parse-arity-body ^Expr [^Scope scope ^seq error-context
-                              ^Exprs param-bindings ^long fctx ^seq body]
-  (.progn-expr (.expr-factory scope) param-bindings
-               (-> (context/with-local-bindings scope param-bindings)
-                   (context/parse-progn error-context fctx body))))
-
 (defn parse-fn* ^Expr [^Scope scope ^long fctx
                        [_ fn-nm paramv & body :as ^seq form]]
-  (let [fn-nm (syntax/simple-symbol-str fn-nm)
-        mangled-nm (context/pick-unique-name scope fn-nm)
+  (let [fn-nm (syntax/simple-symbol fn-nm)
         at (interop/parse-arity-type (.resolver scope) fctx paramv form)
-        pbnds (model/parameter-bindings scope at)
-        code (parse-arity-body scope form pbnds fctx body)
         redir (when (nil? (next body))
                 (let [form (first body)]
-                  (when (and (and  (seq? form)) (nil? (interop/tag-of form)))
-                    (redirection (.resolver scope) at form))))
-        ef (.expr-factory scope)]
-    (.new-function ef
-                   mangled-nm
-                   (doto (new ArityType/1 1) (aset 0 at))
-                   (doto (.new-exprs ef 1) (.set 0 code))
-                   (doto (new MethodHandleDesc/1 1) (aset 0 redir)))))
+                  (when (and (seq? form) (nil? (interop/tag-of form)))
+                    (redirection (.resolver scope) at form))))]
+    (.new-function
+     scope fn-nm
+     (^Function fn ^Expr [^AritySpec spec]
+      (let [pbnds (model/parameter-bindings scope (.at spec))
+            x (context/parse-progn (context/with-local-bindings scope pbnds)
+                                   (.error-context spec) fctx (.body spec))]
+        (.progn-expr (.expr-factory scope) pbnds x)))
+     (doto (new AritySpec/1 1)
+       (aset 0 (AritySpec. at body redir form nil))))))

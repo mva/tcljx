@@ -170,9 +170,6 @@
       rsv
       (wrong "cannot manipulate namespace data in this position"))))
 
-(defn pick-unique-name ^String [^Scope scope ^String nm]
-  (.pick-unique-name (.resolver scope) nm))
-
 ;;; ------------------------------------------------------------------------
 
 (defn with-local-binding ^Scope [^Scope scope ^Expr binding-expr]
