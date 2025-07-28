@@ -70,21 +70,30 @@
     (MethodHandleDesc/ofConstructor (owner-desc owner)
                                     (describe-class* (.getParameterTypes c))))
   
-  #_(defn mhd-of-member ^DirectMethodHandleDesc [^Class owner ^Member m]
-      (condp instance? m
-        Method (mhd-of-method owner m)
-        Field (mhd-of-field owner m)
-        Constructor (mhd-of-constructor owner m))))
+  (defn mhd-of-member ^DirectMethodHandleDesc [^Class owner ^Member m]
+    (condp instance? m
+      Method (mhd-of-method owner m)
+      Field (mhd-of-field owner m)
+      Constructor (mhd-of-constructor owner m))))
 
 ;;; ------------------------------------------------------------------------
 
 (defn virtual? ^boolean [^Member member] ;also true for constructor
   (not (Modifier/isStatic (.getModifiers member))))
+(defn takes-receiver? ^boolean [^Member member]
+  (and (virtual? member) (not (instance? Constructor member))))
 
 (defn parameter-types ^Class/1 [^Member member]
   (if (instance? Executable member)
     (.getParameterTypes ^Executable member)
     (new Class/1 0)))
+
+;; (defn return-type ^Class [^Member member]
+;;   (condp instance? member
+;;     Method (.getReturnType ^Method member)
+;;     Field (.getType ^Field member)
+;;     Constructor (.getDeclaringClass ^Constructor member)
+;;     #_else (throw (IllegalArgumentException.))))
 
 (defn invoke-member
   (^CodeBuilder [^CodeBuilder xb ^Class owner ^Member member]

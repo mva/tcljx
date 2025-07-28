@@ -4,7 +4,7 @@
                [model :as model] [reflect :as reflect])
    (tcljx.classgen [emit :as emit] [insn :as insn] [constgen :as constgen]))
   (:import
-   (tcljx.data.model Expr CodeEmitter Binding Entity Loadable Constant)
+   (tcljx.data.model Expr CodeEmitter Binding Entity Loadable Constant Invocable)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile CodeBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)))
@@ -20,12 +20,6 @@
           opnd-type)))
   (entity-type [_]
     opnd-type)
-  (emit-store [_ xb]
-    (throw (UnsupportedOperationException.)))
-  (emit-iinc [_ xb const]
-    (throw (UnsupportedOperationException.)))
-  (emit-setup-code? [this xb _]
-    true)
   (loadable-entry [_ cpb logical-type?]
     (if (instance? CodeEmitter/1 loadable-value)
       (if associate-meta?
@@ -94,12 +88,6 @@
           opnd-type)))
   (entity-type [_]
     opnd-type)
-  (emit-store [_ xb]
-    (throw (UnsupportedOperationException.)))
-  (emit-iinc [_ xb const]
-    (throw (UnsupportedOperationException.)))
-  (emit-setup-code? [this xb _]
-    true)
   (loadable-entry [this cpb logical-type?]
     (->> (if logical-type? (.datafy this) computational-value)
          (constgen/loadable-entry cpb)))
@@ -150,6 +138,29 @@
 
 ;;; ------------------------------------------------------------------------
 
+(definterface MutableEntity
+  :extends [Entity]
+  ;; Create an alias for this entity when it appears as value of a let
+  ;; binding?
+  (alias-when-let-value? ^boolean [])
+  
+  ;; Emits code taking one operand from the stack and overwrites the
+  ;; entity's current value with it.
+  (emit-store ^CodeBuilder [^CodeBuilder xb])
+  (emit-iinc ^CodeBuilder [^CodeBuilder xb ^int const]) ;optional
+  
+  ;; Called from Binding.  Returns false if control then leaves the
+  ;; method.
+  (emit-setup-code? ^boolean [^CodeBuilder xb ^CodeEmitter init]))
+
+(defn alias-when-let-value? ^boolean [^CodeEmitter ce]
+  (when (instance? Entity ce)
+    (if (instance? MutableEntity ce)
+      (.alias-when-let-value? ^MutableEntity ce)
+      true)))
+
+;;; ------------------------------------------------------------------------
+
 (defn- dup ^CodeBuilder [^CodeBuilder xb ^Class type]
   (case (.slotSize (TypeKind/from type))
     1 (.dup xb)
@@ -157,12 +168,14 @@
 
 (defn static-field ^Entity [^ClassDesc owner ^String fnm ^Class type]
   (let [type-cld (reflect/describe-class type)]
-    (reify Entity
+    (reify MutableEntity
       (emit-insn* [_ xb _ _]
         (.getstatic xb owner fnm type-cld)
         type)
       (entity-type [_]
         type)
+      (alias-when-let-value? [_]
+        false)
       (emit-store [_ xb]
         (throw (UnsupportedOperationException.)))
       (emit-iinc [_ xb const]
@@ -178,24 +191,20 @@
       (emit-insn* [_ xb _ _]
         (.invokestatic xb owner mnm mtd)
         type)
-      (emit-store [_ xb]
-        (throw (UnsupportedOperationException.)))
-      (emit-iinc [_ xb const]
-        (throw (UnsupportedOperationException.)))
       (entity-type [_]
-        type)
-      (emit-setup-code? [_ xb init]
-        true))))
+        type))))
 
 (deftype LocalVariable [^String name ^Class type
                         ^:unsynchronized-mutable ^int slot]
-  Entity
+  MutableEntity
   (emit-insn* [_ xb consumed-type _]
     (insn/with-void-empty-if-requested consumed-type
       (.loadLocal xb (TypeKind/from type) slot)
       type))
   (entity-type [_]
     type)
+  (alias-when-let-value? [_]
+    true)
   (emit-store [_ xb]
     (.storeLocal xb (TypeKind/from type) slot))
   (emit-iinc [_ xb const]
@@ -216,13 +225,15 @@
 
 (deftype Parameter [^String name ^Class type ^int param-no
                     ^:unsynchronized-mutable ^int slot]
-  Entity
+  MutableEntity
   (emit-insn* [_ xb consumed-type _]
     (insn/with-void-empty-if-requested consumed-type
       (.loadLocal xb (TypeKind/from type) slot)
       type))
   (entity-type [_]
     type)
+  (alias-when-let-value? [_]
+    true)
   (emit-store [_ xb]
     (.storeLocal xb (TypeKind/from type) slot))
   (emit-iinc [_ xb const]
@@ -244,10 +255,11 @@
   java.lang.Record
   Binding
   (emit-insn* [this xb consumed-type _]
-    ;; skip setup if this binding is an alias, the bound entity is a
-    ;; constant, or the entity's value is provided by other means
+    ;; skip setup if this binding is an alias, the bound entity is
+    ;; immutable, or the entity's value is provided by other means
     (when (or (nil? initialize-with)
-              (.emit-setup-code? bound-to xb initialize-with))
+              (not (instance? MutableEntity bound-to))
+              (.emit-setup-code? ^MutableEntity bound-to xb initialize-with))
       Void/TYPE)))
 
 (defn- mk-binding ^Binding [^Entity bound-to ^Insn bound-value
@@ -260,7 +272,7 @@
     (mk-binding ent (insn/mk-insn ent type) nil name insn/emitter-empty)))
 
 (defn local-binding ^Binding [^boolean fresh-entity? ^Class opt-type
-                              ^String name init-or-bnd ^long fctx]
+                              ^String name ^Insn init ^long fctx]
   (letfn [(non-alias-local ^Binding [^Insn init]
             (let [ce (insn/emitter init)
                   tp (or opt-type (insn/logical-type init))]
@@ -269,16 +281,26 @@
                 (let [ent (local-variable name tp)
                       ce (-> init (insn/cast-to tp fctx) .emitter)]
                   (mk-binding ent (insn/mk-insn ent tp) nil name ce)))))]
-    (if (instance? Insn init-or-bnd)
-      (non-alias-local init-or-bnd)
-      (let [bnd ^Binding init-or-bnd]
-        (if fresh-entity?
-          (non-alias-local (.bound-value bnd))
-          (mk-binding (.bound-to bnd) (.bound-value bnd) nil name nil))))))
+    (let [ce (.emitter init)]
+      (if (and (not fresh-entity?) (alias-when-let-value? ce))
+        (mk-binding ce init nil name nil)
+        (non-alias-local init)))))
+
+;; FIXME... get rid of complete-non-value-invocable eventually
+(defn- non-value-invocable-insn ^Insn [^Invocable inv]
+  (-> (reify Invocable
+        (emit-insn* [_ _ _ _]
+          (throw (IllegalStateException.)))
+        (entity-type [_]
+          type/polymorphic)
+        (invoke* [_ fctx form xs]
+          (.invoke* inv fctx form xs)))
+      (insn/mk-insn type/polymorphic)))
 
 (defn global-binding
   (^Binding [^Entity bound-to ^String namespace ^String name]
-   (mk-binding bound-to nil namespace name nil)) ;for predefined entities
+   (let [inv (non-value-invocable-insn bound-to)]
+     (mk-binding bound-to inv namespace name nil))) ;for predefined entities
   (^Binding [^Entity bound-to ^Insn bound-value ^String namespace ^String name
              ^CodeEmitter initialize-with]
    (mk-binding bound-to bound-value namespace name initialize-with)))

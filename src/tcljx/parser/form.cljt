@@ -53,10 +53,10 @@
                 (constant/parse-constant-nometa this form)))
             (parse-quote ^Expr [[_ & args]]
               (syntax/empty-tail (next args))
-              (parse-quoted-form (syntax/some-first args)))
+              (parse-quoted-form (syntax/first args)))
 
             (parse-if ^Expr [^long fctx [_ & formr]]
-              (syntax/some-first (next formr)) ;test and first path exist?
+              (syntax/first (next formr)) ;test and first path exist?
               (syntax/empty-tail 3 formr) ;nothing after test and two paths?
               (let [xs (.new-exprs expr-factory (count formr))]
                 (.set xs 0 (context/parse-arg this fctx (first formr)))
@@ -75,7 +75,7 @@
                 (doto (.new-exprs expr-factory 1)
                   (.set 0 (parse-quoted-form form)))))
             (parse-case* ^Expr [^long fctx [_ & formr :as form]]
-              (let [select (context/parse-arg this fctx (syntax/some-first formr))
+              (let [select (context/parse-arg this fctx (syntax/first formr))
                     n (- (count formr) 1)
                     has-default? (odd? n)
                     n-paths (quot n 2)
@@ -96,7 +96,7 @@
               (context/parse-progn this fctx forms))
             
             (parse-throw ^Expr [^long fctx [_ & args]]
-              (let [x (context/parse-arg this fctx (syntax/some-first args))]
+              (let [x (context/parse-arg this fctx (syntax/first args))]
                 (syntax/empty-tail (next args))
                 (.throw-expr expr-factory fctx x)))
             (parse-instanceof* ^Expr [^long fctx [_ & args]]
@@ -105,7 +105,7 @@
                 (if-some [tp (model/type-expression (.get xs 0) (first args))]
                   (.instanceof-expr expr-factory fctx tp (.get xs 1))
                   (.invoke-virtual-member expr-factory fctx (.get xs 0)
-                                          "isInstance" (.drop xs 1)))))
+                                          nil "isInstance" (.drop xs 1)))))
             
             (parse-import* ^Expr [[_ & formr :as form]]
               (let [specs (map syntax/strip-quote formr)
@@ -133,18 +133,20 @@
                     (.invoke-static-member expr-factory fctx false owner mnm xs))
                   (if fnm
                     (.get-virtual-field expr-factory fctx owner-expr fnm)
-                    (.invoke-virtual-member expr-factory fctx owner-expr mnm xs)))))
+                    (.invoke-virtual-member expr-factory fctx owner-expr
+                                            nil mnm xs)))))
             (parse-dot-dot-or-member ^Expr [^String nm ^long fctx [_ & formr]]
               (if (= nm "..")
                 (->> (reduce #(list '. %1 %2)
-                             (list '. (syntax/some-first formr)
-                                   (syntax/some-first (next formr)))
+                             (list '. (syntax/first formr)
+                                   (syntax/first (next formr)))
                              (nnext formr))
                      (parse-dot fctx))
                 (let [mnm (.substring nm 1)
-                      receiver (context/parse-arg this fctx (syntax/some-first formr))
+                      receiver (context/parse-arg this fctx (syntax/first formr))
                       xs (context/parse-args this fctx (rest formr))]
-                  (.invoke-virtual-member expr-factory fctx receiver mnm xs))))
+                  (.invoke-virtual-member expr-factory fctx receiver
+                                          nil mnm xs))))
             (parse-class-dot ^Expr [^String nm ^long fctx [_ & formr]]
               (let [clnm (.substring nm 0 (dec (.length nm)))]
                 (parse-dot fctx (list* \. (symbol nil clnm) 'new formr))))
@@ -162,7 +164,7 @@
                     (case nm
                       ;; FIXME... implement these as proper primitive
                       ;; functions
-                      "identity" (context/parse-arg this fctx (second form))
+                      "identity" (context/parse-arg this fctx (syntax/second form))
                       
                       "def" (def/parse-def this fctx form)
                       "loop*" (loop/parse-loop* this fctx form)
@@ -186,7 +188,7 @@
                       ;; monitor-exit (monitor-form Opcode/MONITOREXIT form)
                       ;; catch is only special within `try-form`
                       ;; finally is only special within `try-form`
-                      "new" (let [sym (syntax/symbol (second form))]
+                      "new" (let [sym (syntax/symbol (syntax/second form))]
                               (new/parse-new this (parse-type-symbol sym)
                                              fctx form))
                       ;; & is only special within arity signature
@@ -211,16 +213,28 @@
                           (throw (wrong/info-unresolved op)))))
 
                     ;; `op` is qualified symbol: either a reference to
-                    ;; a namespace ref, or a static class member
+                    ;; a namespace def, a static class member, or an
+                    ;; instance member
                     (if-some [bnd (context/lookup this op)]
-                      bnd
+                      (assert false)
                       (if-some [cl (context/lookup-class this nmsp)]
-                        (.invoke-static-member expr-factory fctx true cl nm
-                                               (context/parse-args this fctx (rest form)))
+                        (if-some [ptags (interop/param-tags-of op)]
+                          (let [x (parse-class-qualified-symbol cl nm ptags)]
+                            (.invoke expr-factory fctx form (.emitter x)
+                                     (context/parse-args this fctx (rest form))))
+                          (if (= (.charAt nm 0) \.) ;syntax is Class/.member
+                            (.invoke-virtual-member
+                             expr-factory fctx
+                             (context/parse-arg this fctx (syntax/second form))
+                             cl (.substring nm 1)
+                             (context/parse-args this fctx (nnext form)))
+                            (.invoke-static-member
+                             expr-factory fctx true cl nm
+                             (context/parse-args this fctx (rest form)))))
                         (condp = op
                           tcljx.data.config/sym-regex-literal
                           ;; FIXME... drop this later
-                          (constant/regex-literal this (second form))
+                          (constant/regex-literal this (syntax/second form))
 
                           'tinyclj.lang.primitive/list
                           ;; FIXME... drop this later
@@ -229,26 +243,43 @@
                           #_else
                           (throw (wr-info-unresolved-qualified-sym op)))))))
                 (.mk-expr expr-factory form)))
-            
-            (parse-class-qualified-symbol ^Expr [^Class nmsp ^String nm]
-              (if-some [tp (interop/lookup-type resolver nmsp nm)]
-                (.new-constant expr-factory Class tp)
-                (.get-static-field expr-factory fctx nmsp nm)))
-            (lookup-class-symbol ^Expr [^symbol sym]
+
+            (parse-param-tags ^Class/1 [^Object ptags]
+              (when (some? ptags)
+                (let [ptags (syntax/vector ptags)
+                      a (new Class/1 (count ptags))]
+                  (dotimes [i (alength a)]
+                    (let [sym (nth ptags i)]
+                      (aset a i (if (= sym '_)
+                                  type/polymorphic
+                                  (parse-type-symbol sym)))))
+                  a)))
+            (parse-class-qualified-symbol ^Expr [^Class owner ^String nm
+                                                 ^Object ptags]
+              (if-some [tp (interop/lookup-type resolver owner nm)]
+                (.new-constant expr-factory Class tp) ;array type
+                (let [ptags (parse-param-tags ptags)]
+                  (if (.startsWith nm ".")
+                    (.class-member-expr expr-factory false fctx owner
+                                        (.substring nm 1) ptags)
+                    (.class-member-expr expr-factory true fctx owner
+                                        nm ptags)))))
+            (lookup-class-symbol ^Expr [^symbol sym ^map form-meta]
               (if-some [nmsp (namespace sym)]
                 (when-some [cl (.lookup-class resolver nmsp)]
-                  (parse-class-qualified-symbol cl (name sym)))
+                  (let [ptags (interop/get-param-tags form-meta)]
+                    (parse-class-qualified-symbol cl (name sym) ptags)))
                 (when-some [cl (.lookup-class resolver (name sym))]
                   (.new-constant expr-factory Class cl))))
-            (parse-symbol ^Expr [^symbol sym] ;discards meta
+            (parse-symbol ^Expr [^symbol sym ^map form-meta]
               (if-some [bnd (context/lookup this sym)]
                 (.bound-value bnd)
-                (or (lookup-class-symbol sym)
+                (or (lookup-class-symbol sym form-meta)
                     (throw (wrong/info-unresolved sym)))))
             (wr-info-unresolved-type ^Throwable [^symbol sym]
               (wrong/info-unresolved "undefined type symbol " sym))
             (parse-type-symbol ^Class [^symbol sym]
-              (if-some [x (lookup-class-symbol sym)]
+              (if-some [x (lookup-class-symbol sym (meta sym))]
                 (if-some [tp (model/type-expression x sym)]
                   tp
                   (throw (syntax/info "expected type expression" sym)))
@@ -264,8 +295,9 @@
               form-tag (meta/get-tag form-meta)]
           (-> (cond
                 ;; reference to global def, local binding, defined
-                ;; class, or instance field (when in a deftype)
-                (symbol? form) (parse-symbol form)
+                ;; class, class member, or instance field (when in a
+                ;; deftype); close to 90% hit rate for "is a symbol"
+                (symbol? form) (parse-symbol form form-meta)
                 
                 ;; special form, macro form, or some function call variant
                 (and (seq? form) (some? (seq form)))

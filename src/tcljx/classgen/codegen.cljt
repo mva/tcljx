@@ -13,6 +13,7 @@
                      ArityType AritySpec NamespaceBuilder)
    (tcljx.data.resolve Match)
    (tcljx.classgen.classfile ClassElementEmitter)
+   (tcljx.classgen.entity MutableEntity)
    (tcljx.classgen.insn Insn Insns)
    (tcljx.classgen.methodgen FnLiteral)
    (java.lang.classfile ClassBuilder CodeBuilder Opcode Label TypeKind)
@@ -210,10 +211,12 @@
   (new-parameter [_ param-no name type]
     (Insn. (entity/parameter-binding param-no name type) Void/TYPE))
   
-  (new-local [_ fctx fresh-entity? opt-type name init-or-binding]
-    (when opt-type    ;presence of type tag means this is not an alias
-      (insn/ensure-assignable opt-type init-or-binding))
-    (-> (entity/local-binding fresh-entity? opt-type name init-or-binding fctx)
+  (new-local [_ fctx fresh-entity? opt-type name init]
+    (when opt-type
+      (insn/ensure-assignable opt-type init))
+    ;; presence of type tag means this is not an alias
+    (-> (entity/local-binding (or fresh-entity? (some? opt-type))
+                              opt-type name init fctx)
         (insn/mk-insn Void/TYPE)))
   (block-let [_ fctx bindings body]
     (let [block (insn/progn bindings body)]
@@ -281,11 +284,12 @@
                    (if (neg? i)
                      (do (.goto_ xb (.get-recur-target this))
                          nil) ;operand type reported when emitting code
-                     (let [d (aget iinc-deltas i)]
+                     (let [d (aget iinc-deltas i)
+                           ent ^MutableEntity (aget entities i)]
                        (if (primitive/valid-iinc-const? d)
                          (when-not (zero? d) ;elide for unchanged entity 
-                           (.emit-iinc (aget entities i) xb d))
-                         (.emit-store (aget entities i) xb))
+                           (.emit-iinc ent xb d))
+                         (.emit-store ent xb))
                        (recur (dec i)))))))))
           (insn/mk-insn Void/TYPE))))   ;type used while parsing
   
@@ -376,10 +380,10 @@
               (assert false "not yet implemented")
               insn))
           (throw (info-unresolved-member ms owner mnm args "static")))))
-  (invoke-virtual-member [_ fctx receiver mnm args]
+  (invoke-virtual-member [_ fctx receiver opt-owner mnm args]
     (let [receiver ^Insn receiver
           args ^Insns args
-          owner (insn/expr-type receiver)
+          owner (or opt-owner (insn/expr-type receiver))
           ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
       (or (invoke-single-match ms receiver args fctx)
           (throw (info-unresolved-member ms owner mnm args "virtual")))))
@@ -397,6 +401,26 @@
       (or (invoke-single-match ms receiver args fctx)
           (throw (wrong/wr-info (str "no virtual field matching "
                                      (wrong/q-as-symbol owner mnm)))))))
+
+  (class-member-expr [this static? fctx owner mnm ptags]
+    (let [ms (resolve/members-by-param-tags static? owner mnm ptags)
+          wr-info (fn ^Throwable []
+                    (let [sym (wrong/q-as-symbol owner mnm)]
+                      (-> (if (and static? (= resolve/constructor-name mnm))
+                            (if (seq ms)
+                              (str "multiple constructors matching " sym)
+                              (str "no constructor matching " sym))
+                            (let [label (if static? "static" "virtual")]
+                              (if (seq ms)
+                                (str "multiple " label " members matching " sym)
+                                (str "no " label " member matching " sym))))
+                          (wrong/wr-info))))]
+      (let [m ^Match (first ms)]
+        (if (and (some? m) (nil? (next ms)))
+          (if (and static? (resolve/field? m))
+            (insn/invoke-member m nil insn/empty-insns fctx)
+            (methodgen/class-member-fn m))
+          (throw (wr-info))))))
 
   (instanceof-expr [_ fctx type arg]
     (let [arg ^Insn arg]

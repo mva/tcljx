@@ -5,10 +5,11 @@
     [model :as model] [reflect :as reflect] [resolve :as resolve])
    (tcljx.classgen [emit :as emit]))
   (:import
-   (tcljx.data.model Expr Exprs CodeEmitter Entity)
+   (tcljx.data.model Expr Exprs CodeEmitter Entity AritySpec)
    (tcljx.data.resolve Match)
-   (java.lang.classfile CodeBuilder TypeKind)
-   (java.lang.constant MethodTypeDesc)
+   (java.lang.classfile CodeBuilder TypeKind Opcode)
+   (java.lang.constant MethodTypeDesc DirectMethodHandleDesc
+                       DirectMethodHandleDesc$Kind)
    (java.util Arrays)))
 
 ;;; The code generator's implementation of Expr.  The class in
@@ -237,7 +238,8 @@
            (when (instance? java.lang.reflect.Constructor (.member m))
              (-> xb (.new_ (reflect/describe-class (.owner m))) (.dup)))
            ;; instance field or method require receiver argument
-           (when (or (nil? receiver) (emit-insn-logical? xb receiver))
+           (when (or (nil? receiver)
+                     (emit/insn? xb fctx (.owner m) (.emitter receiver)))
              ;; all fixed (i.e. non-vararg) arguments
              (when (emit/typed-insns? xb fctx (.parameter-types m)
                                       (.emitters args) 0 fixed)
@@ -253,6 +255,52 @@
                        (reflect/invoke-member (.owner m) (.member m)))
                    (.return-type m))))))))
       (mk-insn (.return-type m))))
+
+(defn- invoke-mhd* ^CodeBuilder [^CodeBuilder xb ^DirectMethodHandleDesc mhd]
+  (let [cp (.constantPool xb)
+        owner (.classEntry cp (.owner mhd))
+        nm (.utf8Entry cp (.methodName mhd))
+        tp (.utf8Entry cp (.lookupDescriptor mhd))
+        nat (.nameAndTypeEntry cp nm tp)
+        opc (case (.refKind mhd)
+              #_REF_getField 1 Opcode/GETFIELD
+              #_REF_getStatic 2 Opcode/GETSTATIC
+              #_REF_putField 3 Opcode/PUTFIELD
+              #_REF_putStatic 4 Opcode/PUTSTATIC
+              #_REF_invokeVirtual 5 Opcode/INVOKEVIRTUAL
+              #_REF_invokeStatic 6 Opcode/INVOKESTATIC
+              #_REF_invokeSpecial 7 Opcode/INVOKESPECIAL
+              #_REF_newInvokeSpecial 8 Opcode/INVOKESPECIAL
+              #_REF_invokeInterface 9 Opcode/INVOKEINTERFACE)]
+    (if (< (.refKind mhd) #_REF_invokeVirtual 5)
+      (.fieldAccess xb opc (.fieldRefEntry cp owner nat))
+      (.invoke xb opc (if (.isOwnerInterface mhd)
+                        (.interfaceMethodRefEntry cp owner nat)
+                        (.methodRefEntry cp owner nat))))))
+
+(defn invoke-arity ^Insn [^AritySpec spec ^Insns args ^long fctx]
+  (-> (^CodeEmitter fn [xb consumed-type _]
+       (let [at (.at spec)
+             fixed (model/fixed-parameter-count at)
+             parameter-types (.parameter-types at)
+             varargs-tp (when (< fixed (alength parameter-types))
+                          (aget parameter-types fixed))
+             mhd (.redirection spec)]
+         ;; new-dup-dance when creating a new instance of `owner`
+         (when (identical? DirectMethodHandleDesc$Kind/CONSTRUCTOR (.kind mhd))
+           (-> xb (.new_ (.owner mhd)) (.dup)))
+         ;; all fixed (i.e. non-vararg) arguments
+         (when (emit/typed-insns? xb fctx parameter-types (.emitters args)
+                                  0 fixed)
+           ;; optionally: all vararg arguments
+           (when (or (nil? varargs-tp)
+                     (emit-array-of? xb (.getComponentType varargs-tp)
+                                     (.emitters args) fixed))
+             ;; the actual invoke instruction
+             (-> (emit/with-line-number xb fctx)
+                 (invoke-mhd* mhd))
+             (.return-type at)))))
+      (mk-insn (-> spec .at .return-type))))
 
 ;;; Invoke static runtime method without line number information.
 (defn invoke-runtime ^Insn [^Match m ^Insns args]

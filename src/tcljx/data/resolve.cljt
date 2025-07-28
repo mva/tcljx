@@ -107,7 +107,7 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def invoke-polymorphic -1) ;tails arguments & return type are polymorphic
+(def invoke-polymorphic -1) ;tail arguments & return type are polymorphic
 (def invoke-standard 0)     ;regular invocation
 (def invoke-tail-into-array 1)         ;pack tail arguments into array
 
@@ -121,6 +121,9 @@
 (defn- with-invocation-mode ^Match [^Match m ^int invocation-mode]
   (Match. (.owner m) (.member m) (.parameter-types m) (.return-type m)
           invocation-mode))
+
+(defn field? ^boolean [^Match m]
+  (instance? Field (.member m)))
 
 (defn parameter-count ^int [^Match m]
   (alength (.parameter-types m)))

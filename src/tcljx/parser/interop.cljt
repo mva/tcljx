@@ -7,18 +7,20 @@
    (tcljx.data.model Resolver ArityType ArityTypeImpl)
    (clojure.lang IMeta)))
 
-;;; Returns nil if lookup fails.
+;;; Returns nil if lookup fails.  The three argument arity returns an
+;;; array type if class `cl` is provided and `nm` is a digit
+;;; matching [1-9].
 (defn lookup-type
   (^Class [^Resolver rsv ^symbol tp]
    (let [nm (name tp)]
      (if-some [nmsp (namespace tp)]
        (lookup-type rsv (.lookup-class rsv nmsp) nm)
        (.lookup-class rsv nm))))
-  (^Class [^Resolver rsv ^Class nmsp ^String nm] ;nil if `nmsp` is nil
-   (when (and (some? nmsp) (= (.length nm) 1))
+  (^Class [^Resolver rsv ^Class cl ^String nm] ;nil if `cl` is nil
+   (when (and (some? cl) (= (.length nm) 1))
      (let [n (- (int (.charAt nm 0)) (int \0))]
        (when (<= 1 n 9)
-         (type/array-type-of-class nmsp n))))))
+         (type/array-type-of-class cl n))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -35,7 +37,7 @@
   (^Class [^Resolver rsv ^IMeta form ^Class or-else]
    (resolve-tag* rsv (tag-of form) or-else)))
 
-(defn get-param-tags [^map form-meta]
+(defn get-param-tags ^Object [^map form-meta] ;nil if no param tags are given
   (when (some? form-meta)
     (.valAt form-meta :param-tags nil)))
 (defn param-tags-of ^vector [form]
@@ -51,7 +53,8 @@
     (let [paramv (syntax/vector paramv)
           n (count paramv)
           ptypes (new Class/1 n)
-          pnames (new String/1 n)]
+          pnames (new String/1 n)
+          varargs? false]               ;FIXME...
       (assert (not= '& (nth paramv (- n 2) nil)))
       (dotimes [i (alength ptypes)]
         (let [param (nth paramv i)
@@ -62,4 +65,4 @@
         (-> (if (= 'auto-return-type return-tag)
               type/auto-return-marker
               (resolve-tag* rsv return-tag Object))
-            (ArityTypeImpl. ptypes pnames))))))
+            (ArityTypeImpl. ptypes pnames varargs?))))))

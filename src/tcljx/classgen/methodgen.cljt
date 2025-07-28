@@ -1,13 +1,16 @@
 (ns tcljx.classgen.methodgen
   (:require
-   (tcljx.data [model :as model])
-   (tcljx.classgen [runtime :as rt] [insn :as insn]))
+   (tcljx.data [model :as model] [reflect :as reflect] resolve)
+   (tcljx.classgen [runtime :as rt] [insn :as insn] [entity :as entity]))
   (:import
-   (tcljx.data.model Invocable ArityType AritySpec)
-   (tcljx.classgen.insn Insns)
+   (tcljx.data.model Invocable ArityType ArityTypeImpl AritySpec
+                     CodeEmitter Entity)
+   (tcljx.data.resolve Match)
+   (tcljx.classgen.insn Insn Insns)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDesc DirectMethodHandleDesc DynamicConstantDesc
-                       ConstantDescs DirectMethodHandleDesc$Kind)))
+                       ConstantDescs DirectMethodHandleDesc$Kind)
+   (java.lang.reflect Executable)))
 
 (deftype FnLiteral [^String mangled-name ^AritySpec/1 arity-specs]
   java.lang.Record
@@ -21,10 +24,14 @@
    (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
                               owner method-name (model/mtd-of-arity-type at))))
 
+(defn- immediate-fn-desc* ^DynamicConstantDesc [^DirectMethodHandleDesc/1 mhds]
+  (DynamicConstantDesc/ofNamed rt/bsm-static-fn ConstantDescs/DEFAULT_NAME
+                               rt/StaticFn mhds))
+
 (defn static-fn-desc ^DynamicConstantDesc [^ClassDesc owner
                                            ^FnLiteral fn-literal]
   (let [specs (.arity-specs fn-literal)
-        a (new ConstantDesc/1 (alength specs))
+        a (new DirectMethodHandleDesc/1 (alength specs))
         mnm (.mangled-name fn-literal)]
     (dotimes [i (alength a)]
       (let [spec (aget specs i)
@@ -33,5 +40,58 @@
                     (static-arity-mhd owner (str mnm "~" (.parameter-count at))
                                       at))]
         (aset a i mhd)))
-    (DynamicConstantDesc/ofNamed rt/bsm-static-fn ConstantDescs/DEFAULT_NAME
-                                 rt/StaticFn a)))
+    (immediate-fn-desc* a)))
+
+
+(letfn [(arity-parameter-types ^Class/1 [^Match m]
+          (let [ptypes (.parameter-types m)]
+            (if (reflect/takes-receiver? (.member m))
+              (let [a (new Class/1 (inc (alength ptypes)))]
+                (aset a 0 (.owner m))
+                (System/arraycopy ptypes 0 a 1 (alength ptypes))
+                a)
+              ptypes)))]
+  
+  (defn- match-to-arity-spec ^AritySpec [^Match m]
+    (let [varargs? (when (instance? Executable (.member m))
+                     (.isVarArgs ^Executable (.member m)))
+          ptypes (arity-parameter-types m)
+          at (ArityTypeImpl. (.return-type m) ptypes nil varargs?)
+          mhd (reflect/mhd-of-member (.owner m) (.member m))]
+      (AritySpec. at nil mhd nil nil))))
+
+(deftype ImmediateFn [^AritySpec/1 arity-specs]
+  CodeEmitter
+  (emit-insn* [this xb consumed-type then-leave?]
+    (let [mhds (new DirectMethodHandleDesc/1 (alength arity-specs))]
+      (dotimes [i (alength mhds)]
+        (aset mhds i (.redirection (aget arity-specs i))))
+      (-> (immediate-fn-desc* mhds)
+          (entity/mk-constant (.entity-type this))
+          (.emit-insn* xb consumed-type then-leave?))))
+
+  Entity
+  (entity-type [_]
+    tinyclj.lang.StaticFn)
+  
+  Invocable
+  (invoke* [_ fctx form xs]
+    (let [spec (aget arity-specs 0)
+          at (.at spec)
+          ptypes (.parameter-types at)
+          fixed (model/fixed-parameter-count at)]
+      (dotimes [i fixed]   ;check arguments passed to fixed parameters
+        (insn/ensure-assignable (aget ptypes i) xs i))
+      (when (< fixed (alength ptypes)) ;any arguments passed as varargs?
+        (let [va-type (.getComponentType (aget ptypes fixed))]
+          (loop [i fixed]
+            (when (< i (alength ptypes))
+              (insn/ensure-assignable va-type xs i)
+              (recur (inc i))))))
+      (insn/invoke-arity spec xs fctx))))
+
+(defn class-member-fn ^Insn [^Match m]
+  (let [arity-specs (doto (new AritySpec/1 1)
+                      (aset 0 (match-to-arity-spec m)))
+        ent (ImmediateFn. arity-specs)]
+    (insn/mk-insn ent (.entity-type ent))))

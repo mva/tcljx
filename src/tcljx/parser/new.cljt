@@ -11,6 +11,6 @@
       (-> (.expr-factory scope)
           (.invoke-constructor fctx owner (context/parse-args scope fctx args)))
       (let [dims (context/parse-args scope fctx args)]
-        (syntax/some-first args)        ;at least one dimentions is provided
+        (syntax/first args)        ;at least one dimentions is provided
         (syntax/empty-tail n args)
         (.new-array (.expr-factory scope) fctx owner dims)))))

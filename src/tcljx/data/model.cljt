@@ -4,7 +4,7 @@
   (:import
    (java.lang.classfile CodeBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry)
-   (java.lang.constant MethodHandleDesc MethodTypeDesc ConstantDescs)
+   (java.lang.constant DirectMethodHandleDesc MethodTypeDesc ConstantDescs)
    (java.util Arrays)
    (java.util.function Function))
   (:refer-clojure :exclude [zero?]))
@@ -34,7 +34,7 @@
 
 ;;; A named entity on the level of the code generator that exists at
 ;;; runtime, usually appearing as the "provide the value of the given
-;;; name" operation of a binding.  Exposes additional operations
+;;; name" operation of a bound name.  Exposes additional operations
 ;;; beyond "emit code that produces this entity's value".  The code
 ;;; emitted by Entity itself puts its current value on the operand
 ;;; stack.
@@ -45,18 +45,11 @@
 ;;; compilation.
 (definterface Entity
   :extends [CodeEmitter]
-  ;; The type of the value to load from or store in the entity.
-  (entity-type ^Class [])
-
-  ;; Emits code taking one operand from the stack and overwrites the
-  ;; entity's current value with it.
-  (emit-store ^CodeBuilder [^CodeBuilder xb])
-  (emit-iinc ^CodeBuilder [^CodeBuilder xb ^int const]) ;optional
-  
-  ;; Returns false if control then leaves the method.
-  (emit-setup-code? ^boolean [^CodeBuilder xb ^CodeEmitter init]))
-
-
+  ;; The type of the value to load from the entity.  If
+  ;; `type/polymorphic`, then this entity cannot be reified as a
+  ;; regular value at runtime.  This is the case for macros and most
+  ;; primitive functions.
+  (entity-type ^Class []))
 
 ;;; The parser works with opaque instances of Expr exclusively.  An
 ;;; Expr gives a very restricted view on whatever data the code
@@ -210,19 +203,20 @@
 
 (deftype ArityTypeImpl [^Class return-type
                         ^Class/1 parameter-types
-                        ^String/1 parameter-names]
+                        ^String/1 parameter-names
+                        ^boolean varargs?]
   java.lang.Record
   ArityType
   (with-return-type [_ tp]
-    (ArityTypeImpl. tp parameter-types parameter-names))
+    (ArityTypeImpl. tp parameter-types parameter-names varargs?))
   (parameter-count [_]
     (alength parameter-types))
   (parameter-name [_ ^int i]
     (aget parameter-names i))
   (parameter-type [_ ^int i]
     (aget parameter-types i))
-  (varargs? [_]                         ;FIXME...
-    false)
+  (varargs? [_]
+    varargs?)
   (variadic? [_]                        ;FIXME...
     false))
 
@@ -230,7 +224,13 @@
   (MethodTypeDesc/of (reflect/describe-class (.return-type at))
                      (reflect/describe-class* (.parameter-types at))))
 
-(deftype AritySpec [^ArityType at ^seq body ^MethodHandleDesc redirection
+(defn fixed-parameter-count ^int [^ArityType at]
+  (cond-> (.parameter-count at)
+    (or (.variadic? at) (.varargs? at))
+    (dec)))
+
+
+(deftype AritySpec [^ArityType at ^seq body ^DirectMethodHandleDesc redirection
                     ^seq error-context ^Expr code]) ;`code` is initially nil
 
 
@@ -441,12 +441,15 @@
   (invoke-static-member ^Expr [^long fctx ^boolean invoke-value-of-field?
                                ^Class owner ^String mnm ^Exprs args])
   
-  (invoke-virtual-member ^Expr [^long fctx ^Expr receiver ^String mnm
-                                ^Exprs args])
+  (invoke-virtual-member ^Expr [^long fctx ^Expr receiver
+                                ^Class opt-owner ^String mnm ^Exprs args])
 
   (get-static-field ^Expr [^long fctx ^Class owner ^String mnm])
   (get-virtual-field ^Expr [^long fctx ^Expr receiver ^String mnm])
-
+  
+  (class-member-expr ^Expr [^boolean static? ^long fctx
+                            ^Class owner ^String mnm ^Class/1 ptags])
+  
   (instanceof-expr ^Expr [^long fctx ^Class type ^Expr arg])
   (throw-expr ^Expr [^long fctx ^Expr arg])
   

@@ -21,7 +21,7 @@
                     (.new-def-init nmsp nm (context/parse-arg scope fctx init))))
                 (.new-def-init nmsp nm nil))))
           (assign-to-def ^Expr [^Binding bnd ^seq init-forms]
-            (let [init (syntax/some-first init-forms)]
+            (let [init (syntax/first init-forms)]
               (-> (.expr-factory scope)
                   (.assignment bnd (context/parse-arg scope fctx init)))))]
     
