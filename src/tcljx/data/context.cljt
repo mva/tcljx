@@ -1,6 +1,6 @@
 (ns tcljx.data.context
   (:require (tcljx.data [meta :as meta] [wrong :as wrong] [model :as model]))
-  (:import (tcljx.data.model Resolver NamespaceBuilder Binding
+  (:import (tcljx.data.model Resolver NamespaceBuilder Entity Binding
                              Expr Exprs ExprFactory Scope)
            (tcljx.data.wrong WrongInfo)))
 
@@ -140,7 +140,7 @@
 ;;   (instance? tcljx.model.NamespaceResolver rsv))
 
 ;;; Returns nil if `form` does not resolve to a binding.
-(defn lookup ^Binding [^Scope scope ^symbol form]
+(defn lookup ^Entity [^Scope scope ^symbol form]
   (let [nm (name form)]
     (if-some [nmsp (namespace form)]
       ;; a qualified name always refers to a namespace-level def
@@ -150,11 +150,6 @@
       ;; `bindings*` is accurate with very high probability
       (or (.valAt (.bindings* scope) nm nil)
           (.lookup-def (.resolver scope) nil nm))))) ;to cover all defs
-
-(defn lookup-if-alias ^Binding [^symbol sink ^Scope scope form]
-  (when (and (symbol? form) (nil? (.meta ^symbol form))
-             (nil? (meta/get-tag (.meta sink))))
-    (lookup scope form)))
 
 ;;; Returns nil if `nm` does not resolve to a class name.
 (defn lookup-namespace ^String [^Scope scope ^String alias]
@@ -173,13 +168,13 @@
 ;;; ------------------------------------------------------------------------
 
 (defn with-local-binding ^Scope [^Scope scope ^Expr binding-expr]
-  (let [bnd (model/require-binding binding-expr)]
-    (.with-bindings* scope (assoc (.bindings* scope) (.name bnd) bnd))))
+  (let [bnd ^Binding (.emitter binding-expr)]
+    (.with-bindings* scope (assoc (.bindings* scope) (.name bnd) (.bound-to bnd)))))
 
 (defn with-local-bindings ^Scope [^Scope scope ^Exprs binding-exprs]
   (loop [locals (transient (.bindings* scope))
          i 0]
     (if (< i (.length binding-exprs))
-      (let [bnd (model/require-binding binding-exprs i)]
-        (recur (assoc! locals (.name bnd) bnd) (inc i)))
+      (let [bnd ^Binding (.emitter binding-exprs i)]
+        (recur (assoc! locals (.name bnd) (.bound-to bnd)) (inc i)))
       (.with-bindings* scope (persistent! locals)))))

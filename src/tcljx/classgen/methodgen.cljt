@@ -67,11 +67,11 @@
       (dotimes [i (alength mhds)]
         (aset mhds i (.redirection (aget arity-specs i))))
       (-> (immediate-fn-desc* mhds)
-          (entity/mk-constant (.entity-type this))
+          (entity/mk-constant (.value-type this))
           (.emit-insn* xb consumed-type then-leave?))))
 
   Entity
-  (entity-type [_]
+  (value-type [_]
     tinyclj.lang.StaticFn)
   
   Invocable
@@ -90,8 +90,6 @@
               (recur (inc i))))))
       (insn/invoke-arity spec xs fctx))))
 
-(defn class-member-fn ^Insn [^Match m]
-  (let [arity-specs (doto (new AritySpec/1 1)
-                      (aset 0 (match-to-arity-spec m)))
-        ent (ImmediateFn. arity-specs)]
-    (insn/mk-insn ent (.entity-type ent))))
+(defn class-member-entity ^Entity [^Match m]
+  (ImmediateFn. (doto (new AritySpec/1 1)
+                  (aset 0 (match-to-arity-spec m)))))

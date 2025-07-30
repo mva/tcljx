@@ -8,7 +8,7 @@
     [loop :as loop] [fn :as fn] [new :as new] [constant :as constant]
     [trycatch :as trycatch]))
   (:import
-   (tcljx.data.model Resolver Expr Exprs ExprFactory Invocable Scope)
+   (tcljx.data.model Resolver Expr Exprs ExprFactory Entity Invocable Scope)
    (clojure.lang IMeta)))
 
 (deftype ScopeImpl [^ExprFactory expr-factory
@@ -188,9 +188,9 @@
                       ;; monitor-exit (monitor-form Opcode/MONITOREXIT form)
                       ;; catch is only special within `try-form`
                       ;; finally is only special within `try-form`
-                      "new" (let [sym (syntax/symbol (syntax/second form))]
-                              (new/parse-new this (parse-type-symbol sym)
-                                             fctx form))
+                      "new" (let [arg (syntax/second form)
+                                  tp (interop/parse-type-symbol resolver arg)]
+                              (new/parse-new this tp fctx form))
                       ;; & is only special within arity signature
                       
                       ;; special forms that are not special in Clojure:
@@ -205,9 +205,9 @@
                         (parse-class-dot nm fctx form)
                         
                         :else
-                        (if-some [bnd (context/lookup this op)]
-                          (if-some [inv (model/bound-invocable bnd)]
-                            (.invoke expr-factory fctx form inv
+                        (if-some [ent (context/lookup this op)]
+                          (if (model/invocable? ent)
+                            (.invoke expr-factory fctx form ent
                                      (context/parse-args this fctx (rest form)))
                             (assert false))
                           (throw (wrong/info-unresolved op)))))
@@ -215,13 +215,13 @@
                     ;; `op` is qualified symbol: either a reference to
                     ;; a namespace def, a static class member, or an
                     ;; instance member
-                    (if-some [bnd (context/lookup this op)]
+                    (if-some [ent (context/lookup this op)]
                       (assert false)
                       (if-some [cl (context/lookup-class this nmsp)]
-                        (if-some [ptags (interop/param-tags-of op)]
-                          (let [x (parse-class-qualified-symbol cl nm ptags)]
-                            (.invoke expr-factory fctx form (.emitter x)
-                                     (context/parse-args this fctx (rest form))))
+                        (if-some [ent (when (some? (interop/param-tags-of op))
+                                        (interop/lookup-class-entity this op))]
+                          (.invoke expr-factory fctx form ent
+                                   (context/parse-args this fctx (rest form)))
                           (if (= (.charAt nm 0) \.) ;syntax is Class/.member
                             (.invoke-virtual-member
                              expr-factory fctx
@@ -239,56 +239,21 @@
                           'tinyclj.lang.primitive/list
                           ;; FIXME... drop this later
                           (parse-collection-literal fctx (rest form) nil)
-                          
+                            
                           #_else
                           (throw (wr-info-unresolved-qualified-sym op)))))))
                 (.mk-expr expr-factory form)))
 
-            (parse-param-tags ^Class/1 [^Object ptags]
-              (when (some? ptags)
-                (let [ptags (syntax/vector ptags)
-                      a (new Class/1 (count ptags))]
-                  (dotimes [i (alength a)]
-                    (let [sym (nth ptags i)]
-                      (aset a i (if (= sym '_)
-                                  type/polymorphic
-                                  (parse-type-symbol sym)))))
-                  a)))
-            (parse-class-qualified-symbol ^Expr [^Class owner ^String nm
-                                                 ^Object ptags]
-              (if-some [tp (interop/lookup-type resolver owner nm)]
-                (.new-constant expr-factory Class tp) ;array type
-                (let [ptags (parse-param-tags ptags)]
-                  (if (.startsWith nm ".")
-                    (.class-member-expr expr-factory false fctx owner
-                                        (.substring nm 1) ptags)
-                    (.class-member-expr expr-factory true fctx owner
-                                        nm ptags)))))
-            (lookup-class-symbol ^Expr [^symbol sym ^map form-meta]
-              (if-some [nmsp (namespace sym)]
-                (when-some [cl (.lookup-class resolver nmsp)]
-                  (let [ptags (interop/get-param-tags form-meta)]
-                    (parse-class-qualified-symbol cl (name sym) ptags)))
-                (when-some [cl (.lookup-class resolver (name sym))]
-                  (.new-constant expr-factory Class cl))))
-            (parse-symbol ^Expr [^symbol sym ^map form-meta]
-              (if-some [bnd (context/lookup this sym)]
-                (.bound-value bnd)
-                (or (lookup-class-symbol sym form-meta)
-                    (throw (wrong/info-unresolved sym)))))
-            (wr-info-unresolved-type ^Throwable [^symbol sym]
-              (wrong/info-unresolved "undefined type symbol " sym))
-            (parse-type-symbol ^Class [^symbol sym]
-              (if-some [x (lookup-class-symbol sym (meta sym))]
-                (if-some [tp (model/type-expression x sym)]
-                  tp
-                  (throw (syntax/info "expected type expression" sym)))
-                (throw (wr-info-unresolved-type sym))))
+            (parse-symbol ^Expr [^symbol sym]
+              (let [ent (or (context/lookup this sym)
+                            (interop/lookup-class-entity this sym)
+                            (throw (wrong/info-unresolved sym)))]
+                (.value-of expr-factory ent sym)))
             
             (apply-type-hint ^Expr [^Expr x ^long fctx form-tag]
               ;; pre: (some? form-tag)
-              (.type-cast expr-factory fctx
-                          (parse-type-symbol (syntax/symbol form-tag)) x))]
+              (let [tp (interop/parse-type-symbol resolver form-tag)]
+                (.type-cast expr-factory fctx tp x)))]
 
       (if (instance? IMeta form)
         (let [form-meta (.meta ^IMeta form)
@@ -297,7 +262,7 @@
                 ;; reference to global def, local binding, defined
                 ;; class, class member, or instance field (when in a
                 ;; deftype); close to 90% hit rate for "is a symbol"
-                (symbol? form) (parse-symbol form form-meta)
+                (symbol? form) (parse-symbol form)
                 
                 ;; special form, macro form, or some function call variant
                 (and (seq? form) (some? (seq form)))

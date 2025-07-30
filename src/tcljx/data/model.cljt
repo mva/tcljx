@@ -39,17 +39,46 @@
 ;;; emitted by Entity itself puts its current value on the operand
 ;;; stack.
 ;;;
+;;; An entity has a static and bounded compile-time scope in which it
+;;; can be accessed, for example to retrieve its value (if it has
+;;; any), or to access any of the other more specialized services like
+;;; direct invocation.  Only the entity's value can be passed on when
+;;; exiting the scope.  But this value does not provide any privileged
+;;; access to the entity it was derived from.
+;;;
 ;;; Implementation note: To ease certain code generation patterns,
 ;;; identity of Entity instances is important.  A runtime entity
 ;;; should be mirrored by at most one Entity instance during
 ;;; compilation.
 (definterface Entity
   :extends [CodeEmitter]
-  ;; The type of the value to load from the entity.  If
-  ;; `type/polymorphic`, then this entity cannot be reified as a
-  ;; regular value at runtime.  This is the case for macros and most
-  ;; primitive functions.
-  (entity-type ^Class []))
+  ;; The type of the entity's value, for example when pushing it onto
+  ;; the operand stack.  If `type/polymorphic`, then this entity
+  ;; cannot be reified as a regular value at runtime.  This is the
+  ;; case for macros and most primitive functions.
+  (value-type ^Class []))
+
+(definterface MutableEntity
+  :extends [Entity]
+  ;; Create an alias for this entity when it appears as value of a let
+  ;; binding?
+  (alias-when-let-value? ^boolean [])
+  
+  ;; Emits code taking one operand from the stack and overwrites the
+  ;; entity's current value with it.
+  (emit-store ^CodeBuilder [^CodeBuilder xb])
+  (emit-iinc ^CodeBuilder [^CodeBuilder xb ^int const]) ;optional
+  
+  ;; Called from Binding.  Returns false if control then leaves the
+  ;; method.
+  (emit-setup-code? ^boolean [^CodeBuilder xb ^CodeEmitter init]))
+
+(defn alias-when-let-value? ^boolean [^CodeEmitter ce]
+  (when (instance? Entity ce)
+    (if (instance? MutableEntity ce)
+      (.alias-when-let-value? ^MutableEntity ce)
+      true)))
+
 
 ;;; The parser works with opaque instances of Expr exclusively.  An
 ;;; Expr gives a very restricted view on whatever data the code
@@ -68,37 +97,28 @@
   (drop ^Exprs [^int n]))
 
 
-;;; A binding represents the partial evaluation to a runtime named
-;;; entity.  Depending on the context it is used to detect aliasing of
-;;; one name to another, to identify a macro expansion form, and to
-;;; produce the bound value of the binding.
+;;; A binding represents the place in a code sequence where some
+;;; entity `bound-to` is associated with a name.
 (definterface Binding
   :extends [CodeEmitter]
   ;; The runtime entity for which this binding provides a name.  There
   ;; can be multiple bindings referring to the same shared entity.  In
-  ;; this case, only the root binding performs initialization of the
-  ;; entity by calling `emit-setup-code`.
+  ;; this case, at most one binding has a non-nil `provided-value` and
+  ;; only this binding performs initialization of the entity by
+  ;; calling its `emit-setup-code`.
   (bound-to ^Entity [])
 
-  ;; The expression that produces the entity's value.
-  (bound-value ^Expr [])
+  ;; The expression that provides the `bound-to` entity's value, or
+  ;; nil if this binding is an alias for an existing entity referred
+  ;; to by `bound-to`.
+  (provided-value ^Expr [])
 
-  ;; Every binding has a name, but only global bindings on the
-  ;; namespace level provide a non-nil namespace name.
-  (namespace ^String [])                ;non nil if global def
+  ;; The name assigned to the entity `bound-to`.
   (name ^String []))
 
-(defn binding-name ^symbol [^Binding bnd] ;for error messages
-  (symbol (.namespace bnd) (.name bnd)))
-
-(defn global? ^boolean [^Binding bnd]
-  (some? (.namespace bnd)))
-
-(defn require-binding
-  (^Binding [^Expr x]
-   (.emitter x))
-  (^Binding [^Exprs xs ^int i]
-   (.emitter xs i)))
+(definterface GlobalEntity)
+(defn global? ^boolean [^Entity ent]
+  (instance? GlobalEntity ent))
 
 ;;; ------------------------------------------------------------------------
 
@@ -238,9 +258,8 @@
   :extends [Entity]
   (invoke* ^Expr [^long fctx ^seq form ^Exprs xs]))
 
-(defn bound-invocable ^Invocable [^Binding bnd]
-  (when (instance? Invocable (.bound-to bnd))
-    (.bound-to bnd)))
+(defn invocable? ^boolean [^Entity ent]
+  (instance? Invocable ent))
 
 ;;; If `x` is a binding, then return the very first non-aliasing
 ;;; binding that defines its value.  Otherwise, return nil.
@@ -272,10 +291,10 @@
   ;; names for the scope of the namespace.  Returns nil if not found.
   (lookup-class ^Class [^String nm])
   
-  ;; Returns the binding representing the def form for `nm` in
+  ;; Returns the entity representing the def form for `nm` in
   ;; namespace `nmsp`, or nil if no such binding exists.  Use nil as
   ;; `nmsp` to refer to the current namespace.
-  (lookup-def ^Binding [^String nmsp ^String nm])
+  (lookup-def ^Entity [^String nmsp ^String nm])
 
   ;; Generates unique names for fn* and reify* instances within a
   ;; given namespace.  `dflt-nm` of nil means function or interface
@@ -329,7 +348,7 @@
   ;; that initializes the binding with its value (if any).  Pass an
   ;; `init` of nil if no intial value is provided.
   (new-def-init ^Expr [^String nm ^Expr init])
-  (new-def-alias ^Expr [^String nm ^Binding other])
+  (new-def-alias ^Expr [^String nm ^Entity other])
 
   ;; FIXME... see tcljc/emitter/namespace.cljt
   ;; hack for dependency chain core_print.cljt
@@ -359,6 +378,11 @@
 (definterface ExprFactory
   (empty-expr ^Expr [])
   (new-exprs ^Exprs [^int length])
+
+  (class-entity ^Entity [^Class cl])
+  (class-member-entity ^Entity [^boolean static? ^Class owner ^String mnm
+                                ^Class/1 ptags])
+  (value-of ^Expr [^Entity ent ^symbol form])
   
   ;; Create an expression denoting the constant `value` of type
   ;; `expr-type`.  For the most part, there is a one-to-one
@@ -406,12 +430,12 @@
   
   ;; ### bindings
 
-  (assignment ^Expr [^Binding bnd ^Expr value])
+  (assignment ^Expr [^Entity ent ^Expr value])
 
   (new-parameter ^Expr [^int param-no ^String name ^Class type])
   
-  (new-local ^Expr [^long fctx ^boolean fresh-entity? ^Class opt-type
-                    ^String name init-or-binding])
+  (binding-alias ^Expr [^long fctx ^String name ^Entity ent])
+  (binding-fresh ^Expr [^long fctx ^Class opt-type ^String name ^Expr init])
   (block-let ^Expr [^long fctx ^Exprs bindings ^Expr body])
   
   (with-recur-parameters ^ExprFactory [^Exprs parameters])
@@ -446,9 +470,6 @@
 
   (get-static-field ^Expr [^long fctx ^Class owner ^String mnm])
   (get-virtual-field ^Expr [^long fctx ^Expr receiver ^String mnm])
-  
-  (class-member-expr ^Expr [^boolean static? ^long fctx
-                            ^Class owner ^String mnm ^Class/1 ptags])
   
   (instanceof-expr ^Expr [^long fctx ^Class type ^Expr arg])
   (throw-expr ^Expr [^long fctx ^Expr arg])

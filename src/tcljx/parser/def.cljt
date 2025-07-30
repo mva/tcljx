@@ -1,15 +1,19 @@
 (ns tcljx.parser.def
   (:require
-   (tcljx.data [wrong :as wrong] [context :as context] [model :as model])
+   (tcljx.data [meta :as meta] [wrong :as wrong] [context :as context]
+               [model :as model])
    (tcljx.parser [syntax :as syntax]))
   (:import
-   (tcljx.data.model Expr Binding Scope)))
+   (tcljx.data.model Expr Entity Scope)))
 
 (defn parse-def ^Expr [^Scope scope ^long fctx [_ nm-sym & args]]
-  (letfn [(aliased-def ^Binding [init]
-            (if-some [bnd (context/lookup-if-alias nm-sym scope init)]
-              (when (model/global? bnd)
-                bnd)))
+  (letfn [(aliased-def ^Entity [init]
+            (when (and (symbol? init)
+                       (nil? (.meta ^symbol init))
+                       (nil? (meta/get-tag (.meta ^symbol nm-sym))))
+              (when-some [ent (context/lookup scope init)]
+                (when (model/global? ent)
+                  ent))))
           (new-def ^Expr [^String nm ^seq init-forms]
             ;; pre: `init-forms` is nil when empty
             ;; post: throws `wrong` when outside namespace context
@@ -19,11 +23,11 @@
                   (if-some [bnd (aliased-def init)]
                     (.new-def-alias nmsp nm bnd)
                     (.new-def-init nmsp nm (context/parse-arg scope fctx init))))
-                (.new-def-init nmsp nm nil))))
-          (assign-to-def ^Expr [^Binding bnd ^seq init-forms]
+                (.new-def-init nmsp nm (.empty-expr (.expr-factory scope))))))
+          (assign-to-def ^Expr [^Entity ent ^seq init-forms]
             (let [init (syntax/first init-forms)]
               (-> (.expr-factory scope)
-                  (.assignment bnd (context/parse-arg scope fctx init)))))]
+                  (.assignment ent (context/parse-arg scope fctx init)))))]
     
     (let [nm (syntax/simple-symbol-str nm-sym)
           prior-def (.lookup-def (.resolver scope) nil nm)]

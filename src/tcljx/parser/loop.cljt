@@ -16,8 +16,8 @@
               nm (syntax/simple-symbol-str nm-sym)
               init (nth bindings (inc (* i 2)))
               opt-type (interop/resolve-tag (.resolver scope) nm-sym nil)
-              bnd-x (.new-local ef fctx true opt-type nm
-                                (context/parse-arg scope fctx init))]
+              bnd-x (.binding-fresh ef fctx opt-type nm
+                                    (context/parse-arg scope fctx init))]
           (.set bnd-xs i bnd-x)
           (recur (context/with-local-binding scope bnd-x) (inc i)))
         (let [fctx' (bit-or fctx context/flag-can-recur)

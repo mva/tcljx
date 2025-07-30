@@ -4,7 +4,7 @@
                [context :as context] [model :as model])
    (tcljx.parser [syntax :as syntax]))
   (:import
-   (tcljx.data.model Resolver ArityType ArityTypeImpl)
+   (tcljx.data.model Resolver ExprFactory Scope Entity ArityType ArityTypeImpl)
    (clojure.lang IMeta)))
 
 ;;; Returns nil if lookup fails.  The three argument arity returns an
@@ -44,6 +44,45 @@
   (when-some [ptags (get-param-tags (meta form))]
     (syntax/vector ptags)))
 
+;;; ------------------------------------------------------------------------
+
+(defn parse-type-symbol ^Class [^Resolver resolver form]
+  (let [sym (syntax/symbol form)]
+    (or (lookup-type resolver sym)
+        (throw (syntax/info "expected type expression" form)))))
+
+(defn lookup-class-entity
+  (^Entity [^Scope scope ^symbol sym]
+   (lookup-class-entity (.resolver scope) (.expr-factory scope) sym))
+  (^Entity [^Resolver resolver ^ExprFactory expr-factory ^symbol sym]
+   (letfn [(parse-param-tags ^Class/1 [^Resolver resolver ^Object ptags]
+             (when (some? ptags)
+               (let [ptags (syntax/vector ptags)
+                     a (new Class/1 (count ptags))]
+                 (dotimes [i (alength a)]
+                   (let [sym (nth ptags i)]
+                     (aset a i (if (= sym '_)
+                                 type/polymorphic
+                                 (parse-type-symbol resolver sym)))))
+                 a)))
+           
+           (resolve-class-qualified-symbol ^Entity [^Class owner ^String nm
+                                                    ^Object ptags]
+             (if-some [tp (lookup-type resolver owner nm)]
+               (.class-entity expr-factory tp) ;array type
+               (let [ptags (parse-param-tags resolver ptags)]
+                 (if (.startsWith nm ".")
+                   (.class-member-entity expr-factory false owner
+                                         (.substring nm 1) ptags)
+                   (.class-member-entity expr-factory true owner nm ptags)))))]
+     (if-some [nmsp (namespace sym)]
+       (when-some [cl (.lookup-class resolver nmsp)]
+         (let [ptags (get-param-tags (.meta sym))]
+           (resolve-class-qualified-symbol cl (name sym) ptags)))
+       (when-some [cl (.lookup-class resolver (name sym))]
+         (.class-entity expr-factory cl))))))
+
+;;; ------------------------------------------------------------------------
 
 ;;; If `paramv` is tagged with `auto-return-type`, then the arity's
 ;;; return type is set to the temporary `auto-return-marker`.

@@ -32,8 +32,10 @@
   Expr)
 
 (def mk-insn Insn/new)
+(defn mk-statm ^Insn [^CodeEmitter emitter]
+  (mk-insn emitter type/polymorphic))
 (def emitter-empty (^CodeEmitter fn [xb _ _] Void/TYPE))
-(def insn-empty (mk-insn emitter-empty type/polymorphic))
+(def insn-empty (mk-statm emitter-empty))
 
 ;;; Compilation centers around arrays of types and arrays of code
 ;;; emitters.  For a sequence of forms, the parser vie ExprFactory

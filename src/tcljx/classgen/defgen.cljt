@@ -50,5 +50,4 @@
                     (do (as-field const cva) (.emitter init))
                     (do (as-method) (entity/static-method this-segm nm tp)))
                   (do (as-field nil nil) (entity/static-field this-segm nm tp)))]
-        (entity/global-binding ent (insn/mk-insn ent tp) ns-str nm
-                               (.emitter init))))))
+        (entity/global-binding ent ns-str nm (.emitter init))))))
