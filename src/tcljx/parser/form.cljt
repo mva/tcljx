@@ -24,22 +24,19 @@
     (letfn [(parse-meta ^Expr [^long fctx ^map form-meta]
               (when form-meta
                 (parse-collection-literal fctx form-meta (meta form-meta))))
-            (parse-collection-literal-nometa ^Expr [^long fctx form]
-              (cond
-                (vector? form)
-                (.new-vector expr-factory (context/parse-args this fctx (seq form)))
-                (map? form)
-                (let [forms (mapcat identity form)]
-                  (.new-map expr-factory (context/parse-args this fctx forms)))
-                (set? form)
-                (.new-set expr-factory (context/parse-args this fctx (seq form)))
-                (seq? form)
-                (.new-list expr-factory (context/parse-args this fctx (seq form)))
-                :else
-                (throw (IllegalStateException. (str (class form))))))
             (parse-collection-literal ^Expr [^long fctx form ^map form-meta]
               (let [x-meta (parse-meta fctx form-meta)
-                    x (parse-collection-literal-nometa fctx form)]
+                    coll-tp (cond
+                              (vector? form) type/vector
+                              (map? form) type/map
+                              (set? form) type/set
+                              (seq? form) type/list
+                              :else (throw (IllegalStateException.)))
+                    x (->> (if (identical? type/map coll-tp)
+                             (mapcat identity form)
+                             (seq form))
+                           (context/parse-args this fctx)
+                           (.new-collection expr-factory coll-tp))]
                 (if (some? x-meta)
                   (.attach-meta-to expr-factory x-meta x)
                   x)))

@@ -407,10 +407,7 @@
   
   ;; These methods return a constant expression when possible:
   (attach-meta-to ^Expr [^Expr meta ^Expr arg])
-  (new-vector ^Expr [^Exprs args])
-  (new-map ^Expr [^Exprs args])
-  (new-set ^Expr [^Exprs args])
-  (new-list ^Expr [^Exprs args])
+  (new-collection ^Expr [^Class coll-type ^Exprs args])
   (new-array ^Expr [^long fctx ^Class array-type ^Exprs dims])
 
   ;; ### basics

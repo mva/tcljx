@@ -158,26 +158,16 @@
             (entity/mk-loadable tp true)
             (insn/mk-insn tp)))
       (insn/invoke-runtime literal-with-meta (insn/insns-of arg meta))))
-  (new-vector [this args]
+  (new-collection [this coll-type args]
     (let [args ^Insns args]
       (if (entity/loadables? args)
-        (.new-loadable this type/vector (.emitters args))
-        (insn/invoke-runtime literal-vector args))))
-  (new-map [this args]
-    (let [args ^Insns args]
-      (if (entity/loadables? args)
-        (.new-loadable this type/map (.emitters args))
-        (insn/invoke-runtime literal-map args))))
-  (new-set [this args]
-    (let [args ^Insns args]
-      (if (entity/loadables? args)
-        (.new-loadable this type/set (.emitters args))
-        (insn/invoke-runtime literal-set args))))
-  (new-list [this args]
-    (let [args ^Insns args]
-      (if (entity/loadables? args)
-        (.new-loadable this type/list (.emitters args))
-        (insn/invoke-runtime literal-list args))))
+        (.new-loadable this coll-type (.emitters args))
+        (-> (condp identical? coll-type
+              type/vector literal-vector
+              type/map literal-map
+              type/set literal-set
+              type/list literal-list)
+            (insn/invoke-runtime args)))))
   (new-array [_ fctx array-type dims]
     (let [dims ^Insns dims]
       (dotimes [i (.length dims)]
