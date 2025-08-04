@@ -180,7 +180,7 @@
           ;; by compiler code, and that all non-NULL values (including
           ;; DynamicConstantDesc) always describe some literal and
           ;; known to be non-null value.
-          (let [c (model/const-value x)]
+          (let [c (insn/const-value x)]
             (cond (nil? c) (if (model/loadable? x)
                              Boolean/FALSE     ;is never null
                              nil)              ;may be null
@@ -198,8 +198,8 @@
 
 (defn- icmp ^Insn [^Class arg-type ^CodeEmitter ce0 ^CodeEmitter ce1
                    ^int cmp-opcd ^long fctx]
-  (or (when-some [c0 ^Integer (model/ce-const-value ce0)]
-        (when-some [c1 ^Integer (model/ce-const-value ce1)]
+  (or (when-some [c0 ^Integer (entity/const-value ce0)]
+        (when-some [c1 ^Integer (entity/const-value ce1)]
           (let [n0 ^int c0, n1 ^int c1]
             (when (or c0 c1)         ;both non-null means "don't know"
               (-> (case cmp-opcd
@@ -227,8 +227,8 @@
 (defn- xcmp-signum ^CodeEmitter [^int bytecode ^Class arg-type
                                  ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
   (let [signum #(object (Integer/signum ^int %))
-        c (when-some [c0 (model/ce-const-value ce0)]
-            (when-some [c1 (model/ce-const-value ce1)]
+        c (when-some [c0 (entity/const-value ce0)]
+            (when-some [c1 (entity/const-value ce1)]
               ;; Never constant fold if a NaN is involved; this avoids
               ;; the subleties of [fd]cmpl vs [fd]cmpg.  A floating
               ;; point comparison of -0.0 to 0.0 must return zero --
@@ -310,7 +310,7 @@
                     ce-left (new CodeEmitter/1 n)]
                 (dotimes [i n]
                   (->> (let [ce (aget ces i)]
-                         (if (or (zero? i) (model/ce-const? ce))
+                         (if (or (zero? i) (entity/const? ce))
                            ce
                            (^CodeEmitter fn [xb _ _]
                             (.loadLocal xb (.type-kind wtop) temp)
@@ -322,7 +322,7 @@
                     ce-right (new CodeEmitter/1 n)]
                 (dotimes [i n]
                   (->> (let [ce (aget ces (inc i))]
-                         (if (or (= i (dec n)) (model/ce-const? ce))
+                         (if (or (= i (dec n)) (entity/const? ce))
                            ce
                            (^CodeEmitter fn [xb _ _]
                             (when (emit/insn? xb fctx (.class-primitive wtop) ce)

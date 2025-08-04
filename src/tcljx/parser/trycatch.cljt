@@ -27,7 +27,7 @@
           (when-not (catch-form? form)
             (throw (syntax/info "expect catch clause" form)))
           (let [ctp (-> (context/parse-form scope fctx tp)
-                        (model/type-expression tp))]
+                        (model/type-literal tp))]
             (when (or (nil? ctp) (not (.isAssignableFrom Throwable ctp)))
               (throw (syntax/info "expect caught exception type" tp)))
             (-> (.new-catching-local (.expr-factory scope) fctx ctp

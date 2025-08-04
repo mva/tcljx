@@ -43,7 +43,7 @@
                 (insn/constant-insn target-type))))]
 
   (defn- convert-to-primitive ^Insn [^Insn arg ^Class target-type ^long fctx]
-    (or (when-some [c (model/const-value arg)]
+    (or (when-some [c (insn/const-value arg)]
           (fold-cast-from target-type c))
         (insn/cast-to arg target-type fctx)))
   
@@ -97,12 +97,12 @@
 (defn- numeric-op ^OpSpec [^Wrapper bottom-type ^Opcode base-opcode
                            ^Insn left-identity ^Insn right-identity]
   (OpSpec. bottom-type type/double base-opcode
-           (when left-identity (model/const-value left-identity))
-           (model/const-value right-identity)))
+           (when left-identity (insn/const-value left-identity))
+           (insn/const-value right-identity)))
 
 (defn- bitset-op ^OpSpec [^Opcode base-opcode ^Insn identity]
   (OpSpec. type/int type/long base-opcode
-           (model/const-value identity) (model/const-value identity)))
+           (insn/const-value identity) (insn/const-value identity)))
 
 
 (defn- op-type ^Class [^int opcd]
@@ -133,7 +133,7 @@
 (def ^:private no-iinc Integer/MIN_VALUE) ;outside range of IINC instruction
 (defn iinc-delta ^int [^CodeEmitter entity ^CodeEmitter ce]
   (letfn [(delta ^int [^CodeEmitter arg]
-            (if-some [c (model/ce-const-value arg)]
+            (if-some [c (entity/const-value arg)]
               (.intValue ^Number c)  ;accept any number representation
               no-iinc))]
     (cond
@@ -267,8 +267,8 @@
         
         (op-2 ^CodeEmitter [^OpSpec op ^int opcd0 ^int opcd1
                             ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
-          (let [c0 (model/ce-const-value ce0)
-                c1 (model/ce-const-value ce1)]
+          (let [c0 (entity/const-value ce0)
+                c1 (entity/const-value ce1)]
             (cond
               (left-identity? op c0)
               ce1
@@ -288,11 +288,11 @@
         (unary ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter ce ^long fctx]
           (condp identical? (.base-opcode op)
             Opcode/ISUB
-            (if-some [c (model/ce-const-value ce)]
+            (if-some [c (entity/const-value ce)]
               (folded-constant op opcd (.right-identity op) c)
               (Op2. (+ (.bytecode Opcode/INEG) opcd) opcd opcd ce nil fctx))
             Opcode/IDIV
-            (if-some [c (model/ce-const-value ce)]
+            (if-some [c (entity/const-value ce)]
               (folded-constant op opcd (.right-identity op) c)
               (op-2 op opcd opcd (.emitter insn/insn-int-one) ce fctx))
             #_else ce))

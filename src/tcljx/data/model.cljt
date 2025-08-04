@@ -155,28 +155,12 @@
   :extends [Loadable]
   (computational-value ^Object [])) ;ConstantDesc or Class, and never nil
 
-(defn const?
-  (^boolean [^Expr x]
-   (instance? Constant (.emitter x)))
-  (^boolean [^Exprs xs ^int i]
-   (instance? Constant (.emitter xs i))))
-
-(defn ce-const? ^boolean [^CodeEmitter ce]
-  (instance? Constant ce))
-(defn ce-const-value ^Object [^CodeEmitter ce]
-  (when (ce-const? ce)
-    (Constant/.computational-value ce)))
-
-(defn const-value
-  (^Object [^Expr x]                    ;nil if `x` is not a Constant
-   (ce-const-value (.emitter x)))
-  (^Object [^Exprs xs ^int i]        ;nil if `xs[i]` is not a Constant
-   (ce-const-value (.emitter xs i))))
-
-(defn type-expression ^Class [^Expr x form] ;nil if no type expression
-  (when-some [value (const-value x)]
-    (when (and (class? value) (symbol? form))
-      value)))
+(defn type-literal ^Class [^Expr x form] ;nil if not a type symbol
+  (let [ce (.emitter x)]
+    (when (and (instance? Constant ce)
+               (identical? Class (Entity/.value-type ce))
+               (symbol? form))
+      (Constant/.computational-value ce))))
 
 ;;; ------------------------------------------------------------------------
 

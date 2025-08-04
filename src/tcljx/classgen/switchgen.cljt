@@ -98,7 +98,7 @@
                               (table-switch? low high (.size scs))))))
           (^void [^ArrayList a ^CodeEmitter/1 ces ^Label target]
            (dotimes [i (alength ces)]
-             (let [cv ^int (model/ce-const-value (aget ces i))]
+             (let [cv ^int (entity/const-value (aget ces i))]
                (.add a (SwitchCase/of cv target))))))
         (indexes-to-switch-cases ^SwitchLayout [^CodeBuilder xb ^Exprs/1 guards]
           (let [targets (mk-targets xb (alength guards))

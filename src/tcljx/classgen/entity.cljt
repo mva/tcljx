@@ -111,8 +111,14 @@
             Short/TYPE (object (short x))))
         computational-value))))
 
+(defn const? ^boolean [^CodeEmitter ce]
+  (instance? ConstantImpl ce))
+(defn const-value ^Object [^CodeEmitter ce]
+  (when (const? ce)
+    (ConstantImpl/.computational-value ce)))
+
 (def emitter-empty (^CodeEmitter fn [xb _ _] Void/TYPE))
-(def entity-null (ConstantImpl. ConstantDescs/NULL Object))
+(def entity-null (ConstantImpl. ConstantDescs/NULL type/poly-reference))
 (defn entity-null? ^boolean [^CodeEmitter ce]
   (identical? entity-null ce))
 
@@ -131,7 +137,7 @@
 
 (def entity-int-zero (mk-constant 0 Integer/TYPE))
 (defn entity-zero? ^boolean [^CodeEmitter ce]
-  (and (model/ce-const? ce) (zero? (model/ce-const-value ce))))
+  (and (const? ce) (zero? (const-value ce))))
 
 ;;; ------------------------------------------------------------------------
 

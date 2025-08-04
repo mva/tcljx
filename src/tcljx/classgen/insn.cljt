@@ -46,16 +46,11 @@
 (def insn-int-m1 (mk-insn (entity/mk-constant -1 Integer/TYPE) Integer/TYPE))
 (def insn-float-one (mk-insn (entity/mk-constant 1.0f Float/TYPE) Float/TYPE))
 
-(letfn [(ensure-loadable-type ^Class [^Entity ent form]
-          (let [tp (.value-type ent)]
-            (if (nil? tp)
-              (throw (wrong/wr-info (str "entity " (wrong/q form)
-                                         " has no runtime value")))
-              tp)))]
-  (defn value-of ^Insn [^Entity ent ^symbol form]
-    (if (identical? entity/entity-null ent)
-      insn-null  ;an entity of type Object loading as `poly-reference`
-      (mk-insn ent (ensure-loadable-type ent form)))))
+(defn value-of ^Insn [^Entity ent ^symbol form]
+  (if-some [tp (.value-type ent)]
+    (mk-insn ent tp)
+    (throw (wrong/wr-info (str "entity " (wrong/q form)
+                               " has no runtime value")))))
 
 (defn constant-insn ^Insn [^Object value ^Class type]
   (value-of (entity/mk-constant value type) nil))
@@ -123,6 +118,12 @@
      (Insns. (Arrays/copyOf (.emitters insns) new-length)
              (Arrays/copyOf (.expr-types insns) new-length)))))
 
+(defn const-value
+  (^Object [^Insn x]                    ;nil if `x` is not a Constant
+   (entity/const-value (.emitter x)))
+  (^Object [^Insns xs ^int i]        ;nil if `xs[i]` is not a Constant
+   (entity/const-value (.emitter xs i))))
+
 (defn loadables? ^boolean [^Insns insns]
   (loop [i (dec (.length insns))]
     (cond (neg? i) true
@@ -180,7 +181,7 @@
            (.emit-insn* (.emitter insn-n) xb consumed-type then-leave?)))
         (mk-insn (expr-type insn-n)))))
 (defn prog2 ^Insn [^Insn statm ^Insn insn-n]
-  (if (model/const? statm)
+  (if (entity/const? (.emitter statm))
     insn-n            ;constant `statm` does not have any side effects
     (progn (insns-of statm) insn-n)))
 

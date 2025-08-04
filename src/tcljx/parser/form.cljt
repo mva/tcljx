@@ -99,7 +99,7 @@
             (parse-instanceof* ^Expr [^long fctx [_ & args]]
               (let [xs (context/parse-args this fctx args)]
                 (syntax/empty-tail 2 args)
-                (if-some [tp (model/type-expression (.get xs 0) (first args))]
+                (if-some [tp (model/type-literal (.get xs 0) (first args))]
                   (.instanceof-expr expr-factory fctx tp (.get xs 1))
                   (.invoke-virtual-member expr-factory fctx (.get xs 0)
                                           nil "isInstance" (.drop xs 1)))))
@@ -124,7 +124,7 @@
                     fnm (when (and (> (.length mnm) 1) (= (.charAt mnm 0) \-)
                                    (.empty? xs))
                           (.substring mnm 1))]
-                (if-some [owner (model/type-expression owner-expr owner)]
+                (if-some [owner (model/type-literal owner-expr owner)]
                   (if fnm
                     (.get-static-field expr-factory fctx owner fnm)
                     (.invoke-static-member expr-factory fctx false owner mnm xs))

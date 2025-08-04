@@ -45,7 +45,7 @@
                           (.withField cb nm sink-cld)))))]
       
       (let [tp (insn/logical-type init)
-            ent (if-some [const (model/const-value init)]
+            ent (if-some [const (insn/const-value init)]
                   (if-some [cva (constant-value-attribute const)]
                     (do (as-field const cva) (.emitter init))
                     (do (as-method) (entity/static-method this-segm nm tp)))
