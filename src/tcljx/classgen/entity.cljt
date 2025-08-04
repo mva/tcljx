@@ -10,13 +10,6 @@
    (java.lang.classfile CodeBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)))
 
-(defn ensure-loadable-type ^Class [^Entity ent form]
-  (let [tp (.value-type ent)]
-    (when (type/polymorphic? tp)
-      (throw (wrong/wr-info (str "entity " (wrong/q form)
-                                 " has no runtime value"))))
-    tp))
-
 (deftype LoadableImpl [^Object loadable-value ^Class opnd-type
                        ^boolean associate-meta?]
   java.lang.Record
@@ -111,38 +104,44 @@
             Short/TYPE (object (short x))))
         computational-value))))
 
-(defn mk-constant ^ConstantImpl [^Object computational-value ^Class type]
-  (assert (or (instance? java.lang.constant.ConstantDesc computational-value)
-              (instance? Class computational-value)))
-  (ConstantImpl/new computational-value type))
+(def entity-null (ConstantImpl. ConstantDescs/NULL Object))
+(def insn-null (insn/mk-insn entity-null type/poly-reference))
 
-(def insn-null (insn/mk-insn (mk-constant ConstantDescs/NULL Object)
-                              type/poly-reference))
-
-(def emitter-false (mk-constant 0 Boolean/TYPE))
-(def emitter-true (mk-constant 1 Boolean/TYPE))
-(def insn-false (insn/mk-insn emitter-false Boolean/TYPE))
-(def insn-true (insn/mk-insn emitter-true Boolean/TYPE))
+(def entity-false (ConstantImpl. 0 Boolean/TYPE))
+(def entity-true (ConstantImpl. 1 Boolean/TYPE))
+(def insn-false (insn/mk-insn entity-false Boolean/TYPE))
+(def insn-true (insn/mk-insn entity-true Boolean/TYPE))
 (defn insn-boolean ^Insn [^boolean value] (if value insn-true insn-false))
 
-(def emitter-int-zero (mk-constant 0 Integer/TYPE))
-(def insn-int-zero (insn/mk-insn emitter-int-zero Integer/TYPE))
+(defn mk-constant ^ConstantImpl [^Object computational-value ^Class type]
+  (cond                   ;enforce singleton for null, false, and true
+    (identical? ConstantDescs/NULL computational-value)
+    entity-null
+    
+    (type/same? Boolean/TYPE type)
+    (if (zero? ^int computational-value) entity-false entity-true)
+    
+    :else (ConstantImpl. computational-value type)))
+
+(def entity-int-zero (mk-constant 0 Integer/TYPE))
+(def insn-int-zero (insn/mk-insn entity-int-zero Integer/TYPE))
 (def insn-int-one (insn/mk-insn (mk-constant 1 Integer/TYPE) Integer/TYPE))
 (def insn-int-m1 (insn/mk-insn (mk-constant -1 Integer/TYPE) Integer/TYPE))
 (def insn-float-one (insn/mk-insn (mk-constant 1.0f Float/TYPE) Float/TYPE))
 
-(defn new-constant ^Insn [^Object value ^Class expr-type]
-  #_(prn :new-constant expr-type value)
-  (java.util.Objects/requireNonNull expr-type)
-  (java.util.Objects/requireNonNull value)
-  (cond
-    (identical? ConstantDescs/NULL value)
-    insn-null                          ;enforce singleton
-    
-    (type/same? Boolean/TYPE expr-type)
-    (insn-boolean (not (zero? ^int value))) ;enforce singletons
-    
-    :else (insn/mk-insn (mk-constant value expr-type) expr-type)))
+(letfn [(ensure-loadable-type ^Class [^Entity ent form]
+          (let [tp (.value-type ent)]
+            (when (nil? tp)
+              (throw (wrong/wr-info (str "entity " (wrong/q form)
+                                         " has no runtime value"))))
+            tp))]
+  (defn value-of ^Insn [^Entity ent ^symbol form]
+    (if (identical? entity-null ent)
+      insn-null ;an entity of type `poly-reference` loading as Object NULL
+      (insn/mk-insn ent (ensure-loadable-type ent form)))))
+
+(defn constant-insn ^Insn [^Object value ^Class type]
+  (value-of (mk-constant value type) nil))
 
 ;;; ------------------------------------------------------------------------
 
@@ -260,7 +259,7 @@
     (emit-insn* [_ _ _ _]
       (throw (IllegalStateException.)))
     (value-type [_]
-      type/polymorphic)
+      nil)
     (invoke* [_ fctx form xs]
       (.invoke* inv fctx form xs))))
 

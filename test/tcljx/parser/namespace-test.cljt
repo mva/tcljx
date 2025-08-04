@@ -16,7 +16,7 @@
                      Resolver Scope)
    (tcljx.data.wrong WrongInfo)))
 
-(deftype EmitterData [form]
+(deftype EntityData [form]
   java.lang.Record
   tcljx.data.model.GlobalEntity
   Entity
@@ -34,12 +34,12 @@
   (get [_ i] (aget xs i))
   (set [_ i x] (aset xs i x)))
 
-(defn mk-code ^CodeEmitter [form]
-  (EmitterData. form))
+(defn mk-entity ^CodeEmitter [form]
+  (EntityData. form))
 (defn mk-expr ^Expr [code-or-form]
   (ExprStub. (cond-> code-or-form
                (not (instance? CodeEmitter code-or-form))
-               (mk-code))))
+               (mk-entity))))
 (def expr-empty (mk-expr [:empty-expr]))
 
 (deftype BindingStub [^String namespace ^String name
@@ -53,7 +53,7 @@
   (if (nil? x) 'Null (symbol nil (.getSimpleName (class x)))))
 (defn emitter-data [^CodeEmitter x]
   (condp instance? x
-    EmitterData (.form ^EmitterData x)
+    EntityData (.form ^EntityData x)
     BindingStub [:binding
                  (emitter-data (.bound-to ^BindingStub x))
                  (when-some [v (.provided-value ^BindingStub x)]
@@ -79,9 +79,8 @@
     (ExprsStub. (new ExprStub/1 n)))
   (value-of [_ ent form]
     (mk-expr [:value-of (emitter-data ent)]))
-  
-  (new-constant [_ expr-type value]
-    (mk-expr [:constant value (class-data value)]))
+  (constant-entity [_ value type]
+    (mk-entity [:constant value (class-data value)]))
   
   (progn-expr [_ xs x]
     (mk-expr (-> (reduce (comp conj expr-data) [:progn] xs)
@@ -141,12 +140,12 @@
     this)
   (new-def-init [this nm init]
     (let [ns-sym (symbol ns-str nm)
-          ent (EmitterData. [:entity ns-sym])]
+          ent (EntityData. [:entity ns-sym])]
       (set! globals (assoc globals nm ent))
       (mk-expr (BindingStub. ns-str nm ent init))))
   (new-def-alias [this nm other]
     (let [ns-sym (symbol ns-str nm)
-          ent (EmitterData. [:alias-def ns-sym (emitter-data other)])]
+          ent (EntityData. [:alias-def ns-sym (emitter-data other)])]
       (set! globals (assoc globals nm ent))
       (mk-expr (BindingStub. ns-str nm ent nil))))
 
@@ -164,7 +163,7 @@
   (let [ns-str "nmsp.expected"
         segment-forms (java.util.ArrayList.)
         globals {"some" (InvocableStub.)
-                 "form" (EmitterData. 'nmsp.expected/form)}]
+                 "form" (EntityData. 'nmsp.expected/form)}]
     (NmspBuilderStub. ns-str segment-forms globals)))
 (defn parse-forms-string ^vector [^String cs]
   (let [nmsp (mk-nmsp-builder)
@@ -347,31 +346,32 @@
 
 (deftest basic-def-test
   ;; new def with init
-  (is (= '[[:binding [:entity nmsp.expected/x] [:constant 1 Integer]]]
+  (is (= '[[:binding [:entity nmsp.expected/x] [:value-of [:constant 1 Integer]]]]
          (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
                         (def x 1)])))
 
   ;; new def without init followed by assignment
   (is (= '[[:binding [:entity nmsp.expected/x] [:empty-expr]]
-           [:assignment [:entity nmsp.expected/x] [:constant 1 Integer]]]
+           [:assignment [:entity nmsp.expected/x]
+            [:value-of [:constant 1 Integer]]]]
          (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
                         (def x)
                         (def x 1)])))
 
   ;; new def with init followed by an aliasing def
-  (is (= '[[:binding [:entity nmsp.expected/x] [:constant 1 Integer]]
+  (is (= '[[:binding [:entity nmsp.expected/x] [:value-of [:constant 1 Integer]]]
            [:binding [:alias-def nmsp.expected/y [:entity nmsp.expected/x]] nil]]
          (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
                         (def x 1)
                         (def y x)])))
-  (is (= '[[:binding [:entity nmsp.expected/x] [:constant 1 Integer]]
+  (is (= '[[:binding [:entity nmsp.expected/x] [:value-of [:constant 1 Integer]]]
            [:binding [:alias-def nmsp.expected/y [:entity nmsp.expected/x]] nil]]
          (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
                         (def x 1)
                         (def y nmsp.expected/x)])))
 
   ;; new def with init followed by a use of the def-ed name
-  (is (= '[[:binding [:entity nmsp.expected/x] [:constant 1 Integer]]
+  (is (= '[[:binding [:entity nmsp.expected/x] [:value-of [:constant 1 Integer]]]
            [:value-of [:entity nmsp.expected/x]]]
          (parse-forms '[(ns nmsp.expected (:refer-clojure :none))
                         (def x 1)

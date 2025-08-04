@@ -33,34 +33,34 @@
   (let [ef (.expr-factory scope)]
     (cond
       (nil? form)
-      (.new-constant ef type/poly-reference ConstantDescs/NULL)
+      (model/new-constant ef ConstantDescs/NULL type/poly-reference)
       
       (instance? ConstantDesc form)
-      (.new-constant ef (primitive-type-of (.getClass form)) form)
+      (model/new-constant ef form (primitive-type-of (.getClass form)))
       
       (keyword? form)
-      (.new-loadable ef type/keyword form)
+      (.new-loadable ef form type/keyword)
       
       (boolean? form)
-      (.new-constant ef Boolean/TYPE (int ^boolean form))
+      (model/new-constant ef (int ^boolean form) Boolean/TYPE)
       
       (char? form)
-      (.new-constant ef Character/TYPE (int ^char form))
+      (model/new-constant ef (int ^char form) Character/TYPE)
       
       (number? form)         ;any non-ClassDesc number: Byte and Short
-      (.new-constant ef (primitive-type-of (.getClass form))
-                     (.intValue ^Number form))
+      (model/new-constant ef (.intValue ^Number form)
+                          (primitive-type-of (.getClass form)))
 
       (class? form)
-      (.new-constant ef Class form)
+      (model/new-constant ef form Class)
       
       :else
       ;; Pattern, using the *reference* object's class as
       ;; type (anything Constable works as well during emit)
-      (.new-loadable ef (class form) form))))
+      (.new-loadable ef form (class form)))))
 
 (defn regex-literal ^Expr [^Scope scope ^String pattern]
   (try
-    (.new-loadable (.expr-factory scope) Pattern (Pattern/compile pattern))
+    (.new-loadable (.expr-factory scope) (Pattern/compile pattern) Pattern)
     (catch PatternSyntaxException e
       (throw (wrong/wr-info (str "invalid regex " (wrong/q pattern)) {} e)))))

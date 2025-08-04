@@ -119,8 +119,8 @@
       insn/empty-insns
       (Insns. (new CodeEmitter/1 n) (new Class/1 n))))
 
-  (class-entity [_ cl]
-    (entity/mk-constant cl Class))
+  (constant-entity [_ value type]
+    (entity/mk-constant value type))
   (class-member-entity [this static? owner mnm ptags]
     (let [ms (resolve/members-by-param-tags static? owner mnm ptags)
           wr-info (fn ^Throwable []
@@ -142,11 +142,9 @@
             (methodgen/class-member-entity m))
           (throw (wr-info))))))
   (value-of [_ ent form]
-    (insn/mk-insn ent (entity/ensure-loadable-type ent form)))
+    (entity/value-of ent form))
   
-  (new-constant [_ expr-type value]
-    (entity/new-constant value expr-type))
-  (new-loadable [_ expr-type value]
+  (new-loadable [_ value expr-type]
     (-> value (entity/mk-loadable expr-type false) (insn/mk-insn expr-type)))
 
   (attach-meta-to [this meta arg]
@@ -161,7 +159,7 @@
   (new-collection [this coll-type args]
     (let [args ^Insns args]
       (if (entity/loadables? args)
-        (.new-loadable this coll-type (.emitters args))
+        (.new-loadable this (.emitters args) coll-type)
         (-> (condp identical? coll-type
               type/vector literal-vector
               type/map literal-map
@@ -341,8 +339,8 @@
             fn-literal (FnLiteral. mangled-name arity-specs)]
         (.add pending-functions fn-literal)
         (let [owner (ClassDesc/of "pkg.ns0._10")]
-          (.new-constant this tinyclj.lang.StaticFn
-                         (methodgen/static-fn-desc owner fn-literal))))))
+          (entity/constant-insn (methodgen/static-fn-desc owner fn-literal)
+                                tinyclj.lang.StaticFn)))))
   
   (type-cast [this fctx target-type arg]
     (let [arg-tp (insn/expr-type arg)]

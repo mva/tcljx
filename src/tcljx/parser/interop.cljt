@@ -69,7 +69,7 @@
            (resolve-class-qualified-symbol ^Entity [^Class owner ^String nm
                                                     ^Object ptags]
              (if-some [tp (lookup-type resolver owner nm)]
-               (.class-entity expr-factory tp) ;array type
+               (.constant-entity expr-factory tp Class) ;array type
                (let [ptags (parse-param-tags resolver ptags)]
                  (if (.startsWith nm ".")
                    (.class-member-entity expr-factory false owner
@@ -80,7 +80,7 @@
          (let [ptags (get-param-tags (.meta sym))]
            (resolve-class-qualified-symbol cl (name sym) ptags)))
        (when-some [cl (.lookup-class resolver (name sym))]
-         (.class-entity expr-factory cl))))))
+         (.constant-entity expr-factory cl Class))))))
 
 ;;; ------------------------------------------------------------------------
 

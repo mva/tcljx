@@ -53,9 +53,9 @@
 (definterface Entity
   :extends [CodeEmitter]
   ;; The type of the entity's value, for example when pushing it onto
-  ;; the operand stack.  If `type/polymorphic`, then this entity
-  ;; cannot be reified as a regular value at runtime.  This is the
-  ;; case for macros and most primitive functions.
+  ;; the operand stack.  If nil, then this entity cannot be reified as
+  ;; a regular value at runtime.  This is the case for macros and most
+  ;; primitive functions.
   (value-type ^Class []))
 
 (definterface MutableEntity
@@ -379,23 +379,21 @@
   (empty-expr ^Expr [])
   (new-exprs ^Exprs [^int length])
 
-  (class-entity ^Entity [^Class cl])
-  (class-member-entity ^Entity [^boolean static? ^Class owner ^String mnm
-                                ^Class/1 ptags])
-  (value-of ^Expr [^Entity ent ^symbol form])
-  
-  ;; Create an expression denoting the constant `value` of type
-  ;; `expr-type`.  For the most part, there is a one-to-one
-  ;; correspondence between the primitive (when possible) class of
-  ;; `value` and `expr-type`.  The literal `nil` is represented by
-  ;; ConstantDescs/NULL with a type of type/polymorphic.
+  ;; Create an entity denoting the constant `value` of type `type`.
+  ;; For the most part, there is a one-to-one correspondence between
+  ;; the primitive (when possible) class of `value` and `type`.  The
+  ;; literal `nil` is represented by ConstantDescs/NULL with a type of
+  ;; type/polymorphic.
   ;; "Computationally int" constants (boolean, char, byte, short) are
-  ;; represented by instances of Integer. and their `expr-type` is
+  ;; represented by instances of Integer. and their `type` is
   ;; Boolean/TYPE, Character/TYPE, and so on.  A wide range of types
   ;; is accepted for `value`: instances of ConstantDesc, instances of
   ;; Constable, and structured values provided by Clojure (symbol,
   ;; keyword, vector, and so on).
-  (new-constant ^Expr [^Class expr-type ^Object value]) ;ConstantDesc or Class
+  (constant-entity ^Entity [^Object value ^Class type]) ;ConstantDesc or Class
+  (class-member-entity ^Entity [^boolean static? ^Class owner ^String mnm
+                                ^Class/1 ptags])
+  (value-of ^Expr [^Entity ent ^symbol form])
   
   ;; Create a symbol, a keyword, a collection, or a regex Pattern.
   ;; `value` usually is the compile time data structure as provided by
@@ -403,7 +401,7 @@
   ;; with-meta construction), `value` can be an array `CodeEmitter/1`
   ;; of constant folded expressions, i.e. instances of `Loadable`.
   ;; Non-Constant loadables are never nil.
-  (new-loadable ^Expr [^Class expr-type ^Object value])
+  (new-loadable ^Expr [^Object value ^Class expr-type])
   
   ;; These methods return a constant expression when possible:
   (attach-meta-to ^Expr [^Expr meta ^Expr arg])
@@ -474,6 +472,9 @@
   ;; ### misc
   
   (mk-expr ^Expr [form]))               ;FIXME... drop this
+
+(defn new-constant ^Expr [^ExprFactory ef ^Object value ^Class type]
+  (.value-of ef (.constant-entity ef value type) nil))
 
 (defn exprs-of ^Exprs [^ExprFactory ef & ^Expr/1 xs*]
   (let [xs (.new-exprs ef (alength xs*))]

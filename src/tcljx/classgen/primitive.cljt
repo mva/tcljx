@@ -40,7 +40,7 @@
           (if (type/polymorphic? target-type)
             insn/insn-empty             ;casting some constant to void
             (-> (type/convert-from-constant target-type c)
-                (entity/new-constant target-type))))]
+                (entity/constant-insn target-type))))]
 
   (defn- convert-to-primitive ^Insn [^Insn arg ^Class target-type ^long fctx]
     (or (when-some [c (model/const-value arg)]
@@ -506,7 +506,7 @@
             (Loadable/.loadable-entry (.emitter insn) cpb true)))
         (insn-str ^Insn [^String rstr ^Insns inv-args ^seq const-args
                          ^long fctx]
-          (let [recipe (entity/new-constant rstr String)]
+          (let [recipe (entity/constant-insn rstr String)]
             (cond
               (and (empty? const-args) (.empty? inv-args))
               recipe
@@ -547,7 +547,7 @@
            (let [x ^Insn (.get args i)]
              (if (model/loadable? x)
                (let [s (str (Loadable/.datafy (.emitter x)))
-                     x-str (entity/new-constant s String)]
+                     x-str (entity/constant-insn s String)]
                  (if (re-find re-marks s)
                    (recur (cons const-mark rparts) dyn-args
                           (cons x-str const-args) (inc i))
