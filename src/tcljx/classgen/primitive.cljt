@@ -40,7 +40,7 @@
           (if (type/polymorphic? target-type)
             insn/insn-empty             ;casting some constant to void
             (-> (type/convert-from-constant target-type c)
-                (entity/constant-insn target-type))))]
+                (insn/constant-insn target-type))))]
 
   (defn- convert-to-primitive ^Insn [^Insn arg ^Class target-type ^long fctx]
     (or (when-some [c (model/const-value arg)]
@@ -294,7 +294,7 @@
             Opcode/IDIV
             (if-some [c (model/ce-const-value ce)]
               (folded-constant op opcd (.right-identity op) c)
-              (op-2 op opcd opcd (.emitter entity/insn-int-one) ce fctx))
+              (op-2 op opcd opcd (.emitter insn/insn-int-one) ce fctx))
             #_else ce))
         (binary-numeric-insn ^Insn [^OpSpec op form ^Insns args ^long fctx]
           (let [args (take-args form args 2)
@@ -351,8 +351,8 @@
      (let [arg (take-arg form args)
            wop-type (integral-type form args 0)
            opcd (.computational-id wop-type)]
-       (-> (op-2 (bitset-op Opcode/IXOR entity/insn-int-zero)
-                 opcd opcd (.emitter arg) (.emitter entity/insn-int-m1) fctx)
+       (-> (op-2 (bitset-op Opcode/IXOR insn/insn-int-zero)
+                 opcd opcd (.emitter arg) (.emitter insn/insn-int-m1) fctx)
            (insn/mk-insn (.class-primitive wop-type))))))
 
   ;; FIXME... Only used for shifted-one.  Better alternative: add
@@ -365,7 +365,7 @@
        (cond
          (type/same? Void/TYPE tp) insn/insn-empty
          (.isPrimitive tp) (-> 0 (entity/mk-constant tp) (insn/mk-insn tp))
-         :else entity/insn-null))))
+         :else insn/insn-null))))
   
   (defn mk-binary-shift ^Invocable [^Opcode base-opc]
     (let [op (OpSpec. type/int type/long base-opc nil 0)]
@@ -385,7 +385,7 @@
                     (top-numeric-of form args))]
        (case (.length args)
          0 (throw (wrong/wr-info "missing argument"))
-         1 (insn/progn args entity/insn-true) ;FIXME... drop unary?
+         1 (insn/progn args insn/insn-true) ;FIXME... drop unary?
          2 (condgen/xcmp-2 wtop (.get args 0) (.get args 1) cmp-opcd fctx)
          #_ else (condgen/xcmp-n wtop args cmp-opcd fctx)))))
 
@@ -398,7 +398,7 @@
          
          (case (.length args)
            0 (throw (wrong/wr-info "missing argument"))
-           1 (insn/progn args entity/insn-true) ;FIXME... drop unary?
+           1 (insn/progn args insn/insn-true) ;FIXME... drop unary?
            2 (condgen/xcmp-2 nil (.get args 0) (.get args 1) -1 fctx)
            #_ else (condgen/xcmp-n nil args -1 fctx))))))
   
@@ -506,7 +506,7 @@
             (Loadable/.loadable-entry (.emitter insn) cpb true)))
         (insn-str ^Insn [^String rstr ^Insns inv-args ^seq const-args
                          ^long fctx]
-          (let [recipe (entity/constant-insn rstr String)]
+          (let [recipe (insn/constant-insn rstr String)]
             (cond
               (and (empty? const-args) (.empty? inv-args))
               recipe
@@ -547,7 +547,7 @@
            (let [x ^Insn (.get args i)]
              (if (model/loadable? x)
                (let [s (str (Loadable/.datafy (.emitter x)))
-                     x-str (entity/constant-insn s String)]
+                     x-str (insn/constant-insn s String)]
                  (if (re-find re-marks s)
                    (recur (cons const-mark rparts) dyn-args
                           (cons x-str const-args) (inc i))
@@ -574,23 +574,23 @@
     (-> {}
         (conversions)
         (nary-numeric "+" (numeric-op type/int Opcode/IADD
-                                      entity/insn-int-zero entity/insn-int-zero))
+                                      insn/insn-int-zero insn/insn-int-zero))
         (nary-numeric "-" (numeric-op type/int Opcode/ISUB
-                                      nil entity/insn-int-zero))
+                                      nil insn/insn-int-zero))
         (nary-numeric "*" (numeric-op type/int Opcode/IMUL
-                                      entity/insn-int-one entity/insn-int-one))
+                                      insn/insn-int-one insn/insn-int-one))
         (nary-numeric "/" (numeric-op type/float Opcode/IDIV
-                                      nil entity/insn-float-one))
+                                      nil insn/insn-float-one))
         (primitive "quot" (-> (numeric-op type/int Opcode/IDIV
-                                          nil entity/insn-int-one)
+                                          nil insn/insn-int-one)
                               (mk-binary-xdiv-integral)))
         (primitive "rem" (-> (numeric-op type/int Opcode/IREM
-                                         nil entity/insn-int-one)
+                                         nil insn/insn-int-one)
                              (mk-binary-numeric)))
 
-        (nary-numeric "bit-and" (bitset-op Opcode/IAND entity/insn-int-m1))
-        (nary-numeric "bit-or" (bitset-op Opcode/IOR entity/insn-int-zero))
-        (nary-numeric "bit-xor" (bitset-op Opcode/IXOR entity/insn-int-zero))
+        (nary-numeric "bit-and" (bitset-op Opcode/IAND insn/insn-int-m1))
+        (nary-numeric "bit-or" (bitset-op Opcode/IOR insn/insn-int-zero))
+        (nary-numeric "bit-xor" (bitset-op Opcode/IXOR insn/insn-int-zero))
         (primitive "bit-not" unary-bit-not)
         (primitive "xdefault" unary-xdefault)
         (primitive "bit-shift-left" (mk-binary-shift Opcode/ISHL))

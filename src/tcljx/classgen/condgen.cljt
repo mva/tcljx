@@ -125,18 +125,18 @@
           (loop [opcd cmp-opcd, left (aget args 0), right (aget args 1)]
             ;; loop body is executed at most twice
             (cond
-              (model/ce-zero? right)    ;slide if_icmpeq to ifeq
+              (entity/entity-zero? right) ;slide if_icmpeq to ifeq
               (mk-ifpred (- (.bytecode eq-opc) 6) opcd arg-type
                          (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
               
-              (model/ce-zero? left)
+              (entity/entity-zero? left)
               (recur (swap-cmp opcd) right left)
               
-              (model/ce-null? right)    ;slide if_acmpeq to ifnull
+              (entity/entity-null? right) ;slide if_acmpeq to ifnull
               (mk-ifpred (+ (.bytecode eq-opc) 33) opcd arg-type
                          (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
               
-              (model/ce-null? left)
+              (entity/entity-null? left)
               (recur (swap-cmp opcd) right left)
               
               :else
@@ -169,7 +169,7 @@
             (mk-cmp-pred Opcode/IF_ICMPEQ cmp-ne Boolean/TYPE ;compare to zero!
                          (doto (new CodeEmitter/1 2)
                            (aset 0 test) ;the boolean value to test
-                           (aset 1 (.emitter entity/insn-false)))
+                           (aset 1 entity/entity-false))
                          fctx)) 
           (conditional expr-type if-true if-false fctx)))))
 
@@ -184,7 +184,7 @@
             (cond (nil? c) (if (model/loadable? x)
                              Boolean/FALSE     ;is never null
                              nil)              ;may be null
-                  (model/null? c) Boolean/TRUE ;is always null
+                  (entity/null? c) Boolean/TRUE ;is always null
                   :else Boolean/FALSE)))]      ;is never null
   
   (defn acmp ^Insn [^Insn arg0 ^Insn arg1 ^int cmp-opcd ^long fctx]
@@ -192,7 +192,7 @@
           (when-some [c1 (null-value-pred arg1)]
             (let [c0 ^boolean c0, c1 ^boolean c1]
               (when (or c0 c1)       ;both non-null means "don't know"
-                (entity/insn-boolean (not= (= cmp-opcd cmp-ne) (and c0 c1)))))))
+                (insn/insn-boolean (not= (= cmp-opcd cmp-ne) (and c0 c1)))))))
         (cmp-insn Opcode/IF_ACMPEQ cmp-opcd Object (.emitter arg0)
                   (.emitter arg1) fctx))))
 
@@ -209,7 +209,7 @@
                     #_ge 3 (>= n0 n1)
                     #_gt 4 (> n0 n1)
                     #_le 5 (<= n0 n1))
-                  (entity/insn-boolean))))))
+                  (insn/insn-boolean))))))
       (cmp-insn Opcode/IF_ICMPEQ cmp-opcd arg-type ce0 ce1 fctx)))
 
 (def ^:private mtd-util-equiv
@@ -432,14 +432,14 @@
       
       (.isPrimitive arg-tp)
       ;; polymorphic (aka void) is false, all other primitive types are true
-      (insn/prog2 arg (entity/insn-boolean (not (type/polymorphic? arg-tp))))
+      (insn/prog2 arg (insn/insn-boolean (not (type/polymorphic? arg-tp))))
 
       ;; arg is reference; important: any nil value is logically false
-      (model/ce-null? (.emitter arg))   ;argument is literal nil
-      entity/insn-false
+      (entity/entity-null? (.emitter arg)) ;argument is literal nil
+      insn/insn-false
       
       (.isAssignableFrom arg-tp Boolean) ;argument may be Boolean instance
       (insn/invoke-runtime rt-boolean-cast (insn/insns-of arg))
       
       :else     ;any reference that is a non-Boolean subtype of Object
-      (acmp arg entity/insn-null cmp-ne fctx))))
+      (acmp arg insn/insn-null cmp-ne fctx))))

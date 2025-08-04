@@ -142,7 +142,7 @@
             (methodgen/class-member-entity m))
           (throw (wr-info))))))
   (value-of [_ ent form]
-    (entity/value-of ent form))
+    (insn/value-of ent form))
   
   (new-loadable [_ value expr-type]
     (-> value (entity/mk-loadable expr-type false) (insn/mk-insn expr-type)))
@@ -158,7 +158,7 @@
       (insn/invoke-runtime literal-with-meta (insn/insns-of arg meta))))
   (new-collection [this coll-type args]
     (let [args ^Insns args]
-      (if (entity/loadables? args)
+      (if (insn/loadables? args)
         (.new-loadable this (.emitters args) coll-type)
         (-> (condp identical? coll-type
               type/vector literal-vector
@@ -339,8 +339,8 @@
             fn-literal (FnLiteral. mangled-name arity-specs)]
         (.add pending-functions fn-literal)
         (let [owner (ClassDesc/of "pkg.ns0._10")]
-          (entity/constant-insn (methodgen/static-fn-desc owner fn-literal)
-                                tinyclj.lang.StaticFn)))))
+          (insn/constant-insn (methodgen/static-fn-desc owner fn-literal)
+                              tinyclj.lang.StaticFn)))))
   
   (type-cast [this fctx target-type arg]
     (let [arg-tp (insn/expr-type arg)]

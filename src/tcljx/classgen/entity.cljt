@@ -2,13 +2,21 @@
   (:require
    (tcljx.data [wrong :as wrong] [type :as type] [context :as context]
                [model :as model] [reflect :as reflect])
-   (tcljx.classgen [emit :as emit] [insn :as insn] [constgen :as constgen]))
+   (tcljx.classgen [emit :as emit] [constgen :as constgen]))
   (:import
    (tcljx.data.model Expr CodeEmitter Binding Entity MutableEntity
                      Loadable Constant Invocable)
-   (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile CodeBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)))
+
+;;; FIXME... drop this after all old unit tests have been ported over;
+;;; interesting experiment to see if it works, but probably of little
+;;; or even no practical value.
+(defmacro with-void-empty-if-requested [consumed-type & body]
+  (assert (symbol? consumed-type))
+  `(if (identical? Void/TYPE ~consumed-type)
+     Void/TYPE
+     (do ~@body)))
 
 (deftype LoadableImpl [^Object loadable-value ^Class opnd-type
                        ^boolean associate-meta?]
@@ -48,13 +56,12 @@
 
 (def mk-loadable LoadableImpl/new)
 
-(defn loadables? ^boolean [^Insns insns]
-  (loop [i (dec (.length insns))]
-    (cond (neg? i) true
-          (model/loadable? insns i) (recur (dec i))
-          :else false)))
-
 ;;; ------------------------------------------------------------------------
+
+(defn null? ^boolean [^Object value]
+  (identical? ConstantDescs/NULL value))
+(defn zero? ^boolean [^Object value]
+  (and (instance? Number value) (= (.doubleValue ^Number value) 0.0)))
 
 (deftype ConstantImpl [^Object computational-value ^Class opnd-type]
   java.lang.Record
@@ -64,8 +71,8 @@
       (type/same? Void/TYPE consumed-type)
       Void/TYPE
       
-      (model/null? computational-value)
-      (do (.aconst_null xb)          ;elide any additional checkcast
+      (null? computational-value)
+      (do (.aconst_null xb)            ;elide any additional checkcast
           (if (.isPrimitive consumed-type)
             (.class-reference (type/of consumed-type))
             consumed-type))
@@ -77,7 +84,7 @@
           consumed-type)
       
       (instance? Number computational-value)
-      (if (.isPrimitive consumed-type) ;cannot be void
+      (if (.isPrimitive consumed-type)  ;cannot be void
         (do (->> (type/convert-from-constant consumed-type computational-value)
                  (.loadConstant xb))
             consumed-type)
@@ -93,7 +100,7 @@
     (->> (if logical-type? (.datafy this) computational-value)
          (constgen/loadable-entry cpb)))
   (datafy [_]
-    (when-not (model/null? computational-value)
+    (when-not (null? computational-value)
       (if (instance? Integer computational-value)
         (let [x ^int computational-value]
           (condp identical? opnd-type
@@ -104,14 +111,13 @@
             Short/TYPE (object (short x))))
         computational-value))))
 
+(def emitter-empty (^CodeEmitter fn [xb _ _] Void/TYPE))
 (def entity-null (ConstantImpl. ConstantDescs/NULL Object))
-(def insn-null (insn/mk-insn entity-null type/poly-reference))
+(defn entity-null? ^boolean [^CodeEmitter ce]
+  (identical? entity-null ce))
 
 (def entity-false (ConstantImpl. 0 Boolean/TYPE))
 (def entity-true (ConstantImpl. 1 Boolean/TYPE))
-(def insn-false (insn/mk-insn entity-false Boolean/TYPE))
-(def insn-true (insn/mk-insn entity-true Boolean/TYPE))
-(defn insn-boolean ^Insn [^boolean value] (if value insn-true insn-false))
 
 (defn mk-constant ^ConstantImpl [^Object computational-value ^Class type]
   (cond                   ;enforce singleton for null, false, and true
@@ -119,29 +125,13 @@
     entity-null
     
     (type/same? Boolean/TYPE type)
-    (if (zero? ^int computational-value) entity-false entity-true)
+    (if (tinyclj.core/zero? ^int computational-value) entity-false entity-true)
     
     :else (ConstantImpl. computational-value type)))
 
 (def entity-int-zero (mk-constant 0 Integer/TYPE))
-(def insn-int-zero (insn/mk-insn entity-int-zero Integer/TYPE))
-(def insn-int-one (insn/mk-insn (mk-constant 1 Integer/TYPE) Integer/TYPE))
-(def insn-int-m1 (insn/mk-insn (mk-constant -1 Integer/TYPE) Integer/TYPE))
-(def insn-float-one (insn/mk-insn (mk-constant 1.0f Float/TYPE) Float/TYPE))
-
-(letfn [(ensure-loadable-type ^Class [^Entity ent form]
-          (let [tp (.value-type ent)]
-            (when (nil? tp)
-              (throw (wrong/wr-info (str "entity " (wrong/q form)
-                                         " has no runtime value"))))
-            tp))]
-  (defn value-of ^Insn [^Entity ent ^symbol form]
-    (if (identical? entity-null ent)
-      insn-null ;an entity of type `poly-reference` loading as Object NULL
-      (insn/mk-insn ent (ensure-loadable-type ent form)))))
-
-(defn constant-insn ^Insn [^Object value ^Class type]
-  (value-of (mk-constant value type) nil))
+(defn entity-zero? ^boolean [^CodeEmitter ce]
+  (and (model/ce-const? ce) (zero? (model/ce-const-value ce))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -182,7 +172,7 @@
                         ^:unsynchronized-mutable ^int slot]
   MutableEntity
   (emit-insn* [_ xb consumed-type _]
-    (insn/with-void-empty-if-requested consumed-type
+    (with-void-empty-if-requested consumed-type
       (.loadLocal xb (TypeKind/from type) slot)
       type))
   (value-type [_]
@@ -211,7 +201,7 @@
                     ^:unsynchronized-mutable ^int slot]
   MutableEntity
   (emit-insn* [_ xb consumed-type _]
-    (insn/with-void-empty-if-requested consumed-type
+    (with-void-empty-if-requested consumed-type
       (.loadLocal xb (TypeKind/from type) slot)
       type))
   (value-type [_]
@@ -250,7 +240,7 @@
 
 (defn parameter-binding ^Binding [^int param-no ^String name ^Class type]
   (let [ent (parameter name type param-no)]
-    (mk-binding ent nil name insn/emitter-empty)))
+    (mk-binding ent nil name emitter-empty)))
 
 
 ;; FIXME... get rid of complete-non-value-invocable eventually

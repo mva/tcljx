@@ -3,13 +3,13 @@
    (tcljx.data
     [config :as cfg] [wrong :as wrong] [context :as context] [type :as type]
     [model :as model] [reflect :as reflect] [resolve :as resolve])
-   (tcljx.classgen [emit :as emit]))
+   (tcljx.classgen [emit :as emit] [entity :as entity]))
   (:import
    (tcljx.data.model Expr Exprs CodeEmitter Entity AritySpec)
    (tcljx.data.resolve Match)
    (java.lang.classfile CodeBuilder TypeKind Opcode)
    (java.lang.constant MethodTypeDesc DirectMethodHandleDesc
-                       DirectMethodHandleDesc$Kind)
+                       DirectMethodHandleDesc$Kind ConstantDescs)
    (java.util Arrays)))
 
 ;;; The code generator's implementation of Expr.  The class in
@@ -34,8 +34,32 @@
 (def mk-insn Insn/new)
 (defn mk-statm ^Insn [^CodeEmitter emitter]
   (mk-insn emitter type/polymorphic))
-(def emitter-empty (^CodeEmitter fn [xb _ _] Void/TYPE))
-(def insn-empty (mk-statm emitter-empty))
+(def insn-empty (mk-statm entity/emitter-empty))
+
+(def insn-null (mk-insn entity/entity-null type/poly-reference))
+(def insn-false (mk-insn entity/entity-false Boolean/TYPE))
+(def insn-true (mk-insn entity/entity-true Boolean/TYPE))
+(defn insn-boolean ^Insn [^boolean value] (if value insn-true insn-false))
+
+(def insn-int-zero (mk-insn entity/entity-int-zero Integer/TYPE))
+(def insn-int-one (mk-insn (entity/mk-constant 1 Integer/TYPE) Integer/TYPE))
+(def insn-int-m1 (mk-insn (entity/mk-constant -1 Integer/TYPE) Integer/TYPE))
+(def insn-float-one (mk-insn (entity/mk-constant 1.0f Float/TYPE) Float/TYPE))
+
+(letfn [(ensure-loadable-type ^Class [^Entity ent form]
+          (let [tp (.value-type ent)]
+            (if (nil? tp)
+              (throw (wrong/wr-info (str "entity " (wrong/q form)
+                                         " has no runtime value")))
+              tp)))]
+  (defn value-of ^Insn [^Entity ent ^symbol form]
+    (if (identical? entity/entity-null ent)
+      insn-null  ;an entity of type Object loading as `poly-reference`
+      (mk-insn ent (ensure-loadable-type ent form)))))
+
+(defn constant-insn ^Insn [^Object value ^Class type]
+  (value-of (entity/mk-constant value type) nil))
+
 
 ;;; Compilation centers around arrays of types and arrays of code
 ;;; emitters.  For a sequence of forms, the parser vie ExprFactory
@@ -98,6 +122,12 @@
      empty-insns
      (Insns. (Arrays/copyOf (.emitters insns) new-length)
              (Arrays/copyOf (.expr-types insns) new-length)))))
+
+(defn loadables? ^boolean [^Insns insns]
+  (loop [i (dec (.length insns))]
+    (cond (neg? i) true
+          (model/loadable? insns i) (recur (dec i))
+          :else false)))
 
 (defn emitter
   (^CodeEmitter [^Insn insn]
@@ -164,7 +194,7 @@
       ;; polymorphic method invocation
       arg
 
-      (and (model/ce-null? (.emitter arg))
+      (and (entity/entity-null? (.emitter arg))
            #_(type/poly-reference? x-tp)
            #_(not (.isPrimitive target-type)))
       (mk-insn (.emitter arg) target-type)
@@ -313,11 +343,6 @@
 ;;; FIXME... drop this after all old unit tests have been ported over;
 ;;; interesting experiment to see if it works, but probably of little
 ;;; or even no practical value.
-(defmacro with-void-empty-if-requested [consumed-type & body]
-  (assert (symbol? consumed-type))
-  `(if (identical? Void/TYPE ~consumed-type)
-     Void/TYPE
-     (do ~@body)))
 (defmacro with-void-args-if-requested [consumed-type args & body]
   (assert (symbol? consumed-type))
   `(if (identical? Void/TYPE ~consumed-type)

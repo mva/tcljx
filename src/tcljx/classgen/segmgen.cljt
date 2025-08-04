@@ -36,7 +36,7 @@
 (defn clinit-prologue ^Insn [^String ns-str ^int segm-id]
   (if (= segm-id first-segm-id)
     (insn/invoke-member rt-create-namespace nil
-                        (insn/insns-of (entity/constant-insn ns-str String))
+                        (insn/insns-of (insn/constant-insn ns-str String))
                         context/fctx-none)
     insn/insn-empty))
 
@@ -48,7 +48,7 @@
     (let [cld (segment-cld pkg-build segm-id)
           clnm (str (.packageName cld) "." (.displayName cld))]
       (insn/invoke-member rt-mark-core-initialization nil
-                          (insn/insns-of (entity/constant-insn clnm String))
+                          (insn/insns-of (insn/constant-insn clnm String))
                           context/fctx-none))
     insn/insn-empty))
 

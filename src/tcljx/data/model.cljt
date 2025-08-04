@@ -4,7 +4,7 @@
   (:import
    (java.lang.classfile CodeBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry)
-   (java.lang.constant DirectMethodHandleDesc MethodTypeDesc ConstantDescs)
+   (java.lang.constant DirectMethodHandleDesc MethodTypeDesc)
    (java.util Arrays)
    (java.util.function Function))
   (:refer-clojure :exclude [zero?]))
@@ -161,19 +161,11 @@
   (^boolean [^Exprs xs ^int i]
    (instance? Constant (.emitter xs i))))
 
-(defn null? ^boolean [^Object value]
-  (identical? ConstantDescs/NULL value))
-(defn zero? ^boolean [^Object value]
-  (and (instance? Number value) (= (.doubleValue ^Number value) 0.0)))
 (defn ce-const? ^boolean [^CodeEmitter ce]
   (instance? Constant ce))
 (defn ce-const-value ^Object [^CodeEmitter ce]
   (when (ce-const? ce)
     (Constant/.computational-value ce)))
-(defn ce-null? ^boolean [^CodeEmitter ce]
-  (and (ce-const? ce) (null? (ce-const-value ce))))
-(defn ce-zero? ^boolean [^CodeEmitter ce]
-  (and (ce-const? ce) (zero? (ce-const-value ce))))
 
 (defn const-value
   (^Object [^Expr x]                    ;nil if `x` is not a Constant

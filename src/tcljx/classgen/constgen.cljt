@@ -2,10 +2,9 @@
   (:require
    (tcljx.data [config :as cfg ] [meta :as meta] [reflect :as reflect]
                [type :as type] [model :as model])
-   (tcljx.classgen [runtime :as rt] [insn :as insn]))
+   (tcljx.classgen [runtime :as rt]))
   (:import
    (tcljx.data.model CodeEmitter Loadable)
-   (tcljx.classgen.insn Insn Insns)
    (clojure.lang Named IMeta)
    (java.lang.classfile CodeBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry
