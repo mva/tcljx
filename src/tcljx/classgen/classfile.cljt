@@ -1,6 +1,6 @@
 (ns tcljx.classgen.classfile
   (:import
-   (java.lang.classfile ClassFile Opcode TypeKind ClassBuilder #_MethodBuilder
+   (java.lang.classfile ClassFile Opcode TypeKind #_MethodBuilder
                         CodeBuilder #_Label Opcode$Kind)
    (java.lang.classfile.instruction OperatorInstruction)
    (java.lang.constant #_ConstantDesc ClassDesc #_MethodTypeDesc #_MethodHandleDesc
@@ -11,13 +11,6 @@
 
 (def acc-method-virtual (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_FINAL))
 (def acc-method-static (bit-or acc-method-virtual ClassFile/ACC_STATIC))
-
-(definterface ClassElementEmitter
-  (emit-class-element ^void [^ClassBuilder cb]))
-(defn class-element-emitter? ^boolean [x]
-  (instance? ClassElementEmitter x))
-(defn emit-class-element ^CodeBuilder [^ClassBuilder cb ^ClassElementEmitter cee]
-  (.emit-class-element cee cb))
 
 (defmacro accept->
   ([builder handler]

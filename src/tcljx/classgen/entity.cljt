@@ -141,38 +141,60 @@
 
 ;;; ------------------------------------------------------------------------
 
+;;; This interface is used to denote Entity instances whose owning
+;;; class cannot be provided at the time the entity is created.  Such
+;;; an entity's owner must be set before class generation calls the
+;;; entity's `emit-insn*` method.
+(definterface SegmentProvidesOwner
+  (set-owner! [^ClassDesc owner]))
+
 (defn- dup ^CodeBuilder [^CodeBuilder xb ^Class type]
   (case (.slotSize (TypeKind/from type))
     1 (.dup xb)
     2 (.dup2 xb)))
 
-(defn static-field ^Entity [^ClassDesc owner ^String fnm ^Class type]
-  (let [type-cld (reflect/describe-class type)]
-    (reify MutableEntity
-      (emit-insn* [_ xb _ _]
-        (.getstatic xb owner fnm type-cld)
-        type)
-      (value-type [_]
-        type)
-      (alias-when-let-value? [_]
-        false)
-      (emit-store [_ xb]
-        (throw (UnsupportedOperationException.)))
-      (emit-iinc [_ xb const]
-        (throw (UnsupportedOperationException.)))
-      (emit-setup-code? [_ xb init]
-        (when (emit/insn? xb context/fctx-none type init)
-          (.putstatic xb owner fnm type-cld)
-          true)))))
+(deftype StaticField [^String fnm ^Class type ^ClassDesc type-cld
+                      ^:unsynchronized-mutable ^ClassDesc __owner]
+  SegmentProvidesOwner
+  (set-owner! [_ owner]
+    (set! __owner owner))
+  MutableEntity
+  (emit-insn* [_ xb _ _]
+    (.getstatic xb __owner fnm type-cld)
+    type)
+  (value-type [_]
+    type)
+  (alias-when-let-value? [_]
+    false)
+  (emit-store [_ xb]
+    (throw (UnsupportedOperationException.)))
+  (emit-iinc [_ xb const]
+    (throw (UnsupportedOperationException.)))
+  (emit-setup-code? [_ xb init]
+    (when (emit/insn? xb context/fctx-none type init)
+      (.putstatic xb __owner fnm type-cld)
+      true)))
 
-(defn static-method ^Entity [^ClassDesc owner ^String mnm ^Class type]
-  (let [mtd (MethodTypeDesc/of (reflect/describe-class type))]
-    (reify Entity
-      (emit-insn* [_ xb _ _]
-        (.invokestatic xb owner mnm mtd)
-        type)
-      (value-type [_]
-        type))))
+(defn static-field
+  (^StaticField [^String fnm ^Class type]
+   (static-field nil fnm type))
+  (^StaticField [^ClassDesc owner ^String fnm ^Class type]
+   (StaticField. fnm type (reflect/describe-class type) owner)))
+
+(deftype StaticMethod [^String mnm ^Class type ^MethodTypeDesc mtd
+                       ^:unsynchronized-mutable ^ClassDesc __owner]
+  SegmentProvidesOwner
+  (set-owner! [_ owner]
+    (set! __owner owner))
+  Entity
+  (emit-insn* [_ xb _ _]
+    (.invokestatic xb __owner mnm mtd)
+    type)
+  (value-type [_]
+    type))
+
+(defn static-method ^StaticMethod [^String mnm ^Class type]
+  (StaticMethod. mnm type (MethodTypeDesc/of (reflect/describe-class type)) nil))
 
 (deftype LocalVariable [^String name ^Class type
                         ^:unsynchronized-mutable ^int slot]

@@ -2,9 +2,9 @@
   (:require
    (tcljx.data [config :as cfg] [reflect :as reflect]))
   (:import
-   (java.lang.classfile CodeBuilder)
+   (java.lang.classfile CodeBuilder ClassBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry)
-   (java.lang.constant DirectMethodHandleDesc MethodTypeDesc)
+   (java.lang.constant DirectMethodHandleDesc MethodTypeDesc ClassDesc)
    (java.util Arrays)
    (java.util.function Function))
   (:refer-clojure :exclude [zero?]))

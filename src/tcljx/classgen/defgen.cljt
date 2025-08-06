@@ -5,31 +5,23 @@
                    [entity :as entity]))
   (:import
    (tcljx.data.model Binding)
-   (tcljx.classgen.classfile ClassElementEmitter)
    (tcljx.classgen.insn Insn)
-   (java.lang.classfile ClassFile FieldBuilder)
+   (java.lang.classfile ClassFile FieldBuilder ClassBuilder)
    (java.lang.classfile.attribute ConstantValueAttribute)
    (java.lang.constant ClassDesc MethodTypeDesc ConstantDesc)
    (java.util ArrayList)
    (java.util.function Consumer)))
 
-(defn new-def-init ^Binding [^ArrayList segment-elements ^ClassDesc this-segm
-                             ^String nm ^Insn init]
+(defn new-def-init ^Binding [^ArrayList segment-elements ^String nm ^Insn init]
   (let [sink-type (insn/logical-type init)
         sink-cld (reflect/describe-class sink-type)]
-    (letfn [(as-method ^ClassElementEmitter []
-              (^ClassElementEmitter fn [cb]
-               (let [mtd (MethodTypeDesc/of sink-cld)]
-                 (classfile/with-method-body-> cb
-                   [nm mtd classfile/acc-method-static]
-                   (insn/emit-return sink-type init)))))
-            (field-flags ^int []
+    (letfn [(field-flags ^int []
               (bit-or ClassFile/ACC_STATIC
                       ClassFile/ACC_PUBLIC ;unless namespace private
                       ClassFile/ACC_FINAL  ;unless mutable
                       ))
-            (as-field-cva ^ClassElementEmitter [^ConstantDesc cva]
-              (^ClassElementEmitter fn [cb]
+            (as-field-cva ^Consumer [^ConstantDesc cva]
+              (^Consumer fn ^void [^ClassBuilder cb]
                (.withField cb nm sink-cld
                            (^Consumer fn ^void [^FieldBuilder fb]
                             (-> (.withFlags fb (field-flags))
@@ -39,12 +31,20 @@
             (if (or (instance? Number const) (string? const))
               (do (.add segment-elements (as-field-cva const))
                   (.emitter init))
-              (do (.add segment-elements (as-method))
-                  (entity/static-method this-segm nm sink-type)))
-            (do (.add segment-elements
-                      (^ClassElementEmitter fn [cb]
-                       (let [flags (bit-or (field-flags)
-                                           ClassFile/ACC_TRANSIENT)]
-                         (.withField cb nm sink-cld flags))))
-                (entity/static-field this-segm nm sink-type)))
+              (let [ent (entity/static-method nm sink-type)]
+                (.add segment-elements ent)
+                (.add segment-elements
+                      (^Consumer fn ^void [^ClassBuilder cb]
+                       (let [mtd (MethodTypeDesc/of sink-cld)]
+                         (classfile/with-method-body-> cb
+                           [nm mtd classfile/acc-method-static]
+                           (insn/emit-return sink-type init)))))
+                ent))
+            (let [ent (entity/static-field nm sink-type)]
+              (.add segment-elements ent)
+              (.add segment-elements
+                    (^Consumer fn ^void [^ClassBuilder cb]
+                     (let [flags (bit-or (field-flags) ClassFile/ACC_TRANSIENT)]
+                       (.withField cb nm sink-cld flags))))
+              ent))
           (entity/global-binding nm (.emitter init))))))

@@ -13,6 +13,7 @@
    (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
                      NamespaceBuilder SegmentBuilder
                      Expr ExprFactory Scope)
+   (tcljx.classgen.entity SegmentProvidesOwner)
    (tcljx.classgen.loader Loader PackageBuilder)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassBuilder CodeBuilder)
@@ -72,8 +73,7 @@
   ;;   (set! globals (assoc globals nm bnd))
   ;;   bnd)
   (new-def-init [_ nm init]
-    (let [this-segm (segmgen/segment-cld pkg-build current-segm-id)
-          bnd (defgen/new-def-init segment-elements this-segm nm init)]
+    (let [bnd (defgen/new-def-init segment-elements nm init)]
       (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/mk-insn bnd Void/TYPE)))
   (new-def-alias [_ nm other]
@@ -111,12 +111,19 @@
   SegmentBuilder
   (commit-segment-and-revert [_ end-of-segment-elements
                               then-globals then-imports]
+    ;; fix owner of all SegmentProvidesOwner entities
+    (let [this-segm (segmgen/segment-cld pkg-build current-segm-id)]
+      (dotimes [i end-of-segment-elements]
+        (let [elem (.get segment-elements i)]
+          (when (instance? SegmentProvidesOwner elem)
+            (.set-owner! ^SegmentProvidesOwner elem this-segm)))))
+    
     (segmgen/define-segment pkg-build current-segm-id current-source-file
       (^Consumer fn ^void [^ClassBuilder cb]
        (dotimes [i end-of-segment-elements]
          (let [elem (.get segment-elements i)]
-           (when (classfile/class-element-emitter? elem)
-             (classfile/emit-class-element cb elem)))))
+           (when (instance? Consumer elem)
+             (.accept ^Consumer elem cb)))))
       (let [a (doto (ArrayList.)
                 (.add (segmgen/clinit-prologue ns-str current-segm-id)))]
         (loop [i 0]

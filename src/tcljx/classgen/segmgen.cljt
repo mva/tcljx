@@ -22,6 +22,10 @@
 
 (defn segment-cld ^ClassDesc [^PackageBuilder pkg-build ^int segm-id]
   (ClassDesc/of (.pkg-name pkg-build) (str segment-class-prefix segm-id)))
+(defn super-segment-cld ^ClassDesc [^PackageBuilder pkg-build ^int segm-id]
+  (if (= segm-id first-segm-id)
+    ConstantDescs/CD_Object
+    (segment-cld pkg-build (dec segm-id))))
 
 (defn- with-requires ^ClassBuilder [^ClassBuilder cb ^String req-str]
   (classfile/with-method-body->
@@ -60,10 +64,7 @@
                                   ^Insn clinit-body]
   (loader/bwdi
    pkg-build (segment-cld pkg-build segm-id) segment-class-flags
-   (if (= segm-id first-segm-id)
-     ConstantDescs/CD_Object
-     (segment-cld pkg-build (dec segm-id)))
-   source-file
+   (super-segment-cld pkg-build segm-id) source-file
    (^Consumer fn ^void [^ClassBuilder cb]
     (-> cb
         (classfile/accept-> class-builder-handler)

@@ -12,7 +12,6 @@
    (tcljx.data.model Expr Exprs ExprFactory CodeEmitter Binding Entity
                      MutableEntity ArityType AritySpec NamespaceBuilder)
    (tcljx.data.resolve Match)
-   (tcljx.classgen.classfile ClassElementEmitter)
    (tcljx.classgen.insn Insn Insns)
    (tcljx.classgen.methodgen FnLiteral)
    (java.lang.classfile ClassBuilder CodeBuilder Opcode Label TypeKind)
@@ -42,7 +41,7 @@
           :let [spec (aget (.arity-specs fn-literal) 0)]
           :when (nil? (.redirection spec))]
     (.add segment-elements
-          (^ClassElementEmitter fn [cb]
+          (^Consumer fn ^void [^ClassBuilder cb]
            (let [at (.at spec)
                  mnm (str (.mangled-name fn-literal) "~" (.parameter-count at))
                  mtd (model/mtd-of-arity-type at)]
