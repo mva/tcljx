@@ -240,13 +240,13 @@
               (.emit-setup-code? ^MutableEntity bound-to xb initialize-with))
       Void/TYPE)))
 
-(defn mk-binding ^Binding [^Entity bound-to ^String namespace ^String name
+(defn mk-binding ^Binding [^Entity bound-to ^String name
                            ^CodeEmitter initialize-with]
   (BindingImpl. bound-to initialize-with name))
 
 (defn parameter-binding ^Binding [^int param-no ^String name ^Class type]
   (let [ent (parameter name type param-no)]
-    (mk-binding ent nil name emitter-empty)))
+    (mk-binding ent name emitter-empty)))
 
 
 ;; FIXME... get rid of complete-non-value-invocable eventually
@@ -259,8 +259,8 @@
     (invoke* [_ fctx form xs]
       (.invoke* inv fctx form xs))))
 
-(defn global-binding ^Binding [^Entity bound-to ^String namespace ^String name
+(defn global-binding ^Binding [^Entity bound-to ^String name
                                ^CodeEmitter initialize-with]
   ;; drop `initialize-with` if `bound-to` is static-method
-  (mk-binding bound-to namespace name
+  (mk-binding bound-to name
               (when (instance? MutableEntity bound-to) initialize-with)))

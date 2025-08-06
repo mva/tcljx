@@ -224,7 +224,7 @@
         (insn/mk-statm)))
 
   (binding-alias [_ fctx name ent]
-    (-> (entity/mk-binding ent nil name nil)
+    (-> (entity/mk-binding ent name nil)
         (insn/mk-statm)))
   (binding-fresh [_ fctx opt-type name init]
     (when opt-type
@@ -232,7 +232,7 @@
     (let [tp (or opt-type (insn/logical-type init))
           ent (entity/local-variable name tp)
           ce (-> init (insn/cast-to tp fctx) .emitter)]
-      (-> (entity/mk-binding ent nil name ce)
+      (-> (entity/mk-binding ent name ce)
           (insn/mk-statm))))
   (block-let [_ fctx bindings body]
     (let [block (insn/progn bindings body)]
