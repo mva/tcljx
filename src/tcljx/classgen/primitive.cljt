@@ -521,7 +521,7 @@
               :else
               (-> (^CodeEmitter fn [xb _ _]
                    (let [cpb (.constantPool xb)
-                         atypes (.expr-types inv-args) ;only logical types
+                         atypes (insn/logical-types inv-args)
                          mhe (.methodHandleEntry cpb rt/bsm-concat)
                          bsm (.bsmEntry cpb mhe (->> (cons recipe const-args)
                                                      (consts-to-lces cpb)))

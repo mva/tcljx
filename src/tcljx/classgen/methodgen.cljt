@@ -1,47 +1,125 @@
 (ns tcljx.classgen.methodgen
   (:require
-   (tcljx.data [model :as model] [reflect :as reflect] resolve)
-   (tcljx.classgen [runtime :as rt] [insn :as insn] [entity :as entity]))
+   (tcljx.data [type :as type] [model :as model] [reflect :as reflect] resolve)
+   (tcljx.classgen [classfile :as classfile] [runtime :as rt] [entity :as entity]
+                   [insn :as insn]))
   (:import
-   (tcljx.data.model Invocable ArityType ArityTypeImpl AritySpec
+   (tcljx.data.model Constant Invocable ArityType ArityTypeImpl AritySpec
                      CodeEmitter Entity)
    (tcljx.data.resolve Match)
+   (tcljx.classgen.entity ElementEmitter SegmentProvidesOwner)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDesc DirectMethodHandleDesc DynamicConstantDesc
                        ConstantDescs DirectMethodHandleDesc$Kind)
    (java.lang.reflect Executable)))
 
-(deftype FnLiteral [^String mangled-name ^AritySpec/1 arity-specs]
-  java.lang.Record
-  Invocable)
-
-
-(defn static-arity-mhd
-  (^DirectMethodHandleDesc [^String method-name ^ArityType at]
-   (static-arity-mhd ConstantDescs/CD_Void method-name at))
-  (^DirectMethodHandleDesc [^ClassDesc owner ^String method-name ^ArityType at]
-   (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
-                              owner method-name (model/mtd-of-arity-type at))))
-
 (defn- immediate-fn-desc* ^DynamicConstantDesc [^DirectMethodHandleDesc/1 mhds]
   (DynamicConstantDesc/ofNamed rt/bsm-static-fn ConstantDescs/DEFAULT_NAME
                                rt/StaticFn mhds))
 
-(defn static-fn-desc ^DynamicConstantDesc [^ClassDesc owner
-                                           ^FnLiteral fn-literal]
-  (let [specs (.arity-specs fn-literal)
-        a (new DirectMethodHandleDesc/1 (alength specs))
-        mnm (.mangled-name fn-literal)]
-    (dotimes [i (alength a)]
-      (let [spec (aget specs i)
-            at (.at spec)
-            mhd (or (.redirection spec)
-                    (static-arity-mhd owner (str mnm "~" (.parameter-count at))
-                                      at))]
-        (aset a i mhd)))
-    (immediate-fn-desc* a)))
+(defn- set-static-dmhd! ^void [^DirectMethodHandleDesc/1 dmhds ^ClassDesc owner
+                               ^String mnm ^AritySpec/1 specs]
+  (dotimes [i (alength dmhds)]
+    (let [spec (aget specs i)]
+      (aset dmhds i (or (.redirection spec)
+                        (let [at (.at spec)
+                              nm (str mnm "~" (.parameter-count at))]
+                          (MethodHandleDesc/ofMethod
+                           DirectMethodHandleDesc$Kind/STATIC owner nm
+                           (model/mtd-of-arity-type at))))))))
 
+(defn- arity-index ^int [^AritySpec/1 arity-specs ^int arg-count]
+  (loop [i (dec (alength arity-specs))]
+    (cond
+      (neg? i) (assert false)
+      (= (-> arity-specs (aget i) .at .parameter-count) arg-count) i
+      :else (recur (dec i)))))
+
+(defn- sort-by-arity ^DirectMethodHandleDesc/1 [^DirectMethodHandleDesc/1 dmhds
+                                                ^AritySpec/1 arity-specs]
+  (let [a (new int/1 (alength arity-specs))]
+    (dotimes [i (alength a)]
+      (let [n (-> arity-specs (aget i) .at .parameter-count)]
+        (aset a i (bit-or (bit-shift-left n 16) i))))
+    (java.util.Arrays/sort a)
+    (let [sorted (new DirectMethodHandleDesc/1 (alength dmhds))]
+      (dotimes [i (alength sorted)]
+        (aset sorted i (aget dmhds (short (aget a i)))))
+      sorted)))
+
+;;; Note: For a function wrapping a class member, neither `set-owner!`
+;;; nor `emit-class-elements` is ever called.
+(deftype FnLiteral [^String unique-name ^AritySpec/1 arity-specs
+                    ^:unsynchronized-mutable ^ClassDesc __owner
+                    ^DirectMethodHandleDesc/1 __dmhds] ;see `set-owner!`
+  Invocable
+  (emit-insn* [this xb consumed-type then-leave?]
+    (-> (.computational-value this)
+        (entity/mk-constant (.value-type this))
+        (.emit-insn* xb consumed-type then-leave?)))
+  (value-type [_]
+    tinyclj.lang.StaticFn)
+  (invoke* [this fctx form xs]
+    (let [at-idx (arity-index arity-specs (.length xs))
+          at (.at (aget arity-specs at-idx))
+          ptypes (.parameter-types at)
+          fixed (model/fixed-parameter-count at)]
+      (insn/ensure-assignables ptypes xs fixed)
+      (when (< fixed (alength ptypes)) ;any arguments passed as varargs?
+        (insn/ensure-assignable* (.getComponentType (aget ptypes fixed))
+                                 xs fixed))
+      (-> (^CodeEmitter fn [xb _ _] ;note: must retrieve DMHD *after* owner
+           (insn/emit-invoke-arity (aget __dmhds at-idx) at xs fctx xb))
+          (insn/mk-insn (.return-type at)))))
+  
+  Constant
+  (computational-value [_] ;never nil, but may require owner to be known
+    (immediate-fn-desc* (cond-> __dmhds
+                          (> (alength __dmhds) 1)
+                          (sort-by-arity arity-specs))))
+  
+  SegmentProvidesOwner
+  (set-owner! [_ owner]
+    (set! __owner owner)
+    (set-static-dmhd! __dmhds owner unique-name arity-specs))
+  
+  ElementEmitter
+  (emit-class-elements [_ cb]
+    (doseq [^AritySpec spec arity-specs
+            :when (nil? (.redirection spec))]
+      (let [at (.at spec)
+            mnm (str unique-name "~" (.parameter-count at))
+            mtd (model/mtd-of-arity-type at)]
+        (classfile/with-method-body-> cb
+          [mnm mtd classfile/acc-method-static]
+          ;; pick up any fixed auto-return-type
+          (insn/emit-return (.return-type at) (.code spec)))))))
+
+(defn partial-fn-literal ^FnLiteral [^String unique-name
+                                     ^AritySpec/1 partial-arity-specs]
+  (let [dmhds (new DirectMethodHandleDesc/1 (alength partial-arity-specs))]
+    (FnLiteral. unique-name partial-arity-specs nil dmhds)))
+
+(letfn [(with-code ^AritySpec [^AritySpec spec ^Insn code]
+          (let [rt (-> spec .at .return-type)]
+            (-> (if (type/auto-return-marker? rt)
+                  (let [expr-tp (insn/expr-type code)
+                        logical-tp (type/expr-to-logical expr-tp)]
+                    (.with-return-type (.at spec) logical-tp))
+                  (.at spec))
+                (AritySpec. (.body spec) (.redirection spec)
+                            (.error-context spec) code))))]
+  
+  (defn complete-fn-literal ^FnLiteral [^FnLiteral fn-lit
+                                        ^AritySpec/1 arity-specs
+                                        ^Insns arity-codes]
+    ;; update body expressions to match return types and overwrite any
+    ;; auto-return-marker return types
+    (dotimes [i (alength arity-specs)]
+      (aset (.arity-specs fn-lit) i
+            (with-code (aget arity-specs i) (.get arity-codes i))))
+    fn-lit))
 
 (letfn [(arity-parameter-types ^Class/1 [^Match m]
           (let [ptypes (.parameter-types m)]
@@ -50,46 +128,19 @@
                 (aset a 0 (.owner m))
                 (System/arraycopy ptypes 0 a 1 (alength ptypes))
                 a)
-              ptypes)))]
-  
-  (defn- match-to-arity-spec ^AritySpec [^Match m]
-    (let [varargs? (when (instance? Executable (.member m))
-                     (.isVarArgs ^Executable (.member m)))
-          ptypes (arity-parameter-types m)
-          at (ArityTypeImpl. (.return-type m) ptypes nil varargs?)
-          mhd (reflect/mhd-of-member (.owner m) (.member m))]
-      (AritySpec. at nil mhd nil nil))))
+              ptypes)))
+        (arity-spec-of-match ^AritySpec [^Match m]
+          (let [varargs? (when (instance? Executable (.member m))
+                           (.isVarArgs ^Executable (.member m)))
+                ptypes (arity-parameter-types m)
+                at (ArityTypeImpl. (.return-type m) ptypes nil varargs?)
+                mhd (reflect/mhd-of-member (.owner m) (.member m))]
+            (AritySpec. at nil mhd nil nil)))]
 
-(deftype ImmediateFn [^AritySpec/1 arity-specs]
-  CodeEmitter
-  (emit-insn* [this xb consumed-type then-leave?]
-    (let [mhds (new DirectMethodHandleDesc/1 (alength arity-specs))]
-      (dotimes [i (alength mhds)]
-        (aset mhds i (.redirection (aget arity-specs i))))
-      (-> (immediate-fn-desc* mhds)
-          (entity/mk-constant (.value-type this))
-          (.emit-insn* xb consumed-type then-leave?))))
-
-  Entity
-  (value-type [_]
-    tinyclj.lang.StaticFn)
-  
-  Invocable
-  (invoke* [_ fctx form xs]
-    (let [spec (aget arity-specs 0)
-          at (.at spec)
-          ptypes (.parameter-types at)
-          fixed (model/fixed-parameter-count at)]
-      (dotimes [i fixed]   ;check arguments passed to fixed parameters
-        (insn/ensure-assignable (aget ptypes i) xs i))
-      (when (< fixed (alength ptypes)) ;any arguments passed as varargs?
-        (let [va-type (.getComponentType (aget ptypes fixed))]
-          (loop [i fixed]
-            (when (< i (alength ptypes))
-              (insn/ensure-assignable va-type xs i)
-              (recur (inc i))))))
-      (insn/invoke-arity spec xs fctx))))
-
-(defn class-member-entity ^Entity [^Match m]
-  (ImmediateFn. (doto (new AritySpec/1 1)
-                  (aset 0 (match-to-arity-spec m)))))
+  (defn class-member-fn ^FnLiteral [^Match m]
+    (let [spec (arity-spec-of-match m)
+          arity-specs (doto (new AritySpec/1 1)
+                        (aset 0 spec))
+          dmhds (doto (new DirectMethodHandleDesc/1 1)
+                  (aset 0 (.redirection spec)))]
+      (FnLiteral. "CLASS_MEMBER" arity-specs nil dmhds))))

@@ -457,7 +457,7 @@
                       (.bytecode java.lang.classfile.Opcode/SWAP)))))
 
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(FIELD [PUBLIC STATIC FINAL TRANSIENT] "x" "Z")]
+            [(FIELD [PUBLIC STATIC FINAL] "x" "Z")]
             
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
              (LDC "pkg.ns0")

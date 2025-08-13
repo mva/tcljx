@@ -105,7 +105,7 @@
   
   (try
     (let [resolver (reader-test/stub-resolver "ns.pkg0" {})
-          cs (slurp "../tcljc/src/tinyclj.core/tinyclj/core.cljt")
+          cs (slurp "../tcljc/src/tcljc.core/tinyclj/core.cljt")
           es (time
               (reader/read-all cs resolver))]
       (println :es (count es))

@@ -89,12 +89,7 @@
     (.invoke* inv fctx form args))
   
   (assignment [_ ent init]
-    (mk-expr [:assignment (emitter-data ent) (expr-data init)]))
-  
-  (mk-expr [this form]
-    (if (= form 'not-defined)
-      (throw (wrong/info-unresolved form))
-      (mk-expr form))))
+    (mk-expr [:assignment (emitter-data ent) (expr-data init)])))
 
 (deftype NmspBuilderStub [^String ns-str
                           ^java.util.ArrayList segment-forms
@@ -138,7 +133,7 @@
     (when-not (empty? imports)
       (.add segment-forms (vec (list* :imports imports))))
     this)
-  (new-def-init [this nm init]
+  (new-def-init [this nm redef? init]
     (let [ns-sym (symbol ns-str nm)
           ent (EntityData. [:entity ns-sym])]
       (set! globals (assoc globals nm ent))

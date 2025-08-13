@@ -7,8 +7,8 @@ JAVAC=$(JAVA_BIN)javac
 JAVAP=$(JAVA_BIN)javap
 
 # Note: only textflow__terminal requires --enable-native-access
-JAVA_OPTS=-p $(TCLJC_MDIR) --add-modules tinyclj.core --enable-native-access=ALL-UNNAMED
-TCLJC_OPTS=$(JAVA_OPTS) -m tinyclj.compiler
+JAVA_OPTS=-p $(TCLJC_MDIR) --add-modules tcljc.core --enable-native-access=ALL-UNNAMED
+TCLJC_OPTS=$(JAVA_OPTS) -m tcljc.compiler
 
 #MAIN_NS=tcljx.alpha.textflow__terminal
 MAIN_NS=tcljx.main
@@ -27,7 +27,7 @@ watch-and-run:
 
 # $(DEST_DIR) matches the compiler's default destination directory
 PROJECT_DIR ?= $(notdir $(PWD))
-DEST_DIR=/tmp/$(USER)/tinyclj/$(PROJECT_DIR)
+DEST_DIR=/tmp/$(USER)/tcljc/$(PROJECT_DIR)
 
 run-main:
 	$(JAVA) $(JAVA_OPTS) -cp $(DEST_DIR) $(MAIN_NS).___ $(ARGS)
@@ -46,10 +46,10 @@ run-jfr: compile
 # watch-and-xxx targets is running.
 test:
 # This variant is for the compiler's unit tests.  It avoids a single
-# shared tinyclj.rt/tinyclj.lang.RT whose markCoreInitialization() is
-# first called from tinyclj.core/tinyclj.core._10.<clinit> and then
+# shared tcljc.rt/tinyclj.lang.RT whose markCoreInitialization() is
+# first called from tcljc.core/tinyclj.core._10.<clinit> and then
 # again in the running tests from tclj-dyn//tinyclj.core._10.<clinit>
-	$(JAVA) -cp ../bootstrap-tcljc/tinyclj.rt:../bootstrap-tcljc/tinyclj.core:$(DEST_DIR) $(RUN_TESTS_NS).___
+	$(JAVA) -cp ../bootstrap-tcljc/tcljc.rt:../bootstrap-tcljc/tcljc.core:$(DEST_DIR) $(RUN_TESTS_NS).___
 # This variant works for regular applications:
 #	$(JAVA) $(JAVA_OPTS) -cp $(DEST_DIR) $(RUN_TESTS_NS).___
 watch-and-test:

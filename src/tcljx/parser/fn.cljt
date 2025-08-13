@@ -2,30 +2,12 @@
   (:require
    (tcljx.data [wrong :as wrong] [context :as context] [type :as type]
                [model :as model] [resolve :as resolve] [reflect :as reflect])
-   (tcljx.parser [syntax :as syntax] [interop :as interop]))
+   (tcljx.parser [syntax :as syntax] [interop :as interop] [loop :as loop]))
   (:import
    (tcljx.data.model Expr Exprs ExprFactory ArityType AritySpec Scope Resolver)
    (tcljx.data.resolve Match)
    (java.lang.constant MethodHandleDesc ConstantDescs)
-   (java.lang.reflect Method Constructor Field)
-   (java.util.function Function)))
-
-#_(definterface ArityMethod
-  (at ^ArityType [])
-
-  ;; The "external" method and the "implementation" method differ if
-  ;; there is a bridge method mapping vararg `Object...` to variadic
-  ;; `ISeq`.
-  (load-mh-ext ^DirectMethodHandleDesc [])
-  (load-mh-impl ^DirectMethodHandleDesc []))
-
-#_(deftype ArityMethodImpl [^ArityType at
-                          ^DirectMethodHandleDesc load-mh-ext
-                          ^DirectMethodHandleDesc load-mh-impl]
-  java.lang.Record
-  ArityMethod)
-
-;;; ------------------------------------------------------------------------
+   (java.util.function BiFunction)))
 
 (defn redirection ^MethodHandleDesc [^Resolver rsv ^ArityType at
                                      [op :as ^seq form]]
@@ -60,10 +42,7 @@
                     (when (and (not= mode resolve/invoke-polymorphic)
                                (= (.varargs? at)
                                   (= mode resolve/invoke-tail-into-array)))
-                      (condp instance? member
-                        Method (reflect/mhd-of-method owner member)
-                        Constructor (reflect/mhd-of-constructor owner member)
-                        Field (reflect/mhd-of-field owner member))))))))]
+                      (reflect/mhd-of-member owner member)))))))]
 
     ;; Important: Working on the syntax level is brittle.  There are
     ;; many syntactically different ways to redirect to a method or
@@ -91,20 +70,64 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn parse-fn* ^Expr [^Scope scope ^long fctx
-                       [_ fn-nm paramv & body :as ^seq form]]
-  (let [fn-nm (syntax/simple-symbol fn-nm)
-        at (interop/parse-arity-type (.resolver scope) fctx paramv form)
-        redir (when (nil? (next body))
-                (let [form (first body)]
-                  (when (and (seq? form) (nil? (interop/tag-of form)))
-                    (redirection (.resolver scope) at form))))]
-    (.new-function
-     scope fn-nm
-     (^Function fn ^Expr [^AritySpec spec]
-      (let [pbnds (model/parameter-bindings scope (.at spec))
-            x (context/parse-progn (context/with-local-bindings scope pbnds)
-                                   (.error-context spec) fctx (.body spec))]
-        (.progn-expr (.expr-factory scope) pbnds x)))
-     (doto (new AritySpec/1 1)
-       (aset 0 (AritySpec. at body redir form nil))))))
+(defn parse-fn* ^Expr [^Scope scope ^long fctx ^seq form]
+  (letfn [(max-parameter-count ^int [^AritySpec/1 specs]
+            (loop [n 0, i (dec (alength specs))]
+              (if (neg? i)
+                n
+                (recur (max n (-> (aget specs i) .at .parameter-count))
+                       (dec i)))))
+          (parse-redir ^MethodHandleDesc [^ArityType at ^seq body]
+            (when (nil? (next body))
+              (let [form (first body)]
+                (when (and (seq? form) (nil? (interop/tag-of form)))
+                  (redirection (.resolver scope) at form)))))
+          (parse-arity ^AritySpec [paramv ^seq body ^seq error-context]
+            (context/with-line-from-list [fctx error-context]
+              (let [at (interop/parse-arity-type (.resolver scope) paramv)]
+                (AritySpec. at body (parse-redir at body) error-context nil))))
+          (specs-1 ^AritySpec/1 [paramv ^seq body ^seq error-context]
+            (doto (new AritySpec/1 1)
+              (aset 0 (parse-arity paramv body error-context))))
+          (specs-n ^AritySpec/1 [^seq arity-seq] ;pre: `arity-seq` is not empty
+            (let [n (count arity-seq)
+                  specs (new AritySpec/1 n)]
+              (loop [seen-ns #{}, seen-va -1, i 0,
+                     [[paramv & body :as arity] & arity-r] arity-seq]
+                (if (< i n)
+                  (if (seq? arity)
+                    (let [spec (parse-arity paramv body arity)
+                          at (.at spec)
+                          n (.parameter-count at)
+                          va (if (or (.varargs? at) (.variadic? at)) i -1)]
+                      (when (contains? seen-ns n)
+                        (wrong/other (str "multiple function arities "
+                                          "with " n " parameters")))
+                      (when (and (>= va 0) (>= seen-va 0))
+                        (wrong/other (str "multiple variadic function "
+                                          "arities")))
+                      (aset specs i spec)
+                      (recur (conj seen-ns n) va (inc i) arity-r))
+                    (throw (syntax/info "expect function arity ([...] ...)"
+                                        arity)))
+                  
+                  (when (and (>= seen-va 0)
+                             (not= (max-parameter-count specs) seen-va))
+                    (wrong/other "only maximum arity can be variadic"))))
+              specs))
+          (new-fn ^Expr [^symbol fn-nm [h & t :as ^seq more]]
+            (let [pab (^BiFunction fn ^Expr [^Scope scope ^AritySpec spec]
+                       (let [pbnds (model/parameter-bindings scope (.at spec))]
+                         (-> (context/with-local-bindings scope pbnds)
+                             (loop/parse-loop-body (.error-context spec)
+                                                   fctx pbnds (.body spec)))))]
+              (.new-function scope fn-nm pab
+                             (if (seq? h)    ;arity in parenthesis?
+                               (if (some? t) ;more than one arity?
+                                 (specs-n more)
+                                 (specs-1 (first h) (next h) h))
+                               (specs-1 h t form)))))] ;single inlined arity
+    (let [fn-nm (second form)]
+      (if (symbol? fn-nm)
+        (new-fn (syntax/simple-symbol fn-nm) (nnext form))
+        (new-fn nil (next form))))))

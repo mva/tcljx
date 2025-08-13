@@ -5,7 +5,7 @@
     [model :as model] [reflect :as reflect] [resolve :as resolve])
    (tcljx.classgen [emit :as emit] [entity :as entity]))
   (:import
-   (tcljx.data.model Expr Exprs CodeEmitter Entity AritySpec)
+   (tcljx.data.model Expr Exprs CodeEmitter Entity ArityType)
    (tcljx.data.resolve Match)
    (java.lang.classfile CodeBuilder TypeKind Opcode)
    (java.lang.constant MethodTypeDesc DirectMethodHandleDesc
@@ -54,6 +54,11 @@
 
 (defn constant-insn ^Insn [^Object value ^Class type]
   (value-of (entity/mk-constant value type) nil))
+
+
+;;; This indicates an error regarding the type *of* an expression.
+(defn wr-type ^Throwable [^String msg-prefix ^Insn x]
+  (wrong/wr-info (str msg-prefix (wrong/got (.expr-type x)))))
 
 
 ;;; Compilation centers around arrays of types and arrays of code
@@ -118,6 +123,8 @@
      (Insns. (Arrays/copyOf (.emitters insns) new-length)
              (Arrays/copyOf (.expr-types insns) new-length)))))
 
+(defn const? ^boolean [^Insn x]
+  (entity/const? (.emitter x)))
 (defn const-value
   (^Object [^Insn x]                    ;nil if `x` is not a Constant
    (entity/const-value (.emitter x)))
@@ -149,6 +156,11 @@
    (type/expr-to-logical (expr-type insn)))
   (^Class [^Insns insns ^int i]
    (type/expr-to-logical (expr-type insns i))))
+(defn logical-types ^Class/1 [^Insns insns]
+  (let [a (new Class/1 (.length insns))]
+    (dotimes [i (alength a)]
+      (aset a i (logical-type insns i)))
+    a))
 
 ;;; ------------------------------------------------------------------------
 
@@ -159,7 +171,7 @@
   (^Throwable [^String msg-prefix ^Expr x ^Class tp]
    (wrong/wr-info (str msg-prefix (wrong/got-type tp)))))
 
-(letfn [(ensure-assignable* ^void [^Class target-type ^Class arg-type]
+(letfn [(check-assign ^void [^Class target-type ^Class arg-type]
           (when-not (type/assignable-from? target-type arg-type)
             (throw (info-type (str "cannot assign to " (wrong/q target-type)
                                    #_(when (some? dest-descr)
@@ -167,9 +179,22 @@
                               nil arg-type))))]
   (defn ensure-assignable
     (^void [^Class target-type ^Insn x]
-     (ensure-assignable* target-type (expr-type x)))
+     (check-assign target-type (expr-type x)))
     (^void [^Class target-type ^Insns xs ^int i]
-     (ensure-assignable* target-type (expr-type xs i)))))
+     (check-assign target-type (expr-type xs i))))
+  
+  (defn ensure-assignable*
+    (^void [^Class target-type ^Insns xs]
+     (ensure-assignable* target-type xs 0))
+    (^void [^Class target-type ^Insns xs ^int start]
+     (loop [i start]
+       (when (< i (.length xs))
+         (ensure-assignable target-type xs i)
+         (recur (inc i))))))
+  
+  (defn ensure-assignables ^void [^Class/1 target-types ^Insns xs ^int end]
+    (dotimes [i end]
+      (ensure-assignable (aget target-types i) xs i))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -254,6 +279,12 @@
                        ptypes fixed (- (alength invocation-atypes) fixed))
      (MethodTypeDesc/of (reflect/describe-class return-type)
                         (reflect/describe-class* ptypes)))))
+(defn mtd-of-fn-poly
+  (^MethodTypeDesc [^Class return-type ^Class f-tp ^Class/1 invocation-atypes]
+   (let [a (new Class/1 (inc (alength invocation-atypes)))]
+     (aset a 0 f-tp)
+     (System/arraycopy invocation-atypes 0 a 1 (alength invocation-atypes))
+     (mtd-of-poly return-type a))))
 
 (defn invoke-member ^Insn [^Match m ^Insn receiver ^Insns args ^long fctx]
   (-> (^CodeEmitter fn [xb consumed-type _]
@@ -311,29 +342,26 @@
                         (.interfaceMethodRefEntry cp owner nat)
                         (.methodRefEntry cp owner nat))))))
 
-(defn invoke-arity ^Insn [^AritySpec spec ^Insns args ^long fctx]
-  (-> (^CodeEmitter fn [xb consumed-type _]
-       (let [at (.at spec)
-             fixed (model/fixed-parameter-count at)
-             parameter-types (.parameter-types at)
-             varargs-tp (when (< fixed (alength parameter-types))
-                          (aget parameter-types fixed))
-             mhd (.redirection spec)]
-         ;; new-dup-dance when creating a new instance of `owner`
-         (when (identical? DirectMethodHandleDesc$Kind/CONSTRUCTOR (.kind mhd))
-           (-> xb (.new_ (.owner mhd)) (.dup)))
-         ;; all fixed (i.e. non-vararg) arguments
-         (when (emit/typed-insns? xb fctx parameter-types (.emitters args)
-                                  0 fixed)
-           ;; optionally: all vararg arguments
-           (when (or (nil? varargs-tp)
-                     (emit-array-of? xb (.getComponentType varargs-tp)
-                                     (.emitters args) fixed))
-             ;; the actual invoke instruction
-             (-> (emit/with-line-number xb fctx)
-                 (invoke-mhd* mhd))
-             (.return-type at)))))
-      (mk-insn (-> spec .at .return-type))))
+(defn emit-invoke-arity ^Class [^DirectMethodHandleDesc mhd ^ArityType at
+                                ^Insns args ^long fctx ^CodeBuilder xb]
+  (let [fixed (model/fixed-parameter-count at)
+        parameter-types (.parameter-types at)
+        varargs-tp (when (< fixed (alength parameter-types))
+                     (aget parameter-types fixed))]
+    ;; new-dup-dance when creating a new instance of `owner`
+    (when (identical? DirectMethodHandleDesc$Kind/CONSTRUCTOR (.kind mhd))
+      (-> xb (.new_ (.owner mhd)) (.dup)))
+    ;; all fixed (i.e. non-vararg) arguments
+    (when (emit/typed-insns? xb fctx parameter-types (.emitters args)
+                             0 fixed)
+      ;; optionally: all vararg arguments
+      (when (or (nil? varargs-tp)
+                (emit-array-of? xb (.getComponentType varargs-tp)
+                                (.emitters args) fixed))
+        ;; the actual invoke instruction
+        (-> (emit/with-line-number xb fctx)
+            (invoke-mhd* mhd))
+        (.return-type at)))))
 
 ;;; Invoke static runtime method without line number information.
 (defn invoke-runtime ^Insn [^Match m ^Insns args]

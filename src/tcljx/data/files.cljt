@@ -24,7 +24,7 @@
 
 (defn tmp-dest-dir ^Path [^String dir-name]
   (path-of (System/getProperty "java.io.tmpdir")
-           (System/getProperty "user.name") "tinyclj" dir-name))
+           (System/getProperty "user.name") "tcljx" dir-name))
 
 ;;; ------------------------------------------------------------------------
 

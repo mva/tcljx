@@ -6,7 +6,7 @@
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry)
    (java.lang.constant DirectMethodHandleDesc MethodTypeDesc ClassDesc)
    (java.util Arrays)
-   (java.util.function Function))
+   (java.util.function BiFunction))
   (:refer-clojure :exclude [zero?]))
 
 ;;; Emit instruction code into the CodeBuilder instance.  Return the
@@ -105,7 +105,7 @@
   ;; can be multiple bindings referring to the same shared entity.  In
   ;; this case, at most one binding has a non-nil `provided-value` and
   ;; only this binding performs initialization of the entity by
-  ;; calling its `emit-setup-code`.
+  ;; calling its `emit-setup-code?`.
   (bound-to ^Entity [])
 
   ;; The expression that provides the `bound-to` entity's value, or
@@ -122,12 +122,30 @@
 
 ;;; ------------------------------------------------------------------------
 
+;;; An entity whose bytecode representation is a variant of the LDC
+;;; instruction.  Constant values must be visible to the parser,
+;;; because type expression literals (for example `Classname` or
+;;; `Classname/1`) are part of the syntax of some special forms.
+;;; Constant values are visible to the code generator to support
+;;; bottom up constant folding while building the expression tree.
+(definterface Constant
+  :extends [Entity]
+  (computational-value ^Object [])) ;ConstantDesc, Class, or some non-nil value
+
+(defn type-literal ^Class [^Expr x form] ;nil if not a type symbol
+  (let [ce (.emitter x)]
+    (when (and (instance? Constant ce)
+               (identical? Class (Entity/.value-type ce))
+               (symbol? form))
+      (Constant/.computational-value ce))))
+
+
 ;;; Any entity that can be turned into either an LDC instruction as
 ;;; part of a method's code attribute, or into a loadable entry inside
 ;;; the constant pool.  The method `emit-insn*` emits an LDC or
-;;; equivalent instruction, and `emit-setup-code` is empty.
+;;; equivalent instruction.
 (definterface Loadable
-  :extends [Entity]
+  :extends [Constant]
   ;; If `logical-type?` is true, then make sure the entry materializes
   ;; as the actual logical type of the loadable, instead of its
   ;; computational type.  Only makes a difference to computational int
@@ -144,23 +162,6 @@
    (instance? Loadable (.emitter x)))
   (^boolean [^Exprs xs ^int i]
    (instance? Loadable (.emitter xs i))))
-
-
-;;; Constant values must be visible to the parser, because type
-;;; expression literals (for example `Classname` or `Classname/1`) are
-;;; part of the syntax of some special forms.  Constant values are
-;;; visible to the code generator to support bottom up constant
-;;; folding while building the expression tree.
-(definterface Constant
-  :extends [Loadable]
-  (computational-value ^Object [])) ;ConstantDesc or Class, and never nil
-
-(defn type-literal ^Class [^Expr x form] ;nil if not a type symbol
-  (let [ce (.emitter x)]
-    (when (and (instance? Constant ce)
-               (identical? Class (Entity/.value-type ce))
-               (symbol? form))
-      (Constant/.computational-value ce))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -234,16 +235,8 @@
   :extends [Entity]
   (invoke* ^Expr [^long fctx ^seq form ^Exprs xs]))
 
-(defn invocable? ^boolean [^Entity ent]
+(defn invocable? ^boolean [^CodeEmitter ent]
   (instance? Invocable ent))
-
-;;; If `x` is a binding, then return the very first non-aliasing
-;;; binding that defines its value.  Otherwise, return nil.
-#_(defn root ^Binding [^Expr x]
-    (loop [^Binding bnd nil, x x]
-      (if (binding? x)
-        (let [bnd ^Binding x] (recur bnd (.init bnd)))
-        bnd)))
 
 ;;; ------------------------------------------------------------------------
 
@@ -273,8 +266,9 @@
   (lookup-def ^Entity [^String nmsp ^String nm])
 
   ;; Generates unique names for fn* and reify* instances within a
-  ;; given namespace.  `dflt-nm` of nil means function or interface
-  ;; function.
+  ;; given namespace.  In case of name clashes the result is not
+  ;; deterministic, unless all of the namespace processing happens
+  ;; within a single thread.
   (pick-unique-name ^String [^String dflt-nm]))
 
 ;;; ------------------------------------------------------------------------
@@ -323,7 +317,7 @@
   ;; Adds the new binding to the namespace.  Returns an expression
   ;; that initializes the binding with its value (if any).  Pass an
   ;; `init` of nil if no intial value is provided.
-  (new-def-init ^Expr [^String nm ^Expr init])
+  (new-def-init ^Expr [^String nm ^boolean redef? ^Expr init])
   (new-def-alias ^Expr [^String nm ^Entity other])
 
   ;; FIXME... see tcljc/emitter/namespace.cljt
@@ -398,6 +392,7 @@
                     ^long fctx ^seq/1 error-contexts])
 
   (invoke ^Expr [^long fctx ^Object form ^Invocable inv ^Exprs args])
+  (invoke-value ^Expr [^long fctx ^Expr f ^Exprs args])
   
   ;; ### bindings
 
@@ -421,7 +416,7 @@
   
   ;; Replaces any arity return types `auto-return-marker` with their
   ;; corresponding body's expression type.
-  (new-function* ^Expr [^String mangled-nm ^Function parse-arity-body
+  (new-function* ^Expr [^Scope scope ^symbol fn-nm ^BiFunction parse-arity-body
                         ^AritySpec/1 arity-specs])
   
   ;; ### interop
@@ -443,24 +438,11 @@
   (get-virtual-field ^Expr [^long fctx ^Expr receiver ^String mnm])
   
   (instanceof-expr ^Expr [^long fctx ^Class type ^Expr arg])
-  (throw-expr ^Expr [^long fctx ^Expr arg])
-  
-  ;; ### misc
-  
-  (mk-expr ^Expr [form]))               ;FIXME... drop this
-
-(defn new-constant ^Expr [^ExprFactory ef ^Object value ^Class type]
-  (.value-of ef (.constant-entity ef value type) nil))
-
-(defn exprs-of ^Exprs [^ExprFactory ef & ^Expr/1 xs*]
-  (let [xs (.new-exprs ef (alength xs*))]
-    (dotimes [i (.length xs)]
-      (.set xs i (aget xs* i)))
-    xs))
+  (throw-expr ^Expr [^long fctx ^Expr arg]))
 
 (definterface Scope
   (parse-form ^Expr [^long fctx form])
-  (new-function ^Expr [^symbol fn-nm ^Function parse-arity-body
+  (new-function ^Expr [^symbol fn-nm ^BiFunction parse-arity-body
                        ^AritySpec/1 arity-specs])
   
   ;; Frequency of change: very low.
@@ -476,7 +458,18 @@
   ;; Frequency of change: moderate.
   (bindings* ^map [])
   (with-bindings* ^Scope [^map bindings])
-  (with-recur-parameters ^Scope [^Exprs parameters]))
+  (with-recur-parameters ^Scope [^Exprs parameters])
+  (entity-name ^String [])
+  (with-entity-name ^Scope [^String entity-name]))
+
+(defn new-constant ^Expr [^ExprFactory ef ^Object value ^Class type]
+  (.value-of ef (.constant-entity ef value type) nil))
+
+(defn exprs-of ^Exprs [^ExprFactory ef & ^Expr/1 xs*]
+  (let [xs (.new-exprs ef (alength xs*))]
+    (dotimes [i (.length xs)]
+      (.set xs i (aget xs* i)))
+    xs))
 
 (defn parameter-bindings ^Exprs [^Scope scope ^ArityType at]
   (let [ef (.expr-factory scope)

@@ -6,8 +6,11 @@
   (:import
    (tcljx.data.model Expr CodeEmitter Binding Entity MutableEntity
                      Loadable Constant Invocable)
-   (java.lang.classfile CodeBuilder TypeKind)
+   (java.lang.classfile CodeBuilder ClassBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)))
+
+(definterface ElementEmitter
+  (emit-class-elements ^void [^ClassBuilder cb]))
 
 ;;; FIXME... drop this after all old unit tests have been ported over;
 ;;; interesting experiment to see if it works, but probably of little
@@ -29,6 +32,8 @@
           opnd-type)))
   (value-type [_]
     opnd-type)
+  (computational-value [_]
+    loadable-value)
   (loadable-entry [_ cpb logical-type?]
     (if (instance? CodeEmitter/1 loadable-value)
       (if associate-meta?
@@ -65,7 +70,7 @@
 
 (deftype ConstantImpl [^Object computational-value ^Class opnd-type]
   java.lang.Record
-  Constant
+  Loadable
   (emit-insn* [this xb consumed-type _]
     (cond
       (type/same? Void/TYPE consumed-type)
@@ -111,12 +116,6 @@
             Short/TYPE (object (short x))))
         computational-value))))
 
-(defn const? ^boolean [^CodeEmitter ce]
-  (instance? ConstantImpl ce))
-(defn const-value ^Object [^CodeEmitter ce]
-  (when (const? ce)
-    (ConstantImpl/.computational-value ce)))
-
 (def emitter-empty (^CodeEmitter fn [xb _ _] Void/TYPE))
 (def entity-null (ConstantImpl. ConstantDescs/NULL type/poly-reference))
 (defn entity-null? ^boolean [^CodeEmitter ce]
@@ -134,6 +133,12 @@
     (if (tinyclj.core/zero? ^int computational-value) entity-false entity-true)
     
     :else (ConstantImpl. computational-value type)))
+
+(defn const? ^boolean [^CodeEmitter ce]
+  (instance? Constant ce))
+(defn const-value ^Object [^CodeEmitter ce]
+  (when (const? ce)
+    (Constant/.computational-value ce)))
 
 (def entity-int-zero (mk-constant 0 Integer/TYPE))
 (defn entity-zero? ^boolean [^CodeEmitter ce]

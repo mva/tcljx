@@ -312,10 +312,6 @@
 
 (deftest checkcast-join-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
-             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-                   [[STATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/String;"]]])
-             (ARETURN)]
             [(METHOD [PUBLIC STATIC FINAL] "f~1" "(Ljava/lang/Object;)Ljava/lang/String;")
              ["LOCAL 0: Object x"]
              (ALOAD_0)
@@ -325,6 +321,10 @@
              (ARETURN)
              [L:0]
              (LDC "foo")
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/String;"]]])
              (ARETURN)]
 
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
@@ -343,10 +343,6 @@
 
 (deftest checkcast-switch-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
-             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-                   [[STATIC . "f~2" "(ILjava/lang/Object;)Ljava/lang/String;"]]])
-             (ARETURN)]
             [(METHOD [PUBLIC STATIC FINAL] "f~2" "(ILjava/lang/Object;)Ljava/lang/String;")
              ["LOCAL 0: int n"]
              ["LOCAL 1: Object x"]
@@ -364,6 +360,10 @@
              (INVOKESTATIC Integer "valueOf" "(I)Ljava/lang/Integer;")
              (INVOKESTATIC RT "noMatchingClause" "(Ljava/lang/Object;)Ljava/lang/Exception;")
              (ATHROW)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~2" "(ILjava/lang/Object;)Ljava/lang/String;"]]])
+             (ARETURN)]
 
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
              (LDC "pkg.ns0")
@@ -382,10 +382,6 @@
 
 (deftest checkcast-loop-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
-             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-                   [[STATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/String;"]]])
-             (ARETURN)]
             [(METHOD [PUBLIC STATIC FINAL] "f~1" "(Ljava/lang/Object;)Ljava/lang/String;")
              ["LOCAL 0: Object x"]
              [L:0]
@@ -395,6 +391,10 @@
              [L:1]
              (ALOAD_0)
              (CHECKCAST String)
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/String;"]]])
              (ARETURN)]
 
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
@@ -415,10 +415,6 @@
 
 (deftest checkcast-try-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
-             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-                   [[STATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/String;"]]])
-             (ARETURN)]
             [(METHOD [PUBLIC STATIC FINAL] "f~1" "(Ljava/lang/Object;)Ljava/lang/String;")
              ["LOCAL 0: Object x"]
              [L:0]
@@ -430,6 +426,10 @@
              (ASTORE_1)
              ["LOCAL 1: Exception _"]
              (LDC "foo")
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/String;"]]])
              (ARETURN)]
 
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")

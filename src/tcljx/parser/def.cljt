@@ -14,24 +14,27 @@
               (when-some [ent (context/lookup scope init)]
                 (when (model/global? ent)
                   ent))))
-          (new-def ^Expr [^String nm ^seq init-forms]
+          (new-def ^Expr [^String nm ^boolean redef? ^seq init-forms]
             ;; pre: `init-forms` is nil when empty
             ;; post: throws `wrong` when outside namespace context
             (let [nmsp (context/namespace-builder scope)]
               (if (some? init-forms)
                 (let [init (first init-forms)]
-                  (if-some [bnd (aliased-def init)]
-                    (.new-def-alias nmsp nm bnd)
-                    (.new-def-init nmsp nm (context/parse-arg scope fctx init))))
-                (.new-def-init nmsp nm (.empty-expr (.expr-factory scope))))))
+                  (if-some [ent (when-not redef? (aliased-def init))]
+                    (.new-def-alias nmsp nm ent)
+                    (let [x (context/parse-arg scope fctx init)]
+                      (.new-def-init nmsp nm redef? x))))
+                (let [x (.empty-expr (.expr-factory scope))]
+                  (.new-def-init nmsp nm redef? x)))))
           (assign-to-def ^Expr [^Entity ent ^seq init-forms]
             (let [init (syntax/first init-forms)]
               (-> (.expr-factory scope)
                   (.assignment ent (context/parse-arg scope fctx init)))))]
     
     (let [nm (syntax/simple-symbol-str nm-sym)
+          nm-meta (meta nm-sym)
           prior-def (.lookup-def (.resolver scope) nil nm)]
       (syntax/empty-tail (next args))
       (if (some? prior-def)
         (assign-to-def prior-def args)
-        (new-def nm args)))))
+        (new-def nm (boolean (:redef nm-meta)) args)))))

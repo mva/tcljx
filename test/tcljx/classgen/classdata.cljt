@@ -36,7 +36,7 @@
    rt/bsm-quote :bsm-quote
    rt/bsm-concat :bsm-concat
    rt/bsm-static-fn :bsm-static-fn
-   #_#_rt/bsm-invoke-fn :bsm-invoke-fn
+   rt/bsm-invoke-fn :bsm-invoke-fn
    rt/bsm-clause-code :bsm-clause-code
    #_#_rt/bsm-metafactory :bsm-metafactory
    #_#_rt/bsm-object-method :bsm-object-method

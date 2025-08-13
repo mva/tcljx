@@ -74,11 +74,6 @@
 
 (deftest static-method-wrapper
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "cons" "()Ltinyclj/lang/StaticFn;")
-             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-                   [[STATIC . "rcons~2"
-                     "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;"]]])
-             (ARETURN)]
             [(METHOD [PUBLIC STATIC FINAL] "rcons~2"
                      "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
              ["LOCAL 0: Object seq"]
@@ -86,6 +81,11 @@
              (ALOAD_1)
              (ALOAD_0)
              (INVOKESTATIC RT "cons" "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "cons" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "rcons~2"
+                     "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;"]]])
              (ARETURN)]
             
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")

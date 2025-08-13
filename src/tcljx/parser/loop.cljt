@@ -3,7 +3,16 @@
    (tcljx.data [wrong :as wrong] [context :as context] [model :as model])
    (tcljx.parser [syntax :as syntax] [interop :as interop]))
   (:import
-   (tcljx.data.model Expr Binding Scope)))
+   (tcljx.data.model Expr Exprs Binding Scope)))
+
+(defn parse-loop-body ^Expr [^Scope scope ^seq error-context
+                             ^long fctx ^Exprs bnd-xs ^seq body]
+  (let [fctx' (bit-or fctx context/flag-can-recur)
+        scope' (.with-recur-parameters scope bnd-xs)]
+    (.block-loop (.expr-factory scope') fctx'
+                 (if (nil? error-context)
+                   (context/parse-progn scope' fctx' body)
+                   (context/parse-progn scope' error-context fctx' body)))))
 
 (defn parse-loop* ^Expr [^Scope scope ^long fctx [_ bindings & body :as form]]
   (let [bindings (syntax/vector bindings true)
@@ -20,10 +29,7 @@
                                     (context/parse-arg scope fctx init))]
           (.set bnd-xs i bnd-x)
           (recur (context/with-local-binding scope bnd-x) (inc i)))
-        (let [fctx' (bit-or fctx context/flag-can-recur)
-              scope' (.with-recur-parameters scope bnd-xs)
-              body (context/parse-progn scope' fctx' body)]
-          (.block-loop (.expr-factory scope') fctx body))))))
+        (parse-loop-body scope nil fctx bnd-xs body)))))
 
 (defn parse-recur ^Expr [^Scope scope ^long fctx [_ & args :as form]]
   (if (context/can-recur? fctx)

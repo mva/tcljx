@@ -13,30 +13,31 @@
    (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
                      NamespaceBuilder SegmentBuilder
                      Expr ExprFactory Scope)
-   (tcljx.classgen.entity SegmentProvidesOwner)
+   (tcljx.classgen.entity SegmentProvidesOwner ElementEmitter)
    (tcljx.classgen.loader Loader PackageBuilder)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassBuilder CodeBuilder)
    (java.nio.file Path)
    (java.util ArrayList)
    (java.util.concurrent ConcurrentHashMap)
-   (java.util.function Consumer)))
+   (java.util.function Consumer BiFunction)))
 
 (deftype ImplementationUnavailableException []
   Exception)
 
+(def ^:private ZERO (object 0))
 (deftype NmspBuilderImpl [^NamespaceProvider universe
                           ^String ns-str
                           ^ExprFactory code-gen
                           ^ArrayList segment-elements
-                          ^ArrayList pending-functions ;added to by `code-gen`
                           ^PackageBuilder pkg-build
                           ^:unsynchronized-mutable ^map globals
                           ^:unsynchronized-mutable ^map known-ns
                           ^:unsynchronized-mutable ^map ns-alias
                           ^:unsynchronized-mutable ^map imports
                           ^:unsynchronized-mutable ^String current-source-file
-                          ^:unsynchronized-mutable ^int current-segm-id]
+                          ^:unsynchronized-mutable ^int current-segm-id
+                          ^ConcurrentHashMap private-name-map]
   Resolver
   (ns-str [_]
     ns-str)
@@ -54,7 +55,10 @@
       (when-some [nmsp* (.lookup-namespace this nmsp)]
         (-> known-ns ^map (.valAt nmsp* nil) (.valAt nm nil)))))
   (pick-unique-name [_ dflt-nm]
-    dflt-nm)
+    (let [n ^int (.compute private-name-map dflt-nm
+                           (^BiFunction fn ^Integer [_ ^Integer v]
+                            (if (nil? v) ZERO (object (inc ^int v)))))]
+      (cond-> dflt-nm (pos? n) (str "^" n))))
   
   NamespaceBuilder
   (universe [_]
@@ -72,8 +76,8 @@
   ;; (add-def [_ nm bnd]
   ;;   (set! globals (assoc globals nm bnd))
   ;;   bnd)
-  (new-def-init [_ nm init]
-    (let [bnd (defgen/new-def-init segment-elements nm init)]
+  (new-def-init [_ nm redef? init]
+    (let [bnd (defgen/new-def-init segment-elements nm redef? init)]
       (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/mk-insn bnd Void/TYPE)))
   (new-def-alias [_ nm other]
@@ -99,8 +103,6 @@
                     (.bindings* scope) imports-at-start)
                    (context/parse-form scope fctx form)))]
       (.add segment-elements expr)
-      (when-not (.isEmpty pending-functions)
-        (codegen/process-functions! segment-elements pending-functions))
       this))
 
   (finish [this]
@@ -122,8 +124,8 @@
       (^Consumer fn ^void [^ClassBuilder cb]
        (dotimes [i end-of-segment-elements]
          (let [elem (.get segment-elements i)]
-           (when (instance? Consumer elem)
-             (.accept ^Consumer elem cb)))))
+           (when (instance? ElementEmitter elem)
+             (.emit-class-elements ^ElementEmitter elem cb)))))
       (let [a (doto (ArrayList.)
                 (.add (segmgen/clinit-prologue ns-str current-segm-id)))]
         (loop [i 0]
@@ -152,15 +154,14 @@
     (letfn [(mk-nmsp-builder ^NamespaceBuilder [^String ns-str]
               (let [source-file nil
                     pkg-build (loader/mk-package-builder loader ns-str)
-                    pending-functions (ArrayList.)
-                    ef (codegen/mk-code-generator pending-functions)
                     segment-elements (ArrayList.)
+                    ef (codegen/mk-code-generator segment-elements)
                     globals primitive/primitive-nmsp-globals
                     imports (resolve/predefined-imports (.rt-lookup loader))]
-                (NmspBuilderImpl. this ns-str ef
-                                  segment-elements pending-functions
+                (NmspBuilderImpl. this ns-str ef segment-elements
                                   pkg-build globals known-ns ns-alias imports
-                                  source-file segmgen/first-segm-id)))
+                                  source-file segmgen/first-segm-id
+                                  (ConcurrentHashMap.))))
             
             (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]
               (loop [acc (mk-nmsp-builder ns-str), forms (seq ns-forms)]

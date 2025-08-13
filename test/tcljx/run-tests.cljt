@@ -14,9 +14,9 @@
                    arith-test let-test quote-test meta-test str-test bits-test
                    array-test clone-test switch-test cond-test logic-test
                    xcmp-test try-test loop-test unboxing-test boxing-test
-                   fn-member-test)
+                   fn-member-test fn-test)
    
-   (tcljx #_namespace-test #_fn-test #_itf-fn-test #_variadic-test #_macro-test
+   (tcljx #_namespace-test #_itf-fn-test #_variadic-test #_macro-test
           #_deftype-test #_record-test #_set-test #_definterface-test #_closure-test
           #_line-test #_letfn-test #_reify-test #_require-test #_main-test
 
@@ -61,6 +61,7 @@
     tcljx.classgen.unboxing-test
     tcljx.classgen.boxing-test
     tcljx.classgen.fn-member-test
+    tcljx.classgen.fn-test
     
     #_tcljx.classgen.namespace-test
     #_tcljx.classgen.fn-test

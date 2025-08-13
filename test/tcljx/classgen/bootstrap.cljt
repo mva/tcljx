@@ -49,9 +49,9 @@
         ;; project-name (or (System/getenv "PROJECT_DIR")
         ;;                  (files/default-project-name))
         ;; tcljx-mdir (files/tmp-dest-dir (str project-name ".mdir"))
-        ;; tcljx-mod-rt (.resolve tcljx-mdir (files/path-of "tinyclj-rt.jar"))
+        ;; tcljx-mod-rt (.resolve tcljx-mdir (files/path-of "tcljc-rt.jar"))
         
-        tcljx-mod-rt (files/path-of "../bootstrap-tcljc/tinyclj.rt")]
+        tcljx-mod-rt (files/path-of "../bootstrap-tcljc/tcljc.rt")]
     (loader/app-class-loader :platform [tcljx-mod-rt])))
 (def ^:private rt-lookup (loader/get-rt-lookup app-ld))
 ;; (def ^:private bootstrap-ns-str "tinyclj.lang.bootstrap")

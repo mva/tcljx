@@ -167,9 +167,12 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn with-local-binding ^Scope [^Scope scope ^Expr binding-expr]
-  (let [bnd ^Binding (.emitter binding-expr)]
-    (.with-bindings* scope (assoc (.bindings* scope) (.name bnd) (.bound-to bnd)))))
+(defn with-local-binding
+  (^Scope [^Scope scope ^Expr binding-expr]
+   (let [bnd ^Binding (.emitter binding-expr)]
+     (with-local-binding scope (.name bnd) (.bound-to bnd))))
+  (^Scope [^Scope scope ^String nm ^Entity ent]
+   (.with-bindings* scope (assoc (.bindings* scope) nm ent))))
 
 (defn with-local-bindings ^Scope [^Scope scope ^Exprs binding-exprs]
   (loop [locals (transient (.bindings* scope))

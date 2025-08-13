@@ -13,7 +13,8 @@
 
 (deftype ScopeImpl [^ExprFactory expr-factory
                     ^Resolver resolver
-                    ^map bindings*]
+                    ^map bindings*
+                    ^String entity-name]
   java.lang.Record
   
   Scope
@@ -203,10 +204,12 @@
                         
                         :else
                         (if-some [ent (context/lookup this op)]
-                          (if (model/invocable? ent)
-                            (.invoke expr-factory fctx form ent
-                                     (context/parse-args this fctx (rest form)))
-                            (assert false))
+                          (let [args (context/parse-args this fctx (rest form))]
+                            (if (model/invocable? ent)
+                              (.invoke expr-factory fctx form ent args)
+                              (.invoke-value expr-factory fctx
+                                             (.value-of expr-factory ent op)
+                                             args)))
                           (throw (wrong/info-unresolved op)))))
 
                     ;; `op` is qualified symbol: either a reference to
@@ -239,7 +242,14 @@
                             
                           #_else
                           (throw (wr-info-unresolved-qualified-sym op)))))))
-                (.mk-expr expr-factory form)))
+
+                ;; any non-symbol operation
+                (let [op (context/parse-arg this fctx (first form))
+                      ce (.emitter op)
+                      args (context/parse-args this fctx (rest form))]
+                  (if (model/invocable? ce)
+                    (.invoke expr-factory fctx form ce args)
+                    (.invoke-value expr-factory fctx op args)))))
 
             (parse-symbol ^Expr [^symbol sym]
               (let [ent (or (context/lookup this sym)
@@ -275,13 +285,21 @@
         (constant/parse-constant-nometa this form))))
 
   (new-function [this fn-nm parse-arity-body arity-specs]
-    (let [mangled-nm (.pick-unique-name resolver (name fn-nm))]
-      (.new-function* expr-factory mangled-nm parse-arity-body arity-specs)))
+    (let [nm-str (cond->> (if (some? fn-nm) (name fn-nm) "fn")
+                   (not (.isEmpty entity-name))
+                   (str entity-name "$"))
+          unique-nm (.pick-unique-name resolver nm-str)]
+      (.new-function* expr-factory (.with-entity-name this unique-nm)
+                      fn-nm parse-arity-body arity-specs)))
   
   (with-bindings* [_ bindings]
-    (ScopeImpl. expr-factory resolver bindings))
+    (ScopeImpl. expr-factory resolver bindings entity-name))
   (with-recur-parameters [_ parameters]
     (-> (.with-recur-parameters expr-factory parameters)
-        (ScopeImpl. resolver bindings*))))
+        (ScopeImpl. resolver bindings* entity-name)))
+  (with-entity-name [_ entity-name]
+    (ScopeImpl. expr-factory resolver bindings* entity-name)))
 
-(def mk-scope ScopeImpl/new)
+(defn mk-scope ^Scope [^ExprFactory expr-factory ^Resolver resolver
+                       ^map bindings*]
+  (ScopeImpl. expr-factory resolver bindings* ""))
