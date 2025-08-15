@@ -155,6 +155,55 @@
                  ;; namespace exists: def lookup must have failed
                  (str "no public def " (wrong/q op))
                  (str "no namespace or class " (wrong/q-namespace op)))))
+            (parse-invocation-binding ^Expr [^symbol op ^long fctx ^seq form]
+              ;; `op` is a unqualified symbol without leading or
+              ;; trailing dot
+              (if-some [ent (context/lookup this op)]
+                (let [args (context/parse-args this fctx (rest form))]
+                  (if (model/invocable? ent)
+                    (.invoke expr-factory fctx form ent args)
+                    (.invoke-value expr-factory fctx
+                                   (.value-of expr-factory ent op)
+                                   args)))
+                (throw (wrong/info-unresolved op))))
+            (parse-invocation-qname ^Expr [^symbol op ^long fctx ^seq form
+                                           ^String nmsp ^String nm]
+              ;; `op` is qualified symbol: either a reference to
+              ;; a namespace def, a static class member, or an
+              ;; instance member
+              (if-some [cl (context/lookup-class this nmsp)]
+                (if-some [ent (when (some? (interop/param-tags-of op))
+                                (interop/lookup-class-entity this op))]
+                  (.invoke expr-factory fctx form ent
+                           (context/parse-args this fctx (rest form)))
+                  (if (= (.charAt nm 0) \.) ;syntax is Class/.member
+                    (.invoke-virtual-member
+                     expr-factory fctx
+                     (context/parse-arg this fctx (syntax/second form))
+                     cl (.substring nm 1)
+                     (context/parse-args this fctx (nnext form)))
+                    (.invoke-static-member
+                     expr-factory fctx true cl nm
+                     (context/parse-args this fctx (rest form)))))
+                (condp = op
+                  tcljx.data.config/sym-regex-literal
+                  ;; FIXME... drop this later
+                  (constant/regex-literal this (syntax/second form))
+
+                  'tinyclj.lang.primitive/list
+                  ;; FIXME... drop this later
+                  (parse-collection-literal fctx (rest form) nil)
+                  
+                  #_else
+                  (throw (wr-info-unresolved-qualified-sym op)))))
+            (parse-invocation-other ^Expr [op ^long fctx ^seq form]
+              ;; any non-symbol `op`
+              (let [op (context/parse-arg this fctx (first form))
+                    ce (.emitter op)
+                    args (context/parse-args this fctx (rest form))]
+                (if (model/invocable? ce)
+                  (.invoke expr-factory fctx form ce args)
+                  (.invoke-value expr-factory fctx op args))))
             (parse-invocation ^Expr [op ^long fctx ^seq form] ;discards meta
               (if (symbol? op)
                 (let [nm (name op), nmsp (namespace op)]
@@ -194,63 +243,15 @@
                       ;; special forms that are not special in Clojure:
                       ;; "definterface*" (definterface*-form form)
                       "instanceof*" (parse-instanceof* fctx form)
-                      #_else
-                      (cond
-                        (= (.charAt nm 0) \.)
-                        (parse-dot-dot-or-member nm fctx form)
-                        
-                        (= (.charAt nm (dec (.length nm))) \.)
-                        (parse-class-dot nm fctx form)
-                        
-                        :else
-                        (if-some [ent (context/lookup this op)]
-                          (let [args (context/parse-args this fctx (rest form))]
-                            (if (model/invocable? ent)
-                              (.invoke expr-factory fctx form ent args)
-                              (.invoke-value expr-factory fctx
-                                             (.value-of expr-factory ent op)
-                                             args)))
-                          (throw (wrong/info-unresolved op)))))
-
-                    ;; `op` is qualified symbol: either a reference to
-                    ;; a namespace def, a static class member, or an
-                    ;; instance member
-                    (if-some [ent (context/lookup this op)]
-                      (assert false)
-                      (if-some [cl (context/lookup-class this nmsp)]
-                        (if-some [ent (when (some? (interop/param-tags-of op))
-                                        (interop/lookup-class-entity this op))]
-                          (.invoke expr-factory fctx form ent
-                                   (context/parse-args this fctx (rest form)))
-                          (if (= (.charAt nm 0) \.) ;syntax is Class/.member
-                            (.invoke-virtual-member
-                             expr-factory fctx
-                             (context/parse-arg this fctx (syntax/second form))
-                             cl (.substring nm 1)
-                             (context/parse-args this fctx (nnext form)))
-                            (.invoke-static-member
-                             expr-factory fctx true cl nm
-                             (context/parse-args this fctx (rest form)))))
-                        (condp = op
-                          tcljx.data.config/sym-regex-literal
-                          ;; FIXME... drop this later
-                          (constant/regex-literal this (syntax/second form))
-
-                          'tinyclj.lang.primitive/list
-                          ;; FIXME... drop this later
-                          (parse-collection-literal fctx (rest form) nil)
-                            
-                          #_else
-                          (throw (wr-info-unresolved-qualified-sym op)))))))
-
-                ;; any non-symbol operation
-                (let [op (context/parse-arg this fctx (first form))
-                      ce (.emitter op)
-                      args (context/parse-args this fctx (rest form))]
-                  (if (model/invocable? ce)
-                    (.invoke expr-factory fctx form ce args)
-                    (.invoke-value expr-factory fctx op args)))))
-
+                      #_else (cond
+                               (= (.charAt nm 0) \.)
+                               (parse-dot-dot-or-member nm fctx form)
+                               (= (.charAt nm (dec (.length nm))) \.)
+                               (parse-class-dot nm fctx form)
+                               :else (parse-invocation-binding op fctx form)))
+                    (parse-invocation-qname op fctx form nmsp nm)))
+                (parse-invocation-other op fctx form)))
+            
             (parse-symbol ^Expr [^symbol sym]
               (let [ent (or (context/lookup this sym)
                             (interop/lookup-class-entity this sym)
