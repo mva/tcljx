@@ -7,7 +7,8 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.classgen.bootstrap
   (:require
-   (tcljx.data [files :as files] [reflect :as reflect] [macro :as macro])
+   (tcljx.data [files :as files] [meta :as meta] [reflect :as reflect]
+               [macro :as macro])
    (tcljx.classgen [loader :as loader] [universe :as universe]
                    [segmgen :as segmgen])
    #_tcljx.macro                        ;for class ArrayToCpl
@@ -332,7 +333,7 @@
     ['(ns pkg.ns0)
      (list 'fn* 'fnbody (cond-> params
                           (no-tag? params)
-                          (vary-meta assoc :tag 'auto-return-type))
+                          (vary-meta assoc :tag meta/auto-return-type))
            ;; note: some forms must be wrapped in (identity ...) 
            ;; to prevent them from disappearing
            form)]))

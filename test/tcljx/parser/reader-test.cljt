@@ -6,7 +6,8 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.reader-test
-  (:require [tcljx.data.resolve :as resolve] ;for predefined imports
+  (:require [tcljx.data.meta :as meta]
+            [tcljx.data.resolve :as resolve] ;for predefined imports
             [tcljx.parser.reader :as reader]
             [tinyclj.string :as str]
             [tcljx.alpha.ptest :refer :all])
@@ -754,7 +755,7 @@
   ;; no parameters
   (is (= '(fn* [] ())
          (read1 "#()")))
-  (is (= 'auto-return-type (-> (read1 "#()") (second) (meta) :tag)))
+  (is (= meta/auto-return-type (-> (read1 "#()") (second) (meta) :tag)))
 
   ;; one parameter
   (is (= '(fn* [p$1$__fnlit__] (p$1$__fnlit__))

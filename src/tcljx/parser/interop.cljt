@@ -100,7 +100,7 @@
          (aset ptypes i (resolve-tag rsv psym))
          (aset pnames i (name psym))))
      (let [return-tag (tag-of paramv)]
-       (-> (if (= 'auto-return-type return-tag)
+       (-> (if (= meta/auto-return-type return-tag)
              type/auto-return-marker
              (resolve-tag* rsv return-tag Object))
            (ArityTypeImpl. ptypes pnames varargs?)))))

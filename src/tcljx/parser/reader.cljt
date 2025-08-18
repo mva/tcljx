@@ -281,7 +281,7 @@
                                    (tagged-parameter tag-map p)
                                    (replacement-sym idx))))
                        (vec))
-                  {:tag 'auto-return-type})))]
+                  {:tag meta/auto-return-type})))]
       (with-meta (list 'fn* (fnlit-sig) body) (meta body)))))
 
 ;;; ------------------------------------------------------------------------
