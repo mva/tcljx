@@ -3,7 +3,7 @@
    (tcljx.data [wrong :as wrong] [type :as type] [model :as model]
                [reflect :as reflect] [resolve :as resolve]))
   (:import
-   (tcljx.data.model Scope Expr)
+   (tcljx.data.model Expr Parser)
    (java.lang.constant ConstantDesc ConstantDescs)
    (java.util.regex Pattern PatternSyntaxException)))
 
@@ -28,9 +28,9 @@
 ;;; Note: This function caters for a superset of the form types that
 ;;; are produced by the reader.  It additionally accepts common values
 ;;; that may be injected via macros, like Class or Byte.
-(defn parse-constant-nometa ^Expr [^Scope scope form]
+(defn parse-constant-nometa ^Expr [^Parser parser form]
   ;; pre: (not (instance? IMeta form))
-  (let [ef (.expr-factory scope)]
+  (let [ef (.expr-factory parser)]
     (cond
       (nil? form)
       (model/new-constant ef ConstantDescs/NULL type/poly-reference)
@@ -59,8 +59,8 @@
       ;; type (anything Constable works as well during emit)
       (.new-loadable ef form (class form)))))
 
-(defn regex-literal ^Expr [^Scope scope ^String pattern]
+(defn regex-literal ^Expr [^Parser parser ^String pattern]
   (try
-    (.new-loadable (.expr-factory scope) (Pattern/compile pattern) Pattern)
+    (.new-loadable (.expr-factory parser) (Pattern/compile pattern) Pattern)
     (catch PatternSyntaxException e
       (throw (wrong/wr-info (str "invalid regex " (wrong/q pattern)) {} e)))))

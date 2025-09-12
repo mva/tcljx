@@ -1,0 +1,130 @@
+(ns tcljx.classgen.build
+  (:require
+   (tcljx.data [config :as cfg] [files :as files] [type :as type]
+               [context :as context] [model :as model] [resolve :as resolve])
+   (tcljx.classgen [runtime :as rt] [loader :as loader]
+                   [classfile :as classfile] [emit :as emit] [insn :as insn]
+                   [entity :as entity] [fngen :as fngen] [envgraph :as envgraph])
+   [tinyclj.string :as str])
+  (:import
+   (tcljx.data.model CodeEmitter)
+   (tcljx.classgen.emit OwnedFragment CodeBearingFragment ClosureBlueprint
+                        SegmentAcc OtherClass)
+   (tcljx.classgen.loader PackageBuilder ClassBytes)
+   (tcljx.classgen.insn Insn)
+   (java.lang.classfile ClassFile ClassBuilder CodeBuilder)
+   (java.lang.constant ClassDesc ConstantDescs MethodTypeDesc)
+   (java.util ArrayList)
+   (java.util.function Consumer)))
+
+(def first-segm-id 10)
+(def capstone-class-name "___")
+(def ^:private segment-class-prefix "_") ;followed by number, parsed as symbol
+(def ^:private segment-class-flags (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_ABSTRACT))
+
+;;; ------------------------------------------------------------------------
+
+(defn segment-cld ^ClassDesc [^PackageBuilder pkg-build ^int segm-id]
+  (ClassDesc/of (.pkg-name pkg-build) (str segment-class-prefix segm-id)))
+(defn- super-segment-cld ^ClassDesc [^PackageBuilder pkg-build ^int segm-id]
+  (if (= segm-id first-segm-id)
+    ConstantDescs/CD_Object
+    (segment-cld pkg-build (dec segm-id))))
+
+(defn- with-requires ^ClassBuilder [^ClassBuilder cb ^String req-str]
+  (classfile/with-method-body->
+    cb [rt/name-requires (MethodTypeDesc/of ConstantDescs/CD_String)
+        (bit-or classfile/acc-method-static ClassFile/ACC_SYNTHETIC)]
+    (-> (.ldc req-str) (.areturn))))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private mtd-void-String
+  (MethodTypeDesc/of ConstantDescs/CD_void ConstantDescs/CD_String))
+(defn segment ^ClassBytes [^PackageBuilder pkg-build ^String source-file
+                           ^int segm-id ^SegmentAcc segm-acc]
+  (letfn [(invoke-create-nmsp ^void [^CodeBuilder xb]
+            (-> xb
+                (.ldc (.pkg-name pkg-build))
+                (.invokestatic rt/RT "createNamespace" mtd-void-String)))
+          (invoke-mark-core-init ^void [^CodeBuilder xb]
+            (let [cld (segment-cld pkg-build segm-id)]
+              (-> xb
+                  (.ldc (str (.packageName cld) "." (.displayName cld)))
+                  (.invokestatic rt/RT "markCoreInitialization"
+                                 mtd-void-String))))]
+    (let [this-cld (segment-cld pkg-build segm-id)
+          super-cld (super-segment-cld pkg-build segm-id)]
+      (doseq [^OtherClass oc (.other-classes segm-acc)]
+        (loader/bwdi pkg-build (.this-class oc) (.flags oc) (.super-class oc)
+                     source-file (.class-handler oc)))
+      
+      (loader/bwdi
+       pkg-build this-cld segment-class-flags super-cld source-file
+       (^Consumer fn ^void [^ClassBuilder cb]
+        (let [al (.segment-elements segm-acc)]
+          (dotimes [i (.size al)]
+            (.accept ^Consumer (.get al i) cb)))
+        
+        (.withMethodBody
+         cb ConstantDescs/CLASS_INIT_NAME ConstantDescs/MTD_void
+         (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_STATIC)
+         (^Consumer fn ^void [^CodeBuilder xb]
+          (when (= segm-id first-segm-id)
+            (invoke-create-nmsp xb))
+          (let [al (.clinit-statms segm-acc)]
+            (loop [i 0]
+              (if (< i (.size al))
+                (when (emit/statm? xb ^CodeEmitter (.get al i))
+                  (recur (inc i)))
+                (do (when (cfg/core-lib? (.pkg-name pkg-build))
+                      (invoke-mark-core-init xb))
+                    (.return_ xb))))))))))))
+
+;;; ------------------------------------------------------------------------
+
+(defn- capstone-cld ^ClassDesc [^PackageBuilder pkg-build]
+  (ClassDesc/of (.pkg-name pkg-build) capstone-class-name))
+(defn capstone ^ClassBytes [^PackageBuilder pkg-build ^int segm-id]
+  (let [req-str (if (cfg/core-lib? (.pkg-name pkg-build))
+                  ""            ;suppress internal details of core lib
+                  ;; FIXME... use real requires
+                  (str/join "," (sort (list "tinyclj.core"))))
+        source-file nil
+        cbh (^Consumer fn ^void [^ClassBuilder cb]
+             (-> cb
+                 (with-requires req-str)))]
+    (loader/bwdi pkg-build (capstone-cld pkg-build) segment-class-flags
+                 (segment-cld pkg-build (dec segm-id)) source-file cbh)))
+
+;;; ------------------------------------------------------------------------
+
+(defn prepare-segment ^SegmentAcc [^ArrayList clinit-frags ^int clinit-end]
+  (let [eg (envgraph/mk-graph clinit-frags clinit-end)]
+    (letfn [(cbf-index ^int [^CodeBearingFragment cbf ^int start]
+              (loop [i start]
+                (if (identical? cbf (.cbf (aget (.classes  eg) i)))
+                  i
+                  (recur (inc i)))))
+            (prepare-cbf ^SegmentAcc [^SegmentAcc acc ^int start ^int end]
+              (loop [acc acc, i start]
+                (if (< i end)
+                  (let [class (aget (.classes eg) i)
+                        cbf (.cbf class)]
+                    (recur (fngen/prepare-fn-proxy acc class) (inc i)))
+                  acc)))
+            (mk-segment-acc ^SegmentAcc []
+              (SegmentAcc. (ArrayList.) (ArrayList.) (ArrayList.)))]
+      
+      (loop [acc (mk-segment-acc), i-clinit 0, i-eg 0]
+        (if (< i-clinit clinit-end)
+          (let [frag (.get clinit-frags i-clinit)]
+            (condp instance? frag
+              CodeBearingFragment
+              (let [end (inc (cbf-index frag i-eg))]
+                (recur (prepare-cbf acc i-eg end) (inc i-clinit) end))
+              OwnedFragment
+              (recur (emit/prepare-for-emit! acc frag) (inc i-clinit) i-eg)
+              #_else
+              (recur (emit/add-clinit-statm acc frag) (inc i-clinit) i-eg)))
+          acc)))))

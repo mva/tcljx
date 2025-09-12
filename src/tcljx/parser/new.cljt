@@ -1,16 +1,16 @@
 (ns tcljx.parser.new
   (:require
-   (tcljx.data [context :as context] [type :as type] [model :as model])
-   (tcljx.parser [syntax :as syntax]))
+   (tcljx.data [type :as type] [model :as model])
+   (tcljx.parser [syntax :as syntax] [parse :as parse]))
   (:import
-   (tcljx.data.model Expr Scope)))
+   (tcljx.data.model Expr Parser)))
 
-(defn parse-new ^Expr [^Scope scope ^Class owner ^long fctx [_ _ & args]]
+(defn parse-new ^Expr [^Parser parser ^Class owner ^long fctx [_ _ & args]]
   (let [n (type/type-dimensions owner)]
     (if (zero? n)                       ;constructor
-      (-> (.expr-factory scope)
-          (.invoke-constructor fctx owner (context/parse-args scope fctx args)))
-      (let [dims (context/parse-args scope fctx args)]
+      (-> (.expr-factory parser)
+          (.invoke-constructor fctx owner (parse/args parser fctx args)))
+      (let [dims (parse/args parser fctx args)]
         (syntax/first args)        ;at least one dimentions is provided
         (syntax/empty-tail n args)
-        (.new-array (.expr-factory scope) fctx owner dims)))))
+        (.new-array (.expr-factory parser) fctx owner dims)))))

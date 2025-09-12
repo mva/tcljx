@@ -125,7 +125,7 @@
 (deftest asm-expr-no-args
   (is (= '[(GETSTATIC System "out" "Ljava/io/PrintStream;")
            (ARETURN)]
-         (asm-expr (identity (. java.lang.System out))))))
+         (asm-expr (. java.lang.System out)))))
 
 (deftest asm-expr-ref-arg-without-rtype
   (is (= '[["LOCAL 0: String x"]
@@ -146,9 +146,5 @@
          (asm-expr ^java.lang.Object [^java.lang.String x] x))))
 
 
-;;; Note: Without the identity wrapper, the function arity with the
-;;; static get is turned into direct delegation.  That is, the arity
-;;; has no dedicated method implementing it, and all invocations are
-;;; redirected to the static getter instead.
 (deftest call-expr-auto
-  (is (= System/out (call-expr (identity (. java.lang.System out))))))
+  (is (= System/out (call-expr (. java.lang.System out)))))

@@ -4,88 +4,22 @@
                [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.parser [syntax :as syntax] [interop :as interop] [loop :as loop]))
   (:import
-   (tcljx.data.model Expr Exprs ExprFactory ArityType AritySpec Scope Resolver)
+   (tcljx.data.model Expr Exprs ExprFactory ArityType AritySpec Parser Resolver)
    (tcljx.data.resolve Match)
    (java.lang.constant MethodHandleDesc ConstantDescs)
    (java.util.function BiFunction)))
 
-(defn redirection ^MethodHandleDesc [^Resolver rsv ^ArityType at
-                                     [op :as ^seq form]]
-  (letfn [(resolves-to-class ^Class [^String nm]
-            (when (and (some? nm) (nil? (.lookup-namespace rsv nm)))
-              (.lookup-class rsv nm)))
-          (dot-member-args ^seq [[_ _ & [x :as xs]]]
-            (let [[member :as tail] (if (and (= (count xs) 1) (seq? x)) x xs)]
-              (when (syntax/simple-symbol? member)
-                tail)))
-          (parameters-in-sequence? ^boolean [^seq form-args]
-            (let [pnames (.parameter-names at)]
-              (loop [[arg :as args] form-args, i 0]
-                (if (< i (alength pnames))
-                  (if (and (syntax/simple-symbol? arg)
-                           (nil? (interop/tag-of arg))
-                           (= (name arg) (aget pnames i)))
-                    (recur (rest args) (inc i))
-                    false)              ;does not match parameter list
-                  ;; number of arguments matches number of parameters,
-                  ;; and no pathological duplicate argument names
-                  (and (nil? (seq args)) (= form-args (distinct form-args)))))))
-          (member-mhd ^MethodHandleDesc [^Class owner ^String mnm ^seq args]
-            (when (parameters-in-sequence? args)
-              (let [ms (resolve/members-by-param-tags true owner mnm
-                                                      (.parameter-types at))]
-                (when (and (some? (seq ms)) (nil? (next ms)))
-                  ;; FIXME... varargs flag must also match the arity signature
-                  (let [m ^Match (first ms)
-                        mode (.invocation-mode m)
-                        member (.member m)]
-                    (when (and (not= mode resolve/invoke-polymorphic)
-                               (= (.varargs? at)
-                                  (= mode resolve/invoke-tail-into-array)))
-                      (reflect/mhd-of-member owner member)))))))]
-
-    ;; Important: Working on the syntax level is brittle.  There are
-    ;; many syntactically different ways to redirect to a method or
-    ;; field, both static and virtual.  Every supported syntax variant
-    ;; should have a matching test in tcljx.parser.redirection-test.
-    (when (and (nil? (interop/tag-of form)) (symbol? op))
-      (let [mhd (if (= op '.)
-                  ;; dot form (. Classname member ...)
-                  ;; dot form (. Classname (member ...))
-                  (when (syntax/simple-symbol? (second form))
-                    (when-some [cl (resolves-to-class (name (second form)))]
-                      (when-some [[member-sym & args] (dot-member-args form)]
-                        (member-mhd cl (name member-sym) args))))
-                  ;; invoke static (Classname/member ...)
-                  (when-some [cl (resolves-to-class (namespace op))]
-                    (when (nil? (interop/param-tags-of op))
-                      (member-mhd cl (name op) (rest form)))))
-            auto? (type/auto-return-marker? (.return-type at))]
-        (when (some? mhd)
-          (when (= (cond-> (.invocationType mhd)
-                     auto? (.changeReturnType ConstantDescs/CD_void))
-                   (cond-> (model/mtd-of-arity-type at)
-                     auto? (.changeReturnType ConstantDescs/CD_void)))
-            mhd))))))
-
-;;; ------------------------------------------------------------------------
-
-(defn parse-fn* ^Expr [^Scope scope ^long fctx ^seq form]
+(defn parse-fn* ^Expr [^Parser parser ^long fctx ^seq form]
   (letfn [(max-parameter-count ^int [^AritySpec/1 specs]
             (loop [n 0, i (dec (alength specs))]
               (if (neg? i)
                 n
                 (recur (max n (-> (aget specs i) .at .parameter-count))
                        (dec i)))))
-          (parse-redir ^MethodHandleDesc [^ArityType at ^seq body]
-            (when (nil? (next body))
-              (let [form (first body)]
-                (when (and (seq? form) (nil? (interop/tag-of form)))
-                  (redirection (.resolver scope) at form)))))
           (parse-arity ^AritySpec [paramv ^seq body ^seq error-context]
             (context/with-line-from-list [fctx error-context]
-              (let [at (interop/parse-arity-type (.resolver scope) paramv)]
-                (AritySpec. at body (parse-redir at body) error-context nil))))
+              (let [at (interop/parse-arity-type (.resolver parser) paramv)]
+                (AritySpec. at body nil error-context nil))))
           (specs-1 ^AritySpec/1 [paramv ^seq body ^seq error-context]
             (doto (new AritySpec/1 1)
               (aset 0 (parse-arity paramv body error-context))))
@@ -99,7 +33,7 @@
                     (let [spec (parse-arity paramv body arity)
                           at (.at spec)
                           n (.parameter-count at)
-                          va (if (or (.varargs? at) (.variadic? at)) i -1)]
+                          va (if (model/translates-to-varargs? at) i -1)]
                       (when (contains? seen-ns n)
                         (wrong/other (str "multiple function arities "
                                           "with " n " parameters")))
@@ -116,12 +50,12 @@
                     (wrong/other "only maximum arity can be variadic"))))
               specs))
           (new-fn ^Expr [^symbol fn-nm [h & t :as ^seq more]]
-            (let [pab (^BiFunction fn ^Expr [^Scope scope ^AritySpec spec]
-                       (let [pbnds (model/parameter-bindings scope (.at spec))]
-                         (-> (context/with-local-bindings scope pbnds)
+            (let [pab (^BiFunction fn ^Expr [^Parser parser ^AritySpec spec]
+                       (let [pbnds (model/parameter-bindings parser (.at spec))]
+                         (-> (model/with-local-bindings parser pbnds)
                              (loop/parse-loop-body (.error-context spec)
                                                    fctx pbnds (.body spec)))))]
-              (.new-function scope fn-nm pab
+              (.new-function (.expr-factory parser) parser fn-nm pab
                              (if (seq? h)    ;arity in parenthesis?
                                (if (some? t) ;more than one arity?
                                  (specs-n more)

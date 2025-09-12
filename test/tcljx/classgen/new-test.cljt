@@ -15,11 +15,6 @@
            (INVOKESPECIAL Object "<init>" "()V")
            (ARETURN)]
          (asm-expr (new Object))))
-  (is (instance? Object (call-expr (identity (new Object)))))
-
-  ;; elided method definition
-  (is (= '[fn-arity-method-elided]
-         (asm-expr (Object/new))))
   (is (instance? Object (call-expr (new Object)))))
 
 (deftest new-object-statement-test

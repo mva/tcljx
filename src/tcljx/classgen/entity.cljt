@@ -4,34 +4,35 @@
                [model :as model] [reflect :as reflect])
    (tcljx.classgen [emit :as emit] [constgen :as constgen]))
   (:import
-   (tcljx.data.model Expr CodeEmitter Binding Entity MutableEntity
-                     Loadable Constant Invocable)
+   (tcljx.data.model Expr CodeEmitter Binding Entity LoadFromCopyWhenBound
+                     Constant Invocable)
+   (tcljx.classgen.emit ClosureBlueprint)
    (java.lang.classfile CodeBuilder ClassBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)))
 
-(definterface ElementEmitter
-  (emit-class-elements ^void [^ClassBuilder cb]))
-
-;;; FIXME... drop this after all old unit tests have been ported over;
-;;; interesting experiment to see if it works, but probably of little
-;;; or even no practical value.
 (defmacro with-void-empty-if-requested [consumed-type & body]
   (assert (symbol? consumed-type))
   `(if (identical? Void/TYPE ~consumed-type)
      Void/TYPE
      (do ~@body)))
 
-(deftype LoadableImpl [^Object loadable-value ^Class opnd-type
-                       ^boolean associate-meta?]
-  java.lang.Record
-  Loadable
+;;; ------------------------------------------------------------------------
+
+(deftype CollectionConstant [^Object loadable-value ^Class opnd-type
+                             ^boolean associate-meta?]
+  CodeEmitter
   (emit-insn* [this xb consumed-type _]
-    (if (type/same? Void/TYPE consumed-type)
-      Void/TYPE
-      (do (.ldc xb (.loadable-entry this (.constantPool xb) false))
-          opnd-type)))
+    (with-void-empty-if-requested consumed-type
+      (.ldc xb (.loadable-entry this (.constantPool xb) false))
+      opnd-type))
+
+  Entity
   (value-type [_]
     opnd-type)
+  (entity-id [_]
+    model/entity-id-constant)
+
+  Constant
   (computational-value [_]
     loadable-value)
   (loadable-entry [_ cpb logical-type?]
@@ -42,15 +43,15 @@
       (constgen/loadable-entry cpb loadable-value)))
   (datafy [_]
     (letfn [(value-seq ^seq [^CodeEmitter/1 a]
-              (list* (map Loadable/.datafy a)))] ;wrap LazySeq
+              (list* (map Constant/.datafy a)))] ;wrap LazySeq
       (cond
         (seq? loadable-value) (list* loadable-value) ;wrap LazySeq
         
         (instance? CodeEmitter/1 loadable-value)
         (let [a ^CodeEmitter/1 loadable-value]
           (if associate-meta?
-            (with-meta (Loadable/.datafy (aget a 0))
-              (Loadable/.datafy (aget a 1)))
+            (with-meta (Constant/.datafy (aget a 0))
+              (Constant/.datafy (aget a 1)))
             (condp identical? opnd-type
               type/vector (vec (value-seq a))
               type/map (apply array-map (value-seq a))
@@ -59,7 +60,7 @@
         
         :else loadable-value))))
 
-(def mk-loadable LoadableImpl/new)
+(def mk-collection CollectionConstant/new)
 
 ;;; ------------------------------------------------------------------------
 
@@ -68,39 +69,44 @@
 (defn zero? ^boolean [^Object value]
   (and (instance? Number value) (= (.doubleValue ^Number value) 0.0)))
 
-(deftype ConstantImpl [^Object computational-value ^Class opnd-type]
-  java.lang.Record
-  Loadable
+(deftype JvmConstant [^Object computational-value ^Class opnd-type]
+  CodeEmitter
   (emit-insn* [this xb consumed-type _]
-    (cond
-      (type/same? Void/TYPE consumed-type)
-      Void/TYPE
-      
-      (null? computational-value)
-      (do (.aconst_null xb)            ;elide any additional checkcast
-          (if (.isPrimitive consumed-type)
-            (.class-reference (type/of consumed-type))
-            consumed-type))
-      
-      (type/same? opnd-type consumed-type)
-      (do (if (instance? ConstantDesc computational-value)
-            (.loadConstant xb ^ConstantDesc computational-value)
-            (.ldc xb (.loadable-entry this (.constantPool xb) false)))
-          consumed-type)
-      
-      (instance? Number computational-value)
-      (if (.isPrimitive consumed-type)  ;cannot be void
-        (do (->> (type/convert-from-constant consumed-type computational-value)
-                 (.loadConstant xb))
+    (with-void-empty-if-requested consumed-type
+      (cond
+        (null? computational-value)
+        (do (.aconst_null xb)            ;elide any additional checkcast
+            (if (.isPrimitive consumed-type)
+              (.class-reference (type/of consumed-type))
+              consumed-type))
+        
+        (type/same? opnd-type consumed-type)
+        (do (if (instance? ConstantDesc computational-value)
+              (.loadConstant xb ^ConstantDesc computational-value)
+              (.ldc xb (.loadable-entry this (.constantPool xb) false)))
             consumed-type)
-        (do (.loadConstant xb ^ConstantDesc computational-value)
-            opnd-type))
-      
-      :else
-      (do (.ldc xb (.loadable-entry this (.constantPool xb) false))
-          opnd-type)))
+        
+        (instance? Number computational-value)
+        (if (.isPrimitive consumed-type)  ;cannot be void
+          (do (->> (type/convert-from-constant consumed-type computational-value)
+                   (.loadConstant xb))
+              consumed-type)
+          (do (.loadConstant xb ^ConstantDesc computational-value)
+              opnd-type))
+        
+        :else
+        (do (.ldc xb (.loadable-entry this (.constantPool xb) false))
+            opnd-type))))
+  
+  Entity
   (value-type [_]
     opnd-type)
+  (entity-id [_]
+    model/entity-id-constant)
+
+  Constant
+  (computational-value [_]
+    computational-value)
   (loadable-entry [this cpb logical-type?]
     (->> (if logical-type? (.datafy this) computational-value)
          (constgen/loadable-entry cpb)))
@@ -117,14 +123,14 @@
         computational-value))))
 
 (def emitter-empty (^CodeEmitter fn [xb _ _] Void/TYPE))
-(def entity-null (ConstantImpl. ConstantDescs/NULL type/poly-reference))
+(def entity-null (JvmConstant. ConstantDescs/NULL type/poly-reference))
 (defn entity-null? ^boolean [^CodeEmitter ce]
   (identical? entity-null ce))
 
-(def entity-false (ConstantImpl. 0 Boolean/TYPE))
-(def entity-true (ConstantImpl. 1 Boolean/TYPE))
+(def entity-false (JvmConstant. 0 Boolean/TYPE))
+(def entity-true (JvmConstant. 1 Boolean/TYPE))
 
-(defn mk-constant ^ConstantImpl [^Object computational-value ^Class type]
+(defn mk-constant ^JvmConstant [^Object computational-value ^Class type]
   (cond                   ;enforce singleton for null, false, and true
     (identical? ConstantDescs/NULL computational-value)
     entity-null
@@ -132,7 +138,7 @@
     (type/same? Boolean/TYPE type)
     (if (tinyclj.core/zero? ^int computational-value) entity-false entity-true)
     
-    :else (ConstantImpl. computational-value type)))
+    :else (JvmConstant. computational-value type)))
 
 (defn const? ^boolean [^CodeEmitter ce]
   (instance? Constant ce))
@@ -146,148 +152,82 @@
 
 ;;; ------------------------------------------------------------------------
 
-;;; This interface is used to denote Entity instances whose owning
-;;; class cannot be provided at the time the entity is created.  Such
-;;; an entity's owner must be set before class generation calls the
-;;; entity's `emit-insn*` method.
-(definterface SegmentProvidesOwner
-  (set-owner! [^ClassDesc owner]))
-
 (defn- dup ^CodeBuilder [^CodeBuilder xb ^Class type]
   (case (.slotSize (TypeKind/from type))
     1 (.dup xb)
     2 (.dup2 xb)))
 
-(deftype StaticField [^String fnm ^Class type ^ClassDesc type-cld
-                      ^:unsynchronized-mutable ^ClassDesc __owner]
-  SegmentProvidesOwner
-  (set-owner! [_ owner]
-    (set! __owner owner))
-  MutableEntity
-  (emit-insn* [_ xb _ _]
-    (.getstatic xb __owner fnm type-cld)
-    type)
-  (value-type [_]
-    type)
-  (alias-when-let-value? [_]
-    false)
-  (emit-store [_ xb]
-    (throw (UnsupportedOperationException.)))
-  (emit-iinc [_ xb const]
-    (throw (UnsupportedOperationException.)))
-  (emit-setup-code? [_ xb init]
-    (when (emit/insn? xb context/fctx-none type init)
-      (.putstatic xb __owner fnm type-cld)
-      true)))
-
-(defn static-field
-  (^StaticField [^String fnm ^Class type]
-   (static-field nil fnm type))
-  (^StaticField [^ClassDesc owner ^String fnm ^Class type]
-   (StaticField. fnm type (reflect/describe-class type) owner)))
-
-(deftype StaticMethod [^String mnm ^Class type ^MethodTypeDesc mtd
-                       ^:unsynchronized-mutable ^ClassDesc __owner]
-  SegmentProvidesOwner
-  (set-owner! [_ owner]
-    (set! __owner owner))
+(deftype LocalVariable [^String name ^Class type ^int entity-id ^int param-no
+                        ^CodeEmitter init ^:unsynchronized-mutable ^int slot]
+  CodeEmitter
+  (emit-insn* [_ xb consumed-type _]
+    (with-void-empty-if-requested consumed-type
+      (.loadLocal xb (TypeKind/from type) slot)
+      type))
+  
   Entity
-  (emit-insn* [_ xb _ _]
-    (.invokestatic xb __owner mnm mtd)
-    type)
-  (value-type [_]
-    type))
-
-(defn static-method ^StaticMethod [^String mnm ^Class type]
-  (StaticMethod. mnm type (MethodTypeDesc/of (reflect/describe-class type)) nil))
-
-(deftype LocalVariable [^String name ^Class type
-                        ^:unsynchronized-mutable ^int slot]
-  MutableEntity
-  (emit-insn* [_ xb consumed-type _]
-    (with-void-empty-if-requested consumed-type
-      (.loadLocal xb (TypeKind/from type) slot)
-      type))
   (value-type [_]
     type)
-  (alias-when-let-value? [_]
-    true)
+  (entity-id [_]
+    entity-id)
   (emit-store [_ xb]
     (.storeLocal xb (TypeKind/from type) slot))
   (emit-iinc [_ xb const]
     (.iinc xb slot const))
-  (emit-setup-code? [_ xb init]
-    (let [tk (TypeKind/from type), label (.newLabel xb)]
-      (when-some [on-stack-type (.emit-insn* init xb type false)]
-        (assert (identical? type on-stack-type))
-        (set! slot (.allocateLocal xb tk))
-        (-> (.storeLocal xb tk slot)
-            (.labelBinding label)
-            (.localVariable slot name (reflect/describe-class type)
-                            label (.endLabel xb)))
-        true))))
+  
+  LoadFromCopyWhenBound
+  (emit-setup-code? [_ xb]
+    (if (neg? param-no)             ;let binding or parameter binding?
+      (let [tk (TypeKind/from type), label (.newLabel xb)]
+        (when-some [on-stack-type (.emit-insn* init xb type false)]
+          (assert (identical? type on-stack-type))
+          (set! slot (.allocateLocal xb tk))
+          (-> (.storeLocal xb tk slot)
+              (.labelBinding label)
+              (.localVariable slot name (reflect/describe-class type)
+                              label (.endLabel xb)))
+          true))
+      (do (set! slot (.parameterSlot xb param-no))
+          (.localVariable xb slot name (reflect/describe-class type)
+                          (.startLabel xb) (.endLabel xb))
+          true))))
 
-(defn local-variable ^Entity [^String name ^Class type]
-  (LocalVariable. name type -1))
+(defn local-variable ^Entity [^ClosureBlueprint owner ^String name ^Class type
+                              ^CodeEmitter init]
+  (LocalVariable. name type (.next-entity-id owner) -1 init -1))
 
-(deftype Parameter [^String name ^Class type ^int param-no
-                    ^:unsynchronized-mutable ^int slot]
-  MutableEntity
-  (emit-insn* [_ xb consumed-type _]
-    (with-void-empty-if-requested consumed-type
-      (.loadLocal xb (TypeKind/from type) slot)
-      type))
-  (value-type [_]
-    type)
-  (alias-when-let-value? [_]
-    true)
-  (emit-store [_ xb]
-    (.storeLocal xb (TypeKind/from type) slot))
-  (emit-iinc [_ xb const]
-    (.iinc xb slot const))
-  (emit-setup-code? [_ xb _]
-    (set! slot (.parameterSlot xb param-no))
-    (.localVariable xb slot name (reflect/describe-class type)
-                    (.startLabel xb) (.endLabel xb))
-    true))
-
-(defn- parameter ^Entity [^String name ^Class type ^int param-no]
-  (Parameter. name type param-no -1))
+(defn- parameter ^Entity [^ClosureBlueprint owner ^String name ^Class type
+                          ^int param-no]
+  (LocalVariable. name type (.next-entity-id owner) param-no emitter-empty -1))
 
 ;;; ------------------------------------------------------------------------
 
-(deftype BindingImpl [^Entity bound-to ^CodeEmitter initialize-with
-                      ^String name]
-  java.lang.Record
+(deftype BindingImpl [^Entity bound-to ^String name ^boolean alias?]
   Binding
-  (emit-insn* [this xb consumed-type _]
-    ;; skip setup if this binding is an alias, the bound entity is
-    ;; immutable, or the entity's value is provided by other means
-    (when (or (nil? initialize-with)
-              (.emit-setup-code? ^MutableEntity bound-to xb initialize-with))
-      Void/TYPE)))
+  (emit-insn* [this xb consumed-type then-leave?]
+    (when (or alias? (.emit-setup-code? ^LoadFromCopyWhenBound bound-to xb))
+      (with-void-empty-if-requested consumed-type
+        (.emit-insn* bound-to xb consumed-type then-leave?))))
+  (bound-to [_]
+    bound-to)
+  (name [_]
+    name))
 
-(defn mk-binding ^Binding [^Entity bound-to ^String name
-                           ^CodeEmitter initialize-with]
-  (BindingImpl. bound-to initialize-with name))
+(def mk-binding BindingImpl/new)
 
-(defn parameter-binding ^Binding [^int param-no ^String name ^Class type]
-  (let [ent (parameter name type param-no)]
-    (mk-binding ent name emitter-empty)))
+(defn parameter-binding ^Binding [^ClosureBlueprint owner ^int param-no
+                                  ^String name ^Class type]
+  (mk-binding (parameter owner name type param-no) name false))
 
 
 ;; FIXME... get rid of complete-non-value-invocable eventually
 (defn complete-non-value-invocable ^Invocable [^Invocable inv]
-  (reify Invocable
-    (emit-insn* [_ _ _ _]
-      (throw (IllegalStateException.)))
-    (value-type [_]
-      nil)
-    (invoke* [_ fctx form xs]
-      (.invoke* inv fctx form xs))))
-
-(defn global-binding ^Binding [^Entity bound-to ^String name
-                               ^CodeEmitter initialize-with]
-  ;; drop `initialize-with` if `bound-to` is static-method
-  (mk-binding bound-to name
-              (when (instance? MutableEntity bound-to) initialize-with)))
+(reify Invocable
+  (emit-insn* [_ _ _ _]
+    (throw (IllegalStateException.)))
+  (value-type [_]
+    nil)
+  (entity-id [_]
+    model/entity-id-def)
+  (invoke* [_ fctx form opt-f xs]
+    (.invoke* inv fctx form opt-f xs))))

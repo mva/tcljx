@@ -36,7 +36,7 @@
 
 (defn env-color-output? ^boolean []
   (if-some [cons (System/console)]
-    (.isTerminal cons)
+    (.isTerminal cons)               ;always true starting with JDK 26
     false))
 
 (defn env-style

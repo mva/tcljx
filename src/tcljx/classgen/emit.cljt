@@ -5,9 +5,47 @@
    (tcljx.classgen [classfile :as classfile]))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.model CodeEmitter)
-   (java.lang.classfile CodeBuilder TypeKind)
-   (java.lang.constant MethodTypeDesc ConstantDesc ConstantDescs)))
+   (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound Invocable)
+   (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
+   (java.lang.constant MethodTypeDesc ConstantDesc ClassDesc ConstantDescs)
+   (java.util ArrayList HashMap)
+   (java.util.concurrent ConcurrentHashMap)
+   (java.util.function Consumer Function BiFunction)))
+
+(deftype OtherClass [^ClassDesc this-class ^int flags ^ClassDesc super-class
+                     ^Consumer class-handler])
+(deftype SegmentAcc [^ArrayList segment-elements ;of Consumer
+                     ^ArrayList clinit-statms    ;of CodeEmitter
+                     ^ArrayList other-classes]   ;of OtherClass
+  java.lang.Record)
+
+(defn add-segment-elements ^SegmentAcc [^SegmentAcc acc ^Consumer class-handler]
+  (.add (.segment-elements acc) class-handler)
+  acc)
+(defn add-clinit-statm ^SegmentAcc [^SegmentAcc acc ^CodeEmitter emitter]
+  (.add (.clinit-statms acc) emitter)
+  acc)
+(defn add-class-file ^SegmentAcc [^SegmentAcc acc ^ClassDesc this-class
+                                  ^int flags ^ClassDesc super-class
+                                  ^Consumer class-handler]
+  (.add (.other-classes acc)
+        (OtherClass. this-class flags super-class class-handler))
+  acc)
+
+
+;;; Produces both class elements and instructions for clinit.
+;;; Implictly closes over the ClassDesc of the owning segment, as well
+;;; as the initial value used by `emit-setup-code?`.
+;;; `prepare-for-emit!` is called once, before any of the emit related
+;;; methods.
+(definterface OwnedFragment
+  :extends [Entity LoadFromCopyWhenBound]
+  (prepare-for-emit! ^SegmentAcc [^SegmentAcc acc]))
+
+(defn prepare-for-emit! ^SegmentAcc [^SegmentAcc acc ^OwnedFragment of]
+  (.prepare-for-emit! of acc))
+
+;;; ------------------------------------------------------------------------
 
 ;;; Line numbers are written to enable accurate stack traces.  Any
 ;;; instruction that may cause a stack trace (in other words: that may
@@ -134,7 +172,7 @@
         :else
         (cast-from-reference* xb consumer-fctx consumed-type on-stack-type))))
 
-  (defn- statm? ^boolean [^CodeBuilder xb ^CodeEmitter ce]
+  (defn statm? ^boolean [^CodeBuilder xb ^CodeEmitter ce]
     (when-some [on-stack-type (.emit-insn* ce xb Void/TYPE false)]
       (when-not (identical? Void/TYPE on-stack-type)
         (pop-operand xb on-stack-type))
@@ -186,3 +224,160 @@
      (or (>= i end)
          (and (insn? xb consumer-fctx (aget consumed-types i) (aget ces i))
               (recur (inc i)))))))
+
+(defn entities? ^boolean [^CodeBuilder xb ^Entity/1 ces]
+  (dotimes [i (alength ces)]
+    (let [ent (aget ces i)]
+      (.emit-insn* ent xb (.value-type ent) false)))
+  true)
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private ZERO (object 0))
+
+;; Generates unique names for fn* and reify* instances within a given
+;; namespace.  In case of name clashes the result is not
+;; deterministic, unless all of the namespace's processing happens
+;; within a single thread.
+(defn- pick-unique-name ^String [^ConcurrentHashMap private-name-map
+                                 ^String dflt-nm]
+  (let [n ^int (.compute private-name-map dflt-nm
+                         (^BiFunction fn ^Integer [_ ^Integer v]
+                          (if (nil? v) ZERO (object (inc ^int v)))))]
+    (cond-> dflt-nm (pos? n) (str "^" n))))
+
+
+
+;;; A Blueprint acts as a buffer between the information gathering
+;;; phase of parsing and the build step that emits the class files.
+;;; It encapsulates mutable state and all updates are initiated from a
+;;; single thread.  Blueprints can be nested, for example to capture
+;;; information about a given closure's environment.
+
+(definterface IClosureBlueprint
+  (scope-name ^String [])
+  (closure-level ^int [])
+  (next-entity-id ^int []))
+
+(deftype ClosureBlueprint [^ClassDesc segment-class ^ArrayList fragments
+                           ^ConcurrentHashMap private-name-map
+                           ^String scope-name ^HashMap origin-to-proxy
+                           ^Entity this-fn-proxy
+                           ^:unsynchronized-mutable ^int curr-entity-id]
+  IClosureBlueprint
+  (scope-name [_]
+    scope-name)
+  (closure-level [_]
+    (unsigned-bit-shift-right curr-entity-id 16))
+  (next-entity-id [_]
+    (set! curr-entity-id (inc curr-entity-id))))
+
+(defn size-staged ^int [^ClosureBlueprint cbp]
+  (.size (.fragments cbp)))
+(defn stage-fragment! [^ClosureBlueprint cbp frag]
+  ;; clinit frag: one of OwnedFragment, CodeBearingFragment, or CodeEmitter
+  ;; non-clinit frag: CodeBearingFragment
+  (.add (.fragments cbp) frag))
+
+(definterface IEmitProxy
+  :extends [Invocable]
+  (set-emit-entity! ^void [^Entity ent])
+  (get-emit-entity ^Entity []))
+
+;;; Local copy of a value taken from the entity `origin`, where
+;;; `origin` is defined by a parent of the current function (or reify,
+;;; or interface function).
+(deftype EnvProxy [^Entity origin ^int local-entity-id ^String local-name
+                   ^:unsynchronized-mutable ^Entity __emit-entity]
+  CodeEmitter
+  (emit-insn* [_ xb consumed-type then-leave?]
+    (.emit-insn* __emit-entity xb consumed-type then-leave?))
+  Entity
+  (value-type [_]
+    (.value-type origin))
+  (entity-id [_]
+    local-entity-id)
+  Invocable
+  (invoke* [this fctx form opt-f xs]
+    (.invoke* ^Invocable origin fctx form this xs))
+  IEmitProxy
+  (set-emit-entity! [_ ent]
+    (set! __emit-entity ent))
+  (get-emit-entity [_]
+    __emit-entity))
+
+(def ^:private this-fn-reference ;FIXME... is this only a temporary workaround?
+  (reify Entity
+    (emit-insn* [_ xb _ _]
+      (.aload xb (.receiverSlot xb))
+      tinyclj.lang.AFnMh)))
+
+(defn add-env-proxy! ^Entity [^ClosureBlueprint cbp ^Entity origin
+                              ^String local-name]
+  #_(prn :closure-level (model/closure-level ent)
+         :sequence-number (model/sequence-number ent)
+         :using-scope (.scope-name cbp))
+  (.computeIfAbsent (.origin-to-proxy cbp) origin
+                    (^Function fn [origin]
+                     (EnvProxy. origin (.next-entity-id cbp) local-name nil))))
+
+(defn- closes-over? ^boolean [^ClosureBlueprint cbp ^Entity ent]
+  (let [origin (model/closure-level ent)]
+    (and (>= origin model/closure-level-clinit)
+         (not= origin (.closure-level cbp)))))
+
+(defn value-of ^Entity [^ClosureBlueprint cbp ^Entity ent ^Object form]
+  #_(prn :cbp-level (.closure-level cbp)
+         :ent-level (model/closure-level ent)
+         :sequence-number (model/sequence-number ent)
+         :using-scope (.scope-name cbp)
+         :form form
+         :ent-class (class ent)
+         :closes-over? (closes-over? cbp ent))
+  (if (closes-over? cbp ent)
+    (add-env-proxy! cbp ent (name ^symbol form))
+    ent))
+
+(defn invocation-of ^Entity [^ClosureBlueprint cbp ^Entity inv ^seq form]
+  (if (closes-over? cbp inv)
+    (if (identical? (.this-fn-proxy cbp) inv)
+      this-fn-reference      ;invocation of fn from one of its arities
+      (add-env-proxy! cbp inv (name ^symbol (first form))))
+    inv))
+
+
+(defn mk-segment-clinit ^ClosureBlueprint [^ClassDesc this-class]
+  (let [initial-entity-id (model/entity-id-of model/closure-level-clinit)]
+    (ClosureBlueprint. this-class (ArrayList.) (ConcurrentHashMap.)
+                       nil nil nil initial-entity-id)))
+
+(letfn [(closure ^ClosureBlueprint [^ClosureBlueprint parent
+                                    ^String unique-nm ^Entity this-fn-proxy]
+          (let [nested-frags (ArrayList.)
+                level' (if (some? unique-nm)
+                         (inc (.closure-level parent))
+                         model/closure-level-clinit)]
+            (ClosureBlueprint. (.segment-class parent) nested-frags
+                               (.private-name-map parent) unique-nm
+                               (HashMap.) this-fn-proxy
+                               (model/entity-id-of level'))))]
+  
+  (defn mk-closures ^ClosureBlueprint/1 [^ClosureBlueprint parent 
+                                         ^String scope-name-suffix
+                                         ^Entity this-fn-proxy ^int n]
+    (let [parent-name (.scope-name parent)
+          nm-str (cond->> scope-name-suffix
+                   (some? parent-name) (str parent-name "$"))
+          unique-nm (pick-unique-name (.private-name-map parent) nm-str)
+          a (new ClosureBlueprint/1 n)]
+      (dotimes [i (alength a)]
+        (aset a i (closure parent unique-nm this-fn-proxy)))
+      a)))
+
+;;; ------------------------------------------------------------------------
+
+(deftype CodeBearingFragment [^ClassDesc owner ;if inlined into nmsp segment
+                              ^String class-name ;if turned into separate class
+                              ^String this-name ;name of any receiver locals
+                              ^Entity fn-proxy
+                              ^ClosureBlueprint/1 closures])

@@ -71,7 +71,7 @@
   ;; from JLS8 "Example 5.1.3-1. Narrowing Primitive Conversion"
   (is (= '[(GETSTATIC Float "NEGATIVE_INFINITY" "F")
            (FRETURN)]
-         (asm-expr (identity Float/NEGATIVE_INFINITY))))
+         (asm-expr Float/NEGATIVE_INFINITY)))
   (is (= "long: -9223372036854775808..9223372036854775807"
          (call-expr (let* [fmin Float/NEGATIVE_INFINITY
                            fmax Float/POSITIVE_INFINITY]
@@ -151,28 +151,28 @@
 (deftest cast-from-nil-test
   (is (= '[(ACONST_NULL)
            (ARETURN)]
-         (asm-expr ^Integer (identity nil))))
+         (asm-expr ^Integer (do nil))))
   (is (= '[(ACONST_NULL)
            (INVOKEVIRTUAL Integer "intValue" "()I")
            (IRETURN)]
-         (asm-expr ^int (identity nil)))))
+         (asm-expr ^int (do nil)))))
 
 (deftest object-conv-test
   (is (= '[["LOCAL 0: int x"]
            (ILOAD_0)
            (INVOKESTATIC Integer "valueOf" "(I)Ljava/lang/Integer;")
            (ARETURN)]
-         (asm-expr [^int x] (identity (object x)))))
+         (asm-expr [^int x] (object x))))
   (is (= '[["LOCAL 0: char x"]
            (ILOAD_0)
            (INVOKESTATIC Character "valueOf" "(C)Ljava/lang/Character;")
            (ARETURN)]
-         (asm-expr [^char x] (identity (object x)))))
+         (asm-expr [^char x] (object x))))
   (is (= '[["LOCAL 0: boolean x"]
            (ILOAD_0)
            (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
            (ARETURN)]
-         (asm-expr [^boolean x] (identity (object x)))))
+         (asm-expr [^boolean x] (object x))))
   (is (= '[["LOCAL 0: Object x"]
            (ALOAD_0)
            (ARETURN)]
@@ -264,7 +264,7 @@
 ;;                           ;; (int reference-value) works like ^int and
 ;;                           ;; expects an Integer
 ;;                           (prim-result-conv ^int [^Object x]
-;;                                             (identity (int x)))
+;;                                             (int x))
 ;;                           (prim-result-generic-cast ^int [g]
 ;;                                                     ^int (g))
 ;;                           ;; unlike ^int reference-value, (int
@@ -461,7 +461,7 @@
 ;;            (ILOAD_0)
 ;;            #_(INVOKESTATIC RT "booleanToZeroOne" "(Z)I")
 ;;            (IRETURN)]
-;;          (asm-expr [^boolean x] (identity (int x)))))
+;;          (asm-expr [^boolean x] (int x))))
 ;;   ;; test result type of expression
 ;;   (is (java.util.Objects/equals (Integer/valueOf 1)
 ;;                                 (call-expr [^boolean x] (int x) [true])))

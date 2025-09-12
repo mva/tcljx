@@ -124,6 +124,11 @@
 
 (defn field? ^boolean [^Match m]
   (instance? Field (.member m)))
+(defn static-field? ^boolean [^Match m]
+  (let [member (.member m)] (and (instance? Field member)
+                                 (Modifier/isStatic (.getModifiers member)))))
+(defn varargs? ^boolean [^Match m]
+  (and (instance? Executable (.member m)) (.isVarArgs ^Executable (.member m))))
 
 (defn parameter-count ^int [^Match m]
   (alength (.parameter-types m)))

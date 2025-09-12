@@ -4,21 +4,19 @@
     [config :as cfg] [wrong :as wrong] [context :as context] [type :as type]
     [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen
-    [classfile :as classfile] [runtime :as rt] [emit :as emit] [insn :as insn]
-    [entity :as entity] [primitive :as primitive] [condgen :as condgen]
-    [switchgen :as switchgen] [trygen :as trygen] [defgen :as defgen]
-    [segmgen :as segmgen] [methodgen :as methodgen]))
+    [classfile :as classfile] [runtime :as rt] [emit :as emit]
+    [insn :as insn] [entity :as entity] [primitive :as primitive]
+    [condgen :as condgen] [switchgen :as switchgen] [trygen :as trygen]
+    [defgen :as defgen] [fngen :as fngen]))
   (:import
    (tcljx.data.model Expr Exprs ExprFactory CodeEmitter Binding Entity
-                     MutableEntity ArityType AritySpec NamespaceBuilder)
+                     ArityType AritySpec NamespaceBuilder)
    (tcljx.data.resolve Match)
-   (tcljx.classgen.entity ElementEmitter)
+   (tcljx.classgen.emit ClosureBlueprint CodeBearingFragment)
    (tcljx.classgen.insn Insn Insns)
-   (tcljx.classgen.methodgen FnLiteral)
    (java.lang.classfile ClassBuilder CodeBuilder Opcode Label TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDescs)
-   (java.util ArrayList)
    (java.util.function Consumer)))
 
 (letfn [(find-factory ^Match [^String method-name]
@@ -64,25 +62,35 @@
       (aset a i (primitive/iinc-delta (aget entities i) (aget ces i))))
     a))
 
+#_(defn- get-static-field ^CodeEmitter [^Match m]
+  (reify CodeEmitter
+    (emit-insn* [_ xb consumed-type _]
+      (entity/with-void-empty-if-requested consumed-type
+        (.getstatic xb (reflect/describe-class (.owner m))
+                    (-> m .member .getName)
+                    (reflect/describe-class (.return-type m)))
+        type))))
+
 ;;; ------------------------------------------------------------------------
 
-(definterface ClassFileExprFactory
+(definterface InsnFactory
   :extends [ExprFactory]
   (get-recur-target ^Label [])
-  (set-recur-target! ^void [^Label target]))
+  (set-recur-target! ^void [^Label target])
+  (with-closure ^InsnFactory [^ClosureBlueprint closure]))
 
 ;;; Note: To save work, this code generator assumes that it can use
 ;;; types available at compile time to refer to runtime types of the
 ;;; compiled application.  For example, it uses tinyclj.lang.StaticFn
-;;; as expression type, instead of the type (currently of the same
+;;; as expression type, instead of the type (accidentally of the same
 ;;; name) used by the application to hold a static function instance.
 ;;; Likewise for symbols, keywords, vectors, and so on.  This works
 ;;; only as long as compiler and application agree on the names of
 ;;; their runtime classes.
-(deftype ExprFactoryImpl [^ArrayList segment-elements ;shared with NmspBuilder
+(deftype InsnFactoryImpl [^ClosureBlueprint closure
                           ^Insns recur-parameters
                           ^:unsynchronized-mutable ^Label __recur-target]
-  ClassFileExprFactory
+  InsnFactory
   (empty-expr [_]
     insn/insn-empty)
   (new-exprs [_ n]
@@ -90,41 +98,26 @@
       insn/empty-insns
       (Insns. (new CodeEmitter/1 n) (new Class/1 n))))
 
+  (value-of [_ ent form]
+    (insn/value-of (emit/value-of closure ent form) form))
+  (invoke [this fctx form inv args]
+    (.invoke* inv fctx form (emit/invocation-of closure inv form) args))
+  
   (constant-entity [_ value type]
     (entity/mk-constant value type))
-  (class-member-entity [this static? owner mnm ptags]
-    (let [ms (resolve/members-by-param-tags static? owner mnm ptags)
-          wr-info (fn ^Throwable []
-                    (let [sym (wrong/q-as-symbol owner mnm)]
-                      (-> (if (and static? (= resolve/constructor-name mnm))
-                            (if (seq ms)
-                              (str "multiple constructors matching " sym)
-                              (str "no constructor matching " sym))
-                            (let [label (if static? "static" "virtual")]
-                              (if (seq ms)
-                                (str "multiple " label " members matching " sym)
-                                (str "no " label " member matching " sym))))
-                          (wrong/wr-info))))]
-      (let [m ^Match (first ms)]
-        (if (and (some? m) (nil? (next ms)))
-          (if (and (nil? ptags) static? (resolve/field? m))
-            (entity/static-field (reflect/describe-class (.owner m))
-                                 mnm (.return-type m))
-            (methodgen/class-member-fn m))
-          (throw (wr-info))))))
-  (value-of [_ ent form]
-    (insn/value-of ent form))
+  (class-member-entity [this m]
+    (fngen/class-member-fn m))
   
   (new-loadable [_ value expr-type]
-    (-> value (entity/mk-loadable expr-type false) (insn/mk-insn expr-type)))
+    (-> value (entity/mk-collection expr-type false) (insn/mk-insn expr-type)))
 
   (attach-meta-to [this meta arg]
-    (if (and (model/loadable? arg) (model/loadable? meta))
+    (if (and (insn/const? arg) (insn/const? meta))
       (let [tp (insn/expr-type arg)]
         (-> (doto (new CodeEmitter/1 2)
               (aset 0 (.emitter arg))
               (aset 1 (.emitter meta)))
-            (entity/mk-loadable tp true)
+            (entity/mk-collection tp true)
             (insn/mk-insn tp)))
       (insn/invoke-runtime literal-with-meta (insn/insns-of arg meta))))
   (new-collection [this coll-type args]
@@ -186,8 +179,6 @@
                                   (Insns/.emitters paths-and-default)
                                   (.emitter default-path) fctx))
           (insn/mk-insn join-tp))))
-  (invoke [this fctx form inv args]
-    (.invoke* inv fctx form args))
   (invoke-value [this fctx f args]
     (let [f ^Insn f
           args ^Insns args
@@ -211,19 +202,19 @@
                              f)))))
   
   (new-parameter [_ param-no name type]
-    (-> (entity/parameter-binding param-no name type)
+    (-> (entity/parameter-binding closure param-no name type)
         (insn/mk-statm)))
 
   (binding-alias [_ fctx name ent]
-    (-> (entity/mk-binding ent name nil)
+    (-> (entity/mk-binding ent name true)
         (insn/mk-statm)))
   (binding-fresh [_ fctx opt-type name init]
     (when opt-type
       (insn/ensure-assignable opt-type init))
     (let [tp (or opt-type (insn/logical-type init))
-          ent (entity/local-variable name tp)
           ce (-> init (insn/cast-to tp fctx) .emitter)]
-      (-> (entity/mk-binding ent name ce)
+      (-> (entity/local-variable closure name tp ce)
+          (entity/mk-binding name false)
           (insn/mk-statm))))
   (block-let [_ fctx bindings body]
     (let [block (insn/progn bindings body)]
@@ -241,20 +232,24 @@
   (get-recur-target [this]
     __recur-target)
   (with-recur-parameters [_ parameters]
-    (ExprFactoryImpl. segment-elements parameters nil))
+    (InsnFactoryImpl. closure parameters nil))
   (block-loop [this fctx body]
-    (-> (^CodeEmitter fn [xb consumed-type then-leave?]
-         (.block xb (^Consumer fn ^void [^CodeBuilder xb]
-                     ;; FIXME... skip emit recur-parameters for
-                     ;; functions and methods?
-                     (when (emit/statms? xb (.emitters recur-parameters))
-                       (let [start-of-body (.newLabel xb)]
-                         (.labelBinding xb start-of-body)
-                         (.set-recur-target! this start-of-body)
-                         (emit/then-leave? xb fctx consumed-type
-                                           (.emitter body) then-leave?)))))
-         (when-not then-leave? ;can the then-leave? above return true?
-           consumed-type))
+    (-> (reify
+          CodeEmitter
+          (emit-insn* [_ xb consumed-type then-leave?]
+            (.block xb (^Consumer fn ^void [^CodeBuilder xb]
+                        (when (emit/statms? xb (.emitters recur-parameters))
+                          (let [start-of-body (.newLabel xb)]
+                            (.labelBinding xb start-of-body)
+                            (.set-recur-target! this start-of-body)
+                            (emit/then-leave? xb fctx consumed-type
+                                              (.emitter body) then-leave?)))))
+            (when-not then-leave? ;can the then-leave? above return true?
+              consumed-type))
+          tcljx.classgen.insn.PlainInvokeTest
+          (redirecting-to [_ return-type varargs? params]
+            (when (nil? params)    ;only continue if method-level loop
+              (insn/redirecting-to body return-type varargs? recur-parameters))))
         (insn/mk-insn (insn/expr-type body))))
   (recur-expr [this fctx args]
     (let [args ^Insns args
@@ -292,7 +287,7 @@
                      (do (.goto_ xb (.get-recur-target this))
                          nil) ;operand type reported when emitting code
                      (let [d (aget iinc-deltas i)
-                           ent ^MutableEntity (aget entities i)]
+                           ent (aget entities i)]
                        (if (primitive/valid-iinc-const? d)
                          (when-not (zero? d) ;elide for unchanged entity 
                            (.emit-iinc ent xb d))
@@ -311,24 +306,35 @@
                                       (.emitters ^Insns finally) fctx)
             (trygen/try-catch tp (.emitters insns) catch-types fctx))
           (insn/mk-insn tp))))
-  
-  (new-function* [this scope fn-nm parse-arity-body arity-specs]
-    (let [fn-lit (methodgen/partial-fn-literal (.entity-name scope) arity-specs)
-          scope (cond-> scope
-                  (some? fn-nm)
-                  (context/with-local-binding (name fn-nm) fn-lit))
-          arity-codes (.new-exprs this (alength arity-specs))]
-      (dotimes [i (.length arity-codes)]
-        (let [spec (aget arity-specs i)
-              code (.apply parse-arity-body scope spec)
+
+  (with-closure [_ closure]
+    (InsnFactoryImpl. closure recur-parameters __recur-target))
+  (new-function [this parser fn-nm parse-arity-body arity-specs]
+    (let [name-suffix (if (some? fn-nm) (name fn-nm) "fn")
+          fn-proxy (fngen/partial-fn-literal (.next-entity-id closure) arity-specs)
+          n (alength arity-specs)
+          arity-codes (.new-exprs this n)
+          closures' (emit/mk-closures closure name-suffix fn-proxy n)]
+      (dotimes [i n]
+        (let [closure' (aget closures' i)
+              expr-factory' (.with-closure this closure')
+              parser' (cond-> (.with-expr-factory parser expr-factory')
+                        (some? fn-nm)
+                        (model/with-local-binding (name fn-nm) fn-proxy))
+              
+              spec (aget arity-specs i)
+              code (.apply parse-arity-body parser' spec)
               rt (-> spec .at .return-type)]
           (when-not (type/auto-return-marker? rt)
             (insn/ensure-assignable rt code))
           (.set arity-codes i code)))
       
-      (let [fn-lit (methodgen/complete-fn-literal fn-lit arity-specs arity-codes)]
-        (.add segment-elements fn-lit)
-        (.value-of this fn-lit nil))))
+      (let [fn-proxy (fngen/update-arities fn-proxy arity-codes)
+            scope-name' (.scope-name (aget closures' 0))
+            cbf (CodeBearingFragment. (.segment-class closure) scope-name'
+                                      name-suffix fn-proxy closures')]
+        (emit/stage-fragment! closure cbf)
+        (.value-of this fn-proxy nil))))
   
   (type-cast [this fctx target-type arg]
     (let [arg-tp (insn/expr-type arg)]
@@ -422,5 +428,5 @@
             (insn/mk-insn Void/TYPE))   ;type used while parsing
         (throw (insn/info-type "expect instance of Throwable" arg))))))
 
-(defn mk-code-generator ^ExprFactory [^ArrayList segment-elements]
-  (ExprFactoryImpl. segment-elements nil nil)) ;FIXME... needs recur-parameters
+(defn mk-factory ^ExprFactory [^ClosureBlueprint segment]
+  (InsnFactoryImpl. segment nil nil))

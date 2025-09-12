@@ -1,17 +1,41 @@
 (ns tcljx.data.context
-  (:require (tcljx.data [meta :as meta] [wrong :as wrong] [model :as model]))
-  (:import (tcljx.data.model Resolver NamespaceBuilder Entity Binding
-                             Expr Exprs ExprFactory Scope)
-           (tcljx.data.wrong WrongInfo)))
-
-;;; Some form of "cannot do this at this position" error message.
-(defn wrong [^String msg]
-  (throw (wrong/wr-info msg)))
-
-;;; ------------------------------------------------------------------------
+  (:require (tcljx.data [wrong :as wrong]))
+  (:import (tcljx.data.wrong WrongInfo)))
 
 (def fctx-initial 0l)
 (def fctx-none 0l)           ;used as placeholder for "no line number"
+
+;;; If set in a form context, then a `recur` is possible.  This means
+;;; that the form is in tail position with respect to the
+;;; function (method, enclosing loop): there are no instructions
+;;; between the recur and the end of the function (method, enclosing
+;;; loop).  Put differently, the form is neither directly nor
+;;; indirectly providing an argument value to an expression *and* the
+;;; form is neither directly nor indirectly part of the butlast prefix
+;;; of a progn block.
+(def ^:private flag-can-recur (bit-shift-left 1l 32))
+(defn can-recur? ^boolean [^long fctx]
+  (not (zero? (bit-and flag-can-recur fctx))))
+(defn with-recur [^long fctx]
+  (bit-or fctx flag-can-recur))
+
+;;; If set in a form context, then this form is in strict statement
+;;; position with respect to the function or method: the operand stack
+;;; is known to be empty.  This is used to decide whether a `try`
+;;; expression can be inlined, or should be turned into a closure.
+;;; The technical reason for this is that exception handlers clear the
+;;; operand stack on entry, which prevents a translated
+;;; try-catch-finally from appearing in arbitrary expression position.
+;;; The body of a function or method is always in statement position.
+(def ^:private flag-statm-position (bit-shift-left 1l 33))
+
+(defn of-arg ^long [^long fctx]
+  (bit-and-not fctx (bit-or flag-can-recur flag-statm-position)))
+(defn of-progn-prefix ^long [^long fctx]
+  (bit-and-not fctx flag-can-recur))
+(defn of-finally ^long [^long fctx]
+  (bit-and-not fctx flag-statm-position))
+
 
 (defn fctx-line ^int [^long fctx]
   (int fctx))
@@ -54,130 +78,3 @@
   (assert (vector? binding))
   (assert (symbol? fctx-sym))
   `(with-line-from-meta ~(vector fctx-sym `(meta ~seq-form)) ~@body))
-
-;;; ------------------------------------------------------------------------
-
-;;; If set in a form context, then a `recur` is possible.  This means
-;;; that the form is in tail position with respect to the
-;;; function (method, enclosing loop): there are no instructions
-;;; between the recur and the end of the function (method, enclosing
-;;; loop).  Put differently, the form is neither directly nor
-;;; indirectly providing an argument value to an expression *and* the
-;;; form is neither directly nor indirectly part of the butlast part
-;;; of a progn block.
-(def flag-can-recur (bit-shift-left 1l 32))
-(defn can-recur? ^boolean [^long fctx]
-  (not (zero? (bit-and flag-can-recur fctx))))
-
-;;; If set in a form context, then this form is in global statement
-;;; position with respect to the function or method: the operand stack
-;;; is known to be empty.  This is used to decide whether a `try`
-;;; expression can be inlined, or should be turned into a closure.
-;;; The technical reason for this is that exception handlers clear the
-;;; operand stack on entry, which prevents a translated
-;;; try-catch-finally from appearing in arbitrary expression position.
-;;; The body of a function or method is always in statement position.
-(def flag-statm-position (bit-shift-left 1l 33))
-
-
-(defn new-exprs ^Exprs [^Scope scope ^int n]
-  (.new-exprs (.expr-factory scope) n))
-
-;; Takes a single form `form` and translates it to Expr using the
-;; given form context `fctx`.  This is the workhorse of the parser.
-;; Other methods delegate to it with adjusted `fctx` flags.
-(def parse-form Scope/.parse-form)
-
-;; Takes a single form and parses it as an argument of the given
-;; parent context `parent-fctx`: the form pushes a value to the
-;; operand stack that is subsequently consumed by an instruction
-;; emitted by the parent form.  Delegates to `parse-form` with
-;; `flag-can-recur` and `flag-statm-position` cleared from the
-;; parent context `parent-fctx`.
-(defn parse-arg ^Expr [^Scope scope ^long parent-fctx form]
-  (let [fctx' (bit-and-not parent-fctx (bit-or flag-can-recur
-                                               flag-statm-position))]
-    (parse-form scope fctx' form)))
-
-;; Takes a seq of forms, each of which is parsed as if by `parse-arg`.
-(defn parse-args ^Exprs [^Scope scope ^long parent-fctx ^seq forms]
-  (let [fctx' (bit-and-not parent-fctx (bit-or flag-can-recur
-                                               flag-statm-position))
-        xs (new-exprs scope (count forms))]
-    (loop [i 0, forms (seq forms)]
-      (when (some? forms)
-        (.set xs i (parse-form scope fctx' (first forms)))
-        (recur (inc i) (next forms))))
-    xs))
-
-;; Takes a seq of forms, where only the last form pushes a value to
-;; the operand stack.  Delegates to `parse-form`, clearing
-;; `flag-can-recur` for the butlast elements of `forms`.  The last
-;; element is parsed using the unmodified `parent-fctx`.
-(defn parse-progn
-  (^Expr [^Scope scope ^long parent-fctx ^seq forms]
-   (let [n (count forms)]
-     (if (zero? n)
-       (.empty-expr (.expr-factory scope))
-       (let [fctx' (bit-and-not parent-fctx flag-can-recur)
-             xs (new-exprs scope (dec n))]
-         (loop [i 0, forms forms]
-           (if (< i (.length xs))
-             (do (.set xs i (parse-form scope fctx' (first forms)))
-                 (recur (inc i) (rest forms)))
-             (let [x (parse-form scope parent-fctx (first forms))]
-               (.progn-expr (.expr-factory scope) xs x))))))))
-  (^Expr [^Scope scope ^seq error-context ^long fctx ^seq forms]
-   (with-line-from-list [fctx error-context]
-     (parse-progn scope fctx (seq forms)))))
-
-;;; ------------------------------------------------------------------------
-
-;;; Anything outside of a function or a class definition (that is
-;;; definterface, deftype, reify, etc.) happens in the namespace
-;;; context.
-;; (defn namespace? ^boolean [^Resolver rsv]
-;;   (instance? tcljx.model.NamespaceResolver rsv))
-
-;;; Returns nil if `form` does not resolve to a binding.
-(defn lookup ^Entity [^Scope scope ^symbol form]
-  (let [nm (name form)]
-    (if-some [nmsp (namespace form)]
-      ;; a qualified name always refers to a namespace-level def
-      (.lookup-def (.resolver scope) nmsp nm)
-      
-      ;; for a simple name, the assumption is that a lookup in
-      ;; `bindings*` is accurate with very high probability
-      (or (.valAt (.bindings* scope) nm nil)
-          (.lookup-def (.resolver scope) nil nm))))) ;to cover all defs
-
-;;; Returns nil if `nm` does not resolve to a class name.
-(defn lookup-namespace ^String [^Scope scope ^String alias]
-  (.lookup-namespace (.resolver scope) alias))
-
-;;; Returns nil if `nm` does not resolve to a class name.
-(defn lookup-class ^Class [^Scope scope ^String nm]
-  (.lookup-class (.resolver scope) nm))
-
-(defn namespace-builder ^NamespaceBuilder [^Scope scope]
-  (let [rsv (.resolver scope)]
-    (if (instance? NamespaceBuilder rsv)
-      rsv
-      (wrong "cannot manipulate namespace data in this position"))))
-
-;;; ------------------------------------------------------------------------
-
-(defn with-local-binding
-  (^Scope [^Scope scope ^Expr binding-expr]
-   (let [bnd ^Binding (.emitter binding-expr)]
-     (with-local-binding scope (.name bnd) (.bound-to bnd))))
-  (^Scope [^Scope scope ^String nm ^Entity ent]
-   (.with-bindings* scope (assoc (.bindings* scope) nm ent))))
-
-(defn with-local-bindings ^Scope [^Scope scope ^Exprs binding-exprs]
-  (loop [locals (transient (.bindings* scope))
-         i 0]
-    (if (< i (.length binding-exprs))
-      (let [bnd ^Binding (.emitter binding-exprs i)]
-        (recur (assoc! locals (.name bnd) (.bound-to bnd)) (inc i)))
-      (.with-bindings* scope (persistent! locals)))))

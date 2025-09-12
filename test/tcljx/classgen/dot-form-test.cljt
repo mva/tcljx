@@ -108,11 +108,11 @@
                              "Ljava/util/Comparator;")
                   (ARETURN)]]
     ;; syntax variants
-    (is-asm* (identity (. java.lang.String CASE_INSENSITIVE_ORDER)) exp-asm)
-    (is-asm* (identity (. java.lang.String -CASE_INSENSITIVE_ORDER)) exp-asm)
-    (is-asm* (identity (. String CASE_INSENSITIVE_ORDER)) exp-asm)
-    (is-asm* (identity java.lang.String/CASE_INSENSITIVE_ORDER) exp-asm)
-    (is-asm* (identity String/CASE_INSENSITIVE_ORDER) exp-asm)
+    (is-asm* (. java.lang.String CASE_INSENSITIVE_ORDER) exp-asm)
+    (is-asm* (. java.lang.String -CASE_INSENSITIVE_ORDER) exp-asm)
+    (is-asm* (. String CASE_INSENSITIVE_ORDER) exp-asm)
+    (is-asm* java.lang.String/CASE_INSENSITIVE_ORDER exp-asm)
+    (is-asm* String/CASE_INSENSITIVE_ORDER exp-asm)
     ;; evaluation
     (is (= System/out (call-expr (. java.lang.System out))))))
 

@@ -4,7 +4,7 @@
                [type :as type] [model :as model])
    (tcljx.classgen [runtime :as rt]))
   (:import
-   (tcljx.data.model CodeEmitter Loadable)
+   (tcljx.data.model CodeEmitter Constant)
    (clojure.lang Named IMeta)
    (java.lang.classfile CodeBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry
@@ -77,7 +77,7 @@
 (defn collection-entry ^LoadableConstantEntry [^ConstantPoolBuilder cpb
                                                ^Class tp ^CodeEmitter/1 ldbls]
   (letfn [(cde-coll ^ConstantDynamicEntry [^DirectMethodHandleDesc mhd]
-            (let [bs-args (for [^Loadable ldbl ldbls]
+            (let [bs-args (for [^Constant ldbl ldbls]
                             (.loadable-entry ldbl cpb true))
                   bsm (.bsmEntry cpb (.methodHandleEntry cpb rt/bsm-quote)
                                  ^java.util.List bs-args)
@@ -93,7 +93,7 @@
 (defn with-meta-entry ^LoadableConstantEntry [^ConstantPoolBuilder cpb
                                               ^Class tp ^CodeEmitter/1 ldbls]
   (let [bsm (.bsmEntry cpb (.methodHandleEntry cpb rt/bsm-quote)
-                       ^java.util.List (for [^Loadable ldbl ldbls]
+                       ^java.util.List (for [^Constant ldbl ldbls]
                                          (.loadable-entry ldbl cpb true)))
         nat (.nameAndTypeEntry cpb "with-meta" (reflect/describe-class tp))]
     (.constantDynamicEntry cpb bsm nat)))

@@ -10,7 +10,7 @@
    (tcljx.data [files :as files] [meta :as meta] [reflect :as reflect]
                [macro :as macro])
    (tcljx.classgen [loader :as loader] [universe :as universe]
-                   [segmgen :as segmgen])
+                   [build :as build])
    #_tcljx.macro                        ;for class ArrayToCpl
    #_[tcljx.reader :as rd]
    #_[tcljx.runtime :as rt]
@@ -334,8 +334,8 @@
      (list 'fn* 'fnbody (cond-> params
                           (no-tag? params)
                           (vary-meta assoc :tag meta/auto-return-type))
-           ;; note: some forms must be wrapped in (identity ...) 
-           ;; to prevent them from disappearing
+           ;; note: some forms must be wrapped in (do nil ...) to
+           ;; prevent them from disappearing
            form)]))
 
 (defn method-name [params]
@@ -367,16 +367,14 @@
          (seq)
          (body-as-vector))))
 
-;;; If `form` is optimized away completely because it can be delegated
-;;; to an existing method instance, then wrap it in a ```(identity
-;;; ...)``` clause.  This isn't done automatically, because the
-;;; identity forces its argument to be a value, which interferes with
-;;; some throw and recur patterns.
+(defn- force-fresh-method [form]
+  `(quote (do nil ~form)))
+
 (defmacro asm-expr
   ([form]
    `(asm-expr [] ~form))
   ([params form]
-   `(fn-method-body '~params (object (quote ~form)))))
+   `(fn-method-body '~params ~(force-fresh-method form))))
 
 (defmacro is-asm* [form exp-asm]        ;takes `exp-asm` as value
   (with-meta `(ptest/is (= ~exp-asm (asm-expr ~form)))
@@ -401,7 +399,7 @@
               (first ms)))]
     (let [dyn-ld (loader/dyn-class-loader app-ld [])]
       (nmsp dyn-ld (ns-with-fnbody params form))
-      (let [cl (Class/forName (str "pkg.ns0." segmgen/capstone-class-name)
+      (let [cl (Class/forName (str "pkg.ns0." build/capstone-class-name)
                               true dyn-ld)
             m (get-method cl (method-name params))]
         (.invoke m nil (.toArray ^List args)))))) ;invoke static method
@@ -410,8 +408,8 @@
   ([form]
    `(call-expr [] ~form []))
   ([params form args]
-   ;; enforce materialization of method by wrapping in `identity`
-   `(fn-call-method '~params (object '(~'identity ~form)) ~args)))
+   ;; enforce materialization of method by wrapping form
+   `(fn-call-method '~params ~(force-fresh-method form) ~args)))
 
 (defmacro is-class [form cl]
   (with-meta `(ptest/is (= ~cl (.getClass (call-expr ~form))))

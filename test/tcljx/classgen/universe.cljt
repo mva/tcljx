@@ -4,40 +4,34 @@
     [config :as cfg] [files :as files] [resolve :as resolve] [meta :as meta]
     [wrong :as wrong] [context :as context] [model :as model])
    (tcljx.parser
-     [form :as form] [namespace :as namespace])
+     [form :as form] [parse :as parse] [namespace :as namespace])
    (tcljx.classgen
     [loader :as loader] [runtime :as rt] [classfile :as classfile]
-    [emit :as emit] [insn :as insn] [segmgen :as segmgen] [codegen :as codegen]
-    [defgen :as defgen] [primitive :as primitive]))
+    [emit :as emit] [insn :as insn] [build :as build]
+    [codegen :as codegen] [defgen :as defgen] [primitive :as primitive]))
   (:import
    (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
-                     NamespaceBuilder SegmentBuilder
-                     Expr ExprFactory Scope)
-   (tcljx.classgen.entity SegmentProvidesOwner ElementEmitter)
+                     NamespaceBuilder Expr ExprFactory Parser)
    (tcljx.classgen.loader Loader PackageBuilder)
+   (tcljx.classgen.emit ClosureBlueprint)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassBuilder CodeBuilder)
-   (java.nio.file Path)
-   (java.util ArrayList)
-   (java.util.concurrent ConcurrentHashMap)
-   (java.util.function Consumer BiFunction)))
+   (java.nio.file Path)))
 
 (deftype ImplementationUnavailableException []
   Exception)
 
-(def ^:private ZERO (object 0))
 (deftype NmspBuilderImpl [^NamespaceProvider universe
                           ^String ns-str
                           ^ExprFactory code-gen
-                          ^ArrayList segment-elements
+                          ^:unsynchronized-mutable ^ClosureBlueprint segment
                           ^PackageBuilder pkg-build
                           ^:unsynchronized-mutable ^map globals
                           ^:unsynchronized-mutable ^map known-ns
                           ^:unsynchronized-mutable ^map ns-alias
                           ^:unsynchronized-mutable ^map imports
                           ^:unsynchronized-mutable ^String current-source-file
-                          ^:unsynchronized-mutable ^int current-segm-id
-                          ^ConcurrentHashMap private-name-map]
+                          ^:unsynchronized-mutable ^int current-segm-id]
   Resolver
   (ns-str [_]
     ns-str)
@@ -54,12 +48,7 @@
       (.valAt globals nm nil)
       (when-some [nmsp* (.lookup-namespace this nmsp)]
         (-> known-ns ^map (.valAt nmsp* nil) (.valAt nm nil)))))
-  (pick-unique-name [_ dflt-nm]
-    (let [n ^int (.compute private-name-map dflt-nm
-                           (^BiFunction fn ^Integer [_ ^Integer v]
-                            (if (nil? v) ZERO (object (inc ^int v)))))]
-      (cond-> dflt-nm (pos? n) (str "^" n))))
-  
+    
   NamespaceBuilder
   (universe [_]
     universe)
@@ -76,11 +65,15 @@
   ;; (add-def [_ nm bnd]
   ;;   (set! globals (assoc globals nm bnd))
   ;;   bnd)
-  (new-def-init [_ nm redef? init]
-    (let [bnd (defgen/new-def-init segment-elements nm redef? init)]
+  (new-def-immutable [_ nm init]
+    (let [bnd (defgen/new-def-immutable segment nm init)]
       (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/mk-insn bnd Void/TYPE)))
-  (new-def-alias [_ nm other]
+  (new-def-mutable [_ nm init]
+    (let [bnd (defgen/new-def-mutable segment nm init)]
+      (set! globals (assoc globals nm (.bound-to bnd)))
+      (insn/mk-insn bnd Void/TYPE)))
+  (new-def-alias [_ nm other-ent other-nmsp other-nm]
     (assert false))
 
   (load-file [this path-str]
@@ -90,58 +83,35 @@
     ;; This method is only called for expression forms that do not
     ;; manipulate `known-ns` or `ns-alias`.  The `globals` at start is
     ;; stored as part of of `scope`.
-    (let [scope (form/mk-scope code-gen this globals)
+    (let [parser (form/mk-parser code-gen this globals)
           imports-at-start imports
-          segment-elements-at-start (.size segment-elements)
+          segm-size-at-start (emit/size-staged segment)
           expr (try
-                 (context/parse-form scope fctx form)
+                 (parse/form parser fctx form)
                  (catch ImplementationUnavailableException _
                    ;; flush current segment into a class file, revert
                    ;; state, and try again to parse `form`
                    (.commit-segment-and-revert
-                    this segment-elements-at-start
-                    (.bindings* scope) imports-at-start)
-                   (context/parse-form scope fctx form)))]
-      (.add segment-elements expr)
+                    this segm-size-at-start (.bindings* parser)
+                    imports-at-start)
+                   (parse/form parser fctx form)))]
+      (emit/stage-fragment! segment (.emitter expr))
       this))
 
   (finish [this]
-    (.commit-segment-and-revert this (.size segment-elements) globals imports)
-    (segmgen/define-capstone pkg-build current-segm-id)
+    (.commit-segment-and-revert this (emit/size-staged segment) globals imports)
+    (build/capstone pkg-build current-segm-id)
     (ProvidedNamespace. ns-str))
-
-  SegmentBuilder
-  (commit-segment-and-revert [_ end-of-segment-elements
-                              then-globals then-imports]
-    ;; fix owner of all SegmentProvidesOwner entities
-    (let [this-segm (segmgen/segment-cld pkg-build current-segm-id)]
-      (dotimes [i end-of-segment-elements]
-        (let [elem (.get segment-elements i)]
-          (when (instance? SegmentProvidesOwner elem)
-            (.set-owner! ^SegmentProvidesOwner elem this-segm)))))
-    
-    (segmgen/define-segment pkg-build current-segm-id current-source-file
-      (^Consumer fn ^void [^ClassBuilder cb]
-       (dotimes [i end-of-segment-elements]
-         (let [elem (.get segment-elements i)]
-           (when (instance? ElementEmitter elem)
-             (.emit-class-elements ^ElementEmitter elem cb)))))
-      (let [a (doto (ArrayList.)
-                (.add (segmgen/clinit-prologue ns-str current-segm-id)))]
-        (loop [i 0]
-          (if (< i end-of-segment-elements)
-            (let [elem (.get segment-elements i)]
-              (when (instance? Insn elem)
-                (.add a elem))
-              (recur (inc i)))
-            (do (.add a (segmgen/clinit-epilogue pkg-build current-segm-id))
-                (insn/progn (insn/insns-of* a) insn/insn-empty))))))
+  (commit-segment-and-revert [_ segment-end then-globals then-imports]
+    (let [segm-acc (build/prepare-segment (.fragments segment) segment-end)]
+      (build/segment pkg-build current-source-file current-segm-id segm-acc))
     
     ;; revert back to requested state & move to next segment
+    (set! current-segm-id (inc current-segm-id))
+    (set! segment (-> (build/segment-cld pkg-build current-segm-id)
+                      (emit/mk-segment-clinit)))
     (set! globals then-globals)
-    (set! imports then-imports)
-    (.clear segment-elements)
-    (set! current-segm-id (inc current-segm-id))))
+    (set! imports then-imports)))
 
 ;;; ------------------------------------------------------------------------
 
@@ -154,14 +124,14 @@
     (letfn [(mk-nmsp-builder ^NamespaceBuilder [^String ns-str]
               (let [source-file nil
                     pkg-build (loader/mk-package-builder loader ns-str)
-                    segment-elements (ArrayList.)
-                    ef (codegen/mk-code-generator segment-elements)
+                    this-class (build/segment-cld pkg-build build/first-segm-id)
+                    segment (emit/mk-segment-clinit this-class)
+                    ef (codegen/mk-factory segment)
                     globals primitive/primitive-nmsp-globals
                     imports (resolve/predefined-imports (.rt-lookup loader))]
-                (NmspBuilderImpl. this ns-str ef segment-elements
+                (NmspBuilderImpl. this ns-str ef segment
                                   pkg-build globals known-ns ns-alias imports
-                                  source-file segmgen/first-segm-id
-                                  (ConcurrentHashMap.))))
+                                  source-file build/first-segm-id)))
             
             (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]
               (loop [acc (mk-nmsp-builder ns-str), forms (seq ns-forms)]

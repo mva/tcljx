@@ -1,10 +1,12 @@
 (ns tcljx.parser.interop
   (:require
-   (tcljx.data [meta :as meta] [type :as type] [wrong :as wrong]
-               [context :as context] [model :as model])
+   (tcljx.data [meta :as meta] [type :as type] [resolve :as resolve]
+               [wrong :as wrong] [context :as context] [model :as model])
    (tcljx.parser [syntax :as syntax]))
   (:import
-   (tcljx.data.model Resolver ExprFactory Scope Entity ArityType ArityTypeImpl)
+   (tcljx.data.resolve Match)
+   (tcljx.data.model Resolver Expr Entity Invocable ExprFactory Parser
+                     ArityType ArityTypeImpl)
    (clojure.lang IMeta)))
 
 ;;; Returns nil if lookup fails.  The three argument arity returns an
@@ -51,36 +53,66 @@
     (or (lookup-type resolver sym)
         (throw (syntax/info "expected type expression" form)))))
 
-(defn lookup-class-entity
-  (^Entity [^Scope scope ^symbol sym]
-   (lookup-class-entity (.resolver scope) (.expr-factory scope) sym))
-  (^Entity [^Resolver resolver ^ExprFactory expr-factory ^symbol sym]
-   (letfn [(parse-param-tags ^Class/1 [^Resolver resolver ^Object ptags]
-             (when (some? ptags)
-               (let [ptags (syntax/vector ptags)
-                     a (new Class/1 (count ptags))]
-                 (dotimes [i (alength a)]
-                   (let [sym (nth ptags i)]
-                     (aset a i (if (= sym '_)
-                                 type/polymorphic
-                                 (parse-type-symbol resolver sym)))))
-                 a)))
-           
-           (resolve-class-qualified-symbol ^Entity [^Class owner ^String nm
-                                                    ^Object ptags]
-             (if-some [tp (lookup-type resolver owner nm)]
-               (.constant-entity expr-factory tp Class) ;array type
-               (let [ptags (parse-param-tags resolver ptags)]
-                 (if (.startsWith nm ".")
-                   (.class-member-entity expr-factory false owner
-                                         (.substring nm 1) ptags)
-                   (.class-member-entity expr-factory true owner nm ptags)))))]
-     (if-some [nmsp (namespace sym)]
-       (when-some [cl (.lookup-class resolver nmsp)]
-         (let [ptags (get-param-tags (.meta sym))]
-           (resolve-class-qualified-symbol cl (name sym) ptags)))
-       (when-some [cl (.lookup-class resolver (name sym))]
-         (.constant-entity expr-factory cl Class))))))
+(defn- class-member-match ^Match [^boolean static? ^Class owner ^String mnm
+                                  ^Class/1 ptags]
+  (let [ms (resolve/members-by-param-tags static? owner mnm ptags)
+        wr-info (fn ^Throwable []
+                  (let [sym (wrong/q-as-symbol owner mnm)]
+                    (-> (if (and static? (= resolve/constructor-name mnm))
+                          (if (seq ms)
+                            (str "multiple constructors matching " sym)
+                            (str "no constructor matching " sym))
+                          (let [label (if static? "static" "virtual")]
+                            (if (seq ms)
+                              (str "multiple " label " members matching " sym)
+                              (str "no " label " member matching " sym))))
+                        (wrong/wr-info))))]
+    (let [m ^Match (first ms)]
+      (if (and (some? m) (nil? (next ms)))
+        m
+        (throw (wr-info))))))
+
+(letfn [(parse-param-tags ^Class/1 [^Object ptags ^Resolver resolver]
+          (when (some? ptags)
+            (let [ptags (syntax/vector ptags)
+                  a (new Class/1 (count ptags))]
+              (dotimes [i (alength a)]
+                (let [sym (nth ptags i)]
+                  (aset a i (if (= sym '_)
+                              type/polymorphic
+                              (parse-type-symbol resolver sym)))))
+              a)))
+        (resolve ^Match [^Class owner ^String nm ^Class/1 ptags]
+          (if (.startsWith nm ".")
+            (class-member-match false owner (.substring nm 1) ptags)
+            (class-member-match true owner nm ptags)))
+        (lookup ^Object [^Resolver rsv ^ExprFactory ef ^symbol sym]
+          (let [nm (name sym)]
+            (if-some [nmsp (namespace sym)]
+              (when-some [cl (.lookup-class rsv nmsp)]
+                (if-some [tp (lookup-type rsv cl nm)]
+                  (.constant-entity ef tp Class) ;array type
+                  (let [ptags (-> (get-param-tags (.meta sym))
+                                  (parse-param-tags rsv)) 
+                        m (resolve cl nm ptags)
+                        ent (.class-member-entity ef m)]
+                    (if (and (nil? ptags) (resolve/static-field? m))
+                      (.invoke* ^Invocable ent context/fctx-none nil
+                                nil (.new-exprs ef 0))
+                      ent))))
+              (when-some [cl (.lookup-class rsv nm)]
+                (.constant-entity ef cl Class)))))]
+  
+  (defn lookup-class-entity ^Entity [^Parser parser ^symbol sym]
+    (let [x (lookup (.resolver parser) (.expr-factory parser) sym)]
+      (when (instance? Entity x)        ;filter out getstatic
+        x)))
+  (defn lookup-class-expr ^Expr [^Parser parser ^symbol sym]
+    (let [ef (.expr-factory parser)
+          x (lookup (.resolver parser) ef sym)]
+      (if (instance? Entity x)
+        (.value-of ef x sym)
+        x))))                           ;pass through getstatic
 
 ;;; ------------------------------------------------------------------------
 

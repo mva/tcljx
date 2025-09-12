@@ -1,0 +1,93 @@
+(ns tcljx.classgen.envgraph
+  (:require (tcljx.data model)
+            (tcljx.classgen emit))
+  (:import (tcljx.data.model Entity)
+           (tcljx.classgen.emit CodeBearingFragment EnvProxy ClosureBlueprint)
+           (java.util ArrayList HashMap Map$Entry)))
+
+(deftype OriginProxyPairs [^Entity/1 aorigin, ^EnvProxy/1 aproxy])
+
+(defn sorted-ops ^OriginProxyPairs [^HashMap origin-to-proxy]
+  (let [n (.size origin-to-proxy)
+        aorigin (new Entity/1 n)
+        aproxy (new EnvProxy/1 n)
+        it (-> origin-to-proxy .entrySet .iterator)]
+    (loop [i 0]
+      (when (.hasNext it)
+        (let [entry ^Map$Entry (.next it)]
+          (aset aorigin i (.getKey entry))
+          (aset aproxy i (.getValue entry))
+          (recur (inc i)))))
+    (assert (= n 1))
+    (OriginProxyPairs. aorigin aproxy)))
+
+;;; ------------------------------------------------------------------------
+
+(deftype EnvMethod [^String class-name
+                    ^int method-index   ;within this class
+                    ^int closure-level  ;of this class/entity
+                    ^EnvMethod parent ;provides this environment's values
+                    ^HashMap origin-to-proxy]
+  Object
+  (toString [_]
+    (str class-name "[" method-index "]")))
+
+(defn- mk-method ^EnvMethod [^ClosureBlueprint closure ^int method-index
+                             ^EnvMethod parent]
+  #_(println :mk-method (str (.scope-name closure)
+                             "[" method-index "] with level="
+                             (.closure-level closure)
+                             ", parent=" parent))
+  (EnvMethod. (.scope-name closure) method-index (.closure-level closure)
+              parent (.origin-to-proxy closure)))
+
+
+(deftype EnvClass [^EnvMethod/1 methods
+                   ^CodeBearingFragment cbf])
+
+(defn closes-over-env? ^boolean [^EnvClass class]
+  (let [ms (.methods class)]
+    (loop [i (dec (alength ms))]
+      (cond (neg? i) false
+            (.isEmpty (.origin-to-proxy (aget ms i))) (recur (dec i))
+            :else true))))
+
+(defn class-origin-to-proxy ^HashMap [^EnvClass class]
+  (let [methods (.methods class), n (alength methods)]
+    (if (= n 1)
+      (.origin-to-proxy (aget methods 0))
+      (let [acc ^HashMap (.clone (.origin-to-proxy (aget methods (dec n))))]
+        (loop [i (- n 2)]
+          (when (>= i 0)
+            (.putAll acc (.origin-to-proxy (aget methods i)))
+            (recur (dec i))))
+        acc))))
+
+
+(deftype EnvGraph [^EnvClass/1 classes])
+
+;;; ------------------------------------------------------------------------
+
+(defn mk-graph ^EnvGraph [^ArrayList clinit-frags ^int clinit-end]
+  (let [acc-classes (ArrayList.)]
+    (letfn [(add-cbf! ^void [^EnvMethod parent ^CodeBearingFragment cbf]
+              (let [closures (.closures cbf)
+                    n (alength closures)
+                    class-methods (new EnvMethod/1 n)]
+                (dotimes [i n]
+                  (let [closure (aget closures i)
+                        frags (.fragments closure)
+                        method (mk-method closure i parent)]
+                    ;; FIXME... drop closure's scope-name?
+                    (assert (identical? (.class-name cbf) (.scope-name closure)))
+                    (aset class-methods i method)
+                    (add-frags! method frags (.size frags))))
+                (.add acc-classes (EnvClass. class-methods cbf))))
+            (add-frags! ^void [^EnvMethod parent ^ArrayList frags ^int frags-end]
+              (dotimes [i frags-end]
+                (let [frag (.get frags i)]
+                  (condp instance? frag
+                    CodeBearingFragment (add-cbf! parent frag)
+                    #_else nil))))]
+      (add-frags! nil clinit-frags clinit-end)
+      (EnvGraph. (.toArray acc-classes (new EnvClass/1 0))))))

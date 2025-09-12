@@ -1,38 +1,38 @@
 (ns tcljx.parser.loop
   (:require
    (tcljx.data [wrong :as wrong] [context :as context] [model :as model])
-   (tcljx.parser [syntax :as syntax] [interop :as interop]))
+   (tcljx.parser [syntax :as syntax] [parse :as parse] [interop :as interop]))
   (:import
-   (tcljx.data.model Expr Exprs Binding Scope)))
+   (tcljx.data.model Expr Exprs Binding Parser)))
 
-(defn parse-loop-body ^Expr [^Scope scope ^seq error-context
+(defn parse-loop-body ^Expr [^Parser parser ^seq error-context
                              ^long fctx ^Exprs bnd-xs ^seq body]
-  (let [fctx' (bit-or fctx context/flag-can-recur)
-        scope' (.with-recur-parameters scope bnd-xs)]
-    (.block-loop (.expr-factory scope') fctx'
+  (let [fctx' (context/with-recur fctx)
+        parser' (.with-recur-parameters parser bnd-xs)]
+    (.block-loop (.expr-factory parser') fctx'
                  (if (nil? error-context)
-                   (context/parse-progn scope' fctx' body)
-                   (context/parse-progn scope' error-context fctx' body)))))
+                   (parse/progn parser' fctx' body)
+                   (parse/progn parser' error-context fctx' body)))))
 
-(defn parse-loop* ^Expr [^Scope scope ^long fctx [_ bindings & body :as form]]
+(defn parse-loop* ^Expr [^Parser parser ^long fctx [_ bindings & body :as form]]
   (let [bindings (syntax/vector bindings true)
         n (quot (count bindings) 2)
-        ef (.expr-factory scope)
+        ef (.expr-factory parser)
         bnd-xs (.new-exprs ef n)]
-    (loop [scope scope, i 0]
+    (loop [parser parser, i 0]
       (if (< i n)
         (let [nm-sym (nth bindings (* i 2))
               nm (syntax/simple-symbol-str nm-sym)
               init (nth bindings (inc (* i 2)))
-              opt-type (interop/resolve-tag (.resolver scope) nm-sym nil)
+              opt-type (interop/resolve-tag (.resolver parser) nm-sym nil)
               bnd-x (.binding-fresh ef fctx opt-type nm
-                                    (context/parse-arg scope fctx init))]
+                                    (parse/arg parser fctx init))]
           (.set bnd-xs i bnd-x)
-          (recur (context/with-local-binding scope bnd-x) (inc i)))
-        (parse-loop-body scope nil fctx bnd-xs body)))))
+          (recur (model/with-local-binding parser bnd-x) (inc i)))
+        (parse-loop-body parser nil fctx bnd-xs body)))))
 
-(defn parse-recur ^Expr [^Scope scope ^long fctx [_ & args :as form]]
+(defn parse-recur ^Expr [^Parser parser ^long fctx [_ & args :as form]]
   (if (context/can-recur? fctx)
-    (->> (context/parse-args scope fctx args)
-         (.recur-expr (.expr-factory scope) fctx))
+    (->> (parse/args parser fctx args)
+         (.recur-expr (.expr-factory parser) fctx))
     (throw (syntax/info "cannot recur from this position"))))

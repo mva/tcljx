@@ -262,7 +262,7 @@
   (let [exp '[(LDC "foo")
               (INVOKEVIRTUAL Object "toString" "()Ljava/lang/String;")
               (ARETURN)]]
-    (is (= exp (asm-expr (.toString ^Object (identity "foo")))))
+    (is (= exp (asm-expr (.toString ^Object (do "foo")))))
     (is (= exp (asm-expr (Object/.toString "foo"))))
     (is (= exp (asm-expr (^{:param-tags []} Object/.toString "foo"))))
     (is (thrown-with-msg? WrongInfo #"no virtual member"

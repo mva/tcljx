@@ -5,7 +5,7 @@
    (tcljx.classgen [runtime :as rt] [emit :as emit] [entity :as entity]
                    [insn :as insn]))
   (:import
-   (tcljx.data.model Exprs CodeEmitter Loadable)
+   (tcljx.data.model Exprs CodeEmitter Constant)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile CodeBuilder Label)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
@@ -19,7 +19,7 @@
             (loop [seen seen, i 0]
               (if (< i (.length guards))
                 (let [guard-tp (insn/expr-type guards i)
-                      guard-val (Loadable/.datafy (insn/emitter guards i))]
+                      guard-val (Constant/.datafy (insn/emitter guards i))]
                   (when-not (type/assignable-from? select-tp guard-tp)
                     (-> (str "guard " guard-val " not compatible with select "
                              "expression " (wrong/q-type select-tp)
@@ -158,8 +158,8 @@
              les (for [^Insns xs guards]
                    (-> (if (= (.length xs) 1)
                          (insn/emitter xs 0)
-                         (entity/mk-loadable (.emitters xs) type/list false))
-                       (Loadable/.loadable-entry cpb false)))
+                         (entity/mk-collection (.emitters xs) type/list false))
+                       (Constant/.loadable-entry cpb false)))
              bsm (.bsmEntry cpb mhe les)
              mtd (MethodTypeDesc/of ConstantDescs/CD_int
                                     ConstantDescs/CD_Object)

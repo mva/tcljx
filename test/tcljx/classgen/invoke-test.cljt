@@ -11,9 +11,6 @@
    [tcljx.alpha.ptest :refer :all])
   (:import (tcljx.data.wrong WrongInfo)))
 
-;;; Note: Some of the tests below may need an (identity ...) wrapper
-;;; eventually.
-
 (deftest constructor-invoke-test
   (is (= '[(NEW HashMap) (DUP)
            (INVOKESPECIAL HashMap "<init>" "()V")
@@ -57,7 +54,7 @@
            (ACONST_NULL)
            (ARETURN)]
          (asm-expr [^java.lang.invoke.MethodHandles$Lookup l]
-                   (identity (. tinyclj.lang.RT setCoreLookup l)))))
+                   (. tinyclj.lang.RT setCoreLookup l))))
 
   ;; Math/log takes a double and requires implicit conversion from int
   (is (= '[[LDC2_W 123.0]
