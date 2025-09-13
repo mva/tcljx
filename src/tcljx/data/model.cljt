@@ -75,6 +75,7 @@
   ;; a regular value at runtime.  This is the case for macros and most
   ;; primitive functions.
   (value-type ^Class [])
+  (value-type-exact ^ClassDesc [])      ;only available in emit phase
   
   ;; The level of the scope that bounds visibility and accessibility
   ;; of this entity and, for a closure, the entity's sequence number

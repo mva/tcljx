@@ -94,6 +94,8 @@
   Entity
   (value-type [_]
     tinyclj.lang.AFnMh)
+  (value-type-exact [_]
+    (.value-type-exact __emit-entity))
   (entity-id [_]
     entity-id)
   InvocableArity
@@ -147,6 +149,8 @@
   Entity
   (value-type [_]
     tinyclj.lang.StaticFn)
+  (value-type-exact [_]
+    runtime/StaticFn)
   (entity-id [_]
     entity-id)
   
@@ -293,6 +297,8 @@
   Entity
   (value-type [_]
     tinyclj.lang.AFnMh)
+  (value-type-exact [_]
+    this-class)
   (entity-id [_]
     entity-id)
   
@@ -479,12 +485,3 @@
     (if (envgraph/closes-over-env? class)
       (as-fn-virtual acc class)
       (as-fn-static acc (.owner cbf) (.class-name cbf) (.fn-proxy cbf)))))
-
-(defn value-type-exact ^ClassDesc [^Insn insn ^Class or-else]
-  (let [ce (.emitter insn)]
-    (if (instance? FnProxy ce)
-      (let [ce* (.get-emit-entity ^FnProxy ce)]
-        (if (instance? FnVirtual ce*)
-          (.this-class ^FnVirtual ce*)
-          runtime/StaticFn))
-      (reflect/describe-class or-else))))

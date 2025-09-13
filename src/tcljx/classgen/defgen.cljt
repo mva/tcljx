@@ -1,23 +1,23 @@
 (ns tcljx.classgen.defgen
   (:require
-   (tcljx.data [reflect :as reflect] [context :as context] [model :as model])
-   (tcljx.classgen [classfile :as classfile] [insn :as insn]
-                   [entity :as entity] [emit :as emit] [fngen :as fngen]))
+   (tcljx.data [config :as cfg] [reflect :as reflect] [context :as context]
+               [model :as model])
+   (tcljx.classgen [classfile :as classfile] [insn :as insn] [entity :as entity]
+                   [emit :as emit]))
   (:import
    (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound Invocable Binding)
-   (tcljx.classgen.emit OwnedFragment ClosureBlueprint)
+   (tcljx.classgen.emit OwnedFragment ClosureBlueprint IEmitProxy)
    (tcljx.classgen.insn Insn)
-   (tcljx.classgen.fngen FnProxy)
    (java.lang.classfile ClassFile ClassBuilder)
    (java.lang.constant MethodTypeDesc ClassDesc)
    (java.util.function Consumer)))
 
 (defn- field-fragment ^OwnedFragment [^int or-flags ^ClassDesc owner ^String nm
-                                      ^Class tp ^Insn init]
+                                      ^Class tp ^CodeEmitter init-ce]
   (reify OwnedFragment
     (emit-insn* [_ xb consumed-type _]
       (entity/with-void-empty-if-requested consumed-type
-        (.getstatic xb owner nm (fngen/value-type-exact init tp))
+        (.getstatic xb owner nm (emit/value-type-exact init-ce tp))
         tp))
     
     (value-type [_]
@@ -25,25 +25,25 @@
     (entity-id [_]
       model/entity-id-def)
     (emit-setup-code? [_ xb]
-      (or (identical? insn/insn-empty init)
-          (when (emit/insn? xb context/fctx-none tp (.emitter init))
-            (.putstatic xb owner nm (fngen/value-type-exact init tp))
+      (or (identical? entity/emitter-empty init-ce)
+          (when (emit/insn? xb context/fctx-none tp init-ce)
+            (.putstatic xb owner nm (emit/value-type-exact init-ce tp))
             true)))
     
     (prepare-for-emit! [_ acc]
       (->> (^Consumer fn ^void [^ClassBuilder cb]
-            (.withField cb nm (fngen/value-type-exact init tp)
+            (.withField cb nm (emit/value-type-exact init-ce tp)
                         (bit-or ClassFile/ACC_STATIC
                                 ClassFile/ACC_PUBLIC ;unless namespace private
                                 or-flags)))
            (emit/add-segment-elements acc)))))
 
 (defn- method-fragment ^OwnedFragment [^ClassDesc owner ^String nm
-                                       ^Class tp ^Insn init]
+                                       ^Class tp ^CodeEmitter init-ce]
   (reify OwnedFragment
     (emit-insn* [_ xb consumed-type _]
       (entity/with-void-empty-if-requested consumed-type
-        (let [tpd (fngen/value-type-exact init tp)]
+        (let [tpd (emit/value-type-exact init-ce tp)]
           (.invokestatic xb owner nm (MethodTypeDesc/of tpd))
           tp)))
     
@@ -56,13 +56,13 @@
     
     (prepare-for-emit! [_ acc]
       (->> (^Consumer fn ^void [^ClassBuilder cb]
-            (let [tpd (fngen/value-type-exact init tp)]
+            (let [tpd (emit/value-type-exact init-ce tp)]
               (classfile/with-method-body-> cb
                 [nm (MethodTypeDesc/of tpd) classfile/acc-method-static]
-                (insn/emit-return tp init))))
+                (emit/then-leave? cfg/no-line-number tp init-ce true))))
            (emit/add-segment-elements acc)))))
 
-(deftype DefOfFnProxy [^ClassDesc owner ^String nm ^Class tp ^Insn init
+(deftype DefOfProxy [^ClassDesc owner ^String nm ^Class tp ^IEmitProxy proxy
                        ^:unsynchronized-mutable ^OwnedFragment of]
   CodeEmitter
   (emit-insn* [_ xb consumed-type then-leave?]
@@ -76,11 +76,11 @@
     (.emit-setup-code? of xb))
   OwnedFragment
   (prepare-for-emit! [_ acc] ;decides translation pattern based on `init`
-    (->> (set! of (if (entity/const?
-                       (.get-emit-entity ^FnProxy (.emitter init)))
-                    (method-fragment owner nm tp init)
-                    (field-fragment ClassFile/ACC_FINAL owner nm tp init)))
-         (emit/prepare-for-emit! acc))))
+    (let [ce* (.get-emit-entity proxy)]
+      (->> (set! of (if (entity/const? ce*)
+                      (method-fragment owner nm tp ce*)
+                      (field-fragment ClassFile/ACC_FINAL owner nm tp ce*)))
+           (emit/prepare-for-emit! acc)))))
 
 (letfn [(invocable-fragment ^Entity [^OwnedFragment of ^Invocable inv]
           (reify Invocable LoadFromCopyWhenBound
@@ -101,11 +101,11 @@
           owner (.segment-class segm)
           of (cond
                (entity/const? init-ce)
-               (method-fragment owner nm sink-type init)
-               (instance? FnProxy init-ce)
-               (DefOfFnProxy. owner nm sink-type init nil)
+               (method-fragment owner nm sink-type init-ce)
+               (instance? IEmitProxy init-ce)
+               (DefOfProxy. owner nm sink-type init-ce nil)
                :else
-               (field-fragment ClassFile/ACC_FINAL owner nm sink-type init))]
+               (field-fragment ClassFile/ACC_FINAL owner nm sink-type init-ce))]
       (emit/stage-fragment! segm of)
       (-> (if (and (model/invocable? init-ce) (not (model/invocable? of)))
             (invocable-fragment of init-ce)
@@ -116,6 +116,6 @@
     (let [sink-type (insn/logical-type init)
           init-ce (insn/emitter init)
           of (field-fragment ClassFile/ACC_VOLATILE (.segment-class segm) nm
-                             sink-type init)]
+                             sink-type init-ce)]
       (emit/stage-fragment! segm of)
       (entity/mk-binding of nm false))))

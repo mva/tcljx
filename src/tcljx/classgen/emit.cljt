@@ -284,6 +284,11 @@
   (set-emit-entity! ^void [^Entity ent])
   (get-emit-entity ^Entity []))
 
+(defn value-type-exact ^ClassDesc [^CodeEmitter ce ^Class or-else]
+  (if (instance? Entity ce)
+     (.value-type-exact ^Entity ce)
+     (reflect/describe-class or-else)))
+
 ;;; Local copy of a value taken from the entity `origin`, where
 ;;; `origin` is defined by a parent of the current function (or reify,
 ;;; or interface function).
