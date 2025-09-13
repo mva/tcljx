@@ -2,8 +2,17 @@
   (:require (tcljx.data model)
             (tcljx.classgen emit))
   (:import (tcljx.data.model Entity)
-           (tcljx.classgen.emit CodeBearingFragment EnvProxy ClosureBlueprint)
+           (tcljx.classgen.emit EnvProxy ClosureBlueprint SegmentAcc)
+           (java.lang.constant ClassDesc)
            (java.util ArrayList HashMap Map$Entry)))
+
+(deftype CodeBearingFragment [^ClassDesc owner ;if inlined into nmsp segment
+                              ^String class-name ;if turned into separate class
+                              ^String this-name ;name of any receiver locals
+                              ^Entity fn-proxy
+                              ^ClosureBlueprint/1 closures])
+
+;;; ------------------------------------------------------------------------
 
 (deftype OriginProxyPairs [^Entity/1 aorigin, ^EnvProxy/1 aproxy])
 
@@ -64,11 +73,20 @@
         acc))))
 
 
+;;; Can add clinit code, class elements, or whole classes to the
+;;; segment under construction.
+(definterface PreparationTask
+  (extend-segment ^SegmentAcc [^SegmentAcc acc ^EnvClass class]))
+
+(defn run-task ^SegmentAcc [^SegmentAcc acc ^PreparationTask task ^EnvClass class]
+  (.extend-segment task acc class))
+
+
 (deftype EnvGraph [^EnvClass/1 classes])
 
 ;;; ------------------------------------------------------------------------
 
-(defn mk-graph ^EnvGraph [^ArrayList clinit-frags ^int clinit-end]
+(defn mk-graph ^EnvGraph [^ArrayList tasks ^int tasks-end]
   (let [acc-classes (ArrayList.)]
     (letfn [(add-cbf! ^void [^EnvMethod parent ^CodeBearingFragment cbf]
               (let [closures (.closures cbf)
@@ -76,18 +94,18 @@
                     class-methods (new EnvMethod/1 n)]
                 (dotimes [i n]
                   (let [closure (aget closures i)
-                        frags (.fragments closure)
+                        tasks (.tasks closure)
                         method (mk-method closure i parent)]
                     ;; FIXME... drop closure's scope-name?
                     (assert (identical? (.class-name cbf) (.scope-name closure)))
                     (aset class-methods i method)
-                    (add-frags! method frags (.size frags))))
+                    (add-tasks! method tasks (.size tasks))))
                 (.add acc-classes (EnvClass. class-methods cbf))))
-            (add-frags! ^void [^EnvMethod parent ^ArrayList frags ^int frags-end]
-              (dotimes [i frags-end]
-                (let [frag (.get frags i)]
+            (add-tasks! ^void [^EnvMethod parent ^ArrayList tasks ^int tasks-end]
+              (dotimes [i tasks-end]
+                (let [frag (.get tasks i)]
                   (condp instance? frag
                     CodeBearingFragment (add-cbf! parent frag)
                     #_else nil))))]
-      (add-frags! nil clinit-frags clinit-end)
+      (add-tasks! nil tasks tasks-end)
       (EnvGraph. (.toArray acc-classes (new EnvClass/1 0))))))

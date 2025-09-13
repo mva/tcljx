@@ -95,15 +95,15 @@
                     this segm-size-at-start (.bindings* parser)
                     imports-at-start)
                    (parse/form parser fctx form)))]
-      (emit/stage-fragment! segment (.emitter expr))
+      (emit/stage-task! segment (.emitter expr))
       this))
 
   (finish [this]
     (.commit-segment-and-revert this (emit/size-staged segment) globals imports)
     (build/capstone pkg-build current-segm-id)
     (ProvidedNamespace. ns-str))
-  (commit-segment-and-revert [_ segment-end then-globals then-imports]
-    (let [segm-acc (build/prepare-segment (.fragments segment) segment-end)]
+  (commit-segment-and-revert [_ end-of-segment then-globals then-imports]
+    (let [segm-acc (build/prepare-segment (.tasks segment) end-of-segment)]
       (build/segment pkg-build current-source-file current-segm-id segm-acc))
     
     ;; revert back to requested state & move to next segment

@@ -8,9 +8,9 @@
    (tcljx.data.model Constant Invocable ArityType ArityTypeImpl AritySpec
                      CodeEmitter Entity)
    (tcljx.data.resolve Match)
-   (tcljx.classgen.emit CodeBearingFragment ClosureBlueprint EnvProxy SegmentAcc)
+   (tcljx.classgen.emit ClosureBlueprint EnvProxy SegmentAcc IEmitProxy)
    (tcljx.classgen.insn Insn Insns)
-   (tcljx.classgen.envgraph EnvClass OriginProxyPairs)
+   (tcljx.classgen.envgraph EnvClass OriginProxyPairs PreparationTask)
    (java.lang.classfile ClassFile ClassBuilder CodeBuilder TypeKind)
    (java.lang.classfile.instruction SwitchCase)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
@@ -20,22 +20,11 @@
    (java.util HashMap)
    (java.util.function Consumer)))
 
-(defn- mtd-of-arity-type ^MethodTypeDesc [^ArityType at]
-  (MethodTypeDesc/of (reflect/describe-class (.return-type at))
-                     (reflect/describe-class* (.parameter-types at))))
-
-
-(defn- set-static-mhd! ^void [^DirectMethodHandleDesc/1 mhds
-                              ^ClassDesc owner ^String method-name-prefix
-                              ^AritySpec/1 specs]
-  (dotimes [i (alength mhds)]
-    (let [spec (aget specs i)]
-      (->> (or (.redirection spec)
-               (let [at (.at spec)
-                     nm (str method-name-prefix "~" (.parameter-count at))]
-                 (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
-                                            owner nm (mtd-of-arity-type at))))
-           (aset mhds i)))))
+(definterface InvocableArity ;provides hook for FnProxy implementation
+  :extends [Invocable]
+  (arity-specs ^AritySpec/1 [])
+  (emit-invoke-arity ^Class [^CodeBuilder xb ^long fctx ^CodeEmitter opt-f
+                             ^Insns xs ^int at-idx]))
 
 (defn- arity-index ^int [^AritySpec/1 arity-specs ^int arg-count]
   (loop [i (dec (alength arity-specs))]
@@ -43,6 +32,17 @@
       (neg? i) (assert false)
       (= (-> arity-specs (aget i) .at .parameter-count) arg-count) i
       :else (recur (dec i)))))
+
+(defn select-arity ^int [^AritySpec/1 arity-specs ^Insns xs]
+  (let [at-idx (arity-index arity-specs (.length xs))
+        at (.at (aget arity-specs at-idx))
+        ptypes (.parameter-types at)
+        fixed (model/fixed-parameter-count at)]
+    (insn/ensure-assignables ptypes xs fixed)
+    (when (< fixed (alength ptypes)) ;any arguments passed as varargs?
+      (insn/ensure-assignable* (.getComponentType (aget ptypes fixed))
+                               xs fixed))
+    at-idx))
 
 (letfn [(index-map ^int/1 [^AritySpec/1 arity-specs]
           (let [a (new int/1 (alength arity-specs))]
@@ -69,72 +69,9 @@
           (aset sorted i (aget mhds (short (aget a i))))) ;mask index
         sorted))))
 
-(defn select-arity ^int [^AritySpec/1 arity-specs ^Insns xs]
-  (let [at-idx (arity-index arity-specs (.length xs))
-        at (.at (aget arity-specs at-idx))
-        ptypes (.parameter-types at)
-        fixed (model/fixed-parameter-count at)]
-    (insn/ensure-assignables ptypes xs fixed)
-    (when (< fixed (alength ptypes)) ;any arguments passed as varargs?
-      (insn/ensure-assignable* (.getComponentType (aget ptypes fixed))
-                               xs fixed))
-    at-idx))
-
-(definterface InvocableArity ;provides hook for FnProxy implementation
-  :extends [Invocable]
-  (emit-invoke-arity ^Class [^CodeBuilder xb ^long fctx ^CodeEmitter opt-f
-                             ^Insns xs ^int at-idx]))
-(definterface IFnProxy
-  :extends [InvocableArity tcljx.classgen.emit.IEmitProxy])
-(deftype FnProxy [^AritySpec/1 arity-specs ^int entity-id
-                  ^:unsynchronized-mutable ^InvocableArity __emit-entity]
-  CodeEmitter
-  (emit-insn* [this xb consumed-type then-leave?]
-    (.emit-insn* __emit-entity xb consumed-type then-leave?))
-  Entity
-  (value-type [_]
-    tinyclj.lang.AFnMh)
-  (value-type-exact [_]
-    (.value-type-exact __emit-entity))
-  (entity-id [_]
-    entity-id)
-  InvocableArity
-  (invoke* [this fctx form opt-f xs]
-    (let [at-idx (select-arity arity-specs xs)
-          at (.at (aget arity-specs at-idx))]
-      (-> (^CodeEmitter fn [xb _ _] ;trampoline avoids capture of __emit-entity
-           (.emit-invoke-arity this xb fctx opt-f xs at-idx))
-          (insn/mk-insn (.return-type at)))))
-  (emit-invoke-arity [_ xb fctx opt-f xs at-idx] ;picks up current __emit-entity
-    (.emit-invoke-arity __emit-entity xb fctx opt-f xs at-idx))
-  IFnProxy
-  (set-emit-entity! [_ ent]
-    (set! __emit-entity ent))
-  (get-emit-entity [_]
-    __emit-entity))
-
-(defn partial-fn-literal ^FnProxy [^int entity-id
-                                   ^AritySpec/1 partial-arity-specs]
-  (FnProxy. partial-arity-specs entity-id nil))
-
-(letfn [(with-code ^AritySpec [^AritySpec spec ^Insn code]
-          (let [rt (-> spec .at .return-type)
-                va? (model/translates-to-varargs? (.at spec))
-                redir (insn/redirecting-to code rt va? nil)]
-            (-> (if (type/auto-return-marker? rt)
-                  (let [expr-tp (insn/expr-type code)
-                        logical-tp (type/expr-to-logical expr-tp)]
-                    (.with-return-type (.at spec) logical-tp))
-                  (.at spec))
-                (AritySpec. (.body spec) redir (.error-context spec) code))))]
-  
-  (defn update-arities ^FnProxy [^FnProxy fn-proxy ^Insns arity-codes]
-    ;; update overwrite any auto-return-marker return types
-    (let [arity-specs (.arity-specs fn-proxy)]
-      (dotimes [i (alength arity-specs)]
-        (aset (.arity-specs fn-proxy) i
-              (with-code (aget arity-specs i) (.get arity-codes i)))))
-    fn-proxy))
+(defn- mtd-of-arity-type ^MethodTypeDesc [^ArityType at]
+  (MethodTypeDesc/of (reflect/describe-class (.return-type at))
+                     (reflect/describe-class* (.parameter-types at))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -194,6 +131,63 @@
                  (doto (new DirectMethodHandleDesc/1 1)
                    (aset 0 (.redirection spec)))))))
 
+;;; ------------------------------------------------------------------------
+
+(defn- factory-mtd-for ^MethodTypeDesc [^ClassDesc this-class ^Entity/1 ents]
+  (let [tps (new Class/1 (alength ents))]
+    (dotimes [i (alength tps)]
+      (aset tps i (.value-type (aget ents i))))
+    (MethodTypeDesc/of this-class (reflect/describe-class* tps))))
+
+(deftype FnVirtual [^int entity-id ^AritySpec/1 arity-specs
+                    ^DirectMethodHandleDesc/1 mhds
+                    ^ClassDesc this-class
+                    ^OriginProxyPairs construction-ops]
+  CodeEmitter
+  (emit-insn* [this xb consumed-type then-leave?]
+    (when (emit/entities? xb (.aorigin construction-ops))
+      (.invokestatic xb this-class runtime/name-factory-method
+                     (factory-mtd-for this-class (.aorigin construction-ops)))
+      tinyclj.lang.AFnMh))
+  
+  Entity
+  (value-type [_]
+    tinyclj.lang.AFnMh)
+  (value-type-exact [_]
+    this-class)
+  (entity-id [_]
+    entity-id)
+  
+  InvocableArity
+  (invoke* [this fctx form f xs]
+    (let [at-idx (select-arity arity-specs xs)
+          at (.at (aget arity-specs at-idx))]
+      (-> (^CodeEmitter fn [xb _ _]
+           (insn/emit-invoke-arity (aget mhds at-idx) at xs fctx xb))
+          (insn/mk-insn (.return-type at)))))
+  (emit-invoke-arity [_ xb fctx f xs at-idx]
+    (when (emit/insn? xb fctx tinyclj.lang.AFnMh f)
+      (let [at (.at (aget arity-specs at-idx))]
+        (insn/emit-invoke-arity (aget mhds at-idx) at xs fctx xb)))))
+
+
+(definterface FnProxy
+  :extends [InvocableArity IEmitProxy PreparationTask])
+
+;;; -----------------------------------------------------------------------
+
+(defn- set-static-mhd! ^void [^DirectMethodHandleDesc/1 mhds
+                              ^ClassDesc owner ^String method-name-prefix
+                              ^AritySpec/1 specs]
+  (dotimes [i (alength mhds)]
+    (let [spec (aget specs i)]
+      (->> (or (.redirection spec)
+               (let [at (.at spec)
+                     nm (str method-name-prefix "~" (.parameter-count at))]
+                 (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
+                                            owner nm (mtd-of-arity-type at))))
+           (aset mhds i)))))
+
 (defn- as-fn-static ^SegmentAcc [^SegmentAcc acc ^ClassDesc owner
                                  ^String name-prefix ^FnProxy fn-proxy]
   (let [arity-specs (.arity-specs fn-proxy)
@@ -228,12 +222,6 @@
 (def ^:private fn-virtual-class-flags (bit-or ClassFile/ACC_PUBLIC
                                               ClassFile/ACC_FINAL))
 
-(defn- factory-mtd-for ^MethodTypeDesc [^ClassDesc this-class ^Entity/1 ents]
-  (let [tps (new Class/1 (alength ents))]
-    (dotimes [i (alength tps)]
-      (aset tps i (.value-type (aget ents i))))
-    (MethodTypeDesc/of this-class (reflect/describe-class* tps))))
-
 (defn- virtual-field ^Entity [^ClassDesc owner ^String nm ^Class type]
   (let [type-desc (reflect/describe-class type)]
     (reify Entity
@@ -267,13 +255,6 @@
                                         (.value-type origin)))))
     acc))
 
-#_(defn- field-entities ^Entity/1 [^ClassDesc this-class
-                                   ^OriginProxyPairs construction-ops]
-    (let [aorigin (.aorigin construction-ops)
-          aproxy (.aproxy construction-ops)]
-      )
-    )
-
 (defn- set-virtual-mhd! ^void [^DirectMethodHandleDesc/1 mhds
                                ^ClassDesc owner ^AritySpec/1 specs]
   (dotimes [i (alength mhds)]
@@ -282,37 +263,6 @@
       (->> (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/VIRTUAL
                                       owner mnm (mtd-of-arity-type at))
            (aset mhds i)))))
-
-(deftype FnVirtual [^int entity-id ^AritySpec/1 arity-specs
-                    ^DirectMethodHandleDesc/1 mhds
-                    ^ClassDesc this-class
-                    ^OriginProxyPairs construction-ops]
-  CodeEmitter
-  (emit-insn* [this xb consumed-type then-leave?]
-    (when (emit/entities? xb (.aorigin construction-ops))
-      (.invokestatic xb this-class runtime/name-factory-method
-                     (factory-mtd-for this-class (.aorigin construction-ops)))
-      tinyclj.lang.AFnMh))
-  
-  Entity
-  (value-type [_]
-    tinyclj.lang.AFnMh)
-  (value-type-exact [_]
-    this-class)
-  (entity-id [_]
-    entity-id)
-  
-  InvocableArity
-  (invoke* [this fctx form f xs]
-    (let [at-idx (select-arity arity-specs xs)
-          at (.at (aget arity-specs at-idx))]
-      (-> (^CodeEmitter fn [xb _ _]
-           (insn/emit-invoke-arity (aget mhds at-idx) at xs fctx xb))
-          (insn/mk-insn (.return-type at)))))
-  (emit-invoke-arity [_ xb fctx f xs at-idx]
-    (when (emit/insn? xb fctx tinyclj.lang.AFnMh f)
-      (let [at (.at (aget arity-specs at-idx))]
-        (insn/emit-invoke-arity (aget mhds at-idx) at xs fctx xb)))))
 
 (letfn [(virtual-fields ^ClassBuilder [^ClassBuilder cb ^MethodTypeDesc mtd
                                        ^String/1 field-names]
@@ -477,11 +427,67 @@
            (emit/add-class-file acc this-class fn-virtual-class-flags
                                 runtime/AFn)))))
 
-;;; -----------------------------------------------------------------------
+;;; ------------------------------------------------------------------------
 
-(defn prepare-fn-proxy ^SegmentAcc [^SegmentAcc acc ^EnvClass class]
-  (let [cbf (.cbf class)]
-    #_(prn :prepare-fn-proxy (.class-name cbf))
-    (if (envgraph/closes-over-env? class)
-      (as-fn-virtual acc class)
-      (as-fn-static acc (.owner cbf) (.class-name cbf) (.fn-proxy cbf)))))
+(deftype FnProxyImpl [^AritySpec/1 arity-specs ^int entity-id
+                      ^:unsynchronized-mutable ^InvocableArity __emit-entity]
+  CodeEmitter
+  (emit-insn* [this xb consumed-type then-leave?]
+    (.emit-insn* __emit-entity xb consumed-type then-leave?))
+  
+  Entity
+  (value-type [_]
+    tinyclj.lang.AFnMh)
+  (value-type-exact [_]
+    (.value-type-exact __emit-entity))
+  (entity-id [_]
+    entity-id)
+  
+  InvocableArity
+  (arity-specs [_]
+    arity-specs)
+  (invoke* [this fctx form opt-f xs]
+    (let [at-idx (select-arity arity-specs xs)
+          at (.at (aget arity-specs at-idx))]
+      (-> (^CodeEmitter fn [xb _ _] ;trampoline avoids capture of __emit-entity
+           (.emit-invoke-arity this xb fctx opt-f xs at-idx))
+          (insn/mk-insn (.return-type at)))))
+  (emit-invoke-arity [_ xb fctx opt-f xs at-idx] ;picks up current __emit-entity
+    (.emit-invoke-arity __emit-entity xb fctx opt-f xs at-idx))
+  
+  FnProxy
+  (set-emit-entity! [_ ent]
+    (set! __emit-entity ent))
+  (get-emit-entity [_]
+    __emit-entity)
+  (extend-segment [_ acc class]
+    (if (some? class) ;ignore unless called with environment information
+      (let [cbf (.cbf class)]
+        #_(prn :prepare-fn-proxy (.class-name cbf))
+        (if (envgraph/closes-over-env? class)
+          (as-fn-virtual acc class)
+          (as-fn-static acc (.owner cbf) (.class-name cbf) (.fn-proxy cbf))))
+      acc)))
+
+(defn partial-fn-literal ^FnProxy [^int entity-id
+                                   ^AritySpec/1 partial-arity-specs]
+  (FnProxyImpl. partial-arity-specs entity-id nil))
+
+(letfn [(with-code ^AritySpec [^AritySpec spec ^Insn code]
+          (let [rt (-> spec .at .return-type)
+                va? (model/translates-to-varargs? (.at spec))
+                redir (insn/redirecting-to code rt va? nil)]
+            (-> (if (type/auto-return-marker? rt)
+                  (let [expr-tp (insn/expr-type code)
+                        logical-tp (type/expr-to-logical expr-tp)]
+                    (.with-return-type (.at spec) logical-tp))
+                  (.at spec))
+                (AritySpec. (.body spec) redir (.error-context spec) code))))]
+  
+  (defn update-arities ^FnProxy [^FnProxy fn-proxy ^Insns arity-codes]
+    ;; update overwrite any auto-return-marker return types
+    (let [arity-specs (.arity-specs fn-proxy)]
+      (dotimes [i (alength arity-specs)]
+        (aset (.arity-specs fn-proxy) i
+              (with-code (aget arity-specs i) (.get arity-codes i)))))
+    fn-proxy))

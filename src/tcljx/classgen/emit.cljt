@@ -33,18 +33,6 @@
   acc)
 
 
-;;; Produces both class elements and instructions for clinit.
-;;; Implictly closes over the ClassDesc of the owning segment, as well
-;;; as the initial value used by `emit-setup-code?`.
-;;; `prepare-for-emit!` is called once, before any of the emit related
-;;; methods.
-(definterface OwnedFragment
-  :extends [Entity LoadFromCopyWhenBound]
-  (prepare-for-emit! ^SegmentAcc [^SegmentAcc acc]))
-
-(defn prepare-for-emit! ^SegmentAcc [^SegmentAcc acc ^OwnedFragment of]
-  (.prepare-for-emit! of acc))
-
 ;;; ------------------------------------------------------------------------
 
 ;;; Line numbers are written to enable accurate stack traces.  Any
@@ -259,7 +247,7 @@
   (closure-level ^int [])
   (next-entity-id ^int []))
 
-(deftype ClosureBlueprint [^ClassDesc segment-class ^ArrayList fragments
+(deftype ClosureBlueprint [^ClassDesc segment-class ^ArrayList tasks
                            ^ConcurrentHashMap private-name-map
                            ^String scope-name ^HashMap origin-to-proxy
                            ^Entity this-fn-proxy
@@ -273,11 +261,11 @@
     (set! curr-entity-id (inc curr-entity-id))))
 
 (defn size-staged ^int [^ClosureBlueprint cbp]
-  (.size (.fragments cbp)))
-(defn stage-fragment! [^ClosureBlueprint cbp frag]
-  ;; clinit frag: one of OwnedFragment, CodeBearingFragment, or CodeEmitter
-  ;; non-clinit frag: CodeBearingFragment
-  (.add (.fragments cbp) frag))
+  (.size (.tasks cbp)))
+(defn stage-task! [^ClosureBlueprint cbp task]
+  ;; clinit task: one of PreparationTask, CodeBearingFragment, or CodeEmitter
+  ;; non-clinit task: CodeBearingFragment
+  (.add (.tasks cbp) task))
 
 (definterface IEmitProxy
   :extends [Invocable]
@@ -358,11 +346,11 @@
 
 (letfn [(closure ^ClosureBlueprint [^ClosureBlueprint parent
                                     ^String unique-nm ^Entity this-fn-proxy]
-          (let [nested-frags (ArrayList.)
+          (let [nested-tasks (ArrayList.)
                 level' (if (some? unique-nm)
                          (inc (.closure-level parent))
                          model/closure-level-clinit)]
-            (ClosureBlueprint. (.segment-class parent) nested-frags
+            (ClosureBlueprint. (.segment-class parent) nested-tasks
                                (.private-name-map parent) unique-nm
                                (HashMap.) this-fn-proxy
                                (model/entity-id-of level'))))]
@@ -379,10 +367,3 @@
         (aset a i (closure parent unique-nm this-fn-proxy)))
       a)))
 
-;;; ------------------------------------------------------------------------
-
-(deftype CodeBearingFragment [^ClassDesc owner ;if inlined into nmsp segment
-                              ^String class-name ;if turned into separate class
-                              ^String this-name ;name of any receiver locals
-                              ^Entity fn-proxy
-                              ^ClosureBlueprint/1 closures])

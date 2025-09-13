@@ -4,7 +4,7 @@
     [config :as cfg] [wrong :as wrong] [context :as context] [type :as type]
     [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen
-    [classfile :as classfile] [runtime :as rt] [emit :as emit]
+    [classfile :as classfile] [runtime :as rt] [emit :as emit] envgraph
     [insn :as insn] [entity :as entity] [primitive :as primitive]
     [condgen :as condgen] [switchgen :as switchgen] [trygen :as trygen]
     [defgen :as defgen] [fngen :as fngen]))
@@ -12,7 +12,8 @@
    (tcljx.data.model Expr Exprs ExprFactory CodeEmitter Binding Entity
                      ArityType AritySpec NamespaceBuilder)
    (tcljx.data.resolve Match)
-   (tcljx.classgen.emit ClosureBlueprint CodeBearingFragment)
+   (tcljx.classgen.emit ClosureBlueprint)
+   (tcljx.classgen.envgraph CodeBearingFragment)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile ClassBuilder CodeBuilder Opcode Label TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
@@ -333,7 +334,7 @@
             scope-name' (.scope-name (aget closures' 0))
             cbf (CodeBearingFragment. (.segment-class closure) scope-name'
                                       name-suffix fn-proxy closures')]
-        (emit/stage-fragment! closure cbf)
+        (emit/stage-task! closure cbf)
         (.value-of this fn-proxy nil))))
   
   (type-cast [this fctx target-type arg]
