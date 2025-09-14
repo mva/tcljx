@@ -5,7 +5,7 @@
    (tcljx.classgen [classfile :as classfile]))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound Invocable)
+   (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
    (java.lang.constant MethodTypeDesc ConstantDesc ClassDesc ConstantDescs)
    (java.util ArrayList HashMap)
@@ -268,7 +268,7 @@
   (.add (.tasks cbp) task))
 
 (definterface IEmitProxy
-  :extends [Invocable]
+  :extends [Entity]
   (set-emit-entity! ^void [^Entity ent])
   (get-emit-entity ^Entity []))
 
@@ -290,9 +290,8 @@
     (.value-type origin))
   (entity-id [_]
     local-entity-id)
-  Invocable
-  (invoke* [this fctx form opt-f xs]
-    (.invoke* ^Invocable origin fctx form this xs))
+  (invoke* [this fctx form opt-f at-idx xs]
+    (.invoke* origin fctx form this at-idx xs))
   IEmitProxy
   (set-emit-entity! [_ ent]
     (set! __emit-entity ent))

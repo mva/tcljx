@@ -5,7 +5,7 @@
    (tcljx.classgen [emit :as emit] [constgen :as constgen]))
   (:import
    (tcljx.data.model Expr CodeEmitter Binding Entity LoadFromCopyWhenBound
-                     Constant Invocable)
+                     Constant)
    (tcljx.classgen.emit ClosureBlueprint)
    (java.lang.classfile CodeBuilder ClassBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)))
@@ -170,6 +170,10 @@
     type)
   (entity-id [_]
     entity-id)
+  (arity-specs [_]
+    model/arity-specs-invoke-dynamic)
+  (invoke* [this fctx form _ at-idx xs]
+    (throw (IllegalStateException.)))
   (emit-store [_ xb]
     (.storeLocal xb (TypeKind/from type) slot))
   (emit-iinc [_ xb const]

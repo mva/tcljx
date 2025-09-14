@@ -6,7 +6,7 @@
                    [emit :as emit]))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.model CodeEmitter Invocable)
+   (tcljx.data.model CodeEmitter)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile CodeBuilder Opcode Label TypeKind)
    (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)))

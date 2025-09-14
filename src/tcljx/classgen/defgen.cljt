@@ -5,7 +5,7 @@
    (tcljx.classgen [classfile :as classfile] [insn :as insn] [entity :as entity]
                    [emit :as emit] [envgraph :as envgraph]))
   (:import
-   (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound Invocable Binding)
+   (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound Binding)
    (tcljx.classgen.emit ClosureBlueprint IEmitProxy)
    (tcljx.classgen.envgraph  PreparationTask)
    (tcljx.classgen.insn Insn)
@@ -26,6 +26,12 @@
       tp)
     (entity-id [_]
       model/entity-id-def)
+    (arity-specs [_]
+      (if (= or-flags ClassFile/ACC_FINAL)
+        (model/arity-specs-of init-ce)
+        model/arity-specs-invoke-dynamic))
+    (invoke* [this fctx form _ at-idx xs]
+      (.invoke* ^Entity init-ce fctx form this at-idx xs))
     LoadFromCopyWhenBound
     (emit-setup-code? [_ xb]
       (or (identical? entity/emitter-empty init-ce)
@@ -42,7 +48,7 @@
            (emit/add-segment-elements acc)))))
 
 (defn- method-fragment ^Entity [^ClassDesc owner ^String nm
-                                ^Class tp ^CodeEmitter init-ce]
+                                ^Class tp ^Entity init-ce]
   (reify
     CodeEmitter
     (emit-insn* [_ xb consumed-type _]
@@ -55,6 +61,10 @@
       tp)
     (entity-id [_]
       model/entity-id-def)
+    (arity-specs [_]
+      (.arity-specs init-ce))
+    (invoke* [this fctx form _ at-idx xs]
+      (.invoke* init-ce fctx form this at-idx xs))
     LoadFromCopyWhenBound
     (emit-setup-code? [_ xb]
       true)
@@ -77,6 +87,10 @@
     tp)
   (entity-id [_]
     model/entity-id-def)
+  (arity-specs [_]
+    (.arity-specs proxy))
+  (invoke* [this fctx form opt-f at-idx xs]
+    (.invoke* proxy fctx form this at-idx xs))
   LoadFromCopyWhenBound
   (emit-setup-code? [_ xb]
     (.emit-setup-code? __entity xb))
@@ -89,40 +103,24 @@
       (set! __entity ent)
       (envgraph/run-task acc ^PreparationTask ent class))))
 
-(letfn [(invocable-fragment ^Entity [^LoadFromCopyWhenBound ent ^Invocable inv]
-          (reify Invocable LoadFromCopyWhenBound
-            (emit-insn* [_ xb consumed-type then-leave?]
-              (.emit-insn* ent xb consumed-type then-leave?))
-            (value-type [_]
-              (.value-type ent))
-            (entity-id [_]
-              model/entity-id-def)
-            (emit-setup-code? [_ xb]
-              (.emit-setup-code? ent xb))
-            (invoke* [_ fctx form _ xs]
-              (.invoke* inv fctx form ent xs))))]
-  
-  (defn new-def-immutable ^Binding [^ClosureBlueprint segm ^String nm ^Insn init]
-    (let [sink-type (insn/logical-type init)
-          init-ce (insn/emitter init)
-          owner (.segment-class segm)
-          ent (cond
-                (entity/const? init-ce)
-                (method-fragment owner nm sink-type init-ce)
-                (instance? IEmitProxy init-ce)
-                (DefOfProxy. owner nm sink-type init-ce nil)
-                :else
-                (field-fragment ClassFile/ACC_FINAL owner nm sink-type init-ce))]
-      (emit/stage-task! segm ent)
-      (-> (if (and (model/invocable? init-ce) (not (model/invocable? ent)))
-            (invocable-fragment ent init-ce)
-            ^Entity ent)
-          (entity/mk-binding nm false))))
+(defn new-def-immutable ^Binding [^ClosureBlueprint segm ^String nm ^Insn init]
+  (let [sink-type (insn/logical-type init)
+        init-ce (insn/emitter init)
+        owner (.segment-class segm)
+        ent (cond
+              (entity/const? init-ce)
+              (method-fragment owner nm sink-type init-ce)
+              (instance? IEmitProxy init-ce)
+              (DefOfProxy. owner nm sink-type init-ce nil)
+              :else
+              (field-fragment ClassFile/ACC_FINAL owner nm sink-type init-ce))]
+    (emit/stage-task! segm ent)
+    (entity/mk-binding ent nm false)))
 
-  (defn new-def-mutable ^Binding [^ClosureBlueprint segm ^String nm ^Insn init]
-    (let [sink-type (insn/logical-type init)
-          init-ce (insn/emitter init)
-          ent (field-fragment ClassFile/ACC_VOLATILE (.segment-class segm) nm
-                             sink-type init-ce)]
-      (emit/stage-task! segm ent)
-      (entity/mk-binding ent nm false))))
+(defn new-def-mutable ^Binding [^ClosureBlueprint segm ^String nm ^Insn init]
+  (let [sink-type (insn/logical-type init)
+        init-ce (insn/emitter init)
+        ent (field-fragment ClassFile/ACC_VOLATILE (.segment-class segm) nm
+                            sink-type init-ce)]
+    (emit/stage-task! segm ent)
+    (entity/mk-binding ent nm false)))

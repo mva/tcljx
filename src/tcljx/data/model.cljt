@@ -50,6 +50,79 @@
 
 ;;; ------------------------------------------------------------------------
 
+;;; Description of an arity's signature.  Basically the information
+;;; encoded in an `fn` parameter vector, with the parameter names
+;;; being optional.
+(definterface IArityType
+  ;; The arity's return type.  In case of `auto-return-type`, this is
+  ;; replaced with the arity body's result type.
+  (return-type ^Class [])
+  
+  ;; This is the "internal" parameter list that is used to parse and
+  ;; compile the arity.  That is, for the variadic case the last/rest
+  ;; parameter is of type `ISeq`.
+  (parameter-types ^Class/1 [])
+  (parameter-type ^Class [^int i])
+  
+  ;; Number of parameters.
+  (parameter-count ^int [])
+
+  ;; The names of the parameters if the arity is being compiled from
+  ;; source.  For an imported function this is nil.
+  (parameter-names ^String/1 [])
+  (parameter-name ^String [^int i])
+
+  ;; JVM-style varargs arity/method with an array parameter like
+  ;; `Object...` or `int...`.  Mutually exclusive with `variadic?`.
+  (varargs? ^boolean [])
+
+  ;; Clojure-style variadic arity with an `ISeq` rest parameter.
+  ;; External view on the arity's method is a varargs `Object...` with
+  ;; a bridge method in between.  Mutually exclusive with `varargs?`.
+  (variadic? ^boolean [])
+  )
+
+(deftype ArityType [^Class return-type
+                    ^Class/1 parameter-types
+                    ^String/1 parameter-names
+                    ^boolean varargs?]
+  java.lang.Record
+  IArityType
+  (parameter-count [_]
+    (alength parameter-types))
+  (parameter-name [_ ^int i]
+    (aget parameter-names i))
+  (parameter-type [_ ^int i]
+    (aget parameter-types i))
+  (varargs? [_]
+    varargs?)
+  (variadic? [_]                        ;FIXME...
+    false))
+
+(defn with-return-type ^ArityType [^ArityType at ^Class tp]
+  (ArityType. tp (.parameter-types at) (.parameter-names at) (.varargs? at)))
+
+(defn translates-to-varargs? ^boolean [^ArityType at]
+  (or (.varargs? at) (.variadic? at)))
+
+(defn fixed-parameter-count ^int [^ArityType at]
+  (- (.parameter-count at) (int (translates-to-varargs? at))))
+
+
+;;; Array of AritySpec is in parameter count order by default.  Source
+;;; code order can be reconstructed via `source-idx`.  Note: `code` is
+;;; initially nil.
+(deftype AritySpec [^ArityType at ^seq body ^DirectMethodHandleDesc redirection
+                    ^seq error-context ^Expr code ^int source-idx])
+
+(defn source-order-idxs ^int/1 [^AritySpec/1 arity-specs]
+  (let [source-order (new int/1 (alength arity-specs))]
+    (dotimes [i (alength arity-specs)]
+      (aset source-order (.source-idx (aget arity-specs i)) i))
+    source-order))
+
+;;; ------------------------------------------------------------------------
+
 ;;; A named entity on the level of the code generator that exists at
 ;;; runtime, usually appearing as the "provide the value of the given
 ;;; name" operation of a bound name.  Exposes additional operations
@@ -76,6 +149,14 @@
   ;; primitive functions.
   (value-type ^Class [])
   (value-type-exact ^ClassDesc [])      ;only available in emit phase
+
+  ;; Indicates which invocation pattern to use: regular function call
+  ;; with type information available during compilation, dynamic (and
+  ;; generic) function call during runtime, or some specialized
+  ;; primitive function translation pattern.
+  (arity-specs ^AritySpec/1 [])
+  (invoke* ^Expr [^long fctx ^seq form ^CodeEmitter opt-f ^int at-idx
+                  ^Exprs xs])
   
   ;; The level of the scope that bounds visibility and accessibility
   ;; of this entity and, for a closure, the entity's sequence number
@@ -86,6 +167,17 @@
   ;; entity's current value with it.
   (emit-store ^CodeBuilder [^CodeBuilder xb])            ;optional
   (emit-iinc ^CodeBuilder [^CodeBuilder xb ^int const])) ;optional
+
+(defn entity? ^boolean [^CodeEmitter ce]
+  (instance? Entity ce))
+
+(def arity-specs-primitive-fn nil)  ;not invoked as a regular function
+(def arity-specs-invoke-dynamic (new AritySpec/1 0)) ;runtime invoke only
+
+(defn arity-specs-of ^AritySpec/1 [^CodeEmitter ce]
+  (if (entity? ce)
+    (.arity-specs ^Entity ce)
+    arity-specs-invoke-dynamic))
 
 (def closure-level-constant 0) ;scope of constants spans all namespaces
 (def closure-level-def 1)      ;entity is a def on namespace level
@@ -129,14 +221,6 @@
     (if (instance? CopyOnRead ce)
       (.alias-when-let-value? ^CopyOnRead ce)
       true)))                ;all other entities: reads are repeatable
-
-
-(definterface Invocable
-  :extends [Entity]
-  (invoke* ^Expr [^long fctx ^seq form ^CodeEmitter opt-f ^Exprs xs]))
-
-(defn invocable? ^boolean [^CodeEmitter ent]
-  (instance? Invocable ent))
 
 
 ;;; An "immediate" entity can be referenced by a fixed nominal
@@ -193,77 +277,6 @@
       (Constant/.computational-value ce))))
 
 ;;; ------------------------------------------------------------------------
-
-;;; Description of an arity's signature.  Basically the information
-;;; encoded in an `fn` parameter vector, with the parameter names
-;;; being optional.
-(definterface ArityType
-  ;; The arity's return type.  In case of `auto-return-type`, this is
-  ;; replaced with the arity body's result type.
-  (return-type ^Class [])
-  (with-return-type ^ArityType [^Class tp])
-  
-  ;; This is the "internal" parameter list that is used to parse and
-  ;; compile the arity.  That is, for the variadic case the last/rest
-  ;; parameter is of type `ISeq`.
-  (parameter-types ^Class/1 [])
-  (parameter-type ^Class [^int i])
-  
-  ;; Number of parameters.
-  (parameter-count ^int [])
-
-  ;; The names of the parameters if the arity is being compiled from
-  ;; source.  For an imported function this is nil.
-  (parameter-names ^String/1 [])
-  (parameter-name ^String [^int i])
-
-  ;; JVM-style varargs arity/method with an array parameter like
-  ;; `Object...` or `int...`.  Mutually exclusive with `variadic?`.
-  (varargs? ^boolean [])
-
-  ;; Clojure-style variadic arity with an `ISeq` rest parameter.
-  ;; External view on the arity's method is a varargs `Object...` with
-  ;; a bridge method in between.  Mutually exclusive with `varargs?`.
-  (variadic? ^boolean [])
-  )
-
-(deftype ArityTypeImpl [^Class return-type
-                        ^Class/1 parameter-types
-                        ^String/1 parameter-names
-                        ^boolean varargs?]
-  java.lang.Record
-  ArityType
-  (with-return-type [_ tp]
-    (ArityTypeImpl. tp parameter-types parameter-names varargs?))
-  (parameter-count [_]
-    (alength parameter-types))
-  (parameter-name [_ ^int i]
-    (aget parameter-names i))
-  (parameter-type [_ ^int i]
-    (aget parameter-types i))
-  (varargs? [_]
-    varargs?)
-  (variadic? [_]                        ;FIXME...
-    false))
-
-(defn translates-to-varargs? ^boolean [^ArityType at]
-  (or (.varargs? at) (.variadic? at)))
-
-(defn fixed-parameter-count ^int [^ArityType at]
-  (- (.parameter-count at) (int (translates-to-varargs? at))))
-
-
-;;; Array of AritySpec is in parameter count order by default.  Source
-;;; code order can be reconstructed via `source-idx`.  Note: `code` is
-;;; initially nil.
-(deftype AritySpec [^ArityType at ^seq body ^DirectMethodHandleDesc redirection
-                    ^seq error-context ^Expr code ^int source-idx])
-
-(defn source-order-idxs ^int/1 [^AritySpec/1 arity-specs]
-  (let [source-order (new int/1 (alength arity-specs))]
-    (dotimes [i (alength arity-specs)]
-      (aset source-order (.source-idx (aget arity-specs i)) i))
-    source-order))
 
 ;;; ------------------------------------------------------------------------
 
@@ -372,7 +385,7 @@
 
   ;; hook into entity tracking to build environment of a closure:
   (value-of ^Expr [^Entity ent ^symbol form])
-  (invoke ^Expr [^long fctx ^seq form ^Invocable inv ^Exprs args])
+  (invoke-entity ^Expr [^long fctx ^seq form ^Entity inv ^Exprs args])
   
   ;; Create an entity denoting the constant `value` of type `type`.
   ;; For the most part, there is a one-to-one correspondence between

@@ -5,8 +5,7 @@
    (tcljx.parser [syntax :as syntax]))
   (:import
    (tcljx.data.resolve Match)
-   (tcljx.data.model Resolver Expr Entity Invocable ExprFactory Parser
-                     ArityType ArityTypeImpl)
+   (tcljx.data.model Resolver Expr Entity ExprFactory Parser ArityType)
    (clojure.lang IMeta)))
 
 ;;; Returns nil if lookup fails.  The three argument arity returns an
@@ -93,12 +92,11 @@
                 (if-some [tp (lookup-type rsv cl nm)]
                   (.constant-entity ef tp Class) ;array type
                   (let [ptags (-> (get-param-tags (.meta sym))
-                                  (parse-param-tags rsv)) 
-                        m (resolve cl nm ptags)
+                                  (parse-param-tags rsv)) m (resolve cl nm ptags)
                         ent (.class-member-entity ef m)]
                     (if (and (nil? ptags) (resolve/static-field? m))
-                      (.invoke* ^Invocable ent context/fctx-none nil
-                                nil (.new-exprs ef 0))
+                      (.invoke* ent context/fctx-none nil nil 0
+                                (.new-exprs ef 0))
                       ent))))
               (when-some [cl (.lookup-class rsv nm)]
                 (.constant-entity ef cl Class)))))]
@@ -135,7 +133,7 @@
        (-> (if (= meta/auto-return-type return-tag)
              type/auto-return-marker
              (resolve-tag* rsv return-tag Object))
-           (ArityTypeImpl. ptypes pnames varargs?)))))
+           (ArityType. ptypes pnames varargs?)))))
   (^ArityType [^Resolver rsv ^long fctx paramv
                ^seq error-context]
    (context/with-line-from-list [fctx error-context]

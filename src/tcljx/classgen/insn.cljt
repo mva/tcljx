@@ -47,7 +47,7 @@
 (def insn-int-m1 (mk-insn (entity/mk-constant -1 Integer/TYPE) Integer/TYPE))
 (def insn-float-one (mk-insn (entity/mk-constant 1.0f Float/TYPE) Float/TYPE))
 
-(defn value-of ^Insn [^Entity ent ^symbol form]
+(defn value-of ^Insn [^Entity ent form]
   (if-some [tp (.value-type ent)]
     (mk-insn ent tp)
     (throw (wrong/wr-info (str "entity " (wrong/q form)

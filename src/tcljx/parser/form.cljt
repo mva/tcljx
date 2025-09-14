@@ -8,7 +8,7 @@
     [let :as let] [loop :as loop] [fn :as fn] [new :as new]
     [constant :as constant] [trycatch :as trycatch]))
   (:import
-   (tcljx.data.model Resolver Expr Exprs ExprFactory Entity Invocable Parser)
+   (tcljx.data.model Resolver Expr Exprs ExprFactory Entity Parser)
    (clojure.lang IMeta)))
 
 (deftype ParserImpl [^ExprFactory expr-factory
@@ -154,16 +154,6 @@
                  ;; namespace exists: def lookup must have failed
                  (str "no public def " (wrong/q op))
                  (str "no namespace or class " (wrong/q-namespace op)))))
-            (parse-invocation-binding ^Expr [^symbol op ^long fctx ^seq form]
-              ;; `op` is a unqualified symbol without leading or
-              ;; trailing dot
-              (if-some [ent (parse/lookup this op)]
-                (let [args (parse/args this fctx (rest form))]
-                  (if (model/invocable? ent)
-                    (.invoke expr-factory fctx form ent args)
-                    (let [f* (.value-of expr-factory ent op)]
-                      (.invoke-value expr-factory fctx f* args))))
-                (throw (wrong/info-unresolved op))))
             (parse-invocation-qname ^Expr [^symbol op ^long fctx ^seq form
                                            ^String nmsp ^String nm]
               ;; `op` is qualified symbol: either a reference to
@@ -172,8 +162,8 @@
               (if-some [cl (parse/lookup-class this nmsp)]
                 (if-some [ent (when (some? (interop/param-tags-of op))
                                 (interop/lookup-class-entity this op))]
-                  (.invoke expr-factory fctx form ent
-                           (parse/args this fctx (rest form)))
+                  (.invoke-entity expr-factory fctx form ent
+                                  (parse/args this fctx (rest form)))
                   (if (= (.charAt nm 0) \.) ;syntax is Class/.member
                     (.invoke-virtual-member
                      expr-factory fctx
@@ -199,8 +189,8 @@
               (let [op (parse/arg this fctx (first form))
                     ce (.emitter op)
                     args (parse/args this fctx (rest form))]
-                (if (model/invocable? ce)
-                  (.invoke expr-factory fctx form ce args)
+                (if (model/entity? ce)
+                  (.invoke-entity expr-factory fctx form ce args)
                   (.invoke-value expr-factory fctx op args))))
             (parse-invocation ^Expr [op ^long fctx ^seq form] ;discards meta
               (if (symbol? op)
@@ -246,7 +236,11 @@
                                (parse-dot-dot-or-member nm fctx form)
                                (= (.charAt nm (dec (.length nm))) \.)
                                (parse-class-dot nm fctx form)
-                               :else (parse-invocation-binding op fctx form)))
+                               :else
+                               (if-some [inv (parse/lookup this op)]
+                                 (.invoke-entity expr-factory fctx form inv
+                                                 (parse/args this fctx (rest form)))
+                                 (throw (wrong/info-unresolved op)))))
                     (parse-invocation-qname op fctx form nmsp nm)))
                 (parse-invocation-other op fctx form)))
             

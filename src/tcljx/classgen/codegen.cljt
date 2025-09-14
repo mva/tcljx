@@ -74,6 +74,26 @@
 
 ;;; ------------------------------------------------------------------------
 
+(defn- arity-index ^int [^AritySpec/1 arity-specs ^int arg-count]
+  (loop [i (dec (alength arity-specs))]
+    (cond
+      (neg? i) (assert false)
+      (= (-> arity-specs (aget i) .at .parameter-count) arg-count) i
+      :else (recur (dec i)))))
+
+(defn- select-arity ^int [^AritySpec/1 arity-specs ^Insns xs]
+  (let [at-idx (arity-index arity-specs (.length xs))
+        at (.at (aget arity-specs at-idx))
+        ptypes (.parameter-types at)
+        fixed (model/fixed-parameter-count at)]
+    (insn/ensure-assignables ptypes xs fixed)
+    (when (< fixed (alength ptypes)) ;any arguments passed as varargs?
+      (insn/ensure-assignable* (.getComponentType (aget ptypes fixed))
+                               xs fixed))
+    at-idx))
+
+;;; ------------------------------------------------------------------------
+
 (definterface InsnFactory
   :extends [ExprFactory]
   (get-recur-target ^Label [])
@@ -101,8 +121,17 @@
 
   (value-of [_ ent form]
     (insn/value-of (emit/value-of closure ent form) form))
-  (invoke [this fctx form inv args]
-    (.invoke* inv fctx form (emit/invocation-of closure inv form) args))
+  (invoke-entity [this fctx form inv args]
+    (let [specs (.arity-specs inv)]
+      (condp identical? specs
+        model/arity-specs-primitive-fn
+        (.invoke* inv fctx form nil -1 args)
+        model/arity-specs-invoke-dynamic
+        (.invoke-value this fctx (.value-of this inv (first form)) args)
+        #_else
+        (let [at-idx (select-arity specs args)
+              inv* (emit/invocation-of closure inv form)]
+          (.invoke* inv fctx form inv* at-idx args)))))
   
   (constant-entity [_ value type]
     (entity/mk-constant value type))
