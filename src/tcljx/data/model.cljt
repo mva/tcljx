@@ -253,8 +253,17 @@
   (- (.parameter-count at) (int (translates-to-varargs? at))))
 
 
+;;; Array of AritySpec is in parameter count order by default.  Source
+;;; code order can be reconstructed via `source-idx`.  Note: `code` is
+;;; initially nil.
 (deftype AritySpec [^ArityType at ^seq body ^DirectMethodHandleDesc redirection
-                    ^seq error-context ^Expr code]) ;`code` is initially nil
+                    ^seq error-context ^Expr code ^int source-idx])
+
+(defn source-order-idxs ^int/1 [^AritySpec/1 arity-specs]
+  (let [source-order (new int/1 (alength arity-specs))]
+    (dotimes [i (alength arity-specs)]
+      (aset source-order (.source-idx (aget arity-specs i)) i))
+    source-order))
 
 ;;; ------------------------------------------------------------------------
 

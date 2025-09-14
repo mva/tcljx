@@ -315,9 +315,12 @@
           fn-proxy (fngen/partial-fn-literal (.next-entity-id closure) arity-specs)
           n (alength arity-specs)
           arity-codes (.new-exprs this n)
-          closures' (emit/mk-closures closure name-suffix fn-proxy n)]
-      (dotimes [i n]
-        (let [closure' (aget closures' i)
+          closures' (emit/mk-closures closure name-suffix fn-proxy n)
+          source-order (model/source-order-idxs arity-specs)]
+      ;; parse arities in source order and complete `arity-codes`
+      (dotimes [j n]
+        (let [i (aget source-order j)
+              closure' (aget closures' i)
               expr-factory' (.with-closure this closure')
               parser' (cond-> (.with-expr-factory parser expr-factory')
                         (some? fn-nm)

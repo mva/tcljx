@@ -7,6 +7,7 @@
    (tcljx.data.model Expr Exprs ExprFactory ArityType AritySpec Parser Resolver)
    (tcljx.data.resolve Match)
    (java.lang.constant MethodHandleDesc ConstantDescs)
+   (java.util Arrays Comparator)
    (java.util.function BiFunction)))
 
 (defn parse-fn* ^Expr [^Parser parser ^long fctx ^seq form]
@@ -16,13 +17,13 @@
                 n
                 (recur (max n (-> (aget specs i) .at .parameter-count))
                        (dec i)))))
-          (parse-arity ^AritySpec [paramv ^seq body ^seq error-context]
+          (parse-arity ^AritySpec [paramv ^seq body ^seq error-context ^int i]
             (context/with-line-from-list [fctx error-context]
               (let [at (interop/parse-arity-type (.resolver parser) paramv)]
-                (AritySpec. at body nil error-context nil))))
+                (AritySpec. at body nil error-context nil i))))
           (specs-1 ^AritySpec/1 [paramv ^seq body ^seq error-context]
             (doto (new AritySpec/1 1)
-              (aset 0 (parse-arity paramv body error-context))))
+              (aset 0 (parse-arity paramv body error-context 0))))
           (specs-n ^AritySpec/1 [^seq arity-seq] ;pre: `arity-seq` is not empty
             (let [n (count arity-seq)
                   specs (new AritySpec/1 n)]
@@ -30,7 +31,7 @@
                      [[paramv & body :as arity] & arity-r] arity-seq]
                 (if (< i n)
                   (if (seq? arity)
-                    (let [spec (parse-arity paramv body arity)
+                    (let [spec (parse-arity paramv body arity i)
                           at (.at spec)
                           n (.parameter-count at)
                           va (if (model/translates-to-varargs? at) i -1)]
@@ -48,6 +49,10 @@
                   (when (and (>= seen-va 0)
                              (not= (max-parameter-count specs) seen-va))
                     (wrong/other "only maximum arity can be variadic"))))
+              (->> (^Comparator fn ^int [^AritySpec o1 ^AritySpec o2]
+                    (Integer/compare (-> o1 .at .parameter-count)
+                                     (-> o2 .at .parameter-count)))
+                   (Arrays/sort specs))
               specs))
           (new-fn ^Expr [^symbol fn-nm [h & t :as ^seq more]]
             (let [pab (^BiFunction fn ^Expr [^Parser parser ^AritySpec spec]

@@ -44,31 +44,6 @@
                                xs fixed))
     at-idx))
 
-(letfn [(index-map ^int/1 [^AritySpec/1 arity-specs]
-          (let [a (new int/1 (alength arity-specs))]
-            (dotimes [i (alength a)]
-              (let [n (-> arity-specs (aget i) .at .parameter-count)]
-                (aset a i (bit-or (bit-shift-left n 16) i))))
-            (java.util.Arrays/sort a)
-            a))]
-  
-  (defn- arity-order-indexes ^int/1 [^AritySpec/1 arity-specs]
-    (let [ao-idxs (new int/1 (alength arity-specs))
-          a (index-map arity-specs)]
-      (dotimes [i (alength ao-idxs)]
-        (aset ao-idxs i (short (aget a i))))
-      ao-idxs))
-  
-  (defn- sort-by-arity ^DirectMethodHandleDesc/1 [^DirectMethodHandleDesc/1 mhds
-                                                  ^AritySpec/1 arity-specs]
-    (if (= (alength arity-specs) 1)
-      mhds
-      (let [a (index-map arity-specs)
-            sorted (new DirectMethodHandleDesc/1 (alength mhds))]
-        (dotimes [i (alength sorted)]
-          (aset sorted i (aget mhds (short (aget a i))))) ;mask index
-        sorted))))
-
 (defn- mtd-of-arity-type ^MethodTypeDesc [^ArityType at]
   (MethodTypeDesc/of (reflect/describe-class (.return-type at))
                      (reflect/describe-class* (.parameter-types at))))
@@ -105,7 +80,7 @@
   Constant
   (computational-value [_] ;never nil, but may require owner to be known
     (DynamicConstantDesc/ofNamed rt/bsm-static-fn ConstantDescs/DEFAULT_NAME
-                                 rt/StaticFn (sort-by-arity mhds arity-specs))))
+                                 rt/StaticFn mhds)))
 
 (letfn [(arity-parameter-types ^Class/1 [^Match m]
           (let [ptypes (.parameter-types m)]
@@ -121,7 +96,7 @@
                 ptypes (arity-parameter-types m)
                 at (ArityTypeImpl. (.return-type m) ptypes nil varargs?)
                 mhd (reflect/mhd-of-member (.owner m) (.member m))]
-            (AritySpec. at nil mhd nil nil)))]
+            (AritySpec. at nil mhd nil nil 0)))]
 
   (defn class-member-fn ^FnStatic [^Match m]
     (let [spec (arity-spec-of-match m)]
@@ -197,15 +172,17 @@
     (.set-emit-entity! fn-proxy fn-static)
        
     (->> (^Consumer fn ^void [^ClassBuilder cb]
-          (dotimes [i (alength arity-specs)]
-            (let [spec (aget arity-specs i)
-                  mhd (aget mhds i)
-                  mtd (MethodTypeDesc/ofDescriptor (.lookupDescriptor mhd))]
-              (when (nil? (.redirection spec))
-                (classfile/with-method-body-> cb
-                  [(.methodName mhd) mtd classfile/acc-method-static]
-                  (insn/emit-return (-> spec .at .return-type)
-                                    (.code spec)))))))
+          (let [source-order (model/source-order-idxs arity-specs)]
+            (dotimes [j (alength arity-specs)]
+              (let [i (aget source-order j)
+                    spec (aget arity-specs i)
+                    mhd (aget mhds i)
+                    mtd (MethodTypeDesc/ofDescriptor (.lookupDescriptor mhd))]
+                (when (nil? (.redirection spec))
+                  (classfile/with-method-body-> cb
+                    [(.methodName mhd) mtd classfile/acc-method-static]
+                    (insn/emit-return (-> spec .at .return-type)
+                                      (.code spec))))))))
          (emit/add-segment-elements acc))))
 
 ;;; ------------------------------------------------------------------------
@@ -288,54 +265,51 @@
                                         ^DirectMethodHandleDesc/1 mhds
                                         ^HashMap origin-to-load
                                         ^ClosureBlueprint/1 cbps]
-          (dotimes [i (alength specs)]
-            (virtual-method cb origin-to-load (aget specs i) this-class this-name
-                            (aget mhds i) (.origin-to-proxy (aget cbps i))))
+          (let [source-order (model/source-order-idxs specs)]
+            (dotimes [j (alength specs)]
+              (let [i (aget source-order j)]
+                (virtual-method cb origin-to-load (aget specs i) this-class
+                                this-name (aget mhds i)
+                                (.origin-to-proxy (aget cbps i))))))
           cb)
         
         (arity-fixed ^void [^CodeBuilder xb ^ClassDesc this-class
-                            ^DirectMethodHandleDesc/1 mhds ^int/1 ao-idxs]
-          (let [scs (new SwitchCase/1 (alength ao-idxs))
+                            ^DirectMethodHandleDesc/1 mhds]
+          (let [scs (new SwitchCase/1 (alength mhds))
                 target-default (.newLabel xb)]
-            (dotimes [j (alength scs)]
-              (let [i (aget ao-idxs j)
-                    inv-tp (.invocationType (aget mhds i))]
+            (dotimes [i (alength scs)]
+              (let [inv-tp (.invocationType (aget mhds i))]
                 (aset scs i (SwitchCase/of (dec (.parameterCount inv-tp))
                                            (.newLabel xb)))))
             (-> (.iload xb (.parameterSlot xb 0))
                 (.lookupswitch target-default (java.util.Arrays/asList scs)))
-            (dotimes [j (alength scs)]
-              (let [i (aget ao-idxs j)]
-                (-> (.labelBinding xb (.target (aget scs i)))
-                    (.ldc (aget mhds i))
-                    (.areturn))))
+            (dotimes [i (alength scs)]
+              (-> (.labelBinding xb (.target (aget scs i)))
+                  (.ldc (aget mhds i))
+                  (.areturn)))
             (-> (.labelBinding xb target-default)
                 (.aconst_null)
                 (.areturn))))
         (arity-or-null ^ClassBuilder [^ClassBuilder cb ^ClassDesc this-class
                                       ^AritySpec/1 specs
-                                      ^DirectMethodHandleDesc/1 mhds
-                                      ^int/1 ao-idxs]
+                                      ^DirectMethodHandleDesc/1 mhds]
           (->> (^Consumer fn ^void [^CodeBuilder xb]
-                (let [i-last (aget ao-idxs (dec (alength ao-idxs)))
-                      at-last (.at (aget specs i-last))]
+                (let [at-last (.at (aget specs (dec (alength specs))))]
                   (assert (not (model/translates-to-varargs? at-last)))
-                  (arity-fixed xb this-class mhds ao-idxs)))
+                  (arity-fixed xb this-class mhds)))
                (.withMethodBody cb runtime/name-arity-method
                                 runtime/mtd-arity-method public-final)))
         (direct-method-handles ^ClassBuilder [^ClassBuilder cb
                                               ^ClassDesc this-class
-                                              ^DirectMethodHandleDesc/1 mhds
-                                              ^int/1 ao-idxs]
+                                              ^DirectMethodHandleDesc/1 mhds]
           (->> (^Consumer fn ^void [^CodeBuilder xb]
-                (-> (.loadConstant xb (alength ao-idxs))
+                (-> (.loadConstant xb (alength mhds))
                     (.anewarray runtime/MethodHandle))
-                (dotimes [j (alength ao-idxs)]
-                  (let [i (aget ao-idxs j)]
-                    (-> (.dup xb)
-                        (.loadConstant j)
-                        (.ldc (aget mhds i))
-                        (.aastore))))
+                (dotimes [i (alength mhds)]
+                  (-> (.dup xb)
+                      (.loadConstant i)
+                      (.ldc (aget mhds i))
+                      (.aastore)))
                 (.areturn xb))
                (.withMethodBody cb runtime/name-dmh-method
                                 runtime/mtd-dmh-method public-final)))
@@ -413,14 +387,13 @@
                                  (.insertParameterTypes 0 runtime/map)
                                  (.changeReturnType ConstantDescs/CD_void))
                   origin-to-load (field-getters this-class construction-ops)
-                  field-names (field-names construction-ops)
-                  ao-idxs (arity-order-indexes arity-specs)]
+                  field-names (field-names construction-ops)]
               (-> cb
                   (virtual-fields factory-mtd field-names)
                   (virtual-methods arity-specs this-class (.this-name cbf) mhds
                                    origin-to-load (.closures cbf))
-                  (arity-or-null this-class arity-specs mhds ao-idxs)
-                  (direct-method-handles this-class mhds ao-idxs)
+                  (arity-or-null this-class arity-specs mhds)
+                  (direct-method-handles this-class mhds)
                   (constructor constr-mtd this-class field-names)
                   (factory factory-mtd constr-mtd)
                   (with-meta-impl constr-mtd this-class field-names))))
@@ -473,21 +446,21 @@
                                    ^AritySpec/1 partial-arity-specs]
   (FnProxyImpl. partial-arity-specs entity-id nil))
 
-(letfn [(with-code ^AritySpec [^AritySpec spec ^Insn code]
-          (let [rt (-> spec .at .return-type)
-                va? (model/translates-to-varargs? (.at spec))
-                redir (insn/redirecting-to code rt va? nil)]
-            (-> (if (type/auto-return-marker? rt)
-                  (let [expr-tp (insn/expr-type code)
-                        logical-tp (type/expr-to-logical expr-tp)]
-                    (.with-return-type (.at spec) logical-tp))
-                  (.at spec))
-                (AritySpec. (.body spec) redir (.error-context spec) code))))]
-  
-  (defn update-arities ^FnProxy [^FnProxy fn-proxy ^Insns arity-codes]
-    ;; update overwrite any auto-return-marker return types
-    (let [arity-specs (.arity-specs fn-proxy)]
-      (dotimes [i (alength arity-specs)]
-        (aset (.arity-specs fn-proxy) i
-              (with-code (aget arity-specs i) (.get arity-codes i)))))
-    fn-proxy))
+(defn update-arities ^FnProxy [^FnProxy fn-proxy ^Insns arity-codes]
+  ;; update overwrite any auto-return-marker return types
+  (let [arity-specs (.arity-specs fn-proxy)]
+    (dotimes [i (alength arity-specs)]
+      (let [spec (aget arity-specs i)
+            rt (-> spec .at .return-type)
+            va? (model/translates-to-varargs? (.at spec))
+            code (.get arity-codes i)
+            redir (insn/redirecting-to code rt va? nil)]
+        (->> (AritySpec. (if (type/auto-return-marker? rt)
+                           (let [expr-tp (insn/expr-type code)
+                                 logical-tp (type/expr-to-logical expr-tp)]
+                             (.with-return-type (.at spec) logical-tp))
+                           (.at spec))
+                         (.body spec) redir (.error-context spec) code
+                         (.source-idx spec))
+             (aset arity-specs i)))))
+  fn-proxy)
