@@ -218,16 +218,3 @@
 (defn parameter-binding ^Binding [^ClosureBlueprint owner ^int param-no
                                   ^String name ^Class type]
   (mk-binding (parameter owner name type param-no) name false))
-
-
-;; FIXME... get rid of complete-non-value-invocable eventually
-(defn complete-non-value-invocable ^Invocable [^Invocable inv]
-(reify Invocable
-  (emit-insn* [_ _ _ _]
-    (throw (IllegalStateException.)))
-  (value-type [_]
-    nil)
-  (entity-id [_]
-    model/entity-id-def)
-  (invoke* [_ fctx form opt-f xs]
-    (.invoke* inv fctx form opt-f xs))))
