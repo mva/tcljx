@@ -9,35 +9,17 @@
   (:require
    (tcljx.data [files :as files] [meta :as meta] [reflect :as reflect]
                [macro :as macro])
-   (tcljx.classgen [loader :as loader] [universe :as universe]
-                   [build :as build])
-   #_tcljx.macro                        ;for class ArrayToCpl
-   #_[tcljx.reader :as rd]
-   #_[tcljx.runtime :as rt]
-   #_[tcljx.config :as cfg]
-   #_[tcljx.wrong :as wrong]
-   #_[tcljx.javabase :as jb]
-   #_[tcljx.expr :as x]
-   #_[tcljx.context :as ctx]
-   #_[tcljx.emitter :as em]
-   #_[tcljx.compiler :as compiler]
-   #_[tcljx.predefined :as predefined]
-   #_[tcljx.emitter :as emitter]
-   #_[tcljx.main.tclj0 :as tclj0]
+   (tcljx.classgen [loader :as loader] [universe :as universe])
    [tcljx.parser.reader-test :as reader-test]
    [tcljx.classgen.classdata :as classdata] ;only available for unit tests
    [tcljx.alpha.ptest :as ptest]            ;for is
-   [tcljx.alpha.ptest__impl :as ptest__impl] ;for get-test-context
-   #_[tcljx.classdata :as classdata])
+   [tcljx.alpha.ptest__impl :as ptest__impl]) ;for get-test-context
   (:import
    (tcljx.classgen.loader Loader ClassBytes)
-   #_(tcljx.io BuildFiles BuildIO NmspIO NmspBuilder)
-   #_(tcljx.expr MacroRef FnMacroFn)
-   #_(clojure.lang Symbol IPersistentMap)
    (java.lang.invoke MethodHandle MethodType)
    (java.lang.reflect Method)
    (java.nio.file Path)
-   (java.util #_HashMap #_Map List)
+   (java.util List)
    (java.util.function Consumer Function)))
 
 ;;; FIXME... For now, the bootstrap class picks up classes of
@@ -399,8 +381,7 @@
               (first ms)))]
     (let [dyn-ld (loader/dyn-class-loader app-ld [])]
       (nmsp dyn-ld (ns-with-fnbody params form))
-      (let [cl (Class/forName (str "pkg.ns0." build/capstone-class-name)
-                              true dyn-ld)
+      (let [cl (Class/forName "pkg.ns0.___" true dyn-ld)
             m (get-method cl (method-name params))]
         (.invoke m nil (.toArray ^List args)))))) ;invoke static method
 

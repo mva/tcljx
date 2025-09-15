@@ -13,7 +13,7 @@
    (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
                      NamespaceBuilder Expr ExprFactory Parser)
    (tcljx.classgen.loader Loader PackageBuilder)
-   (tcljx.classgen.envgraph EnvMethod)
+   (tcljx.classgen.envgraph EnvSegment EnvMethod)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassBuilder CodeBuilder)
    (java.nio.file Path)))
@@ -24,14 +24,13 @@
 (deftype NmspBuilderImpl [^NamespaceProvider universe
                           ^String ns-str
                           ^ExprFactory code-gen
-                          ^:unsynchronized-mutable ^EnvMethod segment
+                          ^:unsynchronized-mutable ^EnvSegment segment
                           ^PackageBuilder pkg-build
                           ^:unsynchronized-mutable ^map globals
                           ^:unsynchronized-mutable ^map known-ns
                           ^:unsynchronized-mutable ^map ns-alias
                           ^:unsynchronized-mutable ^map imports
-                          ^:unsynchronized-mutable ^String current-source-file
-                          ^:unsynchronized-mutable ^int current-segm-id]
+                          ^:unsynchronized-mutable ^String current-source-file]
   Resolver
   (ns-str [_]
     ns-str)
@@ -100,16 +99,14 @@
 
   (finish [this]
     (.commit-segment-and-revert this (.size-staged segment) globals imports)
-    (build/capstone pkg-build current-segm-id)
+    (build/capstone pkg-build segment)
     (ProvidedNamespace. ns-str))
   (commit-segment-and-revert [_ end-of-segment then-globals then-imports]
     (let [segm-acc (build/prepare-segment (.tasks segment) end-of-segment)]
-      (build/segment pkg-build current-source-file current-segm-id segm-acc))
+      (build/segment pkg-build current-source-file segment segm-acc))
     
     ;; revert back to requested state & move to next segment
-    (set! current-segm-id (inc current-segm-id))
-    (set! segment (-> (build/segment-cld pkg-build current-segm-id)
-                      (envgraph/mk-segment-clinit)))
+    (set! segment (envgraph/next-segment segment))
     (set! globals then-globals)
     (set! imports then-imports)))
 
@@ -124,14 +121,14 @@
     (letfn [(mk-nmsp-builder ^NamespaceBuilder [^String ns-str]
               (let [source-file nil
                     pkg-build (loader/mk-package-builder loader ns-str)
-                    this-class (build/segment-cld pkg-build build/first-segm-id)
-                    segment (envgraph/mk-segment-clinit this-class)
-                    ef (codegen/mk-factory segment)
+                    segment (envgraph/mk-first-segment ns-str)
+                    ef (-> (envgraph/mk-method-clinit segment)
+                           (codegen/mk-factory))
                     globals primitive/primitive-nmsp-globals
                     imports (resolve/predefined-imports (.rt-lookup loader))]
-                (NmspBuilderImpl. this ns-str ef segment
-                                  pkg-build globals known-ns ns-alias imports
-                                  source-file build/first-segm-id)))
+                (NmspBuilderImpl. this ns-str ef segment pkg-build
+                                  globals known-ns ns-alias imports
+                                  source-file)))
             
             (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]
               (loop [acc (mk-nmsp-builder ns-str), forms (seq ns-forms)]

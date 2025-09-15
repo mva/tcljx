@@ -363,8 +363,7 @@
       
       (let [fn-proxy (fngen/update-arities fn-proxy arity-codes)
             scope-name' (.scope-name (aget methods' 0))
-            class (EnvClass. fn-proxy (.segment-class method) scope-name'
-                             methods')]
+            class (EnvClass. fn-proxy (.segment method) scope-name' methods')]
         (.stage-task! method class)
         (.value-of this fn-proxy nil))))
   

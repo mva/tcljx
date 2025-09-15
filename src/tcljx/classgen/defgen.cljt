@@ -6,7 +6,7 @@
                    [emit :as emit] [envgraph :as envgraph]))
   (:import
    (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound Binding)
-   (tcljx.classgen.envgraph  EnvMethod IEmitProxy PreparationTask)
+   (tcljx.classgen.envgraph EnvSegment IEmitProxy PreparationTask)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassFile ClassBuilder)
    (java.lang.constant MethodTypeDesc ClassDesc)
@@ -102,7 +102,7 @@
       (set! __entity ent)
       (envgraph/run-task acc ^PreparationTask ent class))))
 
-(defn new-def-immutable ^Binding [^EnvMethod segm ^String nm ^Insn init]
+(defn new-def-immutable ^Binding [^EnvSegment segm ^String nm ^Insn init]
   (let [sink-type (insn/logical-type init)
         init-ce (insn/emitter init)
         owner (.segment-class segm)
@@ -116,10 +116,10 @@
     (.stage-task! segm ent)
     (entity/mk-binding ent nm false)))
 
-(defn new-def-mutable ^Binding [^EnvMethod segm ^String nm ^Insn init]
+(defn new-def-mutable ^Binding [^EnvSegment segm ^String nm ^Insn init]
   (let [sink-type (insn/logical-type init)
         init-ce (insn/emitter init)
-        ent (field-fragment ClassFile/ACC_VOLATILE (.segment-class segm) nm
-                            sink-type init-ce)]
+        owner (.segment-class segm)
+        ent (field-fragment ClassFile/ACC_VOLATILE owner nm sink-type init-ce)]
     (.stage-task! segm ent)
     (entity/mk-binding ent nm false)))

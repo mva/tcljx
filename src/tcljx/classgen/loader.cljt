@@ -68,8 +68,7 @@
 (defn resolve-rt-class ^Class [^Loader loader ^ClassDesc cld]
   (.resolveConstantDesc cld (.rt-lookup loader)))
 
-(deftype PackageBuilder [^String pkg-name
-                         ^Path pkg-dir
+(deftype PackageBuilder [^Path pkg-dir
                          ^MethodHandles$Lookup lookup-in-pkg
                          ^Consumer class-sink
                          ^ClassHierarchyResolver chr-from-file
@@ -87,7 +86,7 @@
   (let [pkg-dir (files/prepare-package-directory (.dest-dir loader) ns-str)
         lookup-in-pkg (beachhead/mk-lookup-in-pkg (.rt-lookup loader)
                                                   (.dyn-ld loader) ns-str)]
-    (PackageBuilder. ns-str pkg-dir lookup-in-pkg (.class-sink loader)
+    (PackageBuilder. pkg-dir lookup-in-pkg (.class-sink loader)
                      (.chr-from-file loader) (ConcurrentHashMap.))))
 
 ;;; For future class building, declare that `cld` is an interface

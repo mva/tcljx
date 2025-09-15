@@ -327,8 +327,7 @@
                             protected-final)))))
 
 (defn- as-fn-virtual ^SegmentAcc [^SegmentAcc acc ^EnvClass class]
-  (let [this-class (ClassDesc/of (.packageName (.owner class))
-                                 (.class-name class))
+  (let [this-class (envgraph/namespace-class class)
         fn-proxy ^IEmitProxy (.fn-proxy class)
         arity-specs (.arity-specs fn-proxy)
         construction-ops (-> (envgraph/class-origin-to-proxy class)
@@ -392,7 +391,8 @@
       #_(prn :prepare-fn-proxy (.class-name cbf))
       (if (envgraph/closes-over-env? class)
         (as-fn-virtual acc class)
-        (as-fn-static acc (.owner class) (.class-name class) (.fn-proxy class)))
+        (as-fn-static acc (-> class .segment .segment-class)
+                      (.class-name class) (.fn-proxy class)))
       acc)))
 
 (defn partial-fn-literal ^FnProxy [^int entity-id

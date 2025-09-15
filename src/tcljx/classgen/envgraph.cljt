@@ -1,7 +1,7 @@
 (ns tcljx.classgen.envgraph
   (:require (tcljx.data [model :as model]))
   (:import (tcljx.data.model CodeEmitter Entity)
-           (java.lang.constant ClassDesc)
+           (java.lang.constant ClassDesc ConstantDescs)
            (java.util ArrayList HashMap Map$Entry)
            (java.util.concurrent ConcurrentHashMap)
            (java.util.function Consumer Function BiFunction)))
@@ -72,12 +72,55 @@
 
 ;;; ------------------------------------------------------------------------
 
+(definterface IEnvSegment
+  (stage-task! ^void [task])
+  (size-staged ^int []))
+
+(deftype EnvSegment [^ConcurrentHashMap private-name-map
+                     ^ClassDesc segment-class
+                     ^ArrayList tasks
+                     ^String pkg-name
+                     ^ClassDesc super-class
+                     ^int segment-id]
+  IEnvSegment
+  (stage-task! [_ task]
+    (.add tasks task))
+  (size-staged [_]
+    (.size tasks)))
+
+(letfn [(segment-cld ^ClassDesc [^String pkg-name ^int segm-id]
+          (ClassDesc/of pkg-name (str "_" segm-id)))]
+  (defn mk-first-segment ^EnvSegment [^String pkg-name]
+    (let [segm-id 10]
+      (EnvSegment. (ConcurrentHashMap.) (segment-cld pkg-name segm-id)
+                   (ArrayList.) pkg-name ConstantDescs/CD_Object segm-id)))
+  (defn next-segment ^EnvSegment [^EnvSegment segm]
+    (let [pkg-name (-> segm .pkg-name), segm-id (-> segm .segment-id (inc))]
+      (EnvSegment. (.private-name-map segm) (segment-cld pkg-name segm-id)
+                   (ArrayList.) pkg-name (.segment-class segm) segm-id))))
+
+(defn capstone-class ^ClassDesc [^EnvSegment segm]
+  (ClassDesc/of (.pkg-name segm) "___"))
+
+(def ^:private ZERO (object 0))
+
+;; Generates unique names for fn* and reify* instances within a given
+;; namespace.  In case of name clashes the result is not
+;; deterministic, unless all of the namespace's processing happens
+;; within a single thread.
+(defn- pick-unique-name ^String [^EnvSegment segm ^String dflt-nm]
+  (let [n ^int (.compute (.private-name-map segm) dflt-nm
+                         (^BiFunction fn ^Integer [_ ^Integer v]
+                          (if (nil? v) ZERO (object (inc ^int v)))))]
+    (cond-> dflt-nm (pos? n) (str "^" n))))
+
+;;; ------------------------------------------------------------------------
+
 (definterface IEnvMethod
   (scope-name ^String [])
   (closure-level ^int [])               ;of this class/entity
   (next-entity-id ^int [])
   
-  (size-staged ^int [])
   (stage-task! ^void [task])
   (add-env-proxy! ^Entity [^Entity origin ^String local-name]))
 
@@ -88,14 +131,13 @@
 ;;; information about a given closure's environment.
 (deftype EnvMethod [^int method-index   ;within this EnvClass
                     ^:unsynchronized-mutable ^int curr-entity-id
-                    ^ConcurrentHashMap private-name-map
                     ^String class-name  ;if turned into separate class
                     ^EnvMethod parent ;provides this environment's values
                     ^HashMap origin-to-proxy
                     ^String this-name   ;name of any receiver locals
                     ^Entity this-fn-proxy ;to detect self recursive calls
                     ^ArrayList tasks
-                    ^ClassDesc segment-class]
+                    ^EnvSegment segment]
   Object
   (toString [_]
     (str class-name "[" method-index "]"))
@@ -107,8 +149,6 @@
   (next-entity-id [_]
     (set! curr-entity-id (inc curr-entity-id)))
   
-  (size-staged [_]
-    (.size tasks))
   (stage-task! [_ task]
     (.add tasks task))
   (add-env-proxy! [this origin local-name]
@@ -119,19 +159,9 @@
           (EnvProxy. origin (.next-entity-id this) local-name nil))
          (.computeIfAbsent origin-to-proxy origin))))
 
-#_
-(defn- mk-method ^EnvMethod [^String class-name ^int method-index
-                             ^int closure-level ^HashMap origin-to-proxy
-                             ^String this-name ^Entity this-fn-proxy
-                             ^EnvMethod parent]
-  (EnvMethod. method-index (model/entity-id-of closure-level)
-              (.private-name-map parent) class-name parent origin-to-proxy
-              this-name this-fn-proxy (ArrayList.)))
-
-(defn mk-segment-clinit ^EnvMethod [^ClassDesc this-class]
+(defn mk-method-clinit ^EnvMethod [^EnvSegment segm]
   (let [initial-entity-id (model/entity-id-of model/closure-level-clinit)]
-    (EnvMethod. 0 initial-entity-id (ConcurrentHashMap.)
-                nil nil nil nil nil (ArrayList.) this-class)))
+    (EnvMethod. 0 initial-entity-id nil nil nil nil nil (.tasks segm) segm)))
 
 (def ^:private this-fn-reference ;FIXME... is this only a temporary workaround?
   (reify Entity
@@ -165,23 +195,13 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def ^:private ZERO (object 0))
-
-;; Generates unique names for fn* and reify* instances within a given
-;; namespace.  In case of name clashes the result is not
-;; deterministic, unless all of the namespace's processing happens
-;; within a single thread.
-(defn- pick-unique-name ^String [^ConcurrentHashMap private-name-map
-                                 ^String dflt-nm]
-  (let [n ^int (.compute private-name-map dflt-nm
-                         (^BiFunction fn ^Integer [_ ^Integer v]
-                          (if (nil? v) ZERO (object (inc ^int v)))))]
-    (cond-> dflt-nm (pos? n) (str "^" n))))
-
 (deftype EnvClass [^Entity fn-proxy
-                   ^ClassDesc owner     ;if inlined into nmsp segment
+                   ^EnvSegment segment
                    ^String class-name   ;if turned into separate class
                    ^EnvMethod/1 methods])
+
+(defn namespace-class ^ClassDesc [^EnvClass class]
+  (ClassDesc/of (-> class .segment .pkg-name) (-> class .class-name)))
 
 (letfn [(method ^EnvMethod [^EnvMethod parent
                             ^String unique-nm ^int method-index
@@ -189,17 +209,16 @@
           (let [level' (if (some? unique-nm)
                          (inc (.closure-level parent))
                          model/closure-level-clinit)]
-            (EnvMethod. method-index (model/entity-id-of level')
-                        (.private-name-map parent) unique-nm parent
-                        (HashMap.) this-name this-fn-proxy (ArrayList.)
-                        (.segment-class parent))))]
+            (EnvMethod. method-index (model/entity-id-of level') unique-nm
+                        parent (HashMap.) this-name this-fn-proxy (ArrayList.)
+                        (.segment parent))))]
   
   (defn mk-methods ^EnvMethod/1 [^EnvMethod parent ^String scope-name-suffix
                                  ^Entity this-fn-proxy ^int n]
     (let [parent-name (.scope-name parent)
           nm-str (cond->> scope-name-suffix
                    (some? parent-name) (str parent-name "$"))
-          unique-nm (pick-unique-name (.private-name-map parent) nm-str)
+          unique-nm (pick-unique-name (.segment parent) nm-str)
           a (new EnvMethod/1 n)]
       (dotimes [i (alength a)]
         (aset a i (method parent unique-nm i scope-name-suffix this-fn-proxy)))
