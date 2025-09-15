@@ -9,44 +9,46 @@
    (tinyclj [string :as str]))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.model Expr Exprs CodeEmitter Entity Constant)
+   (tcljx.data.model CodeEmitter Entity Constant)
    (tcljx.classgen.insn Insn Insns)
    (tcljx.classgen.condgen Branching)
    (java.lang.classfile Opcode CodeBuilder TypeKind)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
    (java.lang.constant ConstantDescs MethodTypeDesc)))
 
-(defmacro with-reify-invocable [^vector paramv & body]
-  `(reify Entity
-     (~'emit-insn* [~'_ ~'_ ~'_ ~'_]
-      (throw (IllegalStateException.)))
-     (~'value-type [~'_]
-      nil)
-     (~'entity-id [~'_]
-      model/entity-id-def)
-     (~'arity-specs [~' _]
-      model/arity-specs-primitive-fn)
-     (~'invoke* ~paramv
-      ~@body)))
+(deftype PrimitiveFnEntity []
+  :abstract true
+  Entity
+  (emit-insn* [_ _ _ _]
+    (throw (IllegalStateException.)))
+  (value-type [_]
+    nil)
+  (entity-id [_]
+    model/entity-id-def)
+  (arity-specs [ _]
+    model/arity-specs-primitive-fn))
+
+(defmacro with-primitive-invoke [^vector paramv & body]
+  `(reify PrimitiveFnEntity (~'invoke* ~paramv ~@body)))
 
 (defn take-args
-  (^Insns [^seq form ^Exprs xs ^int n]
+  (^Insns [^seq form ^Insns xs ^int n]
    (if (= (.length xs) n)
      xs
      (throw (wrong/wr-info (str (wrong/q (first form)) " takes " n
                                 " argument" (when-not (= 1 n) "s")
                                 (wrong/got-int (.length xs)))))))
-  (^Insns [^seq form ^Exprs xs ^int n-min ^int n-max]
+  (^Insns [^seq form ^Insns xs ^int n-min ^int n-max]
    (cond
      (= n-min n-max) (take-args form xs n-max)
      (<= n-min (.length xs) n-max) xs
      :else (throw (wrong/wr-info (str (wrong/q (first form)) " takes " n-min
                                       " to " n-max " arguments"
                                       (wrong/got-int (.length xs))))))))
-(defn take-arg ^Insn [^seq form ^Exprs xs]
+(defn take-arg ^Insn [^seq form ^Insns xs]
   (.get (take-args form xs 1) 0))
 
-(letfn [(fold-cast-from ^Expr [^Class target-type c]
+(letfn [(fold-cast-from ^Insn [^Class target-type c]
           ;; pre: `target-type` is primitive
           ;; pre: expression type of constant `c` is primitive
           (if (type/polymorphic? target-type)
@@ -62,7 +64,7 @@
   (defn- mk-convert-to-primitive ^Entity [^Wrapper target]
     (let [target-type (.class-primitive target)
           numeric? (.numeric? target)]
-      (with-reify-invocable [_ fctx form _ _ args]
+      (with-primitive-invoke [_ fctx form _ _ args]
         (let [arg (-> (take-arg form args) (insn/cast-to-logical))
               arg-type (insn/expr-type arg)]
           (cond
@@ -80,13 +82,13 @@
                           target-type fctx))))))
 
   (def ^:private convert-to-logical-truth
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (-> (take-arg form args)
           (insn/cast-to-logical)
           (condgen/logical-truth fctx))))
 
   (def ^:private convert-to-object
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [arg (-> (take-arg form args) (insn/cast-to-logical))
             arg-tp (insn/expr-type arg)]
         (cond-> arg
@@ -329,7 +331,7 @@
                   tp)))))]
   
   (defn mk-nary-numeric ^Entity [^OpSpec op]
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [args ^Insns args
             wop-type (top-type-of op form args)
             op-type (.class-primitive wop-type)]
@@ -340,11 +342,11 @@
             (insn/mk-insn op-type)))))
 
   (defn mk-binary-numeric ^Entity [^OpSpec op]
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (binary-numeric-insn op form args fctx)))
   
   (defn mk-binary-xdiv-integral [^OpSpec op] ;aka 'quot
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [insn (binary-numeric-insn op form args fctx)
             op-type (.expr-type insn)]
         ;; FIXME... this does not work if the result is out of range of
@@ -359,7 +361,7 @@
               (convert-to-primitive op-type fctx))))))
 
   (def unary-bit-not
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [arg (take-arg form args)
             wop-type (integral-type form args 0)
             opcd (.computational-id wop-type)]
@@ -371,7 +373,7 @@
   ;; primitive implementations of bit-set, bit-clear, bit-flip, and
   ;; bit-test.  Then get rid of shifted-one and xdefault.
   (def unary-xdefault 
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [arg (take-arg form args)
             tp (.expr-type arg)]
         (cond
@@ -381,7 +383,7 @@
   
   (defn mk-binary-shift ^Entity [^Opcode base-opc]
     (let [op (OpSpec. type/int type/long base-opc nil 0)]
-      (with-reify-invocable [_ fctx form _ _ args]
+      (with-primitive-invoke [_ fctx form _ _ args]
         (let [args (take-args form args 2)
               warg0 (integral-type form args 0)
               warg1 (integer-type form args 1)]
@@ -390,7 +392,7 @@
               (insn/mk-insn (.class-primitive warg0)))))))
   
   (defn mk-nary-compare ^Entity [^int cmp-opcd]
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [args ^Insns args
             wtop (or (when (= cmp-opcd condgen/cmp-eq)
                        (type/of-all (.expr-types args)))
@@ -402,7 +404,7 @@
           #_ else (condgen/xcmp-n wtop args cmp-opcd fctx)))))
 
   (def nary-equiv
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [args ^Insns args]
         (if (type/all-monomorphic-primitive? (.expr-types args))
           ;; all arguments are non-void primitive: fall back to number compare
@@ -415,14 +417,14 @@
             #_ else (condgen/xcmp-n nil args -1 fctx))))))
   
   (def binary-identical
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [args (take-args form args 2)]
         (if (type/any-primitive? (.expr-types args))
           (throw (info-two-reference-args form args))
           (condgen/acmp (.get args 0) (.get args 1) condgen/cmp-eq fctx)))))
 
   (def array-length
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [atp (array-type-at-0 form args)
             arg (take-arg form args)]
         (-> (^CodeEmitter fn [xb _ _]
@@ -431,7 +433,7 @@
                Integer/TYPE))
             (insn/mk-insn Integer/TYPE)))))
   (def nary-array-load
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [atp (array-type-at-0 form args)
             args (take-args form args 2 (inc (type/type-dimensions atp)))
             n (dec (.length args))]
@@ -441,7 +443,7 @@
              (emit-array-gets xb fctx args n))
             (insn/mk-insn (type/component-type atp n))))))
   (def nary-array-store
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [atp (array-type-at-0 form args)
             args (take-args form args 3 (+ (type/type-dimensions atp) 2))
             n-gets (- (.length args) 3)
@@ -464,7 +466,7 @@
                      (if void? Void/TYPE tp-set))))))
             (insn/mk-insn tp-set)))))
   (def array-clone
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [atp (array-type-at-0 form args)
             arg (take-arg form args)]
         (-> (^CodeEmitter fn [xb _ _]
@@ -477,7 +479,7 @@
             (insn/mk-insn atp)))))
 
   (def unary-not
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [arg (take-arg form args)]
         (-> (.emitter (condgen/logical-truth arg fctx))
             (condgen/negation fctx)
@@ -548,7 +550,7 @@
                   (insn/mk-insn String)))))]
   
   (def string-concat
-    (with-reify-invocable [_ fctx form _ _ args]
+    (with-primitive-invoke [_ fctx form _ _ args]
       (let [args (prepare-concat-args args fctx)]
         (loop [rparts nil, dyn-args nil, const-args nil, i 0]
           (if (= i (.length args))
