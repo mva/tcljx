@@ -1,6 +1,6 @@
 (ns tcljx.data.model
   (:require
-   (tcljx.data [config :as cfg] resolve))
+   (tcljx.data [config :as cfg] [reflect :as reflect] resolve))
   (:import
    (tcljx.data.resolve Match)
    (java.lang.classfile CodeBuilder ClassBuilder)
@@ -171,6 +171,11 @@
 (defn entity? ^boolean [^CodeEmitter ce]
   (instance? Entity ce))
 
+(defn value-type-exact ^ClassDesc [^CodeEmitter ce ^Class or-else]
+  (if (instance? Entity ce)
+     (.value-type-exact ^Entity ce)
+     (reflect/describe-class or-else)))
+
 (def arity-specs-primitive-fn nil)  ;not invoked as a regular function
 (def arity-specs-invoke-dynamic (new AritySpec/1 0)) ;runtime invoke only
 
@@ -275,8 +280,6 @@
                (identical? Class (Entity/.value-type ce))
                (symbol? form))
       (Constant/.computational-value ce))))
-
-;;; ------------------------------------------------------------------------
 
 ;;; ------------------------------------------------------------------------
 

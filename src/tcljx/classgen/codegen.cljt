@@ -4,16 +4,15 @@
     [config :as cfg] [wrong :as wrong] [context :as context] [type :as type]
     [model :as model] [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen
-    [classfile :as classfile] [runtime :as rt] [emit :as emit] envgraph
-    [insn :as insn] [entity :as entity] [primitive :as primitive]
-    [condgen :as condgen] [switchgen :as switchgen] [trygen :as trygen]
-    [defgen :as defgen] [fngen :as fngen]))
+    [classfile :as classfile] [runtime :as rt] [emit :as emit]
+    [envgraph :as envgraph] [insn :as insn] [entity :as entity]
+    [primitive :as primitive] [condgen :as condgen] [switchgen :as switchgen]
+    [trygen :as trygen] [defgen :as defgen] [fngen :as fngen]))
   (:import
    (tcljx.data.model Expr Exprs ExprFactory CodeEmitter Binding Entity
                      ArityType AritySpec NamespaceBuilder)
    (tcljx.data.resolve Match)
-   (tcljx.classgen.emit ClosureBlueprint)
-   (tcljx.classgen.envgraph CodeBearingFragment)
+   (tcljx.classgen.envgraph EnvClass EnvMethod)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile ClassBuilder CodeBuilder Opcode Label TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
@@ -98,7 +97,7 @@
   :extends [ExprFactory]
   (get-recur-target ^Label [])
   (set-recur-target! ^void [^Label target])
-  (with-closure ^InsnFactory [^ClosureBlueprint closure]))
+  (with-method ^InsnFactory [^EnvMethod method]))
 
 ;;; Note: To save work, this code generator assumes that it can use
 ;;; types available at compile time to refer to runtime types of the
@@ -108,7 +107,7 @@
 ;;; Likewise for symbols, keywords, vectors, and so on.  This works
 ;;; only as long as compiler and application agree on the names of
 ;;; their runtime classes.
-(deftype InsnFactoryImpl [^ClosureBlueprint closure
+(deftype InsnFactoryImpl [^EnvMethod method
                           ^Insns recur-parameters
                           ^:unsynchronized-mutable ^Label __recur-target]
   InsnFactory
@@ -120,7 +119,7 @@
       (Insns. (new CodeEmitter/1 n) (new Class/1 n))))
 
   (value-of [_ ent form]
-    (insn/value-of (emit/value-of closure ent form) form))
+    (insn/value-of (envgraph/value-of method ent form) form))
   (invoke-entity [this fctx form inv args]
     (let [specs (.arity-specs inv)]
       (condp identical? specs
@@ -130,7 +129,7 @@
         (.invoke-value this fctx (.value-of this inv (first form)) args)
         #_else
         (let [at-idx (select-arity specs args)
-              inv* (emit/invocation-of closure inv form)]
+              inv* (envgraph/invocation-of method inv form)]
           (.invoke* inv fctx form inv* at-idx args)))))
   
   (constant-entity [_ value type]
@@ -232,7 +231,7 @@
                              f)))))
   
   (new-parameter [_ param-no name type]
-    (-> (entity/parameter-binding closure param-no name type)
+    (-> (entity/parameter-binding method param-no name type)
         (insn/mk-statm)))
 
   (binding-alias [_ fctx name ent]
@@ -243,7 +242,7 @@
       (insn/ensure-assignable opt-type init))
     (let [tp (or opt-type (insn/logical-type init))
           ce (-> init (insn/cast-to tp fctx) .emitter)]
-      (-> (entity/local-variable closure name tp ce)
+      (-> (entity/local-variable method name tp ce)
           (entity/mk-binding name false)
           (insn/mk-statm))))
   (block-let [_ fctx bindings body]
@@ -262,7 +261,7 @@
   (get-recur-target [this]
     __recur-target)
   (with-recur-parameters [_ parameters]
-    (InsnFactoryImpl. closure parameters nil))
+    (InsnFactoryImpl. method parameters nil))
   (block-loop [this fctx body]
     (-> (reify
           CodeEmitter
@@ -337,20 +336,20 @@
             (trygen/try-catch tp (.emitters insns) catch-types fctx))
           (insn/mk-insn tp))))
 
-  (with-closure [_ closure]
-    (InsnFactoryImpl. closure recur-parameters __recur-target))
+  (with-method [_ method]
+    (InsnFactoryImpl. method recur-parameters __recur-target))
   (new-function [this parser fn-nm parse-arity-body arity-specs]
     (let [name-suffix (if (some? fn-nm) (name fn-nm) "fn")
-          fn-proxy (fngen/partial-fn-literal (.next-entity-id closure) arity-specs)
+          fn-proxy (fngen/partial-fn-literal (.next-entity-id method) arity-specs)
           n (alength arity-specs)
           arity-codes (.new-exprs this n)
-          closures' (emit/mk-closures closure name-suffix fn-proxy n)
+          methods' (envgraph/mk-methods method name-suffix fn-proxy n)
           source-order (model/source-order-idxs arity-specs)]
       ;; parse arities in source order and complete `arity-codes`
       (dotimes [j n]
         (let [i (aget source-order j)
-              closure' (aget closures' i)
-              expr-factory' (.with-closure this closure')
+              method' (aget methods' i)
+              expr-factory' (.with-method this method')
               parser' (cond-> (.with-expr-factory parser expr-factory')
                         (some? fn-nm)
                         (model/with-local-binding (name fn-nm) fn-proxy))
@@ -363,10 +362,10 @@
           (.set arity-codes i code)))
       
       (let [fn-proxy (fngen/update-arities fn-proxy arity-codes)
-            scope-name' (.scope-name (aget closures' 0))
-            cbf (CodeBearingFragment. (.segment-class closure) scope-name'
-                                      name-suffix fn-proxy closures')]
-        (emit/stage-task! closure cbf)
+            scope-name' (.scope-name (aget methods' 0))
+            class (EnvClass. fn-proxy (.segment-class method) scope-name'
+                             methods')]
+        (.stage-task! method class)
         (.value-of this fn-proxy nil))))
   
   (type-cast [this fctx target-type arg]
@@ -461,5 +460,5 @@
             (insn/mk-insn Void/TYPE))   ;type used while parsing
         (throw (insn/info-type "expect instance of Throwable" arg))))))
 
-(defn mk-factory ^ExprFactory [^ClosureBlueprint segment]
+(defn mk-factory ^ExprFactory [^EnvMethod segment]
   (InsnFactoryImpl. segment nil nil))

@@ -1,18 +1,58 @@
 (ns tcljx.classgen.envgraph
-  (:require (tcljx.data model)
-            (tcljx.classgen emit))
-  (:import (tcljx.data.model Entity)
-           (tcljx.classgen.emit EnvProxy ClosureBlueprint SegmentAcc)
+  (:require (tcljx.data [model :as model]))
+  (:import (tcljx.data.model CodeEmitter Entity)
            (java.lang.constant ClassDesc)
-           (java.util ArrayList HashMap Map$Entry)))
+           (java.util ArrayList HashMap Map$Entry)
+           (java.util.concurrent ConcurrentHashMap)
+           (java.util.function Consumer Function BiFunction)))
 
-(deftype CodeBearingFragment [^ClassDesc owner ;if inlined into nmsp segment
-                              ^String class-name ;if turned into separate class
-                              ^String this-name ;name of any receiver locals
-                              ^Entity fn-proxy
-                              ^ClosureBlueprint/1 closures])
+(deftype OtherClass [^ClassDesc this-class ^int flags ^ClassDesc super-class
+                     ^Consumer class-handler])
+(deftype SegmentAcc [^ArrayList segment-elements ;of Consumer
+                     ^ArrayList clinit-statms    ;of CodeEmitter
+                     ^ArrayList other-classes]   ;of OtherClass
+  java.lang.Record)
+
+(defn add-segment-elements ^SegmentAcc [^SegmentAcc acc ^Consumer class-handler]
+  (.add (.segment-elements acc) class-handler)
+  acc)
+(defn add-clinit-statm ^SegmentAcc [^SegmentAcc acc ^CodeEmitter emitter]
+  (.add (.clinit-statms acc) emitter)
+  acc)
+(defn add-class-file ^SegmentAcc [^SegmentAcc acc ^ClassDesc this-class
+                                  ^int flags ^ClassDesc super-class
+                                  ^Consumer class-handler]
+  (.add (.other-classes acc)
+        (OtherClass. this-class flags super-class class-handler))
+  acc)
 
 ;;; ------------------------------------------------------------------------
+
+(definterface IEmitProxy
+  :extends [Entity]
+  (set-emit-entity! ^void [^Entity ent])
+  (get-emit-entity ^Entity []))
+
+;;; Local copy of a value taken from the entity `origin`, where
+;;; `origin` is defined by a parent of the current function (or reify,
+;;; or interface function).
+(deftype EnvProxy [^Entity origin ^int local-entity-id ^String local-name
+                   ^:unsynchronized-mutable ^Entity __emit-entity]
+  CodeEmitter
+  (emit-insn* [_ xb consumed-type then-leave?]
+    (.emit-insn* __emit-entity xb consumed-type then-leave?))
+  Entity
+  (value-type [_]
+    (.value-type origin))
+  (entity-id [_]
+    local-entity-id)
+  (invoke* [this fctx form opt-f at-idx xs]
+    (.invoke* origin fctx form this at-idx xs))
+  IEmitProxy
+  (set-emit-entity! [_ ent]
+    (set! __emit-entity ent))
+  (get-emit-entity [_]
+    __emit-entity))
 
 (deftype OriginProxyPairs [^Entity/1 aorigin, ^EnvProxy/1 aproxy])
 
@@ -32,27 +72,138 @@
 
 ;;; ------------------------------------------------------------------------
 
-(deftype EnvMethod [^String class-name
-                    ^int method-index   ;within this class
-                    ^int closure-level  ;of this class/entity
+(definterface IEnvMethod
+  (scope-name ^String [])
+  (closure-level ^int [])               ;of this class/entity
+  (next-entity-id ^int [])
+  
+  (size-staged ^int [])
+  (stage-task! ^void [task])
+  (add-env-proxy! ^Entity [^Entity origin ^String local-name]))
+
+;;; An EnvMethod acts as a buffer between the information gathering
+;;; phase of parsing and the build step that emits the class files.
+;;; It encapsulates mutable state and all updates are initiated from a
+;;; single thread.  EnvMethods are usually nested, and capture
+;;; information about a given closure's environment.
+(deftype EnvMethod [^int method-index   ;within this EnvClass
+                    ^:unsynchronized-mutable ^int curr-entity-id
+                    ^ConcurrentHashMap private-name-map
+                    ^String class-name  ;if turned into separate class
                     ^EnvMethod parent ;provides this environment's values
-                    ^HashMap origin-to-proxy]
+                    ^HashMap origin-to-proxy
+                    ^String this-name   ;name of any receiver locals
+                    ^Entity this-fn-proxy ;to detect self recursive calls
+                    ^ArrayList tasks
+                    ^ClassDesc segment-class]
   Object
   (toString [_]
-    (str class-name "[" method-index "]")))
+    (str class-name "[" method-index "]"))
+  IEnvMethod
+  (scope-name [_]
+    class-name)
+  (closure-level [_]
+    (unsigned-bit-shift-right curr-entity-id 16))
+  (next-entity-id [_]
+    (set! curr-entity-id (inc curr-entity-id)))
+  
+  (size-staged [_]
+    (.size tasks))
+  (stage-task! [_ task]
+    (.add tasks task))
+  (add-env-proxy! [this origin local-name]
+    #_(prn :closure-level (model/closure-level ent)
+           :sequence-number (model/sequence-number ent)
+           :using-scope (.scope-name cbp))
+    (->> (^Function fn [origin]
+          (EnvProxy. origin (.next-entity-id this) local-name nil))
+         (.computeIfAbsent origin-to-proxy origin))))
 
-(defn- mk-method ^EnvMethod [^ClosureBlueprint closure ^int method-index
+#_
+(defn- mk-method ^EnvMethod [^String class-name ^int method-index
+                             ^int closure-level ^HashMap origin-to-proxy
+                             ^String this-name ^Entity this-fn-proxy
                              ^EnvMethod parent]
-  #_(println :mk-method (str (.scope-name closure)
-                             "[" method-index "] with level="
-                             (.closure-level closure)
-                             ", parent=" parent))
-  (EnvMethod. (.scope-name closure) method-index (.closure-level closure)
-              parent (.origin-to-proxy closure)))
+  (EnvMethod. method-index (model/entity-id-of closure-level)
+              (.private-name-map parent) class-name parent origin-to-proxy
+              this-name this-fn-proxy (ArrayList.)))
 
+(defn mk-segment-clinit ^EnvMethod [^ClassDesc this-class]
+  (let [initial-entity-id (model/entity-id-of model/closure-level-clinit)]
+    (EnvMethod. 0 initial-entity-id (ConcurrentHashMap.)
+                nil nil nil nil nil (ArrayList.) this-class)))
 
-(deftype EnvClass [^EnvMethod/1 methods
-                   ^CodeBearingFragment cbf])
+(def ^:private this-fn-reference ;FIXME... is this only a temporary workaround?
+  (reify Entity
+    (emit-insn* [_ xb _ _]
+      (.aload xb (.receiverSlot xb))
+      tinyclj.lang.AFnMh)))
+
+(defn- closes-over? ^boolean [^EnvMethod em ^Entity ent]
+  (let [origin (model/closure-level ent)]
+    (and (>= origin model/closure-level-clinit)
+         (not= origin (.closure-level em)))))
+
+(defn value-of ^Entity [^EnvMethod em ^Entity ent ^Object form]
+  #_(prn :cbp-level (.closure-level em)
+         :ent-level (model/closure-level ent)
+         :sequence-number (model/sequence-number ent)
+         :using-scope (.scope-name em)
+         :form form
+         :ent-class (class ent)
+         :closes-over? (closes-over? em ent))
+  (if (closes-over? em ent)
+    (.add-env-proxy! em ent (name ^symbol form))
+    ent))
+
+(defn invocation-of ^Entity [^EnvMethod em ^Entity inv ^seq form]
+  (if (closes-over? em inv)
+    (if (identical? (.this-fn-proxy em) inv)
+      this-fn-reference      ;invocation of fn from one of its arities
+      (.add-env-proxy! em inv (name ^symbol (first form))))
+    inv))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private ZERO (object 0))
+
+;; Generates unique names for fn* and reify* instances within a given
+;; namespace.  In case of name clashes the result is not
+;; deterministic, unless all of the namespace's processing happens
+;; within a single thread.
+(defn- pick-unique-name ^String [^ConcurrentHashMap private-name-map
+                                 ^String dflt-nm]
+  (let [n ^int (.compute private-name-map dflt-nm
+                         (^BiFunction fn ^Integer [_ ^Integer v]
+                          (if (nil? v) ZERO (object (inc ^int v)))))]
+    (cond-> dflt-nm (pos? n) (str "^" n))))
+
+(deftype EnvClass [^Entity fn-proxy
+                   ^ClassDesc owner     ;if inlined into nmsp segment
+                   ^String class-name   ;if turned into separate class
+                   ^EnvMethod/1 methods])
+
+(letfn [(method ^EnvMethod [^EnvMethod parent
+                            ^String unique-nm ^int method-index
+                            ^String this-name ^Entity this-fn-proxy]
+          (let [level' (if (some? unique-nm)
+                         (inc (.closure-level parent))
+                         model/closure-level-clinit)]
+            (EnvMethod. method-index (model/entity-id-of level')
+                        (.private-name-map parent) unique-nm parent
+                        (HashMap.) this-name this-fn-proxy (ArrayList.)
+                        (.segment-class parent))))]
+  
+  (defn mk-methods ^EnvMethod/1 [^EnvMethod parent ^String scope-name-suffix
+                                 ^Entity this-fn-proxy ^int n]
+    (let [parent-name (.scope-name parent)
+          nm-str (cond->> scope-name-suffix
+                   (some? parent-name) (str parent-name "$"))
+          unique-nm (pick-unique-name (.private-name-map parent) nm-str)
+          a (new EnvMethod/1 n)]
+      (dotimes [i (alength a)]
+        (aset a i (method parent unique-nm i scope-name-suffix this-fn-proxy)))
+      a)))
 
 (defn closes-over-env? ^boolean [^EnvClass class]
   (let [ms (.methods class)]
@@ -88,24 +239,17 @@
 
 (defn mk-graph ^EnvGraph [^ArrayList tasks ^int tasks-end]
   (let [acc-classes (ArrayList.)]
-    (letfn [(add-cbf! ^void [^EnvMethod parent ^CodeBearingFragment cbf]
-              (let [closures (.closures cbf)
-                    n (alength closures)
-                    class-methods (new EnvMethod/1 n)]
+    (letfn [(add-class! ^void [^EnvMethod parent ^EnvClass class]
+              (let [n (alength (.methods class))]
                 (dotimes [i n]
-                  (let [closure (aget closures i)
-                        tasks (.tasks closure)
-                        method (mk-method closure i parent)]
-                    ;; FIXME... drop closure's scope-name?
-                    (assert (identical? (.class-name cbf) (.scope-name closure)))
-                    (aset class-methods i method)
+                  (let [method (aget (.methods class) i)
+                        tasks (.tasks method)]
                     (add-tasks! method tasks (.size tasks))))
-                (.add acc-classes (EnvClass. class-methods cbf))))
+                (.add acc-classes class)))
             (add-tasks! ^void [^EnvMethod parent ^ArrayList tasks ^int tasks-end]
               (dotimes [i tasks-end]
-                (let [frag (.get tasks i)]
-                  (condp instance? frag
-                    CodeBearingFragment (add-cbf! parent frag)
-                    #_else nil))))]
+                (let [task (.get tasks i)]
+                  (when (instance? EnvClass task)
+                    (add-class! parent task)))))]
       (add-tasks! nil tasks tasks-end)
       (EnvGraph. (.toArray acc-classes (new EnvClass/1 0))))))

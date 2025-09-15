@@ -7,7 +7,7 @@
   (:import
    (tcljx.data.model Constant ArityType AritySpec CodeEmitter Entity)
    (tcljx.data.resolve Match)
-   (tcljx.classgen.emit ClosureBlueprint EnvProxy SegmentAcc IEmitProxy)
+   (tcljx.classgen.envgraph EnvMethod EnvProxy IEmitProxy SegmentAcc)
    (tcljx.classgen.insn Insn Insns)
    (tcljx.classgen.envgraph EnvClass OriginProxyPairs PreparationTask)
    (java.lang.classfile ClassFile ClassBuilder CodeBuilder TypeKind)
@@ -150,7 +150,7 @@
        
     (->> (^Consumer fn ^void [^ClassBuilder cb]
           (class-elements-static cb arity-specs mhds))
-         (emit/add-segment-elements acc))))
+         (envgraph/add-segment-elements acc))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -245,7 +245,7 @@
                                        ^MethodTypeDesc factory-mtd
                                        ^String/1 field-names
                                        ^HashMap origin-to-load
-                                       ^ClosureBlueprint/1 cbps]
+                                       ^EnvMethod/1 ems]
     (let [constr-mtd (-> factory-mtd
                          (.insertParameterTypes 0 runtime/map)
                          (.changeReturnType ConstantDescs/CD_void))]
@@ -256,10 +256,11 @@
       ;; virtual methods implementing the function arities
       (let [source-order (model/source-order-idxs specs)]
         (dotimes [j (alength specs)]
-          (let [i (aget source-order j)]
+          (let [i (aget source-order j)
+                em (aget ems i)]
             (virtual-method cb origin-to-load (aget specs i) this-class
-                            this-name (aget mhds i)
-                            (.origin-to-proxy (aget cbps i))))))
+                            (.this-name em) (aget mhds i)
+                            (.origin-to-proxy em)))))
       ;; virtual method __arityOrNull
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (let [at-last (.at (aget specs (dec (alength specs))))]
@@ -326,10 +327,9 @@
                             protected-final)))))
 
 (defn- as-fn-virtual ^SegmentAcc [^SegmentAcc acc ^EnvClass class]
-  (let [cbf (.cbf class)
-        this-class (ClassDesc/of (.packageName (.owner cbf))
-                                 (.class-name cbf))
-        fn-proxy ^IEmitProxy (.fn-proxy cbf)
+  (let [this-class (ClassDesc/of (.packageName (.owner class))
+                                 (.class-name class))
+        fn-proxy ^IEmitProxy (.fn-proxy class)
         arity-specs (.arity-specs fn-proxy)
         construction-ops (-> (envgraph/class-origin-to-proxy class)
                              (envgraph/sorted-ops))
@@ -348,11 +348,11 @@
                 origin-to-load (field-getters this-class construction-ops)
                 field-names (field-names construction-ops)]
             (class-elements-virtual cb arity-specs mhds
-                                    this-class (.this-name cbf)
+                                    this-class (.class-name class)
                                     factory-mtd field-names
-                                    origin-to-load (.closures cbf))))
-         (emit/add-class-file acc this-class fn-virtual-class-flags
-                              runtime/AFn))))
+                                    origin-to-load (.methods class))))
+         (envgraph/add-class-file acc this-class fn-virtual-class-flags
+                                  runtime/AFn))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -389,11 +389,10 @@
   PreparationTask
   (extend-segment [_ acc class]
     (if (some? class) ;ignore unless called with environment information
-      (let [cbf (.cbf class)]
-        #_(prn :prepare-fn-proxy (.class-name cbf))
-        (if (envgraph/closes-over-env? class)
-          (as-fn-virtual acc class)
-          (as-fn-static acc (.owner cbf) (.class-name cbf) (.fn-proxy cbf))))
+      #_(prn :prepare-fn-proxy (.class-name cbf))
+      (if (envgraph/closes-over-env? class)
+        (as-fn-virtual acc class)
+        (as-fn-static acc (.owner class) (.class-name class) (.fn-proxy class)))
       acc)))
 
 (defn partial-fn-literal ^FnProxy [^int entity-id

@@ -2,11 +2,11 @@
   (:require
    (tcljx.data [wrong :as wrong] [type :as type] [context :as context]
                [model :as model] [reflect :as reflect])
-   (tcljx.classgen [emit :as emit] [constgen :as constgen]))
+   (tcljx.classgen envgraph [constgen :as constgen]))
   (:import
    (tcljx.data.model Expr CodeEmitter Binding Entity LoadFromCopyWhenBound
                      Constant)
-   (tcljx.classgen.emit ClosureBlueprint)
+   (tcljx.classgen.envgraph EnvMethod)
    (java.lang.classfile CodeBuilder ClassBuilder TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc ConstantDescs)))
 
@@ -196,11 +196,11 @@
                           (.startLabel xb) (.endLabel xb))
           true))))
 
-(defn local-variable ^Entity [^ClosureBlueprint owner ^String name ^Class type
+(defn local-variable ^Entity [^EnvMethod owner ^String name ^Class type
                               ^CodeEmitter init]
   (LocalVariable. name type (.next-entity-id owner) -1 init -1))
 
-(defn- parameter ^Entity [^ClosureBlueprint owner ^String name ^Class type
+(defn- parameter ^Entity [^EnvMethod owner ^String name ^Class type
                           ^int param-no]
   (LocalVariable. name type (.next-entity-id owner) param-no emitter-empty -1))
 
@@ -219,6 +219,6 @@
 
 (def mk-binding BindingImpl/new)
 
-(defn parameter-binding ^Binding [^ClosureBlueprint owner ^int param-no
+(defn parameter-binding ^Binding [^EnvMethod owner ^int param-no
                                   ^String name ^Class type]
   (mk-binding (parameter owner name type param-no) name false))

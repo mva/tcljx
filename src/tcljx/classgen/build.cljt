@@ -8,8 +8,8 @@
    [tinyclj.string :as str])
   (:import
    (tcljx.data.model CodeEmitter)
-   (tcljx.classgen.emit ClosureBlueprint SegmentAcc OtherClass)
-   (tcljx.classgen.envgraph CodeBearingFragment PreparationTask)
+   (tcljx.classgen.envgraph EnvClass EnvMethod PreparationTask
+                            SegmentAcc OtherClass)
    (tcljx.classgen.loader PackageBuilder ClassBytes)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassFile ClassBuilder CodeBuilder)
@@ -101,16 +101,16 @@
 
 (defn prepare-segment ^SegmentAcc [^ArrayList tasks ^int tasks-end]
   (let [eg (envgraph/mk-graph tasks tasks-end)]
-    (letfn [(index-of-cbf ^int [^CodeBearingFragment cbf ^int start]
+    (letfn [(index-of-class ^int [^EnvClass class ^int start]
               (loop [i start]
-                (if (identical? cbf (.cbf (aget (.classes  eg) i)))
+                (if (identical? class (aget (.classes eg) i))
                   i
                   (recur (inc i)))))
             (prepare-classes ^SegmentAcc [^SegmentAcc acc ^int start ^int end]
               (loop [acc acc, i start]
                 (if (< i end)
                   (let [class (aget (.classes eg) i)
-                        task ^PreparationTask (-> class .cbf .fn-proxy)]
+                        task ^PreparationTask (.fn-proxy class)]
                     (recur (envgraph/run-task acc task class) (inc i)))
                   acc)))
             (mk-segment-acc ^SegmentAcc []
@@ -120,11 +120,11 @@
         (if (< i-clinit tasks-end)
           (let [frag (.get tasks i-clinit)]
             (condp instance? frag
-              CodeBearingFragment
-              (let [end-eg (inc (index-of-cbf frag i-eg))]
+              EnvClass
+              (let [end-eg (inc (index-of-class frag i-eg))]
                 (recur (prepare-classes acc i-eg end-eg) (inc i-clinit) end-eg))
               PreparationTask
               (recur (envgraph/run-task acc frag nil) (inc i-clinit) i-eg)
               #_else
-              (recur (emit/add-clinit-statm acc frag) (inc i-clinit) i-eg)))
+              (recur (envgraph/add-clinit-statm acc frag) (inc i-clinit) i-eg)))
           acc)))))

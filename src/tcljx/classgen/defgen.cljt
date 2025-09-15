@@ -6,8 +6,7 @@
                    [emit :as emit] [envgraph :as envgraph]))
   (:import
    (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound Binding)
-   (tcljx.classgen.emit ClosureBlueprint IEmitProxy)
-   (tcljx.classgen.envgraph  PreparationTask)
+   (tcljx.classgen.envgraph  EnvMethod IEmitProxy PreparationTask)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassFile ClassBuilder)
    (java.lang.constant MethodTypeDesc ClassDesc)
@@ -19,7 +18,7 @@
     CodeEmitter
     (emit-insn* [_ xb consumed-type _]
       (entity/with-void-empty-if-requested consumed-type
-        (.getstatic xb owner nm (emit/value-type-exact init-ce tp))
+        (.getstatic xb owner nm (model/value-type-exact init-ce tp))
         tp))
     Entity
     (value-type [_]
@@ -36,16 +35,16 @@
     (emit-setup-code? [_ xb]
       (or (identical? entity/emitter-empty init-ce)
           (when (emit/insn? xb context/fctx-none tp init-ce)
-            (.putstatic xb owner nm (emit/value-type-exact init-ce tp))
+            (.putstatic xb owner nm (model/value-type-exact init-ce tp))
             true)))
     PreparationTask
     (extend-segment [_ acc _]
       (->> (^Consumer fn ^void [^ClassBuilder cb]
-            (.withField cb nm (emit/value-type-exact init-ce tp)
+            (.withField cb nm (model/value-type-exact init-ce tp)
                         (bit-or ClassFile/ACC_STATIC
                                 ClassFile/ACC_PUBLIC ;unless namespace private
                                 or-flags)))
-           (emit/add-segment-elements acc)))))
+           (envgraph/add-segment-elements acc)))))
 
 (defn- method-fragment ^Entity [^ClassDesc owner ^String nm
                                 ^Class tp ^Entity init-ce]
@@ -53,7 +52,7 @@
     CodeEmitter
     (emit-insn* [_ xb consumed-type _]
       (entity/with-void-empty-if-requested consumed-type
-        (let [tpd (emit/value-type-exact init-ce tp)]
+        (let [tpd (model/value-type-exact init-ce tp)]
           (.invokestatic xb owner nm (MethodTypeDesc/of tpd))
           tp)))
     Entity
@@ -71,11 +70,11 @@
     PreparationTask
     (extend-segment [_ acc _]
       (->> (^Consumer fn ^void [^ClassBuilder cb]
-            (let [tpd (emit/value-type-exact init-ce tp)]
+            (let [tpd (model/value-type-exact init-ce tp)]
               (classfile/with-method-body-> cb
                 [nm (MethodTypeDesc/of tpd) classfile/acc-method-static]
                 (emit/then-leave? cfg/no-line-number tp init-ce true))))
-           (emit/add-segment-elements acc)))))
+           (envgraph/add-segment-elements acc)))))
 
 (deftype DefOfProxy [^ClassDesc owner ^String nm ^Class tp ^IEmitProxy proxy
                      ^:unsynchronized-mutable ^LoadFromCopyWhenBound __entity]
@@ -103,7 +102,7 @@
       (set! __entity ent)
       (envgraph/run-task acc ^PreparationTask ent class))))
 
-(defn new-def-immutable ^Binding [^ClosureBlueprint segm ^String nm ^Insn init]
+(defn new-def-immutable ^Binding [^EnvMethod segm ^String nm ^Insn init]
   (let [sink-type (insn/logical-type init)
         init-ce (insn/emitter init)
         owner (.segment-class segm)
@@ -114,13 +113,13 @@
               (DefOfProxy. owner nm sink-type init-ce nil)
               :else
               (field-fragment ClassFile/ACC_FINAL owner nm sink-type init-ce))]
-    (emit/stage-task! segm ent)
+    (.stage-task! segm ent)
     (entity/mk-binding ent nm false)))
 
-(defn new-def-mutable ^Binding [^ClosureBlueprint segm ^String nm ^Insn init]
+(defn new-def-mutable ^Binding [^EnvMethod segm ^String nm ^Insn init]
   (let [sink-type (insn/logical-type init)
         init-ce (insn/emitter init)
         ent (field-fragment ClassFile/ACC_VOLATILE (.segment-class segm) nm
                             sink-type init-ce)]
-    (emit/stage-task! segm ent)
+    (.stage-task! segm ent)
     (entity/mk-binding ent nm false)))

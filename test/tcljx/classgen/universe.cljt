@@ -7,13 +7,13 @@
      [form :as form] [parse :as parse] [namespace :as namespace])
    (tcljx.classgen
     [loader :as loader] [runtime :as rt] [classfile :as classfile]
-    [emit :as emit] [insn :as insn] [build :as build]
+    [envgraph :as envgraph] [emit :as emit] [insn :as insn] [build :as build]
     [codegen :as codegen] [defgen :as defgen] [primitive :as primitive]))
   (:import
    (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
                      NamespaceBuilder Expr ExprFactory Parser)
    (tcljx.classgen.loader Loader PackageBuilder)
-   (tcljx.classgen.emit ClosureBlueprint)
+   (tcljx.classgen.envgraph EnvMethod)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassBuilder CodeBuilder)
    (java.nio.file Path)))
@@ -24,7 +24,7 @@
 (deftype NmspBuilderImpl [^NamespaceProvider universe
                           ^String ns-str
                           ^ExprFactory code-gen
-                          ^:unsynchronized-mutable ^ClosureBlueprint segment
+                          ^:unsynchronized-mutable ^EnvMethod segment
                           ^PackageBuilder pkg-build
                           ^:unsynchronized-mutable ^map globals
                           ^:unsynchronized-mutable ^map known-ns
@@ -85,7 +85,7 @@
     ;; stored as part of of `scope`.
     (let [parser (form/mk-parser code-gen this globals)
           imports-at-start imports
-          segm-size-at-start (emit/size-staged segment)
+          segm-size-at-start (.size-staged segment)
           expr (try
                  (parse/form parser fctx form)
                  (catch ImplementationUnavailableException _
@@ -95,11 +95,11 @@
                     this segm-size-at-start (.bindings* parser)
                     imports-at-start)
                    (parse/form parser fctx form)))]
-      (emit/stage-task! segment (.emitter expr))
+      (.stage-task! segment (.emitter expr))
       this))
 
   (finish [this]
-    (.commit-segment-and-revert this (emit/size-staged segment) globals imports)
+    (.commit-segment-and-revert this (.size-staged segment) globals imports)
     (build/capstone pkg-build current-segm-id)
     (ProvidedNamespace. ns-str))
   (commit-segment-and-revert [_ end-of-segment then-globals then-imports]
@@ -109,7 +109,7 @@
     ;; revert back to requested state & move to next segment
     (set! current-segm-id (inc current-segm-id))
     (set! segment (-> (build/segment-cld pkg-build current-segm-id)
-                      (emit/mk-segment-clinit)))
+                      (envgraph/mk-segment-clinit)))
     (set! globals then-globals)
     (set! imports then-imports)))
 
@@ -125,7 +125,7 @@
               (let [source-file nil
                     pkg-build (loader/mk-package-builder loader ns-str)
                     this-class (build/segment-cld pkg-build build/first-segm-id)
-                    segment (emit/mk-segment-clinit this-class)
+                    segment (envgraph/mk-segment-clinit this-class)
                     ef (codegen/mk-factory segment)
                     globals primitive/primitive-nmsp-globals
                     imports (resolve/predefined-imports (.rt-lookup loader))]
