@@ -158,7 +158,7 @@
 ;;              (INVOKEDYNAMIC "_" "(DII)Ljava/lang/String;"
 ;;                             :bsm-concat ["\u0001\u0001\u0001"])
 ;;              (ARETURN)]
-            
+
 ;;             [(METHOD [PUBLIC STATIC FINAL] "asm-expr$try~0" "(I)I")
 ;;              ["LOCAL 0: int b"]
 ;;              [L:0]
@@ -426,95 +426,103 @@
                          ;; the output code
                          (.println System/out s))))))))
 
-;; (deftest finally-duplicates-function
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "f~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
-;;              ["LOCAL 0: Object s"]
-;;              (GETSTATIC System "out" "Ljava/io/PrintStream;")
-;;              (ALOAD_0)
-;;              (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/Object;)V")
-;;              (ACONST_NULL)
-;;              (ARETURN)]
+(deftest finally-duplicates-function
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(I)Ljava/lang/Object;")
+             ["LOCAL 0: int b"]
+             (INVOKESTATIC OutputStream "nullOutputStream" "()Ljava/io/OutputStream;")
+             (ILOAD_0)
+             (INVOKEVIRTUAL OutputStream "write" "(I)V")
+             (ACONST_NULL)
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f^1~1" "(I)Ljava/lang/Object;")
+             ["LOCAL 0: int b"]
+             (INVOKESTATIC OutputStream "nullOutputStream" "()Ljava/io/OutputStream;")
+             (ILOAD_0)
+             (INVOKEVIRTUAL OutputStream "write" "(I)V")
+             (ACONST_NULL)
+             (ARETURN)]
 
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
 
-;;              [L:0]
-;;              (GETSTATIC System "out" "Ljava/io/PrintStream;")
-;;              (LDC "Hello World")
-;;              (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
-;;              (GOTO L:3)
-;;              (EXCEPTION_CATCH L:0 L:1 L:1 Throwable)
+             [L:0]
+             (INVOKESTATIC OutputStream "nullOutputStream" "()Ljava/io/OutputStream;")
+             (BIPUSH 64)
+             (INVOKEVIRTUAL OutputStream "write" "(I)V")
+             (GOTO L:3)
+             (EXCEPTION_CATCH L:0 L:1 L:1 Throwable)
              
-;;              [L:1] (ASTORE_0) ["LOCAL 0: Throwable _"]
-;;              (GOTO L:3)
+             [L:1] (ASTORE_0) ["LOCAL 0: Throwable _"]
+             (GOTO L:3)
              
-;;              #_catch-any (EXCEPTION_CATCH L:0 L:2 L:2 any) [L:2]
-;;              (LDC "finally")
-;;              (INVOKESTATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
-;;              (POP)
-;;              (ATHROW)
+             #_catch-any (EXCEPTION_CATCH L:0 L:2 L:2 any) [L:2]
+             (BIPUSH 65)
+             (INVOKESTATIC . "f^1~1" "(I)Ljava/lang/Object;")
+             (POP)
+             (ATHROW)
              
-;;              #_finally [L:3]
-;;              (LDC "finally")
-;;              (INVOKESTATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
-;;              (POP)
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (try
-;;                    (.println System/out "Hello World")
-;;                    (catch Throwable _
-;;                      nil)
-;;                    (finally
-;;                      ((fn f [s] (.println System/out s)) "finally")))]))))
+             #_finally [L:3]
+             (BIPUSH 65)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/Object;")
+             (POP)
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (try
+                   (.write (java.io.OutputStream/nullOutputStream) 64)
+                   (catch Throwable _
+                     )
+                   (finally
+                     ((fn* f [^int b] (.write (java.io.OutputStream/nullOutputStream) b)) 65)))]))))
 
-;; (deftest retain-body-type-over-nil
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(FIELD [PUBLIC STATIC FINAL TRANSIENT] "x" "Ljava/lang/String;")]
+(deftest retain-body-type-over-nil
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC FINAL] "x" "Ljava/lang/String;")]
             
-;;             [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[STATIC . "f~0" "()V"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "f~0" "()V")
-;;              (RETURN)]
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              [L:0]
-;;              (LDC "foo")
-;;              (GOTO L:3)
-;;              (EXCEPTION_CATCH L:0 L:1 L:1 Exception)
-;;              (EXCEPTION_CATCH L:0 L:1 L:2 Throwable)
+            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()V")
+             (RETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~0" "()V"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             [L:0]
+             (LDC "foo")
+             (GOTO L:3)
+             (EXCEPTION_CATCH L:0 L:1 L:1 Exception)
+             (EXCEPTION_CATCH L:0 L:1 L:2 Throwable)
              
-;;              [L:1] (ASTORE_0) ["LOCAL 0: Exception _"]
-;;              (INVOKESTATIC . "f~0" "()V")
-;;              (ACONST_NULL)
-;;              (GOTO L:3)
+             [L:1] (ASTORE_0) ["LOCAL 0: Exception _"]
+             (INVOKESTATIC . "f~0" "()V")
+             (ACONST_NULL)
+             (GOTO L:3)
              
-;;              [L:2] (ASTORE_0) ["LOCAL 0: Throwable _"]
-;;              (INVOKESTATIC . "f~0" "()V")
-;;              (ACONST_NULL)
-;;              (GOTO L:3)
+             [L:2] (ASTORE_0) ["LOCAL 0: Throwable _"]
+             (INVOKESTATIC . "f~0" "()V")
+             (ACONST_NULL)
+             (GOTO L:3)
              
-;;              [L:3]
-;;              (PUTSTATIC . "x" "Ljava/lang/String;")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (def f (fn* f ^void []))
-;;                  (def x (try
-;;                           "foo"
-;;                           (catch Exception _ (f) nil)
-;;                           (catch Throwable _ (f) nil)))]))))
+             [L:3]
+             (PUTSTATIC . "x" "Ljava/lang/String;")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def f (fn* f ^void []))
+                 (def x (try
+                          "foo"
+                          (catch Exception _ (f) nil)
+                          (catch Throwable _ (f) nil)))]))))
 
 (deftest try-finally-around-no-return-body
   (is (= '[[L:0]

@@ -131,13 +131,7 @@
            [L:0]
            (ICONST_0)
            (IRETURN)]
-         (asm-expr [x] (not (identical? nil x)))))
-
-  ;; NYI identical? involving primitive values incl. void
-  ;; (is (= [] (run-i "(identical? 1 nil)")))
-  ;; (is (= [] (run-i "(identical? true nil)")))
-  ;; (is (= [] (run-i "(identical? false nil)")))
-  )
+         (asm-expr [x] (not (identical? nil x))))))
 
 (deftest nil-test
   (is (= '[["LOCAL 0: Object x"]

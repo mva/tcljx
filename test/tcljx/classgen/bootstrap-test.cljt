@@ -10,12 +10,6 @@
             [tcljx.classgen.bootstrap :refer [nmsp asm-expr call-expr]]
             [tcljx.alpha.ptest :refer :all]))
 
-;; (deftest in-short?-test
-;;   (is (jb/in-short? Short/MIN_VALUE))
-;;   (is (jb/in-short? Short/MAX_VALUE))
-;;   (is (not (jb/in-short? (dec Short/MIN_VALUE))))
-;;   (is (not (jb/in-short? (inc Short/MAX_VALUE)))))
-
 (deftest empty-namespace-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")

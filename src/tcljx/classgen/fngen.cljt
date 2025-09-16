@@ -221,14 +221,20 @@
                (.withMethodBody cb (.methodName mhd)
                                 (mtd-of-arity-type (.at spec)) public-final)))
 
-        (arity-fixed ^void [^CodeBuilder xb ^ClassDesc this-class
-                            ^DirectMethodHandleDesc/1 mhds]
+        (arity-parameter-count ^int [^DirectMethodHandleDesc mhd]
+          (dec (.parameterCount (.invocationType mhd))))
+        (arity-fixed-1 ^void [^CodeBuilder xb ^DirectMethodHandleDesc mhd]
+          (let [target-default (.newLabel xb)]
+            (-> (.iload xb (.parameterSlot xb 0))
+                (.loadConstant (arity-parameter-count mhd))
+                (.if_icmpne target-default) (.ldc mhd) (.areturn)
+                (.labelBinding target-default) (.aconst_null) (.areturn))))
+        (arity-fixed-n ^void [^CodeBuilder xb ^DirectMethodHandleDesc/1 mhds]
           (let [scs (new SwitchCase/1 (alength mhds))
                 target-default (.newLabel xb)]
             (dotimes [i (alength scs)]
-              (let [inv-tp (.invocationType (aget mhds i))]
-                (aset scs i (SwitchCase/of (dec (.parameterCount inv-tp))
-                                           (.newLabel xb)))))
+              (aset scs i (SwitchCase/of (arity-parameter-count (aget mhds i))
+                                         (.newLabel xb))))
             (-> (.iload xb (.parameterSlot xb 0))
                 (.lookupswitch target-default (java.util.Arrays/asList scs)))
             (dotimes [i (alength scs)]
@@ -265,7 +271,9 @@
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (let [at-last (.at (aget specs (dec (alength specs))))]
               (assert (not (model/translates-to-varargs? at-last)))
-              (arity-fixed xb this-class mhds)))
+              (if (= (alength mhds) 1)
+                (arity-fixed-1 xb (aget mhds 0))
+                (arity-fixed-n xb mhds))))
            (.withMethodBody cb runtime/name-arity-method
                             runtime/mtd-arity-method public-final))
       ;; virtual method __directMethodHandles

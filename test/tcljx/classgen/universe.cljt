@@ -7,8 +7,9 @@
      [form :as form] [parse :as parse] [namespace :as namespace])
    (tcljx.classgen
     [loader :as loader] [runtime :as rt] [classfile :as classfile]
-    [envgraph :as envgraph] [emit :as emit] [insn :as insn] [build :as build]
-    [codegen :as codegen] [defgen :as defgen] [primitive :as primitive]))
+    [envgraph :as envgraph] [entity :as entity] [emit :as emit] [insn :as insn]
+    [build :as build] [codegen :as codegen] [defgen :as defgen]
+    [primitive :as primitive]))
   (:import
    (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
                      NamespaceBuilder Expr ExprFactory Parser)
@@ -65,8 +66,11 @@
   ;;   (set! globals (assoc globals nm bnd))
   ;;   bnd)
   (new-def-immutable [_ nm init]
-    (let [bnd (defgen/new-def-immutable segment nm init)]
-      (set! globals (assoc globals nm (.bound-to bnd)))
+    (let [bnd (defgen/new-def-immutable segment nm init)
+          init-ce (.emitter init)]
+      (set! globals (assoc globals nm (if (entity/jvm-const? init-ce)
+                                        init-ce
+                                        (.bound-to bnd))))
       (insn/mk-insn bnd Void/TYPE)))
   (new-def-mutable [_ nm init]
     (let [bnd (defgen/new-def-mutable segment nm init)]

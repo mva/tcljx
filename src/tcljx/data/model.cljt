@@ -232,9 +232,9 @@
 ;;; description known at compilation time.  Applies to constants,
 ;;; namespace-level defs, and functions with an empty environment.  An
 ;;; immediate entity does not contribute to a closure's environment.
-(definterface ImmediateEntity)
-(defn immediate-entity? ^boolean [^Entity ent]
-  (instance? ImmediateEntity ent))
+(definterface ImmediateEntity :extends [Entity])
+(defn immediate-entity? ^boolean [^CodeEmitter ce]
+  (instance? ImmediateEntity ce))
 
 
 ;;; A binding represents the place in a code sequence where some

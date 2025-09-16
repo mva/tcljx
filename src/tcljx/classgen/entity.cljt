@@ -29,6 +29,8 @@
   Entity
   (value-type [_]
     opnd-type)
+  (value-type-exact [this]
+    (reflect/describe-class (.value-type this)))
   (entity-id [_]
     model/entity-id-constant)
 
@@ -101,6 +103,8 @@
   Entity
   (value-type [_]
     opnd-type)
+  (value-type-exact [this]
+    (reflect/describe-class (.value-type this)))
   (entity-id [_]
     model/entity-id-constant)
 
@@ -123,6 +127,8 @@
         computational-value))))
 
 (def emitter-empty (^CodeEmitter fn [xb _ _] Void/TYPE))
+(defn emitter-empty? ^boolean [^CodeEmitter ce]
+  (identical? emitter-empty ce))
 (def entity-null (JvmConstant. ConstantDescs/NULL type/poly-reference))
 (defn entity-null? ^boolean [^CodeEmitter ce]
   (identical? entity-null ce))
@@ -140,6 +146,8 @@
     
     :else (JvmConstant. computational-value type)))
 
+(defn jvm-const? ^boolean [^CodeEmitter ce]
+  (instance? JvmConstant ce))
 (defn const? ^boolean [^CodeEmitter ce]
   (instance? Constant ce))
 (defn const-value ^Object [^CodeEmitter ce]

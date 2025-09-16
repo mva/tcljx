@@ -2,9 +2,6 @@
   (:require (tcljx.data [wrong :as wrong]))
   (:import (tcljx.data.wrong WrongInfo)))
 
-(def fctx-initial 0l)
-(def fctx-none 0l)           ;used as placeholder for "no line number"
-
 ;;; If set in a form context, then a `recur` is possible.  This means
 ;;; that the form is in tail position with respect to the
 ;;; function (method, enclosing loop): there are no instructions
@@ -28,6 +25,8 @@
 ;;; try-catch-finally from appearing in arbitrary expression position.
 ;;; The body of a function or method is always in statement position.
 (def ^:private flag-statm-position (bit-shift-left 1l 33))
+(defn can-inline-tcf? ^boolean [^long fctx]
+  (not (zero? (bit-and flag-statm-position fctx))))
 
 (defn of-arg ^long [^long fctx]
   (bit-and-not fctx (bit-or flag-can-recur flag-statm-position)))
@@ -35,6 +34,9 @@
   (bit-and-not fctx flag-can-recur))
 (defn of-finally ^long [^long fctx]
   (bit-and-not fctx flag-statm-position))
+
+(def fctx-initial flag-statm-position)
+(def fctx-none 0l)           ;used as placeholder for "no line number"
 
 
 (defn fctx-line ^int [^long fctx]

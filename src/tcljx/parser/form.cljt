@@ -192,6 +192,13 @@
                 (if (model/entity? ce)
                   (.invoke-entity expr-factory fctx form ce args)
                   (.invoke-value expr-factory fctx op args))))
+            (parse-try-or-extract ^Expr [^long fctx ^seq form]
+              (if (context/can-inline-tcf? fctx)
+                (trycatch/parse-try this fctx form)
+                ;; FIXME... must not clobber name `try` here!
+                (->> (list (list 'fn* 'try (with-meta [] {:tag 'auto-return-type})
+                                 form))
+                     (.parse-form this fctx))))
             (parse-invocation ^Expr [op ^long fctx ^seq form] ;discards meta
               (if (symbol? op)
                 (let [nm (name op), nmsp (namespace op)]
@@ -217,7 +224,7 @@
                       ;; set! (set!-form form)
                       ;; deftype* (deftype*-form form)
                       ;; reify* (reify*-form form)
-                      "try" (trycatch/parse-try this fctx form)
+                      "try" (parse-try-or-extract fctx form)
                       "throw" (parse-throw fctx form)
                       ;; monitor-enter (monitor-form Opcode/MONITORENTER form)
                       ;; monitor-exit (monitor-form Opcode/MONITOREXIT form)

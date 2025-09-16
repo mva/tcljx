@@ -211,35 +211,3 @@
          (asm-expr [^double x] (* x 1))))
   (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
          (asm-expr [^double x] (* 1 x)))))
-
-;; (comment transform backed out again
-;;   (deftest multiply-by-zero-test
-;;     (is (= '[["LOCAL 0: int x"] (ICONST_0) (IRETURN)]
-;;            (asm-expr [^int x] (* x 0))))
-;;     (is (= '[["LOCAL 0: int x"] (ICONST_0) (IRETURN)]
-;;            (asm-expr [^int x] (* 0 x))))
-    
-;;     (is (= '[["LOCAL 0: long x"] (LCONST_0) (LRETURN)]
-;;            (asm-expr [^long x] (* x 0))))
-;;     (is (= '[["LOCAL 0: long x"] (LCONST_0) (LRETURN)]
-;;            (asm-expr [^long x] (* 0 x))))
-
-;;     (is (= '[["LOCAL 0: float x"] (FCONST_0) (FRETURN)]
-;;            (asm-expr [^float x] (* x 0))))
-;;     (is (= '[["LOCAL 0: float x"] (FCONST_0) (FRETURN)]
-;;            (asm-expr [^float x] (* 0 x))))
-    
-;;     (is (= '[["LOCAL 0: double x"] (DCONST_0) (DRETURN)]
-;;            (asm-expr [^double x] (* x 0))))
-;;     (is (= '[["LOCAL 0: double x"] (DCONST_0) (DRETURN)]
-;;            (asm-expr [^double x] (* 0 x))))
-
-;;     ;; the cast may throw, which means the expression cannot be
-;;     ;; discarded
-;;     (is (= '[["LOCAL 0: Integer x"]
-;;              (ALOAD_0)
-;;              (INVOKEVIRTUAL Integer "intValue" "()I")
-;;              (POP)
-;;              (ICONST_0)
-;;              (IRETURN)]
-;;            (asm-expr [^Integer x] (* 0 ^int x))))))

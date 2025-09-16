@@ -11,7 +11,6 @@
    (tcljx.data.type Wrapper)
    (tcljx.data.model CodeEmitter Entity Constant)
    (tcljx.classgen.insn Insn Insns)
-   (tcljx.classgen.condgen Branching)
    (java.lang.classfile Opcode CodeBuilder TypeKind)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
    (java.lang.constant ConstantDescs MethodTypeDesc)))

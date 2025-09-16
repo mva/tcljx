@@ -33,7 +33,7 @@
       (.invoke* ^Entity init-ce fctx form this at-idx xs))
     LoadFromCopyWhenBound
     (emit-setup-code? [_ xb]
-      (or (identical? entity/emitter-empty init-ce)
+      (or (entity/emitter-empty? init-ce)
           (when (emit/insn? xb context/fctx-none tp init-ce)
             (.putstatic xb owner nm (model/value-type-exact init-ce tp))
             true)))

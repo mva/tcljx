@@ -13,7 +13,7 @@
 
 (definterface Branching
   :extends [CodeEmitter]
-  (emit-branch-if-false? ^boolean [^CodeBuilder xb ^Label target]))
+  (emit-branch-on? ^boolean [^CodeBuilder xb ^boolean outcome? ^Label target]))
 
 (definterface Negatable
   (negate ^CodeEmitter []))
@@ -35,6 +35,10 @@
     (2 3) (+ cmp-opcd 2)                ;lt -> gt, ge -> le
     (4 5) (- cmp-opcd 2)))              ;gt -> lt, le -> ge
 
+(defn- some-code? ^boolean [^CodeEmitter ce ^Class consumed-type]
+  (not (and (type/same? Void/TYPE consumed-type)
+            (or (entity/emitter-empty? ce) (entity/const? ce)))))
+
 ;;; Turn a branching instruction IFXXX into a complete conditional
 ;;; expression with a "true" path and a "false" path.
 (defn- conditional
@@ -46,19 +50,24 @@
    (emit/with-adaption-barrier produced-type
      (^CodeEmitter fn [xb consumed-type then-leave?]
       (let [start-false (.newLabel xb), end-false (.newLabel xb)]
-        (when (.emit-branch-if-false? branch xb start-false)
-          
-          (let [return-t? (emit/then-leave? xb fctx consumed-type if-true
-                                            then-leave?)]
-            (when return-t?
-              (.goto_ xb end-false))
-            
-            (.labelBinding xb start-false)
-            (let [return-f? (emit/then-leave? xb fctx consumed-type if-false
+        (if (some-code? if-true consumed-type)
+          (when (.emit-branch-on? branch xb false start-false)
+            (let [return-t? (emit/then-leave? xb fctx consumed-type if-true
                                               then-leave?)]
-              (.labelBinding xb end-false)
-              (when (or return-t? return-f?)
-                consumed-type)))))))))
+              (when (and return-t? (some-code? if-false consumed-type))
+                (.goto_ xb end-false))
+              
+              (.labelBinding xb start-false)
+              (let [return-f? (emit/then-leave? xb fctx consumed-type if-false
+                                                then-leave?)]
+                (.labelBinding xb end-false)
+                (when (or return-t? return-f?)
+                  consumed-type))))
+          (when (.emit-branch-on? branch xb true end-false) ;consumed-type: void
+            ;; FIXME... when-not to (list 'if test (list 'do) (cons 'do body))
+            (emit/insn? xb fctx Void/TYPE if-false)
+            (.labelBinding xb end-false)
+            Void/TYPE)))))))
 
 (defn negation ^CodeEmitter [^CodeEmitter ce ^long fctx]
   ;; pre: `ce` is boolean
@@ -90,9 +99,10 @@
             (emit-insn* [this xb consumed-type then-leave?] ;standalone insn
               (.emit-insn* (conditional this fctx)
                            xb consumed-type then-leave?))
-            (emit-branch-if-false? [_ xb target] ;test of an if expression
+            (emit-branch-on? [_ xb outcome? target] ;test of an if expression
               (when (emit/insns? xb fctx arg-type args)
-                (case (+ opcode-eq (negate-test cmp-opcd))
+                (case (+ opcode-eq
+                         (cond-> cmp-opcd (not outcome?) (negate-test)))
                   153 (.ifeq xb target)
                   154 (.ifne xb target)
                   155 (.iflt xb target)
@@ -286,7 +296,7 @@
                   (.goto_ xb target)
                   (identical? entity/entity-true cmp)
                   (recur (inc i))
-                  :else (when (.emit-branch-if-false? ^Branching cmp xb target)
+                  :else (when (.emit-branch-on? ^Branching cmp xb false target)
                           (recur (inc i))))))))
         
 
@@ -335,12 +345,13 @@
               (emit-insn* [this xb consumed-type then-leave?]
                 (-> (conditional this fctx)
                     (.emit-insn* xb consumed-type then-leave?)))
-              (emit-branch-if-false? [_ xb target]
+              (emit-branch-on? [_ xb outcome? target]
                 (->> (^java.util.function.Consumer fn ^void [^CodeBuilder xb]
-                      (let [temp (.allocateLocal xb (.type-kind wtop))]
+                      (let [temp (.allocateLocal xb (.type-kind wtop))
+                            cmp* (cond-> cmp-opcd outcome? (negate-test))]
                         (xcmp-n-branch-if-false wtop (load-left ces temp)
                                                 (load-right ces temp)
-                                                cmp-opcd xb fctx target)))
+                                                cmp* xb fctx target)))
                      (.block xb))
                 true)) ;nested block: must assume control doesn't leave method
             (insn/mk-insn Boolean/TYPE))))))
@@ -431,8 +442,8 @@
       arg                      ;identity if `arg` is primitive boolean
       
       (.isPrimitive arg-tp)
-      ;; polymorphic (aka void) is false, all other primitive types are true
-      (insn/prog2 arg (insn/insn-boolean (not (type/polymorphic? arg-tp))))
+      ;; void is false, other non-boolean primitive types are true
+      (insn/prog2 arg (insn/insn-boolean (not (type/same? Void/TYPE arg-tp))))
 
       ;; arg is reference; important: any nil value is logically false
       (entity/entity-null? (.emitter arg)) ;argument is literal nil
