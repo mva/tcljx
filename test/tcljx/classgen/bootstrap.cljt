@@ -9,13 +9,14 @@
   (:require
    (tcljx.data [files :as files] [meta :as meta] [reflect :as reflect]
                [macro :as macro])
-   (tcljx.classgen [loader :as loader] [universe :as universe])
+   (tcljx.classgen [classfile :as classfile] [universe :as universe])
    [tcljx.parser.reader-test :as reader-test]
    [tcljx.classgen.classdata :as classdata] ;only available for unit tests
    [tcljx.alpha.ptest :as ptest]            ;for is
    [tcljx.alpha.ptest__impl :as ptest__impl]) ;for get-test-context
   (:import
-   (tcljx.classgen.loader Loader ClassBytes)
+   (tcljx.data.model NmspClass)
+   (tcljx.classgen.classfile Loader)
    (java.lang.invoke MethodHandle MethodType)
    (java.lang.reflect Method)
    (java.nio.file Path)
@@ -35,8 +36,8 @@
         ;; tcljx-mod-rt (.resolve tcljx-mdir (files/path-of "tcljc-rt.jar"))
         
         tcljx-mod-rt (files/path-of "../bootstrap-tcljc/tcljc.rt")]
-    (loader/app-class-loader :platform [tcljx-mod-rt])))
-(def ^:private rt-lookup (loader/get-rt-lookup app-ld))
+    (classfile/app-class-loader :platform [tcljx-mod-rt])))
+(def ^:private rt-lookup (classfile/get-rt-lookup app-ld))
 
 ;;; ------------------------------------------------------------------------
 
@@ -67,15 +68,15 @@
 
 (defn nmsp
   ([formv]
-   (nmsp (loader/dyn-class-loader app-ld []) formv))
+   (nmsp (classfile/dyn-class-loader app-ld []) formv))
   ([^ClassLoader dyn-ld formv]
    (let [dest-dir (dest-dir-for-this-test)
          !render-to (java.util.concurrent.ConcurrentHashMap.)
-         class-sink (^Consumer fn ^void [^ClassBytes cbs]
+         class-sink (^Consumer fn ^void [^NmspClass ncl]
                      (.put !render-to
-                           (-> cbs .this-class .descriptorString)
-                           (classdata/extract (.class-bytes cbs))))
-         loader (loader/mk-loader dest-dir app-ld dyn-ld class-sink)
+                           (-> ncl .this-class .descriptorString)
+                           (classdata/extract (.class-bytes ncl))))
+         loader (classfile/mk-loader dest-dir app-ld dyn-ld class-sink)
          
          ns-forms-seq (split-at-ns formv)
          
@@ -166,7 +167,7 @@
                       (str "found " (count ms) " matches for method name "
                            nm " in class " cl))
               (first ms)))]
-    (let [dyn-ld (loader/dyn-class-loader app-ld [])]
+    (let [dyn-ld (classfile/dyn-class-loader app-ld [])]
       (nmsp dyn-ld (ns-with-fnbody params form))
       (let [cl (Class/forName "pkg.ns0.___" true dyn-ld)
             m (get-method cl (method-name params))]

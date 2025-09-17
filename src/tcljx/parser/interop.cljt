@@ -8,6 +8,12 @@
    (tcljx.data.model Resolver Expr Entity ExprFactory Parser ArityType)
    (clojure.lang IMeta)))
 
+(defn array-rank ^int [^String nm] ;returns 0 if not in [1-9]
+  (when (= (.length nm) 1)
+    (let [ch (int (.charAt nm 0))]
+      (when (<= (int \1) ch (int \9))
+        (- ch (int \0))))))
+
 ;;; Returns nil if lookup fails.  The three argument arity returns an
 ;;; array type if class `cl` is provided and `nm` is a digit
 ;;; matching [1-9].
@@ -18,9 +24,9 @@
        (lookup-type rsv (.lookup-class rsv nmsp) nm)
        (.lookup-class rsv nm))))
   (^Class [^Resolver rsv ^Class cl ^String nm] ;nil if `cl` is nil
-   (when (and (some? cl) (= (.length nm) 1))
-     (let [n (- (int (.charAt nm 0)) (int \0))]
-       (when (<= 1 n 9)
+   (when (some? cl)
+     (let [n (array-rank nm)]
+       (when (pos? n)
          (type/array-type-of-class cl n))))))
 
 ;;; ------------------------------------------------------------------------
@@ -51,6 +57,10 @@
   (let [sym (syntax/symbol form)]
     (or (lookup-type resolver sym)
         (throw (syntax/info "expected type expression" form)))))
+
+(defn cast-to-tag ^Expr [^Expr x ^Parser parser ^long fctx tag]
+  (let [tp (parse-type-symbol (.resolver parser) tag)]
+    (.type-cast (.expr-factory parser) fctx tp x)))
 
 (defn- class-member-match ^Match [^boolean static? ^Class owner ^String mnm
                                   ^Class/1 ptags]

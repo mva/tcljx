@@ -1,16 +1,14 @@
 (ns tcljx.classgen.envgraph
   (:require (tcljx.data [model :as model]))
-  (:import (tcljx.data.model CodeEmitter Entity)
+  (:import (tcljx.data.model CodeEmitter Entity NmspClass)
            (java.lang.constant ClassDesc ConstantDescs)
            (java.util ArrayList HashMap Map$Entry)
            (java.util.concurrent ConcurrentHashMap)
            (java.util.function Consumer Function BiFunction)))
 
-(deftype OtherClass [^ClassDesc this-class ^int flags ^ClassDesc super-class
-                     ^Consumer class-handler])
 (deftype SegmentAcc [^ArrayList segment-elements ;of Consumer
                      ^ArrayList clinit-statms    ;of CodeEmitter
-                     ^ArrayList other-classes]   ;of OtherClass
+                     ^ArrayList other-classes]   ;of NmspClass
   java.lang.Record)
 
 (defn add-segment-elements ^SegmentAcc [^SegmentAcc acc ^Consumer class-handler]
@@ -19,11 +17,8 @@
 (defn add-clinit-statm ^SegmentAcc [^SegmentAcc acc ^CodeEmitter emitter]
   (.add (.clinit-statms acc) emitter)
   acc)
-(defn add-class-file ^SegmentAcc [^SegmentAcc acc ^ClassDesc this-class
-                                  ^int flags ^ClassDesc super-class
-                                  ^Consumer class-handler]
-  (.add (.other-classes acc)
-        (OtherClass. this-class flags super-class class-handler))
+(defn add-class-file ^SegmentAcc [^SegmentAcc acc ^NmspClass ncl]
+  (.add (.other-classes acc) ncl)
   acc)
 
 ;;; ------------------------------------------------------------------------

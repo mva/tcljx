@@ -1,8 +1,7 @@
 (ns tcljx.classgen.emit
   (:require
    (tcljx.data [config :as cfg] [context :as context] [type :as type]
-               [model :as model] [reflect :as reflect])
-   (tcljx.classgen [classfile :as classfile]))
+               [model :as model] [reflect :as reflect]))
   (:import
    (tcljx.data.type Wrapper)
    (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound)

@@ -11,33 +11,6 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn strip-quote [x]
-  (if (and (seq? x) (= cfg/sym-quote (core/first x)) (nil? (nnext x)))
-    (core/second x)
-    x))
-
-(defn next-if-string ^seq [^seq xs]
-  (cond-> xs (string? (core/first xs)) (next)))
-
-(defn empty-tail
-  (^void [^seq forms]
-   (empty-tail 0 forms))
-  (^void [^int n ^seq forms]
-   (when (some? (nthnext forms n))
-     (throw (info "unexpected arguments at end" (nthnext forms n))))))
-
-(defn first [^seq forms]
-  (if (some? (seq forms))
-    (core/first forms)
-    (throw (info "missing argument"))))
-
-(defn second [^seq forms]
-  (if-some [xs (next forms)]
-    (core/first xs)
-    (throw (info "missing argument"))))
-
-;;; ------------------------------------------------------------------------
-
 (defn simple-symbol? ^boolean [form]
   (and (symbol? form) (nil? (namespace form))))
 
@@ -68,6 +41,38 @@
   (if (map? form)
     form
     (throw (info "expect map" form))))
+
+;;; ------------------------------------------------------------------------
+
+(defn strip-quote [x]
+  (if (and (seq? x) (= cfg/sym-quote (core/first x)) (nil? (nnext x)))
+    (core/second x)
+    x))
+
+(defn next-if-string ^seq [^seq xs]
+  (cond-> xs (string? (core/first xs)) (next)))
+
+(defn empty-tail
+  (^void [^seq forms]
+   (empty-tail 0 forms))
+  (^void [^int n ^seq forms]
+   (when (some? (nthnext forms n))
+     (throw (info "unexpected arguments at end" (nthnext forms n))))))
+
+(defn first [^seq forms]
+  (if (some? (seq forms))
+    (core/first forms)
+    (throw (info "missing argument"))))
+
+(defn second [^seq forms]
+  (if-some [xs (next forms)]
+    (core/first xs)
+    (throw (info "missing argument"))))
+
+(defn varargs-parameter ^symbol [[_ & forms]]
+  (if (some? forms)
+    (simple-symbol (core/first forms))
+    (throw (info "missing varargs parameter"))))
 
 ;;; ------------------------------------------------------------------------
 

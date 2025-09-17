@@ -4,23 +4,31 @@
     [config :as cfg] [files :as files] [resolve :as resolve] [meta :as meta]
     [wrong :as wrong] [context :as context] [model :as model])
    (tcljx.parser
-     [form :as form] [parse :as parse] [namespace :as namespace])
+    [form :as form] [parse :as parse] [namespace :as namespace])
    (tcljx.classgen
-    [loader :as loader] [runtime :as rt] [classfile :as classfile]
-    [envgraph :as envgraph] [entity :as entity] [emit :as emit] [insn :as insn]
-    [build :as build] [codegen :as codegen] [defgen :as defgen]
-    [primitive :as primitive]))
+    [classfile :as classfile] [runtime :as rt] [envgraph :as envgraph]
+    [entity :as entity] [emit :as emit] [insn :as insn] [build :as build]
+    [codegen :as codegen] [defgen :as defgen] [primitive :as primitive]))
   (:import
    (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
                      NamespaceBuilder Expr ExprFactory Parser)
-   (tcljx.classgen.loader Loader PackageBuilder)
+   (tcljx.classgen.classfile Loader PackageBuilder)
    (tcljx.classgen.envgraph EnvSegment EnvMethod)
    (tcljx.classgen.insn Insn)
-   (java.lang.classfile ClassBuilder CodeBuilder)
+   (java.lang.classfile ClassFile ClassBuilder CodeBuilder)
+   (java.lang.invoke MethodType MethodHandle MethodHandles)
    (java.nio.file Path)))
 
 (deftype ImplementationUnavailableException []
   Exception)
+
+(def ^:private mt-Class-bytes (MethodType/methodType Class byte/1))
+(defn- get-ephemeral-factory ^MethodHandle [^PackageBuilder pkg-build]
+  (let [ld (-> pkg-build .lookup-in-pkg .lookupClass .getClassLoader
+               (classfile/class-loader-instance "tclj-eph" nil))]
+    (-> (MethodHandles/lookup)
+        (.findVirtual (class ld) "ephemeralClass" mt-Class-bytes)
+        (.bindTo ld))))
 
 (deftype NmspBuilderImpl [^NamespaceProvider universe
                           ^String ns-str
@@ -31,7 +39,8 @@
                           ^:unsynchronized-mutable ^map known-ns
                           ^:unsynchronized-mutable ^map ns-alias
                           ^:unsynchronized-mutable ^map imports
-                          ^:unsynchronized-mutable ^String current-source-file]
+                          ^:unsynchronized-mutable ^String current-source-file
+                          ^:unsynchronized-mutable ^MethodHandle ephemeral-of]
   Resolver
   (ns-str [_]
     ns-str)
@@ -48,7 +57,14 @@
       (.valAt globals nm nil)
       (when-some [nmsp* (.lookup-namespace this nmsp)]
         (-> known-ns ^map (.valAt nmsp* nil) (.valAt nm nil)))))
-    
+  (import-class [_ class]
+    (set! imports (-> imports
+                      (assoc (resolve/imported-short-name class) class)
+                      (assoc (resolve/imported-long-name class) class))))
+  (ephemeral-factory [_]
+    (or ephemeral-of
+        (set! ephemeral-of (get-ephemeral-factory pkg-build))))
+  
   NamespaceBuilder
   (universe [_]
     universe)
@@ -57,9 +73,7 @@
   (process-imports [this import-strs]
     (doseq [^String nm import-strs]
       (if-some [cl (.lookup-class this nm)]
-        (set! imports (-> imports
-                          (assoc (resolve/imported-short-name cl) cl)
-                          (assoc (.getName cl) cl)))
+        (.import-class this cl)
         (throw (wrong/info-class-not-found nm))))
     this)
   ;; (add-def [_ nm bnd]
@@ -105,9 +119,9 @@
     (.commit-segment-and-revert this (.size-staged segment) globals imports)
     (build/capstone pkg-build segment)
     (ProvidedNamespace. ns-str))
-  (commit-segment-and-revert [_ end-of-segment then-globals then-imports]
+  (commit-segment-and-revert [this end-of-segment then-globals then-imports]
     (let [segm-acc (build/prepare-segment (.tasks segment) end-of-segment)]
-      (build/segment pkg-build current-source-file segment segm-acc))
+      (build/segment pkg-build current-source-file segment segm-acc this))
     
     ;; revert back to requested state & move to next segment
     (set! segment (envgraph/next-segment segment))
@@ -124,7 +138,7 @@
   (require-namespaces [this ns-strs]
     (letfn [(mk-nmsp-builder ^NamespaceBuilder [^String ns-str]
               (let [source-file nil
-                    pkg-build (loader/mk-package-builder loader ns-str)
+                    pkg-build (classfile/mk-package-builder loader ns-str)
                     segment (envgraph/mk-first-segment ns-str)
                     ef (-> (envgraph/mk-method-clinit segment)
                            (codegen/mk-factory))
@@ -132,7 +146,7 @@
                     imports (resolve/predefined-imports (.rt-lookup loader))]
                 (NmspBuilderImpl. this ns-str ef segment pkg-build
                                   globals known-ns ns-alias imports
-                                  source-file)))
+                                  source-file nil)))
             
             (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]
               (loop [acc (mk-nmsp-builder ns-str), forms (seq ns-forms)]

@@ -1,13 +1,14 @@
 (ns tcljx.data.model
   (:require
-   (tcljx.data [config :as cfg] [reflect :as reflect] resolve))
+   (tcljx.data [config :as cfg] resolve [reflect :as reflect]))
   (:import
    (tcljx.data.resolve Match)
    (java.lang.classfile CodeBuilder ClassBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry)
    (java.lang.constant DirectMethodHandleDesc ClassDesc)
+   (java.lang.invoke MethodHandle)
    (java.util Arrays)
-   (java.util.function BiFunction))
+   (java.util.function Consumer BiFunction))
   (:refer-clojure :exclude [zero?]))
 
 ;;; Emit instruction code into the CodeBuilder instance.  Return the
@@ -306,7 +307,11 @@
   ;; Returns the entity representing the def form for `nm` in
   ;; namespace `nmsp`, or nil if no such binding exists.  Use nil as
   ;; `nmsp` to refer to the current namespace.
-  (lookup-def ^Entity [^String nmsp ^String nm]))
+  (lookup-def ^Entity [^String nmsp ^String nm])
+  
+  ;; pre: Called from namespace thread.
+  (import-class ^void [^Class class])
+  (ephemeral-factory ^MethodHandle []))
 
 ;;; ------------------------------------------------------------------------
 
@@ -372,6 +377,16 @@
 
 (defn ns-sym ^symbol [^NamespaceBuilder nmsp]
   (symbol nil (.ns-str nmsp)))
+
+
+(deftype NmspClass [^ClassDesc this-class ^ClassDesc super-if-class
+                    ^Consumer class-handler ^byte/1 class-bytes
+                    ^Class defined-class]
+  java.lang.Record)
+
+(defn mk-nmsp-class ^NmspClass [^ClassDesc this-class ^ClassDesc super-if-class
+                                ^Consumer class-handler]
+  (NmspClass. this-class super-if-class class-handler nil nil))
 
 ;;; ------------------------------------------------------------------------
 
@@ -478,7 +493,10 @@
   (get-virtual-field ^Expr [^long fctx ^Expr receiver ^String mnm])
   
   (instanceof-expr ^Expr [^long fctx ^Class type ^Expr arg])
-  (throw-expr ^Expr [^long fctx ^Expr arg]))
+  (throw-expr ^Expr [^long fctx ^Expr arg])
+  
+  (ephemeral-class ^Expr [^Class eph-class])
+  (stage-nmsp-class ^void [^NmspClass ncl]))
 
 (definterface Parser
   (parse-form ^Expr [^long fctx form])

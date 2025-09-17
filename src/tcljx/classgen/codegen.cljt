@@ -14,7 +14,7 @@
    (tcljx.data.resolve Match)
    (tcljx.classgen.envgraph EnvClass EnvMethod)
    (tcljx.classgen.insn Insn Insns)
-   (java.lang.classfile ClassBuilder CodeBuilder Opcode Label TypeKind)
+   (java.lang.classfile ClassFile ClassBuilder CodeBuilder Opcode Label TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDescs)
    (java.util.function Consumer)))
@@ -457,7 +457,15 @@
                (-> xb (emit/with-line-number fctx) (.athrow))
                nil))         ;operand type reported when emitting code
             (insn/mk-insn Void/TYPE))   ;type used while parsing
-        (throw (insn/info-type "expect instance of Throwable" arg))))))
+        (throw (insn/info-type "expect instance of Throwable" arg)))))
+  
+  (ephemeral-class [this eph-class]
+    (when (not= (.closure-level method) model/closure-level-clinit)
+      (throw (wrong/wr-info "cannot define class in this position")))
+    (let [const (.constant-entity this eph-class Class)]
+      (.value-of this const nil)))
+  (stage-nmsp-class [_ ncl]
+    (.stage-task! method ncl)))
 
 (defn mk-factory ^ExprFactory [^EnvMethod segment]
   (InsnFactoryImpl. segment nil nil))

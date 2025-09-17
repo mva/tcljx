@@ -1,13 +1,18 @@
 (ns tcljx.classgen.classfile
+  (:require
+   (tcljx.data [config :as cfg] [files :as files] model))
   (:import
-   (java.lang.classfile ClassFile Opcode TypeKind #_MethodBuilder
-                        CodeBuilder #_Label Opcode$Kind)
+   (tcljx.data.model NmspClass)
+   (java.lang.classfile ClassFile ClassBuilder CodeBuilder Opcode TypeKind
+                        Opcode$Kind ClassHierarchyResolver
+                        ClassHierarchyResolver$ClassHierarchyInfo)
    (java.lang.classfile.instruction OperatorInstruction)
-   (java.lang.constant #_ConstantDesc ClassDesc #_MethodTypeDesc #_MethodHandleDesc
-                       #_DirectMethodHandleDesc #_DirectMethodHandleDesc$Kind
-                       #_ConstantDescs)
-   #_(java.lang.invoke MethodHandle TypeDescriptor$OfField MethodHandles$Lookup)
-   (java.util.function Consumer #_Function)))
+   (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
+   (java.lang.invoke MethodType MethodHandles$Lookup)
+   (java.net URLClassLoader URL)
+   (java.nio.file Path Files)
+   (java.util.concurrent ConcurrentHashMap)
+   (java.util.function Consumer)))
 
 (def acc-method-virtual (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_FINAL))
 (def acc-method-static (bit-or acc-method-virtual ClassFile/ACC_STATIC))
@@ -21,6 +26,11 @@
    (if  (symbol? builder)
      (list 'do (list '.accept handler builder arg) builder)
      `(let [builder# ~builder] (.accept ~handler builder# ~arg) builder#))))
+
+(defn with-source-file ^ClassBuilder [^ClassBuilder cb ^String source-file]
+  (cond-> cb
+    (some? source-file)
+    (.with (java.lang.classfile.attribute.SourceFileAttribute/of source-file))))
 
 (defmacro with-method-body-> [cb [method-name lookup-type-desc flags] & body]
   `(.withMethodBody ~cb ~method-name ~lookup-type-desc ~flags
@@ -39,10 +49,177 @@
 (defn with-operator ^CodeBuilder [^CodeBuilder xb ^int bytecode]
   (.with xb (aget op-instr (- bytecode #_iadd 96))))
 
-
 (defn dup-and-store-local ^CodeBuilder [^CodeBuilder xb ^TypeKind tk ^int slot]
   (case (.slotSize tk)
     1 (.dup xb)
     2 (.dup2 xb))
   (.storeLocal xb tk slot))
 
+;;; ------------------------------------------------------------------------
+
+;;; Compilation scenario "distinct runtimes".  The compiler is, for
+;;; example, a Clojure application running from `getSystemClassLoader`
+;;; with its own runtime.  On the other hand, the application being
+;;; compiled needs to see the Tinyclj runtime, plus any additional
+;;; classes imported by the application.  In this case, the
+;;; application can not be based on `getSystemClassLoader`, but only
+;;; on the neutral `getPlatformClassLoader`.  The Tinyclj runtime and
+;;; imported application classes must be installed manually into a
+;;; fresh application class loader.
+(defn app-class-loader ^URLClassLoader [parent class-paths]
+  (let [parent-ld (case parent
+                    :platform (ClassLoader/getPlatformClassLoader)
+                    :system (ClassLoader/getSystemClassLoader))
+        urls (into-array URL (map files/path-url class-paths))]
+    (URLClassLoader. "tclj-app" urls parent-ld)))
+
+(defn class-loader-instance ^URLClassLoader [^ClassLoader parent ^String name
+                                             source-paths]
+  (let [dyn-cl-class (.loadClass parent "tinyclj.lang.DynamicClassLoader")
+        c (.getConstructor dyn-cl-class String URL/1 ClassLoader)
+        urls (->> source-paths (map files/path-url) (distinct) (into-array URL))]
+    (.newInstance c name urls parent)))
+
+(defn dyn-class-loader ^URLClassLoader [^ClassLoader app-ld source-paths]
+  (class-loader-instance app-ld "tclj-dyn" source-paths))
+
+(defn get-rt-lookup ^MethodHandles$Lookup [^ClassLoader app-ld]
+  (let [cl (Class/forName "tinyclj.lang.CljCljMapper" false app-ld)
+        f (.getDeclaredField cl "rtLookup")]
+    (.get f nil)))
+
+;;; ------------------------------------------------------------------------
+
+(deftype Loader [^Path dest-dir         ;may be nil
+                 ^ClassLoader dyn-ld
+                 ^MethodHandles$Lookup rt-lookup
+                 ^Consumer class-sink
+                 ^ClassHierarchyResolver chr-from-file])
+
+;;; If a non-nil `dest-dir` is provided, then class files will be
+;;; written to this directory.  If a non-nil `class-sink` is provided,
+;;; then the ClassByte instance is passed to the sink after it has
+;;; been defined.
+(defn mk-loader
+  (^Loader [^Path dest-dir ^ClassLoader app-ld]
+   (mk-loader dest-dir app-ld (dyn-class-loader app-ld [])))
+  (^Loader [^Path dest-dir ^ClassLoader app-ld ^ClassLoader dyn-ld]
+   (mk-loader dest-dir app-ld dyn-ld nil))
+  (^Loader [^Path dest-dir ^ClassLoader app-ld ^ClassLoader dyn-ld
+            ^Consumer class-sink]
+   (Loader. dest-dir dyn-ld (get-rt-lookup app-ld) class-sink
+            (ClassHierarchyResolver/ofResourceParsing dyn-ld))))
+
+(defn resolve-rt-class ^Class [^Loader loader ^ClassDesc cld]
+  (.resolveConstantDesc cld (.rt-lookup loader)))
+
+(deftype PackageBuilder [^Path pkg-dir
+                         ^MethodHandles$Lookup lookup-in-pkg
+                         ^Consumer class-sink
+                         ^ClassHierarchyResolver chr-from-file
+                         ^ConcurrentHashMap chr-class-map]
+  ClassHierarchyResolver
+  (getClassInfo [_ class-desc]
+    (or (.get chr-class-map class-desc)
+        (.getClassInfo chr-from-file class-desc))))
+
+(defn- mk-lookup-in-pkg ^MethodHandles$Lookup [^MethodHandles$Lookup rt-lookup
+                                               ^ClassLoader dyn-ld
+                                               ^String pkg-name]
+  (let [bs (.build
+            (ClassFile/of) (ClassDesc/of pkg-name "__beachhead")
+            (^Consumer fn ^void [^ClassBuilder cb]
+             (let [mtd (MethodTypeDesc/of ConstantDescs/CD_MethodHandles_Lookup)]
+               (-> cb                 ;use ClassFile's default version
+                   (.withFlags (bit-or ClassFile/ACC_PUBLIC
+                                       ClassFile/ACC_ABSTRACT))
+                   (.withMethodBody
+                    "beachheadLookup" mtd
+                    (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_STATIC)
+                    (^Consumer fn ^void [^CodeBuilder xb]
+                     (-> (.invokestatic xb ConstantDescs/CD_MethodHandles
+                                        "lookup" mtd)
+                         (.areturn))))))))
+        mt (MethodType/methodType MethodHandles$Lookup byte/1)
+        mh (.findVirtual rt-lookup (class dyn-ld) "lookupInPackage" mt)]
+    ^MethodHandles$Lookup (.invokeExact (.bindTo mh dyn-ld) bs)))
+
+;;; Coordinates cross cutting concerns for building and defining
+;;; classes.  For the Class-File API it provides the class hierarchy
+;;; resolver, and for class definition a mechanism to enforce "super
+;;; class is defined before extending class".
+(defn mk-package-builder ^PackageBuilder [^Loader loader ^String ns-str]
+  (let [pkg-dir (files/prepare-package-directory (.dest-dir loader) ns-str)
+        lookup-in-pkg (mk-lookup-in-pkg (.rt-lookup loader) (.dyn-ld loader)
+                                        ns-str)]
+    (PackageBuilder. pkg-dir lookup-in-pkg (.class-sink loader)
+                     (.chr-from-file loader) (ConcurrentHashMap.))))
+
+;;; ------------------------------------------------------------------------
+
+;;; For future class building, declare that `cld` extends
+;;; `super-class` or is an interface class.
+(defn declare-class ^void [^PackageBuilder pkg-build ^NmspClass ncl]
+  (.put (.chr-class-map pkg-build) (.this-class ncl)
+        (if-some [super-class (.super-if-class ncl)]
+          (ClassHierarchyResolver$ClassHierarchyInfo/ofClass super-class)
+          (ClassHierarchyResolver$ClassHierarchyInfo/ofInterface))))
+
+(defn- class-file-of ^ClassFile [^ClassHierarchyResolver dyn-chr]
+  ;; *Not* setting KEEP_DEAD_CODE, because the code generator cannot
+  ;; *track unreachable code across instances of CodeBuilder.block().
+  (ClassFile/of
+   (java.lang.classfile.ClassFile$ClassHierarchyResolverOption/of dyn-chr)))
+
+(defn- build ^NmspClass [^NmspClass ncl ^PackageBuilder pkg-build]
+  (assert (nil? (.class-bytes ncl)))
+  (let [bs (-> (class-file-of pkg-build)
+               (.build (.this-class ncl) (.class-handler ncl)))]
+    (NmspClass. (.this-class ncl) (.super-if-class ncl) nil bs nil)))
+
+(defn- write ^NmspClass [^NmspClass ncl ^PackageBuilder pkg-build]
+  (when-some [pkg-dir (.pkg-dir pkg-build)]
+    (let [fnm (str (-> ncl .this-class .displayName) files/class-suffix)]
+      (with-open [w (Files/newOutputStream (.resolve pkg-dir fnm))]
+        (.write w (.class-bytes ncl)))))
+  ncl)
+
+(defn- define ^NmspClass [^NmspClass ncl ^PackageBuilder pkg-build]
+  (letfn [#_(internal-name ^String [^ClassDesc cld]
+              (assert (not (.isArray cld)))
+              (assert (not (.isPrimitive cld)))
+              (let [desc (.descriptorString cld)]
+                ;; drop "L" and ";", but keep "/"
+                (.substring desc 1 (dec (.length desc)))))]
+
+    (let [l (.lookup-in-pkg pkg-build)
+          cl (.defineClass l (.class-bytes ncl))
+          ncl (NmspClass. (.this-class ncl) (.super-if-class ncl) nil
+                          (.class-bytes ncl) cl)]
+      #_                           ;FIXME... is this still true?  
+      (-> (try
+            (.defineClass l bs)
+            (catch NoClassDefFoundError _
+              ;; happens for example
+              ;; with "pkg/ns0/n2$n2-n1$n2-n1-n0" from test case
+              ;; tcljc.closure-test/nested
+              (.findClass l (.replace (internal-name this-class) "/" ".")))))
+
+      (when-some [sink (.class-sink pkg-build)]
+        (.accept sink ncl)
+        ncl))))
+
+(defn- initialize ^NmspClass [^NmspClass ncl]
+  ;; FIXME... disable this eventually? for development it is a
+  ;; valuable sanity check!
+  (let [cl (.defined-class ncl)
+        nm (.getName cl)
+        cl* (Class/forName nm true (.getClassLoader cl))]
+    (when-not (identical? cl cl*)
+      (throw (IllegalStateException.
+              (str "failed to define class " nm
+                   " over existing class from classpath"))))
+    ncl))
+
+(defn bwdi ^NmspClass [^PackageBuilder pkg-build ^NmspClass ncl]
+  (-> ncl (build pkg-build) (write pkg-build) (define pkg-build) (initialize)))

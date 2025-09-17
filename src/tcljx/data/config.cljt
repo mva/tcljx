@@ -10,6 +10,7 @@
    #_[tcljx.files :as files]
    #_[tinyclj.string :as str])
   (:import
+   (java.lang.classfile ClassFile ClassBuilder)
    #_(java.lang.constant ClassDesc)
    #_(java.lang.invoke MethodHandles$Lookup)
    #_(java.net URLClassLoader URL)
@@ -30,6 +31,11 @@
 ;; ;; entries for parameter and bindings names plus their type
 ;; ;; descriptors, increasing the pressure on the constant pool.
 ;; (def enable-local-variables true)
+
+(defn with-class-version ^ClassBuilder [^ClassBuilder cb]
+  (let [major ClassFile/JAVA_17_VERSION
+        minor 0 #_ClassFile/PREVIEW_MINOR_VERSION]
+    (.withVersion cb major minor)))
 
 (def no-line-number 0)
 
@@ -55,40 +61,7 @@
 
 ;; (def wait-cyclic-ms (* 5 1000l))
 
-;; (def java-base-classes              ;almost all from package java.lang
-;;   [Boolean Byte Character Class ClassLoader #_clojure.lang.Compiler Double
-;;    Enum Float InheritableThreadLocal Integer Long Math Number Object
-;;    Package Process ProcessBuilder Runtime RuntimePermission
-;;    Short StackTraceElement StrictMath String
-;;    #_StringBuffer StringBuilder System Thread ThreadGroup ThreadLocal
-;;    Throwable Void Appendable CharSequence Cloneable Comparable
-;;    Iterable Readable Runnable java.util.concurrent.Callable
-;;    BigInteger BigDecimal
-             
-;;    ArithmeticException ArrayIndexOutOfBoundsException
-;;    ArrayStoreException ClassCastException ClassNotFoundException
-;;    CloneNotSupportedException EnumConstantNotPresentException
-;;    Exception IllegalAccessException IllegalArgumentException
-;;    IllegalMonitorStateException IllegalStateException
-;;    IllegalThreadStateException IndexOutOfBoundsException
-;;    InstantiationException  NegativeArraySizeException
-;;    NoSuchFieldException NoSuchMethodException NullPointerException
-;;    NumberFormatException RuntimeException SecurityException
-;;    StringIndexOutOfBoundsException TypeNotPresentException
-;;    UnsupportedOperationException AbstractMethodError AssertionError
-;;    ClassCircularityError ClassFormatError Error
-;;    ExceptionInInitializerError IllegalAccessError
-;;    IncompatibleClassChangeError InstantiationError InternalError
-;;    LinkageError NoClassDefFoundError NoSuchFieldError
-;;    NoSuchMethodError OutOfMemoryError StackOverflowError
-;;    UnknownError UnsatisfiedLinkError
-;;    UnsupportedClassVersionError VerifyError VirtualMachineError
-             
-;;    Thread$UncaughtExceptionHandler Thread$State
-;;    Deprecated Override SuppressWarnings])
-
 ;;; ------------------------------------------------------------------------
-
 
 ;; (defn nmsp-rpath ^Path [^String ns-str]
 ;;   (path-of (str (str/replace ns-str "." "/") source-suffix)))
@@ -157,17 +130,17 @@
 ;;; tclj-in-tclj), it is easier to duplicate munge/demunge code.  See
 ;;; tinyclj/lang/Compiler.java
 
-;; ;;; see OpenJDK classFileParser.cpp, verify_unqualified_name
-;; (defn nm-repl ^String [^char c]
-;;   (case c
-;;     ;; \; nil                             ;invalid in symbol & class name
-;;     ;; \[ nil                             ;invalid in symbol & class name
-;;     \/ "_SLASH_"                        ;"/"
-;;     \\ "_BSLASH_"                       ;"\\"
-;;     \< "_LT_"                           ;"<"
-;;     \> "_GT_"                           ;">"
-;;     \. "_DOT_"                          ;"."
-;;     nil))                              ;accept char
+;;; see OpenJDK classFileParser.cpp, verify_unqualified_name
+(defn nm-repl ^String [^char c]
+  (case c
+    ;; \; nil                             ;invalid in symbol & class name
+    ;; \[ nil                             ;invalid in symbol & class name
+    \/ "_SLASH_"                        ;"/"
+    \\ "_BSLASH_"                       ;"\\"
+    \< "_LT_"                           ;"<"
+    \> "_GT_"                           ;">"
+    \. "_DOT_"                          ;"."
+    nil))                              ;accept char
 
 ;; (def ^:private ^java.util.Map de-repl
 ;;   (java.util.Map/of "_SLASH_" "/"
@@ -176,68 +149,29 @@
 ;;                     "_GT_" ">"
 ;;                     "_DOT_" "."))
 
-;; (defn munge-name ^String [nm-sym]   ;pre: `nm-sym` is symbol or string
-;;   (let [nm (name nm-sym)]
-;;     (letfn [(up-to-replacement ^int [^int s]
-;;               (loop [i s]
-;;                 (if (and (< i (.length nm))
-;;                          (nil? (nm-repl (.charAt nm i))))
-;;                   (recur (inc i))
-;;                   i)))
-;;             (replace-all ^String [^int s ^StringBuilder b]
-;;               (let [e (up-to-replacement s)]
-;;                 (if (= e (.length nm))
-;;                   (str (.append b (subs nm s)))
-;;                   (recur (inc e)
-;;                          (doto b
-;;                            (.append (subs nm s e))
-;;                            (.append (nm-repl (.charAt nm e))))))))]
-;;       (let [i (up-to-replacement 0)]
-;;         (if (= i (.length nm))
-;;           nm               ;common fast path: return existing instance
-;;           (replace-all 0 (StringBuilder.)))))))
+(defn munge-name ^String [nm-sym]   ;pre: `nm-sym` is symbol or string
+  (let [nm (name nm-sym)]
+    (letfn [(up-to-replacement ^int [^int s]
+              (loop [i s]
+                (if (and (< i (.length nm))
+                         (nil? (nm-repl (.charAt nm i))))
+                  (recur (inc i))
+                  i)))
+            (replace-all ^String [^int s ^StringBuilder b]
+              (let [e (up-to-replacement s)]
+                (if (= e (.length nm))
+                  (str (.append b (subs nm s)))
+                  (recur (inc e)
+                         (doto b
+                           (.append (subs nm s e))
+                           (.append (nm-repl (.charAt nm e))))))))]
+      (let [i (up-to-replacement 0)]
+        (if (= i (.length nm))
+          nm               ;common fast path: return existing instance
+          (replace-all 0 (StringBuilder.)))))))
 
 ;; (defn demunge-name ^String [^String s]
 ;;   (if (neg? (.indexOf s "_"))
 ;;     s                      ;common fast path: return existing instance
 ;;     (str/replace s #"_(?:DOT|[LG]T|B?SLASH)_"
 ;;                  (fn [^String m] (.getOrDefault de-repl m m)))))
-
-;; ;;; ------------------------------------------------------------------------
-
-;; (def nano-time-zero (System/nanoTime))
-;; (defn fmt-duration ^String [^long nanos]
-;;   (let [ms (/ nanos 1000000.0)]
-;;     (String/format java.util.Locale/ROOT "%5.2f" (object ms))))
-;; (defn fmt-instance ^String [^long inst]
-;;   (let [ms (/ (- inst nano-time-zero) 1000000.0)]
-;;     (String/format java.util.Locale/ROOT "%7.2f" (object ms))))
-
-;; (def ^:private *logger* (agent {}))
-
-;; (defn- print-log [a ^String s]
-;;   (.println System/out s)
-;;   a)
-
-;; (defn log-info ^void [label & parts]
-;;   (let [now (System/nanoTime)
-;;         s (str (fmt-instance now) " (info) "
-;;                label " " (str/join " " parts)
-;;                " [tid=" (.threadId (Thread/currentThread)) "]")]
-;;     (send-off *logger* print-log s)))
-
-;; (defn log-start ^long [label & parts]
-;;   (let [now (System/nanoTime)
-;;         s (str (fmt-instance now) " (start) "
-;;                label " " (str/join " " parts)
-;;                " [tid=" (.threadId (Thread/currentThread)) "]")]
-;;     (send-off *logger* print-log s)
-;;     now))
-
-;; (defn log-end ^long [^long start label & parts]
-;;   (let [now (System/nanoTime)
-;;         s (str (fmt-instance now) " (" (fmt-duration (- now start)) ") "
-;;                label " " (str/join " " parts)
-;;                " [tid=" (.threadId (Thread/currentThread)) "]")]
-;;     (send-off *logger* print-log s)
-;;     now))

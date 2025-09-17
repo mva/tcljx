@@ -1,11 +1,9 @@
 (ns tcljx.classgen.primitive
   (:require
-   (tcljx.data
-    [config :as cfg] [type :as type] [resolve :as resolve]
-    [reflect :as reflect] [model :as model] [wrong :as wrong])
-   (tcljx.classgen
-    [classfile :as classfile] [emit :as emit] [insn :as insn] [entity :as entity]
-    [runtime :as rt] [condgen :as condgen])
+   (tcljx.data [config :as cfg] [type :as type] [resolve :as resolve]
+               [reflect :as reflect] [model :as model] [wrong :as wrong])
+   (tcljx.classgen [classfile :as classfile] [emit :as emit] [insn :as insn]
+                   [entity :as entity] [runtime :as rt] [condgen :as condgen])
    (tinyclj [string :as str]))
   (:import
    (tcljx.data.type Wrapper)

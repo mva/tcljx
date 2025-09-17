@@ -58,6 +58,7 @@
    Thread$UncaughtExceptionHandler Thread$State
    Deprecated Override SuppressWarnings])
 
+(def imported-long-name Class/.getName)
 (defn imported-short-name ^String [^Class cl]
   (let [s (.getName cl)] ;want "Thread$State" for j.l.Thread.State
     (.substring s (inc (.lastIndexOf s (int \.))))))
@@ -70,7 +71,7 @@
     ;; demand and refer to the same JVM-level class instance
     (doseq [^Class cl java-base-classes]
       (.put m (imported-short-name cl) cl)
-      (.put m (.getName cl) cl))
+      (.put m (imported-long-name cl) cl))
     
     ;; pseudo-import of primitive types types by their lower-case Java
     ;; name

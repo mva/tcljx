@@ -1,7 +1,8 @@
 (ns tcljx.classgen.fngen
   (:require
-   (tcljx.data [type :as type] [model :as model] [reflect :as reflect] resolve)
-   (tcljx.classgen [runtime :as runtime] [classfile :as classfile]
+   (tcljx.data [config :as cfg] [type :as type] [reflect :as reflect] resolve
+               [model :as model])
+   (tcljx.classgen [classfile :as classfile] [runtime :as runtime]
                    [emit :as emit] [runtime :as rt] [entity :as entity]
                    [insn :as insn] [envgraph :as envgraph]))
   (:import
@@ -336,6 +337,7 @@
 
 (defn- as-fn-virtual ^SegmentAcc [^SegmentAcc acc ^EnvClass class]
   (let [this-class (envgraph/namespace-class class)
+        super-class runtime/AFn
         fn-proxy ^IEmitProxy (.fn-proxy class)
         arity-specs (.arity-specs fn-proxy)
         construction-ops (-> (envgraph/class-origin-to-proxy class)
@@ -354,12 +356,15 @@
                                (.changeReturnType ConstantDescs/CD_void))
                 origin-to-load (field-getters this-class construction-ops)
                 field-names (field-names construction-ops)]
-            (class-elements-virtual cb arity-specs mhds
-                                    this-class (.class-name class)
-                                    factory-mtd field-names
-                                    origin-to-load (.methods class))))
-         (envgraph/add-class-file acc this-class fn-virtual-class-flags
-                                  runtime/AFn))))
+            (-> (cfg/with-class-version cb)
+                (.withFlags fn-virtual-class-flags)
+                (.withSuperclass super-class)
+                (class-elements-virtual arity-specs mhds
+                                        this-class (.class-name class)
+                                        factory-mtd field-names
+                                        origin-to-load (.methods class)))))
+         (model/mk-nmsp-class this-class super-class)
+         (envgraph/add-class-file acc))))
 
 ;;; ------------------------------------------------------------------------
 

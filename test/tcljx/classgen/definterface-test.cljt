@@ -1,0 +1,222 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.classgen.definterface-test
+  (:require [tcljx.classgen.bootstrap :refer [nmsp]]
+            [tcljx.alpha.ptest :refer :all]))
+
+(deftest simple-method-test
+  (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/IInterface")
+            [(METHOD [PUBLIC ABSTRACT] "foo" "(Ljava/lang/Class;)I")]]
+
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC FINAL] "a" "[Lpkg/ns0/IInterface;")]
+            [(FIELD [PUBLIC STATIC FINAL] "b" "[Lpkg/ns0/IInterface;")]
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (ACONST_NULL)
+             (PUTSTATIC . "a" "[Lpkg/ns0/IInterface;")
+             (ACONST_NULL)
+             (PUTSTATIC . "b" "[Lpkg/ns0/IInterface;")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         ;; definterface* automatically imports the class name,
+         ;; similar to macro definterface from the core lib
+         (nmsp '[(ns pkg.ns0)
+                 (definterface* IInterface
+                   (foo ^int [^Class cl]))
+                 (def ^pkg.ns0.IInterface/1 a)
+                 (def ^IInterface/1 b)]))))
+
+(deftest default-type-test
+  (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/IInterface")
+            [(METHOD [PUBLIC ABSTRACT] "foo"
+                     "(Ljava/lang/Object;)Ljava/lang/Object;")]]
+
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (definterface* IInterface
+                   (foo [a]))]))))
+
+(deftest varargs-test
+  (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/IInterface")
+            [(METHOD [PUBLIC VARARGS ABSTRACT] "foo"
+                     "([Ljava/lang/Object;)Ljava/lang/Object;")]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (definterface* IInterface
+                   (foo [& ^Object/1 a]))]))))
+
+;; (deftest function-itf-test
+;;   (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/FnBinaryInt")
+;;             [(METHOD [PUBLIC ABSTRACT] "fn2" "(II)I")]]
+
+;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+;;             [(FIELD [PUBLIC STATIC FINAL TRANSIENT] "add-int"
+;;                     "Lpkg/ns0/FnBinaryInt;")]
+;;             [(FIELD [PUBLIC STATIC FINAL TRANSIENT] "two" "I")]
+
+;;             [(METHOD [PUBLIC STATIC FINAL] "FnBinaryInt~2" "(II)I")
+;;              ["LOCAL 0: int a"]
+;;              ["LOCAL 1: int b"]
+;;              (ILOAD_0)
+;;              (ILOAD_1)
+;;              (IADD)
+;;              (IRETURN)]
+;;             [(METHOD [PUBLIC STATIC FINAL] "apply-binary-int" "()Ltinyclj/lang/StaticFn;")
+;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+;;                    [[INTERFACE_VIRTUAL FnBinaryInt "fn2" "(II)I"]]])
+;;              (ARETURN)]
+            
+;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+;;              (LDC "pkg.ns0")
+;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+
+;;              (INVOKEDYNAMIC "fn2" "()Lpkg/ns0/FnBinaryInt;" :bsm-metafactory
+;;                             ["MethodTypeDesc[(int,int)int]"
+;;                              [STATIC . "FnBinaryInt~2" "(II)I"]
+;;                              "MethodTypeDesc[(int,int)int]"])
+;;              (PUTSTATIC . "add-int" "Lpkg/ns0/FnBinaryInt;")
+;;              (GETSTATIC . "add-int" "Lpkg/ns0/FnBinaryInt;")
+;;              (ICONST_1)
+;;              (ICONST_1)
+;;              (INVOKEINTERFACE FnBinaryInt "fn2" "(II)I" :itf)
+;;              (PUTSTATIC . "two" "I")
+             
+;;              (RETURN)]]
+;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+;;              (LDC "tinyclj.core")
+;;              (ARETURN)]]]
+;;          (nmsp '[(ns pkg.ns0)
+;;                  (definterface* FnBinaryInt
+;;                    (fn2 ^int [^int a ^int b]))
+;;                  (import* pkg.ns0.FnBinaryInt)
+;;                  (def add-int (^FnBinaryInt fn* [a b] (+ a b)))
+;;                  (def apply-binary-int
+;;                    (fn* apply-binary-int ^int [^FnBinaryInt f ^int a ^int b]
+;;                         (.fn2 f a b)))
+;;                  (def two (apply-binary-int add-int 1 1))]))))
+
+(def exp-self-ref
+  '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/ISucc")
+     [(METHOD [PUBLIC ABSTRACT] "succ" "(Lpkg/ns0/ISucc;)Lpkg/ns0/ISucc;")]]
+
+    [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+     [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+      (LDC "pkg.ns0")
+      (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+      (RETURN)]]
+    [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+     [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+      (LDC "tinyclj.core")
+      (ARETURN)]]])
+
+(deftest self-ref-test
+  (is (= exp-self-ref (nmsp '[(ns pkg.ns0)
+                              (definterface* ISucc
+                                (succ ^ISucc [^ISucc a]))]))))
+
+(deftest self-ref-fq-test
+  (is (= exp-self-ref (nmsp '[(ns pkg.ns0)
+                              (definterface* ISucc
+                                (succ ^pkg.ns0.ISucc [^pkg.ns0.ISucc a]))]))))
+
+(deftest forward-ref-test
+  (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/ISucc")
+            [(METHOD [PUBLIC ABSTRACT] "succ" "(Lpkg/ns0/IForward;)Lpkg/ns0/IForward;")]]
+
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (definterface* ISucc
+                   (succ ^IForward [^IForward a]))]))))
+
+(deftest definterface-inside-function
+  (is (thrown-with-msg? tcljx.data.wrong.WrongInfo
+                        #"cannot define class in this position"
+                        (nmsp '[(ns pkg.ns0)
+                                (def f (fn* f ^boolean []
+                                            (definterface* IFoo)))]))))
+
+(deftest extends-test
+  ;; empty option :extends
+  (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/IFoo")]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (definterface* IFoo :extends [])])))
+
+  ;; option :extends refers to existing class (qualified class name
+  ;; and imported class name)
+  (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/IFoo" nil
+                   "java/lang/Object" [Runnable])]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (definterface* IFoo :extends [java.lang.Runnable])])))
+  (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/IFoo" nil
+                   "java/lang/Object" [Runnable])]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (definterface* IFoo :extends [Runnable])]))))

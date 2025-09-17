@@ -2,16 +2,18 @@
   (:require
    (tcljx.data [meta :as meta] [wrong :as wrong] [context :as context]
                [model :as model] [type :as type])
-   (tcljx.parser [syntax :as syntax] [parse :as parse]))
+   (tcljx.parser [syntax :as syntax] [interop :as interop] [parse :as parse]))
   (:import
    (tcljx.data.model Expr Entity Parser)))
 
 (defn parse-def ^Expr [^Parser parser ^long fctx [_ nm-sym & [init :as args]]]
   (let [nm (syntax/simple-symbol-str nm-sym)
         nm-meta (meta nm-sym)
-        x-init (if (some? args)
-                 (parse/form parser (context/of-progn-prefix fctx) init)
-                 (.empty-expr (.expr-factory parser)))]
+        nm-tag (meta/get-tag nm-meta)
+        x-init (cond-> (if (some? args)
+                         (parse/form parser (context/of-progn-prefix fctx) init)
+                         (.empty-expr (.expr-factory parser)))
+                 (some? nm-tag) (interop/cast-to-tag parser fctx nm-tag))]
     (syntax/empty-tail (next args))
     
     (letfn [(of-immutable-def? ^boolean [^Entity ent] ;pre: `init` is symbol

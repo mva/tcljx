@@ -1,0 +1,113 @@
+(ns tcljx.parser.defclass
+  (:require (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
+                        [reflect :as reflect] model)
+            (tcljx.parser [syntax :as syntax] [interop :as interop]))
+  (:import (tcljx.data.model Resolver NmspClass)
+           (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
+           (java.lang.classfile ClassFile ClassBuilder MethodBuilder)
+           (java.util List)
+           (java.util.function Consumer)))
+
+(defn- parse-opts [s]
+  (loop [opts {} [k v & rs :as s] s]
+    (if (keyword? k)
+      (recur (assoc opts k v) rs)
+      [opts s])))
+
+(defn- tag-desc-of ^ClassDesc [^Resolver rsv form ^boolean void?
+                               ^ClassDesc no-hint]
+  (letfn [(class-desc-of ^ClassDesc [^String x]
+            (try
+              (ClassDesc/of x)
+              (catch IllegalArgumentException _
+                (throw (syntax/info "invalid class name" x)))))
+          (symbol-class-desc ^ClassDesc [^symbol x]
+            (or (some-> (interop/lookup-type rsv x) (reflect/describe-class))
+                (let [nm (.toString x)]
+                  (class-desc-of (cond->> nm
+                                   (neg? (.indexOf nm (int \.)))
+                                   (str (.ns-str rsv) "."))))))]
+    
+    (if-some [x (interop/tag-of form)]
+      (let [n (interop/array-rank (name x))]
+        (when (and (not void?) (= x 'void))
+          (throw (syntax/info "`void` tag not applicable in this context")))
+        (if (zero? n)
+          (symbol-class-desc x)
+          (-> (symbol nil (namespace x))
+              (symbol-class-desc)
+              (.arrayType n))))
+      no-hint)))
+
+(defn- method-lookup-type ^MethodTypeDesc [^Resolver rsv msig]
+  (loop [acc []
+         [p :as params] (seq msig)]
+    (cond
+      (nil? params)
+      (-> (tag-desc-of rsv msig true ConstantDescs/CD_Object)
+          (MethodTypeDesc/of ^List acc))
+                
+      (= p '&)
+      (let [p (syntax/varargs-parameter params)
+            tp (tag-desc-of rsv p false nil)
+            tp (cond
+                 (nil? tp)
+                 (throw (syntax/info "method cannot have rest parameter"))
+                 (not (.isArray tp))
+                 (throw (wrong/wr-info "type of vararg parameter must be array"))
+                 :else tp)]
+        (if (nnext params)
+          (throw (syntax/info "junk after vararg parameter"))
+          (recur (conj acc tp) nil)))   ;VARARGS flag is set by caller
+
+      :else
+      (let [tp (tag-desc-of rsv p false ConstantDescs/CD_Object)]
+        (recur (conj acc tp) (next params))))))
+
+(defn- ensure-interface ^Class [^Class tp]
+  (if (.isInterface tp)
+    tp
+    (wrong/other "not an interface class" tp)))
+
+(def ^:private empty-method (^Consumer fn ^void [^MethodBuilder mb] #_none))
+(defn parse-definterface* ^NmspClass [^Resolver rsv ^long fctx
+                                      [_ itf-nm & opts+sigs]]
+  (letfn [(lookup-interface ^ClassDesc [^symbol sym]
+            (if-some [tp (interop/lookup-type rsv sym)]
+              (-> tp (ensure-interface) (reflect/describe-class))
+              (throw (wrong/info-class-not-found sym))))
+          
+          (method-cbh ^Consumer [[mname msig & methodr]]
+            (let [mname (syntax/simple-symbol mname)
+                  msig (syntax/vector msig)]
+              (syntax/empty-tail methodr)
+              (when-some [tag (interop/tag-of mname)]
+                (wrong/other (str "method result tag " (wrong/q tag) " must be "
+                                  "placed on the parameter vector, not the "
+                                  "method name")))
+              (let [mnm (cfg/munge-name mname)
+                    mtd (method-lookup-type rsv msig)
+                    flags (cond-> (bit-or ClassFile/ACC_PUBLIC
+                                          ClassFile/ACC_ABSTRACT)
+                            (< (.parameterCount mtd) (count msig))
+                            (bit-or ClassFile/ACC_VARARGS))]
+                (^Consumer fn ^void [^ClassBuilder cb]
+                 (.withMethod cb mnm mtd flags empty-method)))))]
+    
+    (let [[opts methods] (parse-opts opts+sigs)
+          itf-nm (syntax/simple-symbol itf-nm)
+          this-class (ClassDesc/of (.ns-str rsv) (name itf-nm))
+          extends-itfs (mapv lookup-interface (:extends opts))
+          method-cbhs (mapv method-cbh methods)
+          cbh (^Consumer fn ^void [^ClassBuilder cb]
+               (-> (cfg/with-class-version cb)
+                   (.withInterfaceSymbols ^List extends-itfs)
+                   (.withFlags (bit-or ClassFile/ACC_PUBLIC
+                                       ClassFile/ACC_INTERFACE
+                                       ClassFile/ACC_ABSTRACT)))
+               (doseq [^Consumer cbh method-cbhs]
+                 (.accept cbh cb)))]
+      (let [bs (.build (ClassFile/of) this-class cbh)
+            eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)]
+        (.import-class rsv eph-cl)
+        (NmspClass. this-class nil cbh nil eph-cl)))))

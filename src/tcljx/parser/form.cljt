@@ -6,7 +6,7 @@
    (tcljx.parser
     [interop :as interop] [syntax :as syntax] [parse :as parse] [def :as def]
     [let :as let] [loop :as loop] [fn :as fn] [new :as new]
-    [constant :as constant] [trycatch :as trycatch]))
+    [constant :as constant] [trycatch :as trycatch] [defclass :as defclass]))
   (:import
    (tcljx.data.model Resolver Expr Exprs ExprFactory Entity Parser)
    (clojure.lang IMeta)))
@@ -199,6 +199,10 @@
                 (->> (list (list 'fn* 'try (with-meta [] {:tag 'auto-return-type})
                                  form))
                      (.parse-form this fctx))))
+            (parse-definterface* ^Expr [^long fctx ^seq form]
+              (let [ncl (defclass/parse-definterface* resolver fctx form)]
+                (.stage-nmsp-class expr-factory ncl)
+                (.ephemeral-class expr-factory (.defined-class ncl))))
             (parse-invocation ^Expr [op ^long fctx ^seq form] ;discards meta
               (if (symbol? op)
                 (let [nm (name op), nmsp (namespace op)]
@@ -236,7 +240,7 @@
                       ;; & is only special within arity signature
                       
                       ;; special forms that are not special in Clojure:
-                      ;; "definterface*" (definterface*-form form)
+                      "definterface*" (parse-definterface* fctx form)
                       "instanceof*" (parse-instanceof* fctx form)
                       #_else (cond
                                (= (.charAt nm 0) \.)
@@ -256,12 +260,7 @@
                 (.value-of expr-factory ent sym)
                 (if-some [x (interop/lookup-class-expr this sym)]
                   x
-                  (throw (wrong/info-unresolved sym)))))
-            
-            (apply-type-hint ^Expr [^Expr x ^long fctx form-tag]
-              ;; pre: (some? form-tag)
-              (let [tp (interop/parse-type-symbol resolver form-tag)]
-                (.type-cast expr-factory fctx tp x)))]
+                  (throw (wrong/info-unresolved sym)))))]
 
       (if (instance? IMeta form)
         (let [form-meta (.meta ^IMeta form)
@@ -279,7 +278,8 @@
                 
                 ;; vector, map, set, or empty list
                 :else (parse-collection-literal fctx form form-meta))
-              (cond-> (some? form-tag) (apply-type-hint fctx form-tag))))
+              (cond-> (some? form-tag)
+                (interop/cast-to-tag this fctx form-tag))))
         
         ;; keyword, pattern, number, character, string, boolean, nil,
         ;; or (via expansion) a class instance
