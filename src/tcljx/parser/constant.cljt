@@ -26,8 +26,8 @@
     #_else nil))
 
 ;;; Note: This function caters for a superset of the form types that
-;;; are produced by the reader.  It additionally accepts common values
-;;; that may be injected via macros, like Class or Byte.
+;;; are produced by the reader.  It additionally accepts some values
+;;; that may be injected via macros, like Byte or Short.
 (defn parse-constant-nometa ^Expr [^Parser parser form]
   ;; pre: (not (instance? IMeta form))
   (let [ef (.expr-factory parser)]
@@ -47,17 +47,14 @@
       (char? form)
       (model/new-constant ef (int ^char form) Character/TYPE)
       
-      (number? form)         ;any non-ClassDesc number: Byte and Short
+      (number? form)      ;any non-ConstantDesc number: Byte and Short
       (model/new-constant ef (.intValue ^Number form)
                           (primitive-type-of (.getClass form)))
 
-      (class? form)
-      (model/new-constant ef form Class)
-      
-      :else
-      ;; Pattern, using the *reference* object's class as
-      ;; type (anything Constable works as well during emit)
-      (.new-loadable ef form (class form)))))
+      (instance? Pattern form)
+      (.new-loadable ef form Pattern)
+
+      :else (wrong/other "unsupported literal value" (class form)))))
 
 (defn regex-literal ^Expr [^Parser parser ^String pattern]
   (try
