@@ -14,7 +14,7 @@
            (tinyclj.lang Literal)
            (clojure.lang IMapEntry IRecord Named)
            (java.util Arrays ArrayList)
-           (java.util.regex Matcher)))
+           (java.util.regex Matcher Pattern PatternSyntaxException)))
 
 (def ^:private sym-unquote (symbol cfg/core-lib "unquote"))
 (def ^:private sym-unquote-splicing (symbol cfg/core-lib "unquote-splicing"))
@@ -778,14 +778,18 @@
               (if (= (char-at j) \")
                 (.push fb (inc j) s)
                 (push-string* j s))))
+          (compile-pattern ^Pattern [^String pattern]
+            (try
+              (Pattern/compile pattern)
+              (catch PatternSyntaxException e
+                (throw (wrong/wr-info (str "invalid regex " (wrong/q pattern))
+                                      {} e)))))
           (push-regex ^int [^int pos]   ;pre: looking at "#\""
             (let [sb (StringBuilder.)
                   line (.current-line fb)]
               (loop [pos (+ pos 2)]
                 (case (char-at pos)
-                  \" (.push fb (inc pos) (mk-list line
-                                                  cfg/sym-regex-literal
-                                                  (.toString sb)))
+                  \" (.push fb (inc pos) (compile-pattern (.toString sb)))
                   \\ (let [ch+1 (char-at (inc pos))]
                        (if (at-eol? ch+1)
                          (wrong-pos pos "incomplete quote at end of line")

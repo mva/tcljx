@@ -174,10 +174,6 @@
                      expr-factory fctx true cl nm
                      (parse/args this fctx (rest form)))))
                 (condp = op
-                  tcljx.data.config/sym-regex-literal
-                  ;; FIXME... drop this later
-                  (constant/regex-literal this (syntax/second form))
-
                   'tinyclj.lang.primitive/list
                   ;; FIXME... drop this later
                   (parse-collection-literal fctx (rest form) nil)

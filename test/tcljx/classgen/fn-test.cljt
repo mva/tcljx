@@ -732,25 +732,3 @@
                         #"cannot assign to .*float.* \(got: .*double.*\)"
                         (nmsp '[(ns pkg.ns0)
                                 ((fn* f [^float x] nil) 0.0)]))))
-
-(deftest hash-over-pattern-test
-  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "fn~0" "()Ljava/lang/Object;")
-             (ACONST_NULL)
-             (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "fn^1~0" "()Ljava/lang/Object;")
-             (LDC [:bsm-quote "re-pattern" "Ljava/util/regex/Pattern;" ["foo"]])
-             (ARETURN)]
-            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-             (LDC "pkg.ns0")
-             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-             (RETURN)]]
-           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
-             (ARETURN)]]]
-         ;; Once the bootstrap compiler changes to tcljc, there is the
-         ;; option to use the #"foo" syntax below.
-         (nmsp '[(ns pkg.ns0)
-                 (fn* [] nil)
-                 (fn* [] (tinyclj.core/regex-literal "foo"))]))))

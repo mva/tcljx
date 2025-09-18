@@ -1,11 +1,10 @@
 (ns tcljx.parser.constant
   (:require
-   (tcljx.data [wrong :as wrong] [type :as type] [model :as model]
-               [reflect :as reflect] [resolve :as resolve]))
+   (tcljx.data [wrong :as wrong] [type :as type] [model :as model]))
   (:import
    (tcljx.data.model Expr Parser)
    (java.lang.constant ConstantDesc ConstantDescs)
-   (java.util.regex Pattern PatternSyntaxException)))
+   (java.util.regex Pattern)))
 
 ;;; Given a primitive type's box class, return the primitive type.
 ;;; Also returns String for String, and nil for all other classes.
@@ -55,9 +54,3 @@
       (.new-loadable ef form Pattern)
 
       :else (wrong/other "unsupported literal value" (class form)))))
-
-(defn regex-literal ^Expr [^Parser parser ^String pattern]
-  (try
-    (.new-loadable (.expr-factory parser) (Pattern/compile pattern) Pattern)
-    (catch PatternSyntaxException e
-      (throw (wrong/wr-info (str "invalid regex " (wrong/q pattern)) {} e)))))

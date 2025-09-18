@@ -631,7 +631,7 @@
                         (reads "\\u004g"))))
 
 (defn readr [^String s]
-  (second (read1 (str "#\"" s "\""))))
+  (.pattern ^java.util.regex.Pattern (read1 (str "#\"" s "\""))))
 
 (deftest regex-value-test
   (is (= "" (readr "")))

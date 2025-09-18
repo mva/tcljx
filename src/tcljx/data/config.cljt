@@ -43,9 +43,6 @@
 ;; (def core-lib-sym (symbol nil core-lib))
 (defn core-lib? ^boolean [^String ns-str] (= core-lib ns-str))
 
-;;; note: the `regex-literal` symbol is spliced into the core lib's
-;;; namespace (similar to e.g. `*ns*`) and bound to a predefined macro
-(def sym-regex-literal (symbol core-lib "regex-literal"))
 (def sym-quote 'quote)
 
 ;;; note: a copy of this lives in tinyclj.core/specials

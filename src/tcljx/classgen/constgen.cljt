@@ -37,15 +37,11 @@
                                   [(.stringEntry cpb nmsp) nm-entry]
                                   [nm-entry]))))
           (cde-pattern ^ConstantDynamicEntry [^Pattern c]
-            (cde-quote "re-pattern" rt/pattern
-                       [(.stringEntry cpb (.pattern c))]))
+              (cde-quote "re-pattern" rt/pattern
+                         [(.stringEntry cpb (.pattern c))]))
           (cde-coll ^ConstantDynamicEntry [^DirectMethodHandleDesc mhd ^seq cs]
-            (if (and (identical? rt/mhd-list mhd)
-                     (identical? cfg/sym-regex-literal (first cs)))
-              ;; undo quoted encoding of regex pattern by the reader
-              (cde-pattern (Pattern/compile (second cs)))
-              (cde-quote (.methodName mhd) (-> mhd .invocationType .returnType)
-                         (for [c cs] (loadable-entry cpb c)))))
+            (cde-quote (.methodName mhd) (-> mhd .invocationType .returnType)
+                       (for [c cs] (loadable-entry cpb c))))
           
           (entry-imeta ^ConstantDynamicEntry [^Object c]
             (cond
