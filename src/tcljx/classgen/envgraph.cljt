@@ -1,21 +1,21 @@
 (ns tcljx.classgen.envgraph
   (:require (tcljx.data [model :as model]))
-  (:import (tcljx.data.model CodeEmitter Entity NmspClass)
+  (:import (tcljx.data.model CodeEmitter Entity Expr NmspClass)
            (java.lang.constant ClassDesc ConstantDescs)
            (java.util ArrayList HashMap Map$Entry)
            (java.util.concurrent ConcurrentHashMap)
            (java.util.function Consumer Function BiFunction)))
 
 (deftype SegmentAcc [^ArrayList segment-elements ;of Consumer
-                     ^ArrayList clinit-statms    ;of CodeEmitter
+                     ^ArrayList clinit-statms    ;of Expr
                      ^ArrayList other-classes]   ;of NmspClass
   java.lang.Record)
 
 (defn add-segment-elements ^SegmentAcc [^SegmentAcc acc ^Consumer class-handler]
   (.add (.segment-elements acc) class-handler)
   acc)
-(defn add-clinit-statm ^SegmentAcc [^SegmentAcc acc ^CodeEmitter emitter]
-  (.add (.clinit-statms acc) emitter)
+(defn add-clinit-statm ^SegmentAcc [^SegmentAcc acc ^Expr expr]
+  (.add (.clinit-statms acc) expr)
   acc)
 (defn add-class-file ^SegmentAcc [^SegmentAcc acc ^NmspClass ncl]
   (.add (.other-classes acc) ncl)
@@ -62,7 +62,7 @@
           (aset aorigin i (.getKey entry))
           (aset aproxy i (.getValue entry))
           (recur (inc i)))))
-    (assert (= n 1))
+    (assert (<= n 1))
     (OriginProxyPairs. aorigin aproxy)))
 
 ;;; ------------------------------------------------------------------------
@@ -190,13 +190,25 @@
 
 ;;; ------------------------------------------------------------------------
 
-(deftype EnvClass [^Entity fn-proxy
+;;; Can add clinit code, class elements, or whole classes to the
+;;; segment under construction.
+(definterface PreparationTask
+  (extend-segment ^SegmentAcc [^SegmentAcc acc ^EnvClass class]))
+
+;;; Represents an entity that may be turned into a decicated class
+;;; description while compiling.  Other alternative: a lambda
+;;; expression generating a hidden class, a generic shared class
+;;; provided by the core library, or the class is elided altogether.
+(deftype EnvClass [^PreparationTask class-task
                    ^EnvSegment segment
                    ^String class-name   ;if turned into separate class
                    ^EnvMethod/1 methods])
 
 (defn namespace-class ^ClassDesc [^EnvClass class]
   (ClassDesc/of (-> class .segment .pkg-name) (-> class .class-name)))
+
+(defn run-task ^SegmentAcc [^SegmentAcc acc ^PreparationTask task ^EnvClass class]
+  (.extend-segment task acc class))
 
 (letfn [(method ^EnvMethod [^EnvMethod parent
                             ^String unique-nm ^int method-index
@@ -208,16 +220,19 @@
                         parent (HashMap.) this-name this-fn-proxy (ArrayList.)
                         (.segment parent))))]
   
-  (defn mk-methods ^EnvMethod/1 [^EnvMethod parent ^String scope-name-suffix
-                                 ^Entity this-fn-proxy ^int n]
-    (let [parent-name (.scope-name parent)
-          nm-str (cond->> scope-name-suffix
-                   (some? parent-name) (str parent-name "$"))
-          unique-nm (pick-unique-name (.segment parent) nm-str)
-          a (new EnvMethod/1 n)]
-      (dotimes [i (alength a)]
-        (aset a i (method parent unique-nm i scope-name-suffix this-fn-proxy)))
-      a)))
+  (defn mk-methods
+    (^EnvMethod/1 [^EnvMethod parent ^Class itf-class]
+     (mk-methods parent (.getSimpleName itf-class) nil 1))
+    (^EnvMethod/1 [^EnvMethod parent ^String scope-name-suffix
+                   ^Entity this-fn-proxy ^int n]
+     (let [parent-name (.scope-name parent)
+           nm-str (cond->> scope-name-suffix
+                    (some? parent-name) (str parent-name "$"))
+           unique-nm (pick-unique-name (.segment parent) nm-str)
+           a (new EnvMethod/1 n)]
+       (dotimes [i (alength a)]
+         (aset a i (method parent unique-nm i scope-name-suffix this-fn-proxy)))
+       a))))
 
 (defn closes-over-env? ^boolean [^EnvClass class]
   (let [ms (.methods class)]
@@ -236,15 +251,6 @@
             (.putAll acc (.origin-to-proxy (aget methods i)))
             (recur (dec i))))
         acc))))
-
-
-;;; Can add clinit code, class elements, or whole classes to the
-;;; segment under construction.
-(definterface PreparationTask
-  (extend-segment ^SegmentAcc [^SegmentAcc acc ^EnvClass class]))
-
-(defn run-task ^SegmentAcc [^SegmentAcc acc ^PreparationTask task ^EnvClass class]
-  (.extend-segment task acc class))
 
 
 (deftype EnvGraph [^EnvClass/1 classes])

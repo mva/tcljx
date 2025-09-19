@@ -38,7 +38,7 @@
    rt/bsm-static-fn :bsm-static-fn
    rt/bsm-invoke-fn :bsm-invoke-fn
    rt/bsm-clause-code :bsm-clause-code
-   #_#_rt/bsm-metafactory :bsm-metafactory
+   rt/bsm-metafactory :bsm-metafactory
    #_#_rt/bsm-object-method :bsm-object-method
 
    ConstantDescs/BSM_NULL_CONSTANT :bsm-null

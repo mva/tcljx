@@ -380,3 +380,25 @@
     (cond-> m
       (.isVarArgs ^Method (.member m))
       (with-invocation-mode invoke-tail-into-array))))
+
+;;; ------------------------------------------------------------------------
+
+(letfn [(functional-itf? ^boolean [^Class cl]
+          (some? (.getAnnotation cl java.lang.FunctionalInterface)))
+        (object-method? ^boolean [^Method m]
+          (try
+            (let [m* (.getMethod Object (.getName m) (.getParameterTypes m))]
+              (and (type/same? (.getReturnType m) (.getReturnType m*))
+                   (= (.isVarArgs m) (.isVarArgs m*))))
+            (catch NoSuchMethodException _
+              false)))
+        (abstract-method? ^boolean [^Method m]
+          (Modifier/isAbstract (.getModifiers m)))]
+  (defn itf-methods [^Class itf]
+    (let [ms (.getMethods itf)]
+      (if (functional-itf? itf)
+        (let [abs-ms (->> (filter abstract-method? ms)
+                          (remove object-method?))]
+          (assert (= (count abs-ms) 1))
+          abs-ms)
+        (filter abstract-method? ms)))))

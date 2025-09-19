@@ -341,6 +341,11 @@
                 ;; parameter is of reference type and argument is nil
                 (poly-reference? atype)))))))
 
+(defn jvm-assignable-from? ^boolean [^Class ptype ^Class atype]
+  #_(prn :jvm-assignable-from? ptype atype)
+  ;; FIXME... used for lambda expression matching; too conservative?
+  (.isAssignableFrom ptype atype))
+
 ;;; ------------------------------------------------------------------------
 
 (def symbol clojure.lang.Symbol)

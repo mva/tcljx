@@ -64,18 +64,11 @@
       (let [tp (tag-desc-of rsv p false ConstantDescs/CD_Object)]
         (recur (conj acc tp) (next params))))))
 
-(defn- ensure-interface ^Class [^Class tp]
-  (if (.isInterface tp)
-    tp
-    (wrong/other "not an interface class" tp)))
-
 (def ^:private empty-method (^Consumer fn ^void [^MethodBuilder mb] #_none))
 (defn parse-definterface* ^NmspClass [^Resolver rsv ^long fctx
                                       [_ itf-nm & opts+sigs]]
   (letfn [(lookup-interface ^ClassDesc [^symbol sym]
-            (if-some [tp (interop/lookup-type rsv sym)]
-              (-> tp (ensure-interface) (reflect/describe-class))
-              (throw (wrong/info-class-not-found sym))))
+            (reflect/describe-class (interop/resolve-interface rsv sym)))
           
           (method-cbh ^Consumer [[mname msig & methodr]]
             (let [mname (syntax/simple-symbol mname)

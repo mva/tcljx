@@ -112,7 +112,7 @@
                     this segm-size-at-start (.bindings* parser)
                     imports-at-start)
                    (parse/form parser fctx form)))]
-      (.stage-task! segment (.emitter expr))
+      (.stage-task! segment expr)
       this))
 
   (finish [this]

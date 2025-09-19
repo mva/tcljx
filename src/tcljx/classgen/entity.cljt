@@ -176,6 +176,8 @@
   Entity
   (value-type [_]
     type)
+  (value-type-exact [this]
+    (reflect/describe-class (.value-type this)))
   (entity-id [_]
     entity-id)
   (arity-specs [_]

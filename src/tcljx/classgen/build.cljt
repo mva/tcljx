@@ -61,7 +61,7 @@
             (let [al (.clinit-statms segm-acc)]
               (loop [i 0]
                 (if (< i (.size al))
-                  (when (emit/statm? xb ^CodeEmitter (.get al i))
+                  (when (emit/statm? xb (insn/emitter (.get al i)))
                     (recur (inc i)))
                   (do (when (cfg/core-lib? (.pkg-name segm))
                         (invoke-mark-core-init xb))
@@ -97,9 +97,9 @@
             (prepare-classes ^SegmentAcc [^SegmentAcc acc ^int start ^int end]
               (loop [acc acc, i start]
                 (if (< i end)
-                  (let [class (aget (.classes eg) i)
-                        task ^PreparationTask (.fn-proxy class)]
-                    (recur (envgraph/run-task acc task class) (inc i)))
+                  (let [class (aget (.classes eg) i)]
+                    (recur (envgraph/run-task acc (.class-task class) class)
+                           (inc i)))
                   acc)))
             (mk-segment-acc ^SegmentAcc []
               (SegmentAcc. (ArrayList.) (ArrayList.) (ArrayList.)))]

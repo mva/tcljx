@@ -31,6 +31,8 @@
 
 ;;; ------------------------------------------------------------------------
 
+(defn untagged? ^boolean [form]
+  (nil? (meta/get-tag (meta form))))
 (defn tag-of ^symbol [form]
   (when-some [tag (meta/get-tag (meta form))]
     (syntax/symbol tag)))
@@ -43,6 +45,12 @@
    (resolve-tag rsv form Object))
   (^Class [^Resolver rsv ^IMeta form ^Class or-else]
    (resolve-tag* rsv (tag-of form) or-else)))
+(defn resolve-interface ^Class [^Resolver rsv ^symbol sym]
+  (if-some [tp (lookup-type rsv sym)]
+    (if (.isInterface tp)
+      tp
+      (wrong/other "not an interface class" tp))
+    (throw (wrong/info-class-not-found sym))))
 
 (defn get-param-tags ^Object [^map form-meta] ;nil if no param tags are given
   (when (some? form-meta)
@@ -128,23 +136,25 @@
 ;;; return type is set to the temporary `auto-return-marker`.
 (defn parse-arity-type
   (^ArityType [^Resolver rsv paramv]
+   (parse-arity-type rsv paramv Object))
+  (^ArityType [^Resolver rsv paramv ^Class or-else-type]
    (let [paramv (syntax/vector paramv)
          n (count paramv)
          ptypes (new Class/1 n)
          pnames (new String/1 n)
-         varargs? false]               ;FIXME...
+         varargs? false]                ;FIXME...
      (assert (not= '& (nth paramv (- n 2) nil)))
      (dotimes [i (alength ptypes)]
        (let [param (nth paramv i)
              psym (syntax/simple-symbol param)]
-         (aset ptypes i (resolve-tag rsv psym))
+         (aset ptypes i (resolve-tag rsv psym or-else-type))
          (aset pnames i (name psym))))
      (let [return-tag (tag-of paramv)]
        (-> (if (= meta/auto-return-type return-tag)
              type/auto-return-marker
-             (resolve-tag* rsv return-tag Object))
+             (resolve-tag* rsv return-tag or-else-type))
            (ArityType. ptypes pnames varargs?)))))
-  (^ArityType [^Resolver rsv ^long fctx paramv
+  (^ArityType [^Resolver rsv ^long fctx paramv ^Class or-else-type
                ^seq error-context]
    (context/with-line-from-list [fctx error-context]
-     (parse-arity-type rsv paramv))))
+     (parse-arity-type rsv paramv or-else-type))))

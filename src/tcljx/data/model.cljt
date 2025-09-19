@@ -100,8 +100,11 @@
   (variadic? [_]                        ;FIXME...
     false))
 
-(defn with-return-type ^ArityType [^ArityType at ^Class tp]
-  (ArityType. tp (.parameter-types at) (.parameter-names at) (.varargs? at)))
+(defn with-return-type
+  (^ArityType [^ArityType at ^Class tp]
+   (with-return-type at tp (.parameter-types at)))
+  (^ArityType [^ArityType at ^Class tp ^Class/1 ptps]
+   (ArityType. tp ptps (.parameter-names at) (.varargs? at))))
 
 (defn translates-to-varargs? ^boolean [^ArityType at]
   (or (.varargs? at) (.variadic? at)))
@@ -469,10 +472,11 @@
 
   ;; Replaces any arity return types `auto-return-marker` with their
   ;; corresponding body's expression type.
-  (new-function ^Expr [^Parser parser ^symbol fn-nm
-                       ^BiFunction parse-arity-body ^AritySpec/1 arity-specs])
-
-  
+  (new-function ^Expr [^Parser parser ^BiFunction parse-arity-body
+                       ^symbol fn-nm ^AritySpec/1 arity-specs])
+  (new-itf-fn ^Expr [^Parser parser ^BiFunction parse-arity-body
+                     ^Class itf-class ^DirectMethodHandleDesc method
+                      ^AritySpec/1 arity-specs])
   
   ;; ### interop
 

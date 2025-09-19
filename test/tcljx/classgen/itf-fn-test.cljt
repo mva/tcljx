@@ -1,0 +1,366 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.classgen.itf-fn-test
+  (:require [tcljx.classgen.bootstrap :refer [nmsp asm-expr]]
+            [tcljx.alpha.ptest :refer :all]))
+
+(deftest restrictions-of-itf-fn
+  (is (thrown-with-msg? tcljx.data.wrong.WrongInfo
+                        #"type tag on function name is not supported"
+                        (asm-expr (fn* ^Runnable foo []
+                                       nil))))
+  (is (thrown-with-msg? tcljx.data.wrong.WrongInfo
+                        #"interface function cannot have a name"
+                        (asm-expr (^Runnable fn* foo []
+                                   nil)))))
+
+(deftest defn-itf-test
+  (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/FnInt2")
+            [(METHOD [PUBLIC ABSTRACT] "arity-2" "(II)I")]]
+
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC FINAL] "add2" "Lpkg/ns0/FnInt2;")]
+            [(FIELD [PUBLIC STATIC FINAL] "two" "I")]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "FnInt2~2" "(II)I")
+             ["LOCAL 0: int a"]
+             ["LOCAL 1: int b"]
+             (ILOAD_0)
+             (ILOAD_1)
+             (IADD)
+             (IRETURN)]
+
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+
+             (INVOKEDYNAMIC "arity-2" "()Lpkg/ns0/FnInt2;" :bsm-metafactory
+                            ["MethodTypeDesc[(int,int)int]"
+                             [STATIC . "FnInt2~2" "(II)I"]
+                             "MethodTypeDesc[(int,int)int]"])
+             (PUTSTATIC . "add2" "Lpkg/ns0/FnInt2;")
+             (GETSTATIC . "add2" "Lpkg/ns0/FnInt2;")
+             (ICONST_1)
+             (ICONST_1)
+             (INVOKEINTERFACE FnInt2 "arity-2" "(II)I" :itf)
+             (PUTSTATIC . "two" "I")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (definterface* FnInt2
+                   (arity-2 ^int [^int a ^int b]))
+                 (def add2 (^pkg.ns0.FnInt2 fn* [a b]
+                            (+ a b)))
+                 (def two (.arity-2 add2 1 1))]))))
+
+
+(deftest def-functional-itf-test
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC FINAL] "f" "Ljava/lang/Runnable;")]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "Runnable~0" "()V")
+             (RETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "g~0" "()Ljava/lang/Object;")
+             (GETSTATIC . "f" "Ljava/lang/Runnable;")
+             (INVOKEINTERFACE Runnable "run" "()V" :itf)
+             (ACONST_NULL)
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "g~0" "()Ljava/lang/Object;"]]])
+             (ARETURN)]
+
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (INVOKEDYNAMIC "run" "()Ljava/lang/Runnable;" :bsm-metafactory
+                            ["MethodTypeDesc[()void]"
+                             [STATIC . "Runnable~0" "()V"]
+                             "MethodTypeDesc[()void]"])
+             (PUTSTATIC . "f" "Ljava/lang/Runnable;")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def ^Runnable f
+                   (^Runnable fn* [] ;mapped to Runnable.run(), which returns void
+                        nil))
+                 (def g (fn* g []
+                             (.run f)))]))))
+
+(deftest def-comparator-itf-test
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC FINAL] "f" "Ljava/util/Comparator;")]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "Comparator~2"
+                     "(Ljava/lang/Object;Ljava/lang/Object;)I")
+             ["LOCAL 0: Object o1"]
+             ["LOCAL 1: Object o2"]
+             (ICONST_0)
+             (IRETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "g~0" "()I")
+             (GETSTATIC . "f" "Ljava/util/Comparator;")
+             (ACONST_NULL)
+             (ACONST_NULL)
+             (INVOKEINTERFACE Comparator "compare"
+                              "(Ljava/lang/Object;Ljava/lang/Object;)I" :itf)
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "g~0" "()I"]]])
+             (ARETURN)]
+
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (INVOKEDYNAMIC "compare" "()Ljava/util/Comparator;"
+                            :bsm-metafactory
+                            ["MethodTypeDesc[(Object,Object)int]"
+                             [STATIC . "Comparator~2"
+                              "(Ljava/lang/Object;Ljava/lang/Object;)I"]
+                             "MethodTypeDesc[(Object,Object)int]"])
+             (PUTSTATIC . "f" "Ljava/util/Comparator;")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def ^java.util.Comparator f
+                   (^java.util.Comparator fn* [o1 o2]
+                    0))
+                 (def g (fn* g ^int []
+                             (.compare f nil nil)))]))))
+
+;;; This requires a properly informed ClassHierarchyResolver, or an
+;;; invalid stack map is generated for "fn~1".
+(deftest join-two-interface-functions
+  (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/FnMyFn")
+            [(METHOD [PUBLIC ABSTRACT] "fn0" "()I")]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC FINAL] "fn-1" "Lpkg/ns0/FnMyFn;")]
+            [(FIELD [PUBLIC STATIC FINAL] "fn-2" "Lpkg/ns0/FnMyFn;")]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "FnMyFn~0" "()I")
+             (ICONST_1)
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "FnMyFn^1~0" "()I")
+             (ICONST_2)
+             (IRETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(Ljava/lang/Object;)V")
+             ["LOCAL 0: Object x"]
+             (ALOAD_0)
+             (IFNONNULL L:0)
+             (GETSTATIC . "fn-2" "Lpkg/ns0/FnMyFn;")
+             (GOTO L:1)
+             [L:0]
+             (GETSTATIC . "fn-1" "Lpkg/ns0/FnMyFn;")
+             [L:1]
+             (ASTORE_1)
+             ["LOCAL 1: FnMyFn g*"]
+             (RETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~1" "(Ljava/lang/Object;)V"]]])
+             (ARETURN)]
+
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             
+             (INVOKEDYNAMIC "fn0" "()Lpkg/ns0/FnMyFn;" :bsm-metafactory
+                            ["MethodTypeDesc[()int]"
+                             [STATIC . "FnMyFn~0" "()I"]
+                             "MethodTypeDesc[()int]"])
+             (PUTSTATIC . "fn-1" "Lpkg/ns0/FnMyFn;")
+             (INVOKEDYNAMIC "fn0" "()Lpkg/ns0/FnMyFn;" :bsm-metafactory
+                            ["MethodTypeDesc[()int]"
+                             [STATIC . "FnMyFn^1~0" "()I"]
+                             "MethodTypeDesc[()int]"])
+             (PUTSTATIC . "fn-2" "Lpkg/ns0/FnMyFn;")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (definterface* FnMyFn
+                   (fn0 ^int []))
+                 (import* pkg.ns0.FnMyFn)
+                 (def fn-1 (^FnMyFn fn* [] 1))
+                 (def fn-2 (^FnMyFn fn* [] 2))
+                 (def f (fn* f ^void [x]
+                             (let* [g* (if (identical? nil x) fn-2 fn-1)]
+                               nil)))]))))
+
+(deftest default-vs-provided-sig
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "Consumer~1" "(Ljava/lang/Object;)V")
+             ["LOCAL 0: Object x"]
+             (RETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "Consumer^1~1" "(Ljava/lang/String;)V")
+             ["LOCAL 0: String s"]
+             (RETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             
+             (INVOKEDYNAMIC "accept"
+                            "()Ljava/util/function/Consumer;"
+                            :bsm-metafactory
+                            ["MethodTypeDesc[(Object)void]"
+                             [STATIC . "Consumer~1" "(Ljava/lang/Object;)V"]
+                             "MethodTypeDesc[(Object)void]"])
+             (LDC "foo")
+             (INVOKEINTERFACE Consumer "accept" "(Ljava/lang/Object;)V" :itf)
+             
+             (INVOKEDYNAMIC "accept"
+                            "()Ljava/util/function/Consumer;"
+                            :bsm-metafactory
+                            ["MethodTypeDesc[(Object)void]"
+                             [STATIC . "Consumer^1~1" "(Ljava/lang/String;)V"]
+                             "MethodTypeDesc[(String)void]"])
+             (LDC "foo")
+             (INVOKEINTERFACE Consumer "accept" "(Ljava/lang/Object;)V" :itf)
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (.accept (^java.util.function.Consumer fn* [x])
+                          "foo")
+                 (.accept (^java.util.function.Consumer fn* ^void [^String s])
+                          "foo")]))))
+
+(deftest sig-mismatch
+  (is (thrown-with-msg?
+       tcljx.data.wrong.WrongInfo
+       #"function result .*java.lang.Object.* not assignment compatible to method's .*void.*"
+       (nmsp '[(ns pkg.ns0)
+               (.accept (^java.util.function.Consumer fn* [^String s]
+                         nil)
+                        "foo")])))
+  
+  (is (thrown-with-msg?
+       tcljx.data.wrong.WrongInfo
+       #"function parameter .*int.* not assignment compatible to method's .*java.lang.Object.*"
+       (nmsp '[(ns pkg.ns0)
+               (.accept (^java.util.function.Consumer fn* ^void [^int s]
+                         nil)
+                        "foo")]))))
+
+;;; BinaryOperator picks up is single abstract method from its base
+;;; interface BiFunction.
+(deftest binary-operator-test
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "BinaryOperator~2"
+                     "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
+             ["LOCAL 0: Object x"]
+             ["LOCAL 1: Object y"]
+             (ACONST_NULL)
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
+                     "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (^java.util.function.BinaryOperator fn* [x y] nil)]))))
+
+(deftest supplier-closure-test
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            
+            [(METHOD [PUBLIC STATIC FINAL] "fn$Supplier~0"
+                     "(Ljava/lang/String;)Ljava/lang/Object;")
+             ["LOCAL 0: String x"]
+             (ALOAD_0)
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "fn~1"
+                     "(Ljava/lang/String;)Ljava/util/function/Supplier;")
+             ["LOCAL 0: String x"]
+             (ALOAD_0)
+             (INVOKEDYNAMIC "get" "(Ljava/lang/String;)Ljava/util/function/Supplier;"
+                            :bsm-metafactory
+                            ["MethodTypeDesc[()Object]"
+                             [STATIC . "fn$Supplier~0"
+                              "(Ljava/lang/String;)Ljava/lang/Object;"]
+                             "MethodTypeDesc[()Object]"])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
+                     "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (fn* ^java.util.function.Supplier [^String x]
+                      (^java.util.function.Supplier fn* []
+                       x))]))))
+
+;; (deftest function-closure-test
+;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT]
+;;                    "pkg/ns0/_10")
+;;             [(METHOD [PUBLIC STATIC FINAL] "fn~1"
+;;                      "(I)Ljava/util/function/Function;")
+;;              ["LOCAL 0: int n"]
+;;              (ILOAD_0)
+;;              (INVOKEDYNAMIC "apply" "(I)Ljava/util/function/Function;"
+;;                             :bsm-metafactory
+;;                             ["MethodTypeDesc[(Object)Object]"
+;;                              [STATIC . "fn$Function~1"
+;;                               "(ILjava/lang/String;)Ljava/lang/Object;"]
+;;                              "MethodTypeDesc[(String)Object]"])
+;;              (ARETURN)]
+            
+;;             [(METHOD [PUBLIC STATIC FINAL] "fn$Function~1"
+;;                      "(ILjava/lang/String;)Ljava/lang/Object;")
+;;              ["LOCAL 0: int n"]
+;;              ["LOCAL 1: String x"]
+;;              (ALOAD_1)
+;;              (INVOKEVIRTUAL String "length" "()I")
+;;              (ILOAD_0)
+;;              (IADD)
+;;              (INVOKESTATIC Integer "valueOf" "(I)Ljava/lang/Integer;")
+;;              (ARETURN)]
+            
+;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+;;              (LDC "pkg.ns0")
+;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+;;              (RETURN)]]
+           
+;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
+;;                      "()Ljava/lang/String;")
+;;              (LDC "tinyclj.core")
+;;              (ARETURN)]]]
+;;          (nmsp '[(ns pkg.ns0)
+;;                  (fn* ^java.util.function.Function [^int n]
+;;                       (^java.util.function.Function fn* [^String x]
+;;                        (+ (.length x) n)))]))))

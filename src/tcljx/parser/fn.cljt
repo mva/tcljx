@@ -7,10 +7,52 @@
    (tcljx.data.model Expr Exprs ExprFactory ArityType AritySpec Parser Resolver)
    (tcljx.data.resolve Match)
    (java.lang.constant MethodHandleDesc ConstantDescs)
+   (java.lang.reflect Method)
    (java.util Arrays Comparator)
    (java.util.function BiFunction)))
 
-(defn parse-fn* ^Expr [^Parser parser ^long fctx ^seq form]
+(defn- fixup-arity-type ^ArityType [^ArityType at ^Method m]
+  (let [unhinted? (every? nil? (cons (.return-type at) (.parameter-types at)))
+        resolve (fn ^Class [^Class at-tp ^Class method-tp]
+                  (or at-tp (if unhinted? method-tp Object)))
+        rtype (let [mtype (.getReturnType m)
+                    rtype (resolve (.return-type at) mtype)]
+                (when-not (type/jvm-assignable-from? mtype rtype)
+                  (wrong/other (str "function result " (wrong/q rtype)
+                                    " not assignment compatible to method's "
+                                    (wrong/q mtype))))
+                rtype)
+        pclasses (.getParameterTypes m)
+        aparam-tp (new Class/1 (.parameter-count at))]
+    (dotimes [i (alength aparam-tp)]
+      (let [pclass (aget pclasses i)
+            dclass (resolve (aget (.parameter-types at) i) pclass)]
+        (if (type/jvm-assignable-from? pclass dclass)
+          (aset aparam-tp i dclass)
+          (wrong/other (str "function parameter " (wrong/q dclass)
+                            " not assignment compatible to "
+                            "method's " (wrong/q pclass))))))
+    (when-not (= (.varargs? at) (.isVarArgs m))
+      (wrong/other "interface and function disagree on varargs status"))
+    (model/with-return-type at rtype aparam-tp)))
+
+(defn- itf-method ^Method [^AritySpec/1 specs ^Class itf-class]
+  (when-not (= (alength specs) 1)
+    (wrong/other "interface function must implement exactly one arity"))
+  (let [an (-> (aget specs 0) .at .parameter-count)]
+    (or (first (->> (resolve/itf-methods itf-class)
+                    (filter #(= (Method/.getParameterCount %) an))))
+        (wrong/other (str "interface " (wrong/q itf-class)
+                          " has no method of arity " an)))))
+
+(defn- fixup-arity-specs-from-itf ^AritySpec/1 [^AritySpec/1 specs ^Method m]
+  (let [spec (aget specs 0)]
+    (aset specs 0 (AritySpec. (fixup-arity-type (.at spec) m)
+                              (.body spec) nil (.error-context spec) nil 0))
+    specs))
+
+(defn- arity-specs-of ^AritySpec/1 [^Parser parser ^long fctx ^seq form
+                                    ^Class or-else-type ^seq more]
   (letfn [(max-parameter-count ^int [^AritySpec/1 specs]
             (loop [n 0, i (dec (alength specs))]
               (if (neg? i)
@@ -19,8 +61,10 @@
                        (dec i)))))
           (parse-arity ^AritySpec [paramv ^seq body ^seq error-context ^int i]
             (context/with-line-from-list [fctx error-context]
-              (let [at (interop/parse-arity-type (.resolver parser) paramv)]
+              (let [at (interop/parse-arity-type (.resolver parser) paramv
+                                                 or-else-type)]
                 (AritySpec. at body nil error-context nil i))))
+          
           (specs-1 ^AritySpec/1 [paramv ^seq body ^seq error-context]
             (doto (new AritySpec/1 1)
               (aset 0 (parse-arity paramv body error-context 0))))
@@ -53,20 +97,41 @@
                     (Integer/compare (-> o1 .at .parameter-count)
                                      (-> o2 .at .parameter-count)))
                    (Arrays/sort specs))
-              specs))
-          (new-fn ^Expr [^symbol fn-nm [h & t :as ^seq more]]
+              specs))]
+    
+    (let [[h & t] more]
+      (if (seq? h)                      ;arity in parenthesis?
+        (if (some? t)                   ;more than one arity?
+          (specs-n more)
+          (specs-1 (first h) (next h) h))
+        (specs-1 h t form)))))             ;single inlined arity
+
+(defn parse-fn* ^Expr [^Parser parser ^long fctx ^seq form]
+  (letfn [(new-fn ^Expr [^symbol fn-nm ^Class itf-class ^seq more]
             (let [pab (^BiFunction fn ^Expr [^Parser parser ^AritySpec spec]
                        (let [pbnds (model/parameter-bindings parser (.at spec))]
                          (-> (model/with-local-bindings parser pbnds)
                              (loop/parse-loop-body (.error-context spec)
-                                                   context/fctx-initial pbnds (.body spec)))))]
-              (.new-function (.expr-factory parser) parser fn-nm pab
-                             (if (seq? h)    ;arity in parenthesis?
-                               (if (some? t) ;more than one arity?
-                                 (specs-n more)
-                                 (specs-1 (first h) (next h) h))
-                               (specs-1 h t form)))))] ;single inlined arity
-    (let [fn-nm (second form)]
+                                                   context/fctx-initial pbnds
+                                                   (.body spec)))))]
+              (if (nil? itf-class)
+                (.new-function (.expr-factory parser) parser pab fn-nm
+                               (arity-specs-of parser fctx form Object more))
+                (let [specs (arity-specs-of parser fctx form nil more)
+                      m (itf-method specs itf-class)]
+                  (.new-itf-fn (.expr-factory parser) parser pab itf-class
+                               (reflect/mhd-of-method itf-class m)
+                               (fixup-arity-specs-from-itf specs m))))))]
+    (let [itf-tag (interop/tag-of (first form))
+          fn-nm (second form)]
       (if (symbol? fn-nm)
-        (new-fn (syntax/simple-symbol fn-nm) (nnext form))
-        (new-fn nil (next form))))))
+        (do (when (some? (interop/tag-of fn-nm))
+              (wrong/other "type tag on function name is not supported"))
+            (when (some? itf-tag)
+              (wrong/other "interface function cannot have a name"))
+            (new-fn (syntax/simple-symbol fn-nm) nil (nnext form)))
+        (if (some? itf-tag)
+          (let [itf (interop/resolve-interface (.resolver parser)
+                                               (syntax/symbol itf-tag))]
+            (new-fn nil itf (next form)))
+          (new-fn nil nil (next form)))))))

@@ -185,9 +185,3 @@
      (or (>= i end)
          (and (insn? xb consumer-fctx (aget consumed-types i) (aget ces i))
               (recur (inc i)))))))
-
-(defn entities? ^boolean [^CodeBuilder xb ^Entity/1 ces]
-  (dotimes [i (alength ces)]
-    (let [ent (aget ces i)]
-      (.emit-insn* ent xb (.value-type ent) false)))
-  true)

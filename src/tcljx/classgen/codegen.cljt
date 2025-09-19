@@ -338,7 +338,7 @@
 
   (with-method [_ method]
     (InsnFactoryImpl. method recur-parameters __recur-target))
-  (new-function [this parser fn-nm parse-arity-body arity-specs]
+  (new-function [this parser parse-arity-body fn-nm arity-specs]
     (let [name-suffix (if (some? fn-nm) (name fn-nm) "fn")
           fn-proxy (fngen/partial-fn-literal (.next-entity-id method) arity-specs)
           n (alength arity-specs)
@@ -366,6 +366,25 @@
             class (EnvClass. fn-proxy (.segment method) scope-name' methods')]
         (.stage-task! method class)
         (.value-of this fn-proxy nil))))
+  (new-itf-fn [this parser parse-arity-body itf-class itf-method arity-specs]
+    (let [itf-fn (fngen/itf-fn arity-specs itf-class itf-method)
+          arity-codes (.new-exprs this 1)
+          methods' (envgraph/mk-methods method itf-class)]
+      
+      (let [expr-factory' (.with-method this (aget methods' 0))
+            parser' (.with-expr-factory parser expr-factory')
+            
+            spec (aget arity-specs 0)
+            code (.apply parse-arity-body parser' spec)]
+        (insn/ensure-assignable (-> spec .at .return-type) code)
+        (->> (AritySpec. (.at spec) (.body spec) nil (.error-context spec)
+                         code (.source-idx spec))
+             (aset arity-specs 0)))
+      
+      (let [scope-name' (.scope-name (aget methods' 0))
+            class (EnvClass. itf-fn (.segment method) scope-name' methods')]
+        (.stage-task! method class)
+        (insn/mk-insn itf-fn itf-class))))
   
   (type-cast [this fctx target-type arg]
     (let [arg-tp (insn/expr-type arg)]
