@@ -90,7 +90,7 @@
            (let [targets (mk-targets xb (alength guards))
                  scs (ArrayList.)]
              (dotimes [i (alength guards)]
-               (guards-to-switch-cases scs (.emitters ^Insns (aget guards i))
+               (guards-to-switch-cases scs (.emitters (aget guards i))
                                        (aget targets i)))
              (let [low (low-case-value scs)
                    high (high-case-value scs)]

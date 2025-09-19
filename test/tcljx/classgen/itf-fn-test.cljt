@@ -324,43 +324,43 @@
                       (^java.util.function.Supplier fn* []
                        x))]))))
 
-;; (deftest function-closure-test
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT]
-;;                    "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "fn~1"
-;;                      "(I)Ljava/util/function/Function;")
-;;              ["LOCAL 0: int n"]
-;;              (ILOAD_0)
-;;              (INVOKEDYNAMIC "apply" "(I)Ljava/util/function/Function;"
-;;                             :bsm-metafactory
-;;                             ["MethodTypeDesc[(Object)Object]"
-;;                              [STATIC . "fn$Function~1"
-;;                               "(ILjava/lang/String;)Ljava/lang/Object;"]
-;;                              "MethodTypeDesc[(String)Object]"])
-;;              (ARETURN)]
+(deftest function-closure-test
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT]
+                   "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "fn$Function~1"
+                     "(ILjava/lang/String;)Ljava/lang/Object;")
+             ["LOCAL 0: int n"]
+             ["LOCAL 1: String x"]
+             (ALOAD_1)
+             (INVOKEVIRTUAL String "length" "()I")
+             (ILOAD_0)
+             (IADD)
+             (INVOKESTATIC Integer "valueOf" "(I)Ljava/lang/Integer;")
+             (ARETURN)]
             
-;;             [(METHOD [PUBLIC STATIC FINAL] "fn$Function~1"
-;;                      "(ILjava/lang/String;)Ljava/lang/Object;")
-;;              ["LOCAL 0: int n"]
-;;              ["LOCAL 1: String x"]
-;;              (ALOAD_1)
-;;              (INVOKEVIRTUAL String "length" "()I")
-;;              (ILOAD_0)
-;;              (IADD)
-;;              (INVOKESTATIC Integer "valueOf" "(I)Ljava/lang/Integer;")
-;;              (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "fn~1"
+                     "(I)Ljava/util/function/Function;")
+             ["LOCAL 0: int n"]
+             (ILOAD_0)
+             (INVOKEDYNAMIC "apply" "(I)Ljava/util/function/Function;"
+                            :bsm-metafactory
+                            ["MethodTypeDesc[(Object)Object]"
+                             [STATIC . "fn$Function~1"
+                              "(ILjava/lang/String;)Ljava/lang/Object;"]
+                             "MethodTypeDesc[(String)Object]"])
+             (ARETURN)]
             
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
            
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
-;;                      "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (fn* ^java.util.function.Function [^int n]
-;;                       (^java.util.function.Function fn* [^String x]
-;;                        (+ (.length x) n)))]))))
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
+                     "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (fn* ^java.util.function.Function [^int n]
+                      (^java.util.function.Function fn* [^String x]
+                       (+ (.length x) n)))]))))

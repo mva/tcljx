@@ -22,6 +22,11 @@
    (java.util List HashMap)
    (java.util.function Consumer)))
 
+(definterface RecurrableBlock
+  :extends [CodeEmitter]
+  (recur-variables ^Entity/1 [])
+  (body ^Insn []))
+
 (defn- env-type-descs ^seq [^OriginProxyPairs env]
   (map Entity/.value-type-exact (.aorigin env)))
 (defn- mtd-of-arity-type
@@ -31,6 +36,15 @@
   (^MethodTypeDesc [^seq prefix ^ArityType at]
    (let [ptps (concat prefix (map reflect/describe-class (.parameter-types at)))]
      (MethodTypeDesc/of (reflect/describe-class (.return-type at)) ^List ptps))))
+
+(defn- emit-body ^void [^CodeBuilder xb ^AritySpec spec ^int first-param-no]
+  (let [return-type (-> spec .at .return-type)
+        body ^RecurrableBlock (-> spec .code .emitter)
+        parameters (.recur-variables body)]
+    (dotimes [i (alength parameters)]
+      (let [param-no (+ first-param-no i)]
+        (.emit-setup-code? ^LocalVariable (aget parameters i) xb param-no)))
+    (emit/then-leave? xb cfg/no-line-number return-type body true)))
 
 ;;; ------------------------------------------------------------------------
 
@@ -152,13 +166,13 @@
             (aset mhds i))))))
 
 (letfn [(provide-env-as-parameters ^CodeBuilder [^CodeBuilder xb
-                                              ^OriginProxyPairs env]
+                                                 ^OriginProxyPairs env]
           (dotimes [i (alength (.aorigin env))]
             (let [origin (aget (.aorigin env) i)
                   proxy (aget (.aproxy env) i)
                   ent (LocalVariable. (.local-name proxy) (.value-type origin)
-                                      0 i nil -1)]
-              (.emit-setup-code? ent xb)
+                                      0 nil -1)]
+              (.emit-setup-code? ent xb i)
               (.set-emit-entity! proxy ent)))
           xb)]
   (defn- class-elements-static ^void [^ClassBuilder cb ^AritySpec/1 specs
@@ -169,14 +183,16 @@
         (let [i (aget source-order j)
               spec (aget specs i)
               mhd (aget mhds i)
-              mtd (MethodTypeDesc/ofDescriptor (.lookupDescriptor mhd))]
+              mtd (MethodTypeDesc/ofDescriptor (.lookupDescriptor mhd))
+              first-param-no (if (some? aenv)
+                               (alength (.aorigin (aget aenv i)))
+                               0)]
           (when (or (some? aenv) (nil? (.redirection spec)))
             (classfile/with-method-body-> cb
               [(.methodName mhd) mtd classfile/acc-method-static]
               (cond-> #_xb
                 (some? aenv) (provide-env-as-parameters (aget aenv i))
-                true (insn/emit-return (-> spec .at .return-type)
-                                       (.code spec))))))))))
+                true (emit-body spec first-param-no)))))))))
 
 (defn- as-fn-static ^SegmentAcc [^SegmentAcc acc ^ClassDesc owner
                                  ^String name-prefix ^IEmitProxy fn-proxy]
@@ -254,8 +270,8 @@
             (.set-emit-entity! proxy (.get origin-to-load origin)))
           (->> (^Consumer fn ^void [^CodeBuilder xb]
                 (-> (.localVariable xb (.receiverSlot xb) this-name
-                                    this-class (.startLabel xb) (.endLabel xb)))
-                (insn/emit-return xb (-> spec .at .return-type) (.code spec)))
+                                    this-class (.startLabel xb) (.endLabel xb))
+                    (emit-body spec 0)))
                (.withMethodBody cb (.methodName mhd)
                                 (mtd-of-arity-type (.at spec)) public-final)))
 
@@ -454,7 +470,9 @@
             rt (-> spec .at .return-type)
             va? (model/translates-to-varargs? (.at spec))
             code (.get arity-codes i)
-            redir (insn/redirecting-to code rt va? nil)]
+            method-block ^RecurrableBlock (.emitter code)
+            redir (insn/redirecting-to (-> method-block .body) rt va?
+                                       (.recur-variables method-block))]
         (->> (AritySpec. (if (type/auto-return-marker? rt)
                            (let [expr-tp (insn/expr-type code)
                                  logical-tp (type/expr-to-logical expr-tp)]

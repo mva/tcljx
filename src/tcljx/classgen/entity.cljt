@@ -165,7 +165,7 @@
     1 (.dup xb)
     2 (.dup2 xb)))
 
-(deftype LocalVariable [^String name ^Class type ^int entity-id ^int param-no
+(deftype LocalVariable [^String name ^Class type ^int entity-id
                         ^CodeEmitter init ^:unsynchronized-mutable ^int slot]
   CodeEmitter
   (emit-insn* [_ xb consumed-type _]
@@ -190,7 +190,7 @@
     (.iinc xb slot const))
   
   LoadFromCopyWhenBound
-  (emit-setup-code? [_ xb]
+  (emit-setup-code? [_ xb param-no]
     (if (neg? param-no)             ;let binding or parameter binding?
       (let [tk (TypeKind/from type), label (.newLabel xb)]
         (when-some [on-stack-type (.emit-insn* init xb type false)]
@@ -208,18 +208,16 @@
 
 (defn local-variable ^Entity [^EnvMethod owner ^String name ^Class type
                               ^CodeEmitter init]
-  (LocalVariable. name type (.next-entity-id owner) -1 init -1))
-
-(defn- parameter ^Entity [^EnvMethod owner ^String name ^Class type
-                          ^int param-no]
-  (LocalVariable. name type (.next-entity-id owner) param-no emitter-empty -1))
+  (LocalVariable. name type (.next-entity-id owner) init -1))
+(defn parameter ^Entity [^EnvMethod owner ^String name ^Class type]
+  (local-variable owner name type emitter-empty)) ;`param-no` provided late
 
 ;;; ------------------------------------------------------------------------
 
 (deftype BindingImpl [^Entity bound-to ^String name ^boolean alias?]
   Binding
   (emit-insn* [this xb consumed-type then-leave?]
-    (when (or alias? (.emit-setup-code? ^LoadFromCopyWhenBound bound-to xb))
+    (when (or alias? (.emit-setup-code? ^LoadFromCopyWhenBound bound-to xb -1))
       (with-void-empty-if-requested consumed-type
         (.emit-insn* bound-to xb consumed-type then-leave?))))
   (bound-to [_]
@@ -229,6 +227,5 @@
 
 (def mk-binding BindingImpl/new)
 
-(defn parameter-binding ^Binding [^EnvMethod owner ^int param-no
-                                  ^String name ^Class type]
-  (mk-binding (parameter owner name type param-no) name false))
+(defn parameter-binding ^Binding [^EnvMethod owner ^String name ^Class type]
+  (mk-binding (parameter owner name type) name false))

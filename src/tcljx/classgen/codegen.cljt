@@ -13,6 +13,7 @@
                      ArityType AritySpec NamespaceBuilder)
    (tcljx.data.resolve Match)
    (tcljx.classgen.envgraph EnvClass EnvMethod)
+   (tcljx.classgen.entity LocalVariable)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile ClassFile ClassBuilder CodeBuilder Opcode Label TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
@@ -50,12 +51,6 @@
                      (str "no " entity " matching " member)
                      (str "multiple " entity "s matching " member)))))
 
-(defn- recur-entities ^Entity/1 [^Insns parameters]
-  (let [emitters (.emitters ^Insns parameters)
-        entities (new Entity/1 (alength emitters))]
-    (dotimes [i (alength entities)]
-      (aset entities i (.bound-to ^Binding (aget emitters i))))
-    entities))
 (defn- recur-iinc-deltas ^int/1 [^Entity/1 entities ^CodeEmitter/1 ces]
   (let [a (new int/1 (alength entities))]
     (dotimes [i (alength a)]
@@ -91,12 +86,10 @@
                                xs fixed))
     at-idx))
 
-;;; ------------------------------------------------------------------------
-
 (definterface InsnFactory
   :extends [ExprFactory]
   (get-recur-target ^Label [])
-  (set-recur-target! ^void [^Label target])
+  (set-recur-target! ^void [^Label target]) ;on this copy of InsnFactory!
   (with-method ^InsnFactory [^EnvMethod method]))
 
 ;;; Note: To save work, this code generator assumes that it can use
@@ -107,8 +100,7 @@
 ;;; Likewise for symbols, keywords, vectors, and so on.  This works
 ;;; only as long as compiler and application agree on the names of
 ;;; their runtime classes.
-(deftype InsnFactoryImpl [^EnvMethod method
-                          ^Insns recur-parameters
+(deftype InsnFactoryImpl [^EnvMethod method ^Entity/1 recur-variables
                           ^:unsynchronized-mutable ^Label __recur-target]
   InsnFactory
   (empty-expr [_]
@@ -202,10 +194,10 @@
       (switchgen/validate-guards select-tp guards fctx error-contexts)
       (-> (if (switchgen/switch-on-int? select-tp)
             (switchgen/switch-int (.emitter select) join-tp guards
-                                  (Insns/.emitters paths-and-default)
+                                  (.emitters paths-and-default)
                                   (.emitter default-path) fctx)
             (switchgen/switch-map (.emitter select) join-tp guards
-                                  (Insns/.emitters paths-and-default)
+                                  (.emitters paths-and-default)
                                   (.emitter default-path) fctx))
           (insn/mk-insn join-tp))))
   (invoke-value [this fctx f args]
@@ -230,8 +222,8 @@
         (throw (insn/wr-type "called function's type does not implement `IFn`"
                              f)))))
   
-  (new-parameter [_ param-no name type]
-    (-> (entity/parameter-binding method param-no name type)
+  (new-parameter [_ name type]
+    (-> (entity/parameter-binding method name type)
         (insn/mk-statm)))
 
   (binding-alias [_ fctx name ent]
@@ -260,14 +252,15 @@
     (set! __recur-target target))
   (get-recur-target [this]
     __recur-target)
-  (with-recur-parameters [_ parameters]
-    (InsnFactoryImpl. method parameters nil))
-  (block-loop [this fctx body]
+  (with-recur-variables [_ variables]
+    (InsnFactoryImpl. method variables nil)) ;clear __recur-target
+  (block-recurrable [this fctx loop-bindings body]
     (-> (reify
           CodeEmitter
           (emit-insn* [_ xb consumed-type then-leave?]
             (.block xb (^Consumer fn ^void [^CodeBuilder xb]
-                        (when (emit/statms? xb (.emitters recur-parameters))
+                        (when (or (nil? loop-bindings)
+                                  (emit/statms? xb (.emitters loop-bindings)))
                           (let [start-of-body (.newLabel xb)]
                             (.labelBinding xb start-of-body)
                             (.set-recur-target! this start-of-body)
@@ -275,16 +268,17 @@
                                               (.emitter body) then-leave?)))))
             (when-not then-leave? ;can the then-leave? above return true?
               consumed-type))
-          tcljx.classgen.insn.PlainInvokeTest
-          (redirecting-to [_ return-type varargs? params]
-            (when (nil? params)    ;only continue if method-level loop
-              (insn/redirecting-to body return-type varargs? recur-parameters))))
+          tcljx.classgen.fngen.RecurrableBlock
+          (recur-variables [_]
+            recur-variables)
+          (body [_]
+            body))
         (insn/mk-insn (insn/expr-type body))))
   (recur-expr [this fctx args]
     (let [args ^Insns args
           arg-types (.expr-types args)
           ces (.emitters args)
-          entities (recur-entities recur-parameters)]
+          entities recur-variables]
       
       (when-not (= (alength arg-types) (alength entities))
         (-> (str "recur expects " (alength entities) " arguments"
@@ -332,12 +326,12 @@
           tp (condgen/join-type (.expr-types insns) 0 (.length insns))]
       (-> (if (some? finally)
             (trygen/try-catch-finally tp (.emitters insns) catch-types
-                                      (.emitters ^Insns finally) fctx)
+                                      (.emitters finally) fctx)
             (trygen/try-catch tp (.emitters insns) catch-types fctx))
           (insn/mk-insn tp))))
 
   (with-method [_ method]
-    (InsnFactoryImpl. method recur-parameters __recur-target))
+    (InsnFactoryImpl. method recur-variables __recur-target))
   (new-function [this parser parse-arity-body fn-nm arity-specs]
     (let [name-suffix (if (some? fn-nm) (name fn-nm) "fn")
           fn-proxy (fngen/partial-fn-literal (.next-entity-id method) arity-specs)

@@ -47,6 +47,7 @@
   (get ^Expr [^int i])
   (set ^Expr [^int i ^Expr x])
   (emitter ^CodeEmitter [^int i])
+  (emitters ^CodeEmitter/1 [])
   (drop ^Exprs [^int n]))
 
 ;;; ------------------------------------------------------------------------
@@ -210,13 +211,14 @@
 
 (definterface LoadFromCopyWhenBound
   :extends [Entity]
-  ;; Called from non-alias Binding and closes over the binding's
-  ;; value.  A let binding usually allocates a local variable and
-  ;; stores in it the initial value, causing all later `emit-insn*`
-  ;; calls to emit a `loadLoad` instruction.  A def binding works
-  ;; similar, using a static field or a static method.  Returns false
-  ;; if control then leaves the method.
-  (emit-setup-code? ^boolean [^CodeBuilder xb]))
+  ;; Called from non-alias Binding with a negative `param-no`, or from
+  ;; a method code's prologue with a non-negative `param-no`.  A let
+  ;; binding usually allocates a local variable and stores in it the
+  ;; initial value, causing all later `emit-insn*` calls to emit a
+  ;; `loadLoad` instruction.  A def binding works similar, using a
+  ;; static field or a static method.  Returns false if control then
+  ;; leaves the method.
+  (emit-setup-code? ^boolean [^CodeBuilder xb ^int param-no]))
 
 
 (definterface CopyOnRead
@@ -454,14 +456,14 @@
 
   (assignment ^Expr [^Entity ent ^Expr value])
 
-  (new-parameter ^Expr [^int param-no ^String name ^Class type])
+  (new-parameter ^Expr [^String name ^Class type])
   
   (binding-alias ^Expr [^long fctx ^String name ^Entity ent])
   (binding-fresh ^Expr [^long fctx ^Class opt-type ^String name ^Expr init])
   (block-let ^Expr [^long fctx ^Exprs bindings ^Expr body])
   
-  (with-recur-parameters ^ExprFactory [^Exprs parameters])
-  (block-loop ^Expr [^long fctx ^Expr body])
+  (with-recur-variables ^ExprFactory [^Entity/1 variables])
+  (block-recurrable ^Expr [^long fctx ^Exprs loop-bindings ^Expr body])
   (recur-expr ^Expr [^long fctx ^Exprs args])
   
   (new-catching-local ^Expr [^long fctx ^Class type ^String name])
@@ -518,7 +520,7 @@
   ;; Frequency of change: moderate.
   (bindings* ^map [])
   (with-bindings* ^Parser [^map bindings])
-  (with-recur-parameters ^Parser [^Exprs parameters])
+  (with-recur-variables ^Parser [^Entity/1 variables])
   (with-expr-factory ^Parser [^ExprFactory expr-factory]))
 
 (defn new-constant ^Expr [^ExprFactory ef ^Object value ^Class type]
@@ -534,7 +536,7 @@
   (let [ef (.expr-factory parser)
         xs (.new-exprs ef (.parameter-count at))]
     (dotimes [i (.length xs)]
-      (.set xs i (.new-parameter ef i (.parameter-name at i)
+      (.set xs i (.new-parameter ef (.parameter-name at i)
                                  (.parameter-type at i))))
     xs))
 

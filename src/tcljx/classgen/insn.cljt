@@ -241,9 +241,6 @@
   (^Insn [^Insns insns ^int i]
    (cast-to-logical (.get insns i))))
 
-(defn emit-return ^void [^CodeBuilder xb ^Class return-type ^Insn body]
-  (emit/then-leave? xb cfg/no-line-number return-type (.emitter body) true))
-
 ;;; ------------------------------------------------------------------------
 
 ;;; Emit `insn` using its own logical type, without any applying any
@@ -293,10 +290,10 @@
 
 (definterface PlainInvokeTest ;to identify fn arity redirecting to class member
   (redirecting-to ^DirectMethodHandleDesc [^Class return-type ^boolean varargs?
-                                           ^Insns params]))
+                                           ^Entity/1 params]))
 
 (defn redirecting-to ^DirectMethodHandleDesc [^Insn x ^Class return-type
-                                              ^boolean varargs? ^Insns params]
+                                              ^boolean varargs? ^Entity/1 params]
   (when (instance? PlainInvokeTest (.emitter x))
     (.redirecting-to ^PlainInvokeTest (.emitter x) return-type varargs? params)))
 
@@ -337,28 +334,25 @@
 
         PlainInvokeTest
         (redirecting-to [inv return-type varargs? params]
-          (letfn [(same-entity? ^boolean [^CodeEmitter ce-param ^CodeEmitter ce-arg]
-                    (identical? (.bound-to ^Binding ce-param) ce-arg))
-                  (direct-to-args? [^Class/1 inv-atypes ^int inv-start]
-                    (when (= (.length params) (+ (.length args) inv-start))
-                      (loop [i (dec (.length params))]
+          (letfn [(direct-to-args? [^Class/1 inv-atypes ^int inv-start]
+                    (when (= (alength params) (+ (.length args) inv-start))
+                      (loop [i (dec (alength params))]
                         (cond
                           (< i inv-start) true
                           (let [ce-arg (emitter args (- i inv-start))]
-                            (and (same-entity? (emitter params i) ce-arg)
+                            (and (identical? (aget params i) ce-arg)
                                  (type/same? (.value-type ^Entity ce-arg)
                                              (aget inv-atypes (- i inv-start)))))
                           (recur (dec i))
                           :else false))))]
             
-            (when (and (some? params)       ;provided by `block-loop`
-                       (not= resolve/invoke-polymorphic (.invocation-mode m))
+            (when (and (not= resolve/invoke-polymorphic (.invocation-mode m))
                        (or (type/auto-return-marker? return-type)
                            (type/same? return-type (.return-type m)))
                        (= varargs? (resolve/varargs? m))
                        (direct-to-args? (.parameter-types m) (int (some? receiver)))
                        (or (nil? receiver)
-                           (same-entity? (emitter params 0) (.emitter receiver))))
+                           (identical? (aget params 0) (.emitter receiver))))
               (reflect/mhd-of-member (.owner m) (.member m))))))
       (mk-insn (.return-type m))))
 

@@ -2,9 +2,10 @@
   (:require
    (tcljx.data [wrong :as wrong] [context :as context] [type :as type]
                [model :as model] [resolve :as resolve] [reflect :as reflect])
-   (tcljx.parser [syntax :as syntax] [interop :as interop] [loop :as loop]))
+   (tcljx.parser [parse :as parse] [syntax :as syntax] [interop :as interop] [loop :as loop]))
   (:import
-   (tcljx.data.model Expr Exprs ExprFactory ArityType AritySpec Parser Resolver)
+   (tcljx.data.model Expr Exprs Entity Binding ExprFactory ArityType AritySpec
+                     Parser Resolver)
    (tcljx.data.resolve Match)
    (java.lang.constant MethodHandleDesc ConstantDescs)
    (java.lang.reflect Method)
@@ -109,11 +110,16 @@
 (defn parse-fn* ^Expr [^Parser parser ^long fctx ^seq form]
   (letfn [(new-fn ^Expr [^symbol fn-nm ^Class itf-class ^seq more]
             (let [pab (^BiFunction fn ^Expr [^Parser parser ^AritySpec spec]
-                       (let [pbnds (model/parameter-bindings parser (.at spec))]
-                         (-> (model/with-local-bindings parser pbnds)
-                             (loop/parse-loop-body (.error-context spec)
-                                                   context/fctx-initial pbnds
-                                                   (.body spec)))))]
+                       (let [pbnds (model/parameter-bindings parser (.at spec))
+                             pvars (loop/binding-variables pbnds)
+                             fctx' (context/with-recur context/fctx-initial)
+                             parser' (-> parser
+                                         (model/with-local-bindings pbnds)
+                                         (.with-recur-variables pvars))
+                             ef (.expr-factory parser')]
+                         (->> (parse/progn parser' (.error-context spec) fctx'
+                                           (.body spec))
+                              (.block-recurrable ef fctx nil))))]
               (if (nil? itf-class)
                 (.new-function (.expr-factory parser) parser pab fn-nm
                                (arity-specs-of parser fctx form Object more))

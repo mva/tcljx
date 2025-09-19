@@ -283,8 +283,8 @@
 
   (with-bindings* [_ bindings]
     (ParserImpl. expr-factory resolver bindings))
-  (with-recur-parameters [_ parameters]
-    (-> (.with-recur-parameters expr-factory parameters)
+  (with-recur-variables [_ variables]
+    (-> (.with-recur-variables expr-factory variables)
         (ParserImpl. resolver bindings*)))
   (with-expr-factory [_ expr-factory]
     (ParserImpl. expr-factory resolver bindings*)))
