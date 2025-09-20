@@ -12,7 +12,7 @@
    (tcljx.classgen.entity LocalVariable)
    (tcljx.classgen.insn Insn Insns)
    (tcljx.classgen.envgraph EnvClass OriginProxyPairs PreparationTask)
-   (java.lang.classfile ClassFile ClassBuilder CodeBuilder TypeKind)
+   (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
    (java.lang.classfile.instruction SwitchCase)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDesc DirectMethodHandleDesc ConstantDescs
@@ -208,17 +208,7 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def ^:private public-static-final (bit-or ClassFile/ACC_PUBLIC
-                                           ClassFile/ACC_STATIC
-                                           ClassFile/ACC_FINAL))
-(def ^:private private-final (bit-or ClassFile/ACC_PRIVATE
-                                     ClassFile/ACC_FINAL))
-(def ^:private public-final (bit-or ClassFile/ACC_PUBLIC
-                                    ClassFile/ACC_FINAL))
-(def ^:private protected-final (bit-or ClassFile/ACC_PROTECTED
-                                       ClassFile/ACC_FINAL))
-(def ^:private fn-virtual-class-flags (bit-or ClassFile/ACC_PUBLIC
-                                              ClassFile/ACC_FINAL))
+(def ^:private fn-virtual-class-flags (model/acc* public final))
 
 (defn- virtual-field ^Entity [^ClassDesc owner ^String nm ^Class type]
   (let [type-desc (reflect/describe-class type)]
@@ -273,7 +263,8 @@
                                     this-class (.startLabel xb) (.endLabel xb))
                     (emit-body spec 0)))
                (.withMethodBody cb (.methodName mhd)
-                                (mtd-of-arity-type (.at spec)) public-final)))
+                                (mtd-of-arity-type (.at spec))
+                                (model/acc* public final))))
 
         (arity-parameter-count ^int [^DirectMethodHandleDesc mhd]
           (dec (.parameterCount (.invocationType mhd))))
@@ -312,7 +303,7 @@
       ;; virtual fields holding the closed over environment
       (dotimes [i (alength field-names)]
         (.withField cb (aget field-names i) (.parameterType factory-mtd i)
-                    private-final))
+                    (model/acc* private final)))
       ;; virtual methods implementing the function arities
       (let [source-order (model/source-order-idxs specs)]
         (dotimes [j (alength specs)]
@@ -329,7 +320,8 @@
                 (arity-fixed-1 xb (aget mhds 0))
                 (arity-fixed-n xb mhds))))
            (.withMethodBody cb runtime/name-arity-method
-                            runtime/mtd-arity-method public-final))
+                            runtime/mtd-arity-method
+                            (model/acc* public final synthetic)))
       ;; virtual method __directMethodHandles
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (-> (.loadConstant xb (alength mhds))
@@ -341,7 +333,8 @@
                   (.aastore)))
             (.areturn xb))
            (.withMethodBody cb runtime/name-dmh-method
-                            runtime/mtd-dmh-method public-final))
+                            runtime/mtd-dmh-method
+                            (model/acc* public final synthetic)))
       ;; private constructor <init>
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (dotimes [i (dec (.parameterCount constr-mtd))]
@@ -356,7 +349,7 @@
                                 runtime/mtd-void-map)
                 (.return_)))
            (.withMethodBody cb ConstantDescs/INIT_NAME constr-mtd
-                            ClassFile/ACC_PRIVATE))
+                            (model/acc* private synthetic)))
       ;; public static factory method __create
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (-> xb
@@ -370,7 +363,7 @@
                                 constr-mtd)
                 (.areturn)))
            (.withMethodBody cb runtime/name-factory-method factory-mtd
-                            public-static-final))
+                            (model/acc* public static final synthetic)))
       ;; protected virtual method __withMetaImpl
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (-> (.new_ xb this-class)
@@ -386,7 +379,7 @@
                 (.areturn)))
            (.withMethodBody cb runtime/name-with-meta-impl
                             (MethodTypeDesc/of this-class runtime/map)
-                            protected-final)))))
+                            (model/acc* protected final synthetic))))))
 
 (defn- as-fn-virtual ^SegmentAcc [^SegmentAcc acc ^EnvClass class]
   (let [this-class (envgraph/namespace-class class)

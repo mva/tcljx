@@ -8,8 +8,7 @@
    (java.lang.constant DirectMethodHandleDesc ClassDesc)
    (java.lang.invoke MethodHandle)
    (java.util Arrays)
-   (java.util.function Consumer BiFunction))
-  (:refer-clojure :exclude [zero?]))
+   (java.util.function Consumer BiFunction)))
 
 ;;; Emit instruction code into the CodeBuilder instance.  Return the
 ;;; actual type of the value pushed onto operand stack, or nil if
@@ -26,8 +25,8 @@
 ;;; 
 ;;; No line number is passed to the method.  This limits any adapting
 ;;; instructions to get to `consumed-type` to "safe" ones that are
-;;; known to never raise an exception.  `insn?` and `then-leave?` must
-;;; close over the consumer form's line number to perform throwing
+;;; known to never raise an exception.  `insn?` and `then-leave?` take
+;;; the consumer form's line number as parameter to perform throwing
 ;;; adaptions like CHECKCAST.
 (definterface CodeEmitter
   (emit-insn* ^Class [^CodeBuilder xb ^Class consumed-type
@@ -554,3 +553,11 @@
       (let [bnd ^Binding (.emitter binding-exprs i)]
         (recur (assoc! locals (.name bnd) (.bound-to bnd)) (inc i)))
       (.with-bindings* parser (persistent! locals)))))
+
+(defmacro acc* [& flags]
+  (reduce #(bit-or ^int %1 (case %2
+                             public 0x0001, private 0x0002, protected 0x0004
+                             static 0x0008, final 0x0010, volatile 0x0040
+                             varargs 0x0080, interface 0x0200, abstract 0x0400
+                             synthetic 0x1000))
+          0 flags))

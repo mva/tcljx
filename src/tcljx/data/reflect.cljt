@@ -1,6 +1,6 @@
 (ns tcljx.data.reflect
   (:import
-   (java.lang.classfile ClassFile Opcode #_TypeKind ClassBuilder #_MethodBuilder
+   (java.lang.classfile Opcode #_TypeKind ClassBuilder #_MethodBuilder
                         CodeBuilder #_Label)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
                        DirectMethodHandleDesc DirectMethodHandleDesc$Kind

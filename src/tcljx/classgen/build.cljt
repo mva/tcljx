@@ -12,17 +12,17 @@
    (tcljx.classgen.envgraph EnvSegment EnvClass EnvMethod PreparationTask
                             SegmentAcc)
    (tcljx.classgen.insn Insn)
-   (java.lang.classfile ClassFile ClassBuilder CodeBuilder)
+   (java.lang.classfile ClassBuilder CodeBuilder)
    (java.lang.constant ClassDesc ConstantDescs MethodTypeDesc)
    (java.util ArrayList)
    (java.util.function Consumer)))
 
-(def ^:private segment-class-flags (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_ABSTRACT))
+(def ^:private segment-class-flags (model/acc* public abstract))
 
 (defn- with-requires ^ClassBuilder [^ClassBuilder cb ^String req-str]
   (classfile/with-method-body->
     cb [rt/name-requires (MethodTypeDesc/of ConstantDescs/CD_String)
-        (bit-or classfile/acc-method-static ClassFile/ACC_SYNTHETIC)]
+        (bit-or classfile/acc-method-static (model/acc* synthetic))]
     (-> (.ldc req-str) (.areturn))))
 
 (def ^:private mtd-void-String
@@ -54,7 +54,7 @@
       
           (.withMethodBody
            cb ConstantDescs/CLASS_INIT_NAME ConstantDescs/MTD_void
-           (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_STATIC)
+           (model/acc* public static)
            (^Consumer fn ^void [^CodeBuilder xb]
             (when (identical? ConstantDescs/CD_Object (.super-class segm))
               (invoke-create-nmsp xb))

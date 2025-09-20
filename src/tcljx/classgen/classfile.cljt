@@ -1,6 +1,6 @@
 (ns tcljx.classgen.classfile
   (:require
-   (tcljx.data [config :as cfg] [files :as files] model))
+   (tcljx.data [config :as cfg] [files :as files] [model :as model]))
   (:import
    (tcljx.data.model NmspClass)
    (java.lang.classfile ClassFile ClassBuilder CodeBuilder Opcode TypeKind
@@ -14,8 +14,8 @@
    (java.util.concurrent ConcurrentHashMap)
    (java.util.function Consumer)))
 
-(def acc-method-virtual (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_FINAL))
-(def acc-method-static (bit-or acc-method-virtual ClassFile/ACC_STATIC))
+(def acc-method-virtual (model/acc* public final))
+(def acc-method-static (bit-or acc-method-virtual (model/acc* static)))
 
 (defmacro accept->
   ([builder handler]
@@ -131,11 +131,9 @@
             (^Consumer fn ^void [^ClassBuilder cb]
              (let [mtd (MethodTypeDesc/of ConstantDescs/CD_MethodHandles_Lookup)]
                (-> cb                 ;use ClassFile's default version
-                   (.withFlags (bit-or ClassFile/ACC_PUBLIC
-                                       ClassFile/ACC_ABSTRACT))
+                   (.withFlags (model/acc* public abstract))
                    (.withMethodBody
-                    "beachheadLookup" mtd
-                    (bit-or ClassFile/ACC_PUBLIC ClassFile/ACC_STATIC)
+                    "beachheadLookup" mtd (model/acc* public static)
                     (^Consumer fn ^void [^CodeBuilder xb]
                      (-> (.invokestatic xb ConstantDescs/CD_MethodHandles
                                         "lookup" mtd)

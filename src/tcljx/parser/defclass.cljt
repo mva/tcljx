@@ -1,6 +1,6 @@
 (ns tcljx.parser.defclass
   (:require (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
-                        [reflect :as reflect] model)
+                        [reflect :as reflect] [model :as model])
             (tcljx.parser [syntax :as syntax] [interop :as interop]))
   (:import (tcljx.data.model Resolver NmspClass)
            (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
@@ -80,10 +80,9 @@
                                   "method name")))
               (let [mnm (cfg/munge-name mname)
                     mtd (method-lookup-type rsv msig)
-                    flags (cond-> (bit-or ClassFile/ACC_PUBLIC
-                                          ClassFile/ACC_ABSTRACT)
+                    flags (cond-> (model/acc* public abstract)
                             (< (.parameterCount mtd) (count msig))
-                            (bit-or ClassFile/ACC_VARARGS))]
+                            (bit-or (model/acc* varargs)))]
                 (^Consumer fn ^void [^ClassBuilder cb]
                  (.withMethod cb mnm mtd flags empty-method)))))]
     
@@ -95,9 +94,7 @@
           cbh (^Consumer fn ^void [^ClassBuilder cb]
                (-> (cfg/with-class-version cb)
                    (.withInterfaceSymbols ^List extends-itfs)
-                   (.withFlags (bit-or ClassFile/ACC_PUBLIC
-                                       ClassFile/ACC_INTERFACE
-                                       ClassFile/ACC_ABSTRACT)))
+                   (.withFlags (model/acc* public interface abstract)))
                (doseq [^Consumer cbh method-cbhs]
                  (.accept cbh cb)))]
       (let [bs (.build (ClassFile/of) this-class cbh)

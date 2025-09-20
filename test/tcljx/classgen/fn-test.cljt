@@ -470,7 +470,8 @@
              (INVOKEVIRTUAL . "fn2" "(II)I")
              (IRETURN)]
             
-            [(METHOD [PUBLIC FINAL] "__arityOrNull" "(I)Ljava/lang/invoke/MethodHandle;")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__arityOrNull"
+                     "(I)Ljava/lang/invoke/MethodHandle;")
              #_["LOCAL 0: mk-inc-fn$inc __this"]
              #_["LOCAL 1: int n"]
              (ILOAD_1)
@@ -485,7 +486,8 @@
              (ACONST_NULL)
              (ARETURN)]
             
-            [(METHOD [PUBLIC FINAL] "__directMethodHandles" "()[Ljava/lang/invoke/MethodHandle;")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__directMethodHandles"
+                     "()[Ljava/lang/invoke/MethodHandle;")
              #_["LOCAL 0: mk-inc-fn$inc __this"]
              (ICONST_2)
              (ANEWARRAY "MethodHandle[]")
@@ -499,7 +501,8 @@
              (AASTORE)
              (ARETURN)]
             
-            [(METHOD [PRIVATE] "<init>" "(Lclojure/lang/IPersistentMap;I)V")
+            [(METHOD [PRIVATE SYNTHETIC] "<init>"
+                     "(Lclojure/lang/IPersistentMap;I)V")
              #_["LOCAL 0: uninitialized_this_type __this"]
              #_["LOCAL 1: IPersistentMap __meta"]
              #_["LOCAL 2: int n"]
@@ -511,7 +514,8 @@
              (INVOKESPECIAL AFnMh "<init>" "(Lclojure/lang/IPersistentMap;)V")
              (RETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "__create" "(I)Lpkg/ns0/mk-inc-fn$inc;")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "__create"
+                     "(I)Lpkg/ns0/mk-inc-fn$inc;")
              #_["LOCAL 0: int n"]
              (NEW mk-inc-fn$inc) (DUP)
              (ACONST_NULL)
@@ -519,7 +523,8 @@
              (INVOKESPECIAL . "<init>" "(Lclojure/lang/IPersistentMap;I)V")
              (ARETURN)]
             
-            [(METHOD [PROTECTED FINAL] "__withMetaImpl" "(Lclojure/lang/IPersistentMap;)Lpkg/ns0/mk-inc-fn$inc;")
+            [(METHOD [PROTECTED FINAL SYNTHETIC] "__withMetaImpl"
+                     "(Lclojure/lang/IPersistentMap;)Lpkg/ns0/mk-inc-fn$inc;")
              #_["LOCAL 0: mk-inc-fn$inc __this"]
              #_["LOCAL 1: IPersistentMap __meta"]
              (NEW mk-inc-fn$inc) (DUP)

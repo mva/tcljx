@@ -8,10 +8,11 @@
    (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound Binding)
    (tcljx.classgen.envgraph EnvSegment IEmitProxy PreparationTask)
    (tcljx.classgen.insn Insn)
-   (java.lang.classfile ClassFile ClassBuilder)
+   (java.lang.classfile ClassBuilder)
    (java.lang.constant MethodTypeDesc ClassDesc)
    (java.util.function Consumer)))
 
+(def ^:private acc-final (model/acc* final))
 (defn- field-fragment ^Entity [^int or-flags ^ClassDesc owner ^String nm
                                ^Class tp ^CodeEmitter init-ce]
   (reify
@@ -26,7 +27,7 @@
     (entity-id [_]
       model/entity-id-def)
     (arity-specs [_]
-      (if (= or-flags ClassFile/ACC_FINAL)
+      (if (= or-flags acc-final)
         (model/arity-specs-of init-ce)
         model/arity-specs-invoke-dynamic))
     (invoke* [this fctx form _ at-idx xs]
@@ -41,8 +42,8 @@
     (extend-segment [_ acc _]
       (->> (^Consumer fn ^void [^ClassBuilder cb]
             (.withField cb nm (model/value-type-exact init-ce tp)
-                        (bit-or ClassFile/ACC_STATIC
-                                ClassFile/ACC_PUBLIC ;unless namespace private
+                        (bit-or (model/acc* static public)
+                                ;;... unless namespace private?
                                 or-flags)))
            (envgraph/add-segment-elements acc)))))
 
@@ -98,7 +99,7 @@
     (let [ce* (.get-emit-entity proxy)
           ent (if (entity/const? ce*)
                 (method-fragment owner nm tp ce*)
-                (field-fragment ClassFile/ACC_FINAL owner nm tp ce*))]
+                (field-fragment acc-final owner nm tp ce*))]
       (set! __entity ent)
       (envgraph/run-task acc ^PreparationTask ent class))))
 
@@ -112,7 +113,7 @@
               (instance? IEmitProxy init-ce)
               (DefOfProxy. owner nm sink-type init-ce nil)
               :else
-              (field-fragment ClassFile/ACC_FINAL owner nm sink-type init-ce))]
+              (field-fragment acc-final owner nm sink-type init-ce))]
     (.stage-task! segm ent)
     (entity/mk-binding ent nm false)))
 
@@ -120,6 +121,6 @@
   (let [sink-type (insn/logical-type init)
         init-ce (insn/emitter init)
         owner (.segment-class segm)
-        ent (field-fragment ClassFile/ACC_VOLATILE owner nm sink-type init-ce)]
+        ent (field-fragment (model/acc* volatile) owner nm sink-type init-ce)]
     (.stage-task! segm ent)
     (entity/mk-binding ent nm false)))

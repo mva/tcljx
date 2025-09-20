@@ -109,6 +109,7 @@
              (PUTSTATIC . "cfn" "Lclojure/lang/IPersistentMap;")
 
              (RETURN)]]
+           
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
              (LDC "tinyclj.core")
@@ -126,7 +127,8 @@
              (IADD)
              (IRETURN)]
             
-            [(METHOD [PUBLIC FINAL] "__arityOrNull" "(I)Ljava/lang/invoke/MethodHandle;")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__arityOrNull"
+                     "(I)Ljava/lang/invoke/MethodHandle;")
              #_["LOCAL 0: mk-add1$add1 __this"]
              #_["LOCAL 1: int n"]
              (ILOAD_1)
@@ -138,7 +140,8 @@
              (ACONST_NULL)
              (ARETURN)]
             
-            [(METHOD [PUBLIC FINAL] "__directMethodHandles" "()[Ljava/lang/invoke/MethodHandle;")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__directMethodHandles"
+                     "()[Ljava/lang/invoke/MethodHandle;")
              #_["LOCAL 0: mk-add1$add1 __this"]
              (ICONST_1)
              (ANEWARRAY "MethodHandle[]")
@@ -148,7 +151,8 @@
              (AASTORE)
              (ARETURN)]
             
-            [(METHOD [PRIVATE] "<init>" "(Lclojure/lang/IPersistentMap;I)V")
+            [(METHOD [PRIVATE SYNTHETIC] "<init>"
+                     "(Lclojure/lang/IPersistentMap;I)V")
              #_["LOCAL 0: uninitialized_this_type __this"]
              #_["LOCAL 1: IPersistentMap __meta"]
              #_["LOCAL 2: int a"]
@@ -160,7 +164,8 @@
              (INVOKESPECIAL AFnMh "<init>" "(Lclojure/lang/IPersistentMap;)V")
              (RETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "__create" "(I)Lpkg/ns0/mk-add1$add1;")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "__create"
+                     "(I)Lpkg/ns0/mk-add1$add1;")
              #_["LOCAL 0: int a"]
              (NEW mk-add1$add1) (DUP)
              (ACONST_NULL)
@@ -168,7 +173,8 @@
              (INVOKESPECIAL . "<init>" "(Lclojure/lang/IPersistentMap;I)V")
              (ARETURN)]
             
-            [(METHOD [PROTECTED FINAL] "__withMetaImpl" "(Lclojure/lang/IPersistentMap;)Lpkg/ns0/mk-add1$add1;")
+            [(METHOD [PROTECTED FINAL SYNTHETIC] "__withMetaImpl"
+                     "(Lclojure/lang/IPersistentMap;)Lpkg/ns0/mk-add1$add1;")
              #_["LOCAL 0: mk-add1$add1 __this"]
              #_["LOCAL 1: IPersistentMap __meta"]
              (NEW mk-add1$add1) (DUP)

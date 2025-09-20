@@ -15,7 +15,7 @@
    (tcljx.classgen.envgraph EnvClass EnvMethod)
    (tcljx.classgen.entity LocalVariable)
    (tcljx.classgen.insn Insn Insns)
-   (java.lang.classfile ClassFile ClassBuilder CodeBuilder Opcode Label TypeKind)
+   (java.lang.classfile ClassBuilder CodeBuilder Opcode Label TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDescs)
    (java.util.function Consumer)))
