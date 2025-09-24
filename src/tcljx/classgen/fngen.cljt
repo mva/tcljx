@@ -1,31 +1,29 @@
 (ns tcljx.classgen.fngen
   (:require
-   (tcljx.data [config :as cfg] [type :as type] [reflect :as reflect] resolve
-               [model :as model])
+   (tcljx.data [config :as cfg] [context :as context] [type :as type]
+               [reflect :as reflect] [resolve :as resolve] [model :as model])
    (tcljx.classgen [classfile :as classfile] [runtime :as runtime]
                    [emit :as emit] [runtime :as rt] [entity :as entity]
-                   [insn :as insn] [envgraph :as envgraph]))
+                   [insn :as insn] [condgen :as condgen] [envgraph :as envgraph]))
   (:import
-   (tcljx.data.model Constant ArityType AritySpec CodeEmitter Entity)
+   (tcljx.data.model CodeEmitter Entity Constant ArityType AritySpec MethodSpec
+                     FieldSpec NmspClass)
    (tcljx.data.resolve Match)
    (tcljx.classgen.envgraph EnvMethod EnvProxy IEmitProxy SegmentAcc)
    (tcljx.classgen.entity LocalVariable)
-   (tcljx.classgen.insn Insn Insns)
+   (tcljx.classgen.insn Insn Insns PlainInvokeTest)
    (tcljx.classgen.envgraph EnvClass OriginProxyPairs PreparationTask)
-   (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
+   (clojure.lang IPersistentMap Keyword)
+   (java.lang.classfile ClassBuilder CodeBuilder TypeKind Opcode)
    (java.lang.classfile.instruction SwitchCase)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDesc DirectMethodHandleDesc ConstantDescs
                        DirectMethodHandleDesc$Kind
                        DynamicConstantDesc DynamicCallSiteDesc)
+   (java.lang.invoke MethodHandle)
    (java.lang.reflect Executable)
    (java.util List HashMap)
    (java.util.function Consumer)))
-
-(definterface RecurrableBlock
-  :extends [CodeEmitter]
-  (recur-variables ^Entity/1 [])
-  (body ^Insn []))
 
 (defn- env-type-descs ^seq [^OriginProxyPairs env]
   (map Entity/.value-type-exact (.aorigin env)))
@@ -37,23 +35,22 @@
    (let [ptps (concat prefix (map reflect/describe-class (.parameter-types at)))]
      (MethodTypeDesc/of (reflect/describe-class (.return-type at)) ^List ptps))))
 
-(defn- emit-body ^void [^CodeBuilder xb ^AritySpec spec ^int first-param-no]
+(defn- emit-body ^void [^CodeBuilder xb ^MethodSpec spec ^int first-param-no]
   (let [return-type (-> spec .at .return-type)
-        body ^RecurrableBlock (-> spec .code .emitter)
-        parameters (.recur-variables body)]
+        parameters (.parameters spec)]
     (dotimes [i (alength parameters)]
       (let [param-no (+ first-param-no i)]
         (.emit-setup-code? ^LocalVariable (aget parameters i) xb param-no)))
-    (emit/then-leave? xb cfg/no-line-number return-type body true)))
+    (emit/then-leave? xb cfg/no-line-number return-type (.code spec) true)))
 
 ;;; ------------------------------------------------------------------------
 
-(deftype FnStatic [^int entity-id ^AritySpec/1 arity-specs
+(deftype FnStatic [^int entity-id ^MethodSpec/1 method-specs
                    ^DirectMethodHandleDesc/1 mhds]
   CodeEmitter
   (emit-insn* [this xb consumed-type then-leave?]
     (-> (.computational-value this)
-        (entity/mk-constant (.value-type this))
+        (entity/constant (.value-type this))
         (.emit-insn* xb consumed-type then-leave?)))
   
   Entity
@@ -63,12 +60,12 @@
     runtime/StaticFn)
   (entity-id [_]
     entity-id)
-  (arity-specs [_]
-    arity-specs)
-  (invoke* [this fctx form _ at-idx xs]
-    (let [at (.at (aget arity-specs at-idx))]
+  (method-specs [_]
+    method-specs)
+  (invoke* [this fctx form _ m-idx xs]
+    (let [at (.at (aget method-specs m-idx))]
       (-> (^CodeEmitter fn [xb _ _]
-           (insn/emit-invoke-arity (aget mhds at-idx) at xs fctx xb))
+           (insn/emit-invoke-arity (aget mhds m-idx) at xs fctx xb))
           (insn/mk-insn (.return-type at)))))
   
   Constant
@@ -84,21 +81,19 @@
                 (System/arraycopy ptypes 0 a 1 (alength ptypes))
                 a)
               ptypes)))
-        (arity-spec-of-match ^AritySpec [^Match m]
+        (method-spec-of-match ^MethodSpec [^Match m]
           (let [varargs? (when (instance? Executable (.member m))
                            (.isVarArgs ^Executable (.member m)))
-                ptypes (arity-parameter-types m)
-                at (ArityType. (.return-type m) ptypes nil varargs?)
-                mhd (reflect/mhd-of-member (.owner m) (.member m))]
-            (AritySpec. at nil mhd nil nil 0)))]
-
+                ptypes (arity-parameter-types m)]
+            (-> (ArityType. (.return-type m) ptypes nil varargs?)
+                (MethodSpec. nil nil nil 0 nil))))]
+  
   (defn class-member-fn ^FnStatic [^Match m]
-    (let [spec (arity-spec-of-match m)]
-      (FnStatic. model/entity-id-constant
-                 (doto (new AritySpec/1 1)
-                   (aset 0 spec))
-                 (doto (new DirectMethodHandleDesc/1 1)
-                   (aset 0 (.redirection spec)))))))
+    (FnStatic. model/entity-id-constant
+               (doto (new MethodSpec/1 1)
+                 (aset 0 (method-spec-of-match m)))
+               (doto (new DirectMethodHandleDesc/1 1)
+                 (aset 0 (reflect/mhd-of-member (.owner m) (.member m)))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -115,7 +110,7 @@
       (.emit-insn* ent xb (.value-type ent) false)))
   xb)
 
-(deftype FnVirtual [^int entity-id ^AritySpec/1 arity-specs
+(deftype FnVirtual [^int entity-id ^MethodSpec/1 method-specs
                     ^DirectMethodHandleDesc/1 mhds
                     ^ClassDesc this-class ^Entity/1 aorigin]
   CodeEmitter
@@ -132,38 +127,46 @@
     this-class)
   (entity-id [_]
     entity-id)
-  (arity-specs [_]
-    arity-specs)
-  (invoke* [this fctx form f at-idx xs]
-    (let [at (.at (aget arity-specs at-idx))]
+  (method-specs [_]
+    method-specs)
+  (invoke* [this fctx form f m-idx xs]
+    (let [at (.at (aget method-specs m-idx))]
       (-> (^CodeEmitter fn [xb _ _]
            (when (emit/insn? xb fctx tinyclj.lang.AFnMh f)
-             (insn/emit-invoke-arity (aget mhds at-idx) at xs fctx xb)))
+             (insn/emit-invoke-arity (aget mhds m-idx) at xs fctx xb)))
           (insn/mk-insn (.return-type at))))))
 
 ;;; -----------------------------------------------------------------------
 
+(defn- source-order-idxs ^int/1 [^MethodSpec/1 mspecs]
+  (let [source-order (new int/1 (alength mspecs))]
+    (dotimes [i (alength mspecs)]
+      (aset source-order (.source-idx (aget mspecs i)) i))
+    source-order))
+
 (defn- set-static-mhd!
   (^void [^DirectMethodHandleDesc/1 mhds ^ClassDesc owner ^String name-prefix
-          ^AritySpec/1 specs]
+          ^MethodSpec/1 specs]
    (dotimes [i (alength mhds)]
-     (let [spec (aget specs i)]
-       (->> (or (.redirection spec)
-                (let [at (.at spec)
-                      nm (str name-prefix "~" (.parameter-count at))]
-                  (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
-                                             owner nm (mtd-of-arity-type at))))
-            (aset mhds i)))))
+     (let [spec (aget specs i), at (.at spec)
+           nm (str name-prefix "~" (.parameter-count at))
+           mhd (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
+                                          owner nm (mtd-of-arity-type at))
+           body (-> spec .x-body .emitter)
+           redir (when (instance? PlainInvokeTest body)
+                   (.redirecting-to ^PlainInvokeTest body (.return-type at)
+                                    (model/translates-to-varargs? at)
+                                    (.parameters spec)))]
+       (aset mhds i (or redir mhd)))))
   (^void [^DirectMethodHandleDesc/1 mhds ^ClassDesc owner ^String name-prefix
-          ^OriginProxyPairs/1 aenv ^AritySpec/1 specs]
+          ^OriginProxyPairs/1 aenv ^MethodSpec/1 specs]
    (dotimes [i (alength mhds)]
-     (let [spec (aget specs i), env (aget aenv i)]
-       (->> (let [at (.at spec)
-                  nm (str name-prefix "~" (.parameter-count at))
-                  mtd (mtd-of-arity-type (env-type-descs env) at)]
-              (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
-                                         owner nm mtd))
-            (aset mhds i))))))
+     (let [at (.at (aget specs i))
+           nm (str name-prefix "~" (.parameter-count at))
+           mtd (mtd-of-arity-type (env-type-descs (aget aenv i)) at)
+           mhd (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
+                                          owner nm mtd)]
+       (aset mhds i mhd)))))
 
 (letfn [(provide-env-as-parameters ^CodeBuilder [^CodeBuilder xb
                                                  ^OriginProxyPairs env]
@@ -175,10 +178,11 @@
               (.emit-setup-code? ent xb i)
               (.set-emit-entity! proxy ent)))
           xb)]
-  (defn- class-elements-static ^void [^ClassBuilder cb ^AritySpec/1 specs
+  (defn- class-elements-static ^void [^ClassBuilder cb ^MethodSpec/1 specs
                                       ^DirectMethodHandleDesc/1 mhds
+                                      ^ClassDesc segment-class
                                       ^OriginProxyPairs/1 aenv]
-    (let [source-order (model/source-order-idxs specs)]
+    (let [source-order (source-order-idxs specs)]
       (dotimes [j (alength specs)]
         (let [i (aget source-order j)
               spec (aget specs i)
@@ -187,7 +191,7 @@
               first-param-no (if (some? aenv)
                                (alength (.aorigin (aget aenv i)))
                                0)]
-          (when (or (some? aenv) (nil? (.redirection spec)))
+          (when (or (some? aenv) (identical? segment-class (.owner mhd)))
             (classfile/with-method-body-> cb
               [(.methodName mhd) mtd classfile/acc-method-static]
               (cond-> #_xb
@@ -196,21 +200,21 @@
 
 (defn- as-fn-static ^SegmentAcc [^SegmentAcc acc ^ClassDesc owner
                                  ^String name-prefix ^IEmitProxy fn-proxy]
-  (let [arity-specs (.arity-specs fn-proxy)
-        mhds (new DirectMethodHandleDesc/1 (alength arity-specs))
-        fn-static (FnStatic. (.entity-id fn-proxy) arity-specs mhds)]
-    (set-static-mhd! mhds owner name-prefix arity-specs)
+  (let [method-specs (.method-specs fn-proxy)
+        mhds (new DirectMethodHandleDesc/1 (alength method-specs))
+        fn-static (FnStatic. (.entity-id fn-proxy) method-specs mhds)]
+    (set-static-mhd! mhds owner name-prefix method-specs)
     (.set-emit-entity! fn-proxy fn-static)
        
     (->> (^Consumer fn ^void [^ClassBuilder cb]
-          (class-elements-static cb arity-specs mhds nil))
+          (class-elements-static cb method-specs mhds owner nil))
          (envgraph/add-segment-elements acc))))
 
 ;;; ------------------------------------------------------------------------
 
 (def ^:private fn-virtual-class-flags (model/acc* public final))
 
-(defn- virtual-field ^Entity [^ClassDesc owner ^String nm ^Class type]
+(defn- entity-getfield ^Entity [^ClassDesc owner ^String nm ^Class type]
   (let [type-desc (reflect/describe-class type)]
     (reify Entity
       (emit-insn* [_ xb _ _]
@@ -219,18 +223,31 @@
         type)
       (value-type [_]
         type)
+      (value-type-exact [_]
+        type-desc)
       (entity-id [_]
         -1))))
+(defn- entity-this ^Entity [^ClassDesc owner]
+  (reify Entity
+    (emit-insn* [_ xb _ _]
+      (.aload xb (.receiverSlot xb))
+      tinyclj.lang.AFnMh)
+    (value-type [_]
+      tinyclj.lang.AFnMh)
+    (value-type-exact [_]
+      owner)
+    (entity-id [_]
+      -1)))
 
 (defn- field-type ^Class [^OriginProxyPairs construction-ops ^int i]
   (.value-type (aget (.aorigin construction-ops) i)))
 (defn- field-type-desc ^ClassDesc [^OriginProxyPairs construction-ops ^int i]
   (reflect/describe-class (field-type construction-ops i)))
-(defn- field-names ^String/1 [^OriginProxyPairs construction-ops]
+(defn- munged-field-names ^String/1 [^OriginProxyPairs construction-ops]
   (let [aproxy (.aproxy construction-ops)
         a (new String/1 (alength aproxy))]
     (dotimes [i (alength a)]
-      (aset a i (.local-name (aget aproxy i))))
+      (aset a i (cfg/munge-name (.local-name (aget aproxy i)))))
     a))
 (defn- field-getters ^HashMap [^ClassDesc owner
                                ^OriginProxyPairs construction-ops]
@@ -239,12 +256,12 @@
         acc (HashMap.)]
     (dotimes [i (alength aorigin)]
       (let [origin (aget aorigin i)]
-        (.put acc origin (virtual-field owner (.local-name (aget aproxy i))
-                                        (.value-type origin)))))
+        (.put acc origin (entity-getfield owner (.local-name (aget aproxy i))
+                                          (.value-type origin)))))
     acc))
 
 (defn- set-virtual-mhd! ^void [^DirectMethodHandleDesc/1 mhds
-                               ^ClassDesc owner ^AritySpec/1 specs]
+                               ^ClassDesc owner ^MethodSpec/1 specs]
   (dotimes [i (alength mhds)]
     (let [at (.at (aget specs i))
           mnm (str "fn" (.parameter-count at))]
@@ -253,7 +270,7 @@
            (aset mhds i)))))
 
 (letfn [(virtual-method ^void [^ClassBuilder cb ^HashMap origin-to-load
-                               ^AritySpec spec ^ClassDesc this-class
+                               ^MethodSpec spec ^ClassDesc this-class
                                ^String this-name ^DirectMethodHandleDesc mhd
                                ^HashMap origin-to-proxy]
           (doseq [[origin ^EnvProxy proxy] (.entrySet origin-to-proxy)]
@@ -269,11 +286,17 @@
         (arity-parameter-count ^int [^DirectMethodHandleDesc mhd]
           (dec (.parameterCount (.invocationType mhd))))
         (arity-fixed-1 ^void [^CodeBuilder xb ^DirectMethodHandleDesc mhd]
-          (let [target-default (.newLabel xb)]
-            (-> (.iload xb (.parameterSlot xb 0))
-                (.loadConstant (arity-parameter-count mhd))
-                (.if_icmpne target-default) (.ldc mhd) (.areturn)
-                (.labelBinding target-default) (.aconst_null) (.areturn))))
+          (let [n (arity-parameter-count mhd)
+                test-args (doto (new CodeEmitter/1 2)
+                            (aset 0 (LocalVariable. "n" Integer/TYPE -1 nil
+                                                    (.parameterSlot xb 0)))
+                            (aset 1 (entity/constant n Integer/TYPE)))]
+            (-> (condgen/mk-cmp-pred Opcode/IF_ICMPEQ condgen/cmp-eq
+                                     Integer/TYPE test-args context/fctx-none)
+                (condgen/mk-if MethodHandle
+                               (entity/constant mhd MethodHandle)
+                               entity/emitter-empty context/fctx-none)
+                (.emit-insn* xb MethodHandle true))))
         (arity-fixed-n ^void [^CodeBuilder xb ^DirectMethodHandleDesc/1 mhds]
           (let [scs (new SwitchCase/1 (alength mhds))
                 target-default (.newLabel xb)]
@@ -290,22 +313,22 @@
                 (.aconst_null)
                 (.areturn))))]
   
-  (defn- class-elements-virtual ^void [^ClassBuilder cb ^AritySpec/1 specs
+  (defn- class-elements-virtual ^void [^ClassBuilder cb ^MethodSpec/1 specs
                                        ^DirectMethodHandleDesc/1 mhds
                                        ^ClassDesc this-class ^String this-name
                                        ^MethodTypeDesc factory-mtd
-                                       ^String/1 field-names
+                                       ^String/1 afield-mnm
                                        ^HashMap origin-to-load
                                        ^EnvMethod/1 ems]
     (let [constr-mtd (-> factory-mtd
                          (.insertParameterTypes 0 runtime/map)
                          (.changeReturnType ConstantDescs/CD_void))]
       ;; virtual fields holding the closed over environment
-      (dotimes [i (alength field-names)]
-        (.withField cb (aget field-names i) (.parameterType factory-mtd i)
+      (dotimes [i (alength afield-mnm)]
+        (.withField cb (aget afield-mnm i) (.parameterType factory-mtd i)
                     (model/acc* private final)))
       ;; virtual methods implementing the function arities
-      (let [source-order (model/source-order-idxs specs)]
+      (let [source-order (source-order-idxs specs)]
         (dotimes [j (alength specs)]
           (let [i (aget source-order j)
                 em (aget ems i)]
@@ -341,10 +364,10 @@
               (-> (.aload xb (.receiverSlot xb))
                   (.loadLocal (TypeKind/from (.parameterType constr-mtd (inc i)))
                               (.parameterSlot xb (inc i)))
-                  (.putfield this-class (aget field-names i)
+                  (.putfield this-class (aget afield-mnm i)
                              (.parameterType constr-mtd (inc i)))))
             (-> (.aload xb (.receiverSlot xb))
-                (.aload 1)
+                (.aload (.parameterSlot xb 0))
                 (.invokespecial runtime/AFn ConstantDescs/INIT_NAME
                                 runtime/mtd-void-map)
                 (.return_)))
@@ -370,9 +393,9 @@
                 (.dup)
                 (.aload (.parameterSlot xb 0)))
             ;; FIXME... use field entities' emit method
-            (dotimes [i (alength field-names)]
+            (dotimes [i (alength afield-mnm)]
               (-> (.aload xb (.receiverSlot xb))
-                  (.getfield this-class (aget field-names i)
+                  (.getfield this-class (aget afield-mnm i)
                              (.parameterType constr-mtd (inc i)))))
             (-> (.invokespecial xb this-class ConstantDescs/INIT_NAME
                                 constr-mtd)
@@ -385,14 +408,15 @@
   (let [this-class (envgraph/namespace-class class)
         super-class runtime/AFn
         fn-proxy ^IEmitProxy (.class-task class)
-        arity-specs (.arity-specs fn-proxy)
-        construction-ops (-> (envgraph/class-origin-to-proxy class)
+        method-specs (.method-specs fn-proxy)
+        construction-ops (-> (doto (envgraph/class-origin-to-proxy class)
+                               (.remove fn-proxy))
                              (envgraph/sorted-ops))
-        mhds (new DirectMethodHandleDesc/1 (alength arity-specs))
-        fn-virtual (FnVirtual. (.entity-id fn-proxy) arity-specs mhds
+        mhds (new DirectMethodHandleDesc/1 (alength method-specs))
+        fn-virtual (FnVirtual. (.entity-id fn-proxy) method-specs mhds
                                this-class (.aorigin construction-ops))]
     (.set-emit-entity! fn-proxy fn-virtual)
-    (set-virtual-mhd! mhds this-class arity-specs)
+    (set-virtual-mhd! mhds this-class method-specs)
     
     (->> (^Consumer fn ^void [^ClassBuilder cb]
           (let [factory-mtd (-> this-class
@@ -400,81 +424,90 @@
                 constr-mtd (-> factory-mtd
                                (.insertParameterTypes 0 runtime/map)
                                (.changeReturnType ConstantDescs/CD_void))
-                origin-to-load (field-getters this-class construction-ops)
-                field-names (field-names construction-ops)]
+                origin-to-load (doto (field-getters this-class construction-ops)
+                                 (.put fn-proxy (entity-this this-class)))
+                afield-mnm (munged-field-names construction-ops)]
             (-> (cfg/with-class-version cb)
                 (.withFlags fn-virtual-class-flags)
                 (.withSuperclass super-class)
-                (class-elements-virtual arity-specs mhds
+                (class-elements-virtual method-specs mhds
                                         this-class (.class-name class)
-                                        factory-mtd field-names
+                                        factory-mtd afield-mnm
                                         origin-to-load (.methods class)))))
          (model/mk-nmsp-class this-class super-class)
          (envgraph/add-class-file acc))))
 
 ;;; ------------------------------------------------------------------------
 
-(deftype FnProxy [^AritySpec/1 arity-specs ^int entity-id
-                  ^:unsynchronized-mutable ^Entity __emit-entity]
+(deftype FnProxy [^AritySpec/1 arity-specs ^MethodSpec/1 method-specs
+                  ^int entity-id ^:unsynchronized-mutable ^Entity __emit]
   CodeEmitter
   (emit-insn* [this xb consumed-type then-leave?]
-    (.emit-insn* __emit-entity xb consumed-type then-leave?))
+    (.emit-insn* __emit xb consumed-type then-leave?))
   
   Entity
   (value-type [_]
     tinyclj.lang.AFnMh)
   (value-type-exact [_]
-    (.value-type-exact __emit-entity))
+    (.value-type-exact __emit))
   (entity-id [_]
     entity-id)
-  (arity-specs [_]
-    arity-specs)
-  (invoke* [this fctx form opt-f at-idx xs]
-    (let [at (.at (aget arity-specs at-idx))]
+  (method-specs [_]
+    method-specs)
+  (invoke* [this fctx form opt-f m-idx xs]
+    (let [at (.at (aget method-specs m-idx))]
       (-> (^CodeEmitter fn [xb consumed-type then-leave?]
            (-> (.get-emit-entity this)  ;trampoline to get current entity
-               (.invoke* fctx form opt-f at-idx xs)
+               (.invoke* fctx form opt-f m-idx xs)
                (insn/emitter)
                (.emit-insn* xb consumed-type then-leave?)))
           (insn/mk-insn (.return-type at)))))
   
   IEmitProxy
   (set-emit-entity! [_ ent]
-    (set! __emit-entity ent))
+    (set! __emit ent))
   (get-emit-entity [_]
-    __emit-entity)
+    __emit)
 
   PreparationTask
   (extend-segment [_ acc class]
-    (if (envgraph/closes-over-env? class)
+    (if (envgraph/fn-closes-over-env? class)
       (as-fn-virtual acc class)
       (as-fn-static acc (-> class .segment .segment-class)
                     (.class-name class) ^IEmitProxy (.class-task class)))))
 
-(defn partial-fn-literal ^FnProxy [^int entity-id
-                                   ^AritySpec/1 partial-arity-specs]
-  (FnProxy. partial-arity-specs entity-id nil))
+(defn partial-fn-literal ^FnProxy [^int entity-id ^AritySpec/1 arity-specs]
+  (let [method-specs (new MethodSpec/1 (alength arity-specs))]
+    (dotimes [i (alength method-specs)]
+      (aset method-specs i (-> (.at (aget arity-specs i))
+                               (MethodSpec. nil nil nil i nil))))
+    (->> (^java.util.Comparator fn ^int [^MethodSpec o1 ^MethodSpec o2]
+          (Integer/compare (-> o1 .at .parameter-count)
+                           (-> o2 .at .parameter-count)))
+         (java.util.Arrays/sort method-specs))
+    (FnProxy. arity-specs method-specs entity-id nil)))
 
-(defn update-arities ^FnProxy [^FnProxy fn-proxy ^Insns arity-codes]
+(defn update-arities ^FnProxy [^FnProxy fn-proxy ^MethodSpec/1 arity-methods]
   ;; update overwrite any auto-return-marker return types
   (let [arity-specs (.arity-specs fn-proxy)]
     (dotimes [i (alength arity-specs)]
-      (let [spec (aget arity-specs i)
-            rt (-> spec .at .return-type)
-            va? (model/translates-to-varargs? (.at spec))
-            code (.get arity-codes i)
-            method-block ^RecurrableBlock (.emitter code)
-            redir (insn/redirecting-to (-> method-block .body) rt va?
-                                       (.recur-variables method-block))]
-        (->> (AritySpec. (if (type/auto-return-marker? rt)
-                           (let [expr-tp (insn/expr-type code)
-                                 logical-tp (type/expr-to-logical expr-tp)]
-                             (model/with-return-type (.at spec) logical-tp))
-                           (.at spec))
-                         (.body spec) redir (.error-context spec) code
-                         (.source-idx spec))
-             (aset arity-specs i)))))
-  fn-proxy)
+      (let [aspec (aget arity-specs i)
+            mspec (aget arity-methods i)
+            at (if (type/auto-return-marker? (-> aspec .at .return-type))
+                 (let [expr-tp (insn/expr-type (.x-body mspec))
+                       logical-tp (type/expr-to-logical expr-tp)]
+                   (model/with-return-type (.at aspec) logical-tp))
+                 (.at aspec))]
+        (->> (AritySpec. at (.body aspec) (.error-context aspec))
+             (aset arity-specs i))))
+    (let [method-specs (.method-specs fn-proxy)]
+      (dotimes [i (alength method-specs)]
+        (let [j (.source-idx (aget method-specs i))
+              mspec (aget arity-methods j)
+              at* (.at (aget arity-specs j))]
+          (aset method-specs i (MethodSpec. at* (.code mspec) (.x-body mspec)
+                                            (.parameters mspec) j nil))))
+      fn-proxy)))
 
 ;;; ------------------------------------------------------------------------
 
@@ -482,14 +515,14 @@
   (dotimes [i (alength aops)]
     (aset aops i (envgraph/sorted-ops (.origin-to-proxy (aget ems i))))))
 
-(deftype FnItf [^AritySpec/1 arity-specs ^DirectMethodHandleDesc/1 mhds
+(deftype FnItf [^MethodSpec/1 method-specs ^DirectMethodHandleDesc/1 mhds
                 ^Class itf-class ^String method-name
                 ^MethodTypeDesc lookup-type
                 ^OriginProxyPairs/1 aconstruction-ops]
   CodeEmitter
   (emit-insn* [this xb consumed-type then-leave?]
     (entity/with-void-empty-if-requested consumed-type
-      (let [spec (aget arity-specs 0)
+      (let [spec (aget method-specs 0)
             at (.at spec)
             d-mtd (mtd-of-arity-type at)
             env (aget aconstruction-ops 0)
@@ -503,15 +536,76 @@
   (extend-segment [_ acc class]
     (set-construction-ops! aconstruction-ops (.methods class))
     (set-static-mhd! mhds (-> class .segment .segment-class)
-                     (.class-name class) aconstruction-ops arity-specs)
+                     (.class-name class) aconstruction-ops method-specs)
     (->> (^Consumer fn ^void [^ClassBuilder cb]
-          (class-elements-static cb arity-specs mhds aconstruction-ops))
+          (class-elements-static cb method-specs mhds nil aconstruction-ops))
          (envgraph/add-segment-elements acc))))
 
-(defn itf-fn ^FnItf [^AritySpec/1 arity-specs ^Class itf-class
+(defn itf-fn ^FnItf [^MethodSpec/1 method-specs ^Class itf-class
                      ^DirectMethodHandleDesc itf-method]
   (let [mhds (new DirectMethodHandleDesc/1 1)]
-    (FnItf. arity-specs mhds itf-class (.methodName itf-method)
+    (FnItf. method-specs mhds itf-class (.methodName itf-method)
             (-> itf-method .invocationType (.dropParameterTypes 0 1))
             (new OriginProxyPairs/1 1))))
 
+;;; ------------------------------------------------------------------------
+
+(def ^:private m-valAt (resolve/virtual-method IPersistentMap
+                                               "valAt" Object Object))
+(def ^:pricate mtd-seqOrElse (MethodTypeDesc/of ConstantDescs/CD_Object
+                                                ConstantDescs/CD_Object))
+(def ^:private mtd-without (MethodTypeDesc/of runtime/map
+                                              ConstantDescs/CD_Object))
+(defn- dt-create-record ^void [^ClassBuilder cb ^ClassDesc this-class
+                               ^FieldSpec/1 fields]
+  (->> (^Consumer fn ^void [^CodeBuilder xb]
+        (let [arg-0 (-> (LocalVariable. "m" IPersistentMap -1 nil
+                                        (.parameterSlot xb 0))
+                        (insn/mk-insn IPersistentMap))
+              kws (new Insn/1 (- (alength fields) 4))]
+          (dotimes [i (alength kws)]
+            (let [kw (keyword nil (.field-name (aget fields i)))]
+              (aset kws i (-> (entity/collection kw Keyword false)
+                              (insn/mk-insn Keyword)))))
+          
+          (-> xb (.new_ this-class) (.dup))
+          (dotimes [i (alength kws)]
+            (let [xs (insn/insns-of (aget kws i) insn/insn-null)
+                  x (insn/invoke-member m-valAt arg-0 xs context/fctx-none)]
+              (emit/insn? xb context/fctx-none (.type (aget fields i))
+                          (.emitter x))))
+          (-> xb (.aconst_null) (insn/emit-logical? arg-0))
+          (dotimes [i (alength kws)]
+            (insn/emit-logical? xb (aget kws i))
+            (.invokeinterface xb runtime/map "without" mtd-without))
+          (-> (.invokestatic xb runtime/RT "seqOrElse" mtd-seqOrElse)
+              (.iconst_0) (.iconst_0 )
+              (.invokespecial this-class ConstantDescs/INIT_NAME
+                              (model/mtd-of-fields fields))
+              (.areturn))))
+       (.withMethodBody cb "create" (MethodTypeDesc/of this-class runtime/map)
+                        (model/acc* public static synthetic))))
+
+(defn- dt-virtual-methods ^void [^ClassBuilder cb ^MethodSpec/1 method-specs]
+  (dotimes [i (alength method-specs)]
+    (let [spec (aget method-specs i)]
+      (->> (^Consumer fn ^void [^CodeBuilder xb]
+            (emit-body xb spec -1))
+           (.withMethodBody cb (.method-name spec)
+                            (-> (mtd-of-arity-type (.at spec))
+                                (.dropParameterTypes 0 1))
+                            (model/acc* public))))))
+
+(deftype Deftype [^NmspClass eph-ncl ^FieldSpec/1 field-specs
+                  ^MethodSpec/1 method-specs ^boolean defrecord?]
+  PreparationTask
+  (extend-segment [_ acc class]
+    (->> (.andThen (.class-handler eph-ncl)
+                   (^Consumer fn ^void [^ClassBuilder cb]
+                    (when defrecord?
+                      (dt-create-record cb (.this-class eph-ncl) field-specs))
+                    (dt-virtual-methods cb method-specs)))
+         (model/with-class-handler eph-ncl)
+         (envgraph/add-class-file acc))))
+
+(def task-deftype* Deftype/new)

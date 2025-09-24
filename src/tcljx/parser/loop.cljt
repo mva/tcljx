@@ -5,32 +5,32 @@
   (:import
    (tcljx.data.model Expr Exprs Binding Entity Parser)))
 
-(defn binding-variables ^Entity/1 [^Exprs bnds]
-  (let [a (new Entity/1 (.length bnds))]
+(defn binding-variables ^Entity/1 [^Binding/1 bnds]
+  (let [a (new Entity/1 (alength bnds))]
     (dotimes [i (alength a)]
-      (aset a i (Binding/.bound-to (.emitter bnds i))))
+      (aset a i (.bound-to (aget bnds i))))
     a))
           
 (defn parse-loop* ^Expr [^Parser parser ^long fctx [_ bindings & body :as form]]
   (let [bindings (syntax/vector bindings true)
         n (quot (count bindings) 2)
         ef (.expr-factory parser)
-        bnd-xs (.new-exprs ef n)]
+        bnds (new Binding/1 n)]
     (loop [parser parser, i 0]
       (if (< i n)
         (let [nm-sym (nth bindings (* i 2))
               nm (syntax/simple-symbol-str nm-sym)
               init (nth bindings (inc (* i 2)))
               opt-type (interop/resolve-tag (.resolver parser) nm-sym nil)
-              bnd-x (.binding-fresh ef fctx opt-type nm
+              bnd (.binding-fresh ef fctx opt-type nm
                                     (parse/arg parser fctx init))]
-          (.set bnd-xs i bnd-x)
-          (recur (model/with-local-binding parser bnd-x) (inc i)))
+          (aset bnds i bnd)
+          (recur (model/with-local-binding parser bnd) (inc i)))
         (let [fctx' (context/with-recur fctx)
-              bnd-vs (binding-variables bnd-xs)
+              bnd-vs (binding-variables bnds)
               parser' (.with-recur-variables parser bnd-vs)]
-          (.block-recurrable (.expr-factory parser') fctx' bnd-xs
-                             (parse/progn parser' fctx' body)))))))
+          (.block-bindings (.expr-factory parser') fctx' bnds
+                           (parse/progn parser' fctx' body) true))))))
 
 (defn parse-recur ^Expr [^Parser parser ^long fctx [_ & args :as form]]
   (if (context/can-recur? fctx)

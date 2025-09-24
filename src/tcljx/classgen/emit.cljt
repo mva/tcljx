@@ -139,7 +139,6 @@
         (pop-operand xb on-stack-type))
       true))
   
-  ;; FIXME... move argument `ce` to second position?
   (defn insn? ^boolean [^CodeBuilder xb ^long consumer-fctx
                         ^Class consumed-type ^CodeEmitter ce]
     (when-some [on-stack-type (.emit-insn* ce xb consumed-type false)]
@@ -147,17 +146,14 @@
                    on-stack-type)
       true))
   
-  ;; FIXME... move argument `ce` to second position?
   (defn then-leave? ^boolean [^CodeBuilder xb ^long consumer-fctx
                               ^Class consumed-type ^CodeEmitter ce
                               ^boolean then-leave?]
-    (if then-leave?
-      (do (when-some [on-stack-type (.emit-insn* ce xb consumed-type true)]
-            (adapt-stack xb (context/fctx-line consumer-fctx) consumed-type
-                         on-stack-type)
-            (.return_ xb (TypeKind/from consumed-type)))
-          false)
-      (insn? xb consumer-fctx consumed-type ce))))
+    (when-some [on-stack-type (.emit-insn* ce xb consumed-type then-leave?)]
+      (adapt-stack xb (context/fctx-line consumer-fctx) consumed-type
+                   on-stack-type)
+      (when then-leave? (.return_ xb (TypeKind/from consumed-type)))
+      (not then-leave?))))
 
 (defn statms? ^boolean [^CodeBuilder xb ^CodeEmitter/1 ces]
   (loop [i 0]

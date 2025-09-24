@@ -158,7 +158,7 @@
              les (for [^Insns xs guards]
                    (-> (if (= (.length xs) 1)
                          (insn/emitter xs 0)
-                         (entity/mk-collection (.emitters xs) type/list false))
+                         (entity/collection (.emitters xs) type/list false))
                        (Constant/.loadable-entry cpb false)))
              bsm (.bsmEntry cpb mhe les)
              mtd (MethodTypeDesc/of ConstantDescs/CD_int

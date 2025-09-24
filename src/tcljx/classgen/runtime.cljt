@@ -1,5 +1,4 @@
 (ns tcljx.classgen.runtime
-  #_(:require (tcljx.classgen [reflect :as reflect]))
   (:import
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc ConstantDescs
                        DirectMethodHandleDesc$Kind))
@@ -7,6 +6,7 @@
 
 ;;; ------------------------------------------------------------------------
 
+(def Alias (ClassDesc/of "tinyclj.lang.Alias"))
 (def RT (ClassDesc/of "tinyclj.lang.RT"))
 
 #_(def ClojureRT (ClassDesc/of "clojure.lang.RT"))

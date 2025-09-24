@@ -5,10 +5,11 @@
    (tcljx.data.resolve Match)
    (java.lang.classfile CodeBuilder ClassBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry)
-   (java.lang.constant DirectMethodHandleDesc ClassDesc)
+   (java.lang.constant DirectMethodHandleDesc ClassDesc MethodTypeDesc
+                       ConstantDescs)
    (java.lang.invoke MethodHandle)
-   (java.util Arrays)
-   (java.util.function Consumer BiFunction)))
+   (java.lang.reflect Method)
+   (java.util.function Consumer)))
 
 ;;; Emit instruction code into the CodeBuilder instance.  Return the
 ;;; actual type of the value pushed onto operand stack, or nil if
@@ -106,24 +107,17 @@
   (^ArityType [^ArityType at ^Class tp ^Class/1 ptps]
    (ArityType. tp ptps (.parameter-names at) (.varargs? at))))
 
+(defn with-method-type ^ArityType [^ArityType at ^Method m]
+  (let [ptps (aclone (.parameter-types at))]
+    (System/arraycopy (.getParameterTypes m) 0 ptps 1 (dec (alength ptps)))
+    (ArityType. (.getReturnType m) ptps (.parameter-names at)
+                (.isVarArgs m))))
+
 (defn translates-to-varargs? ^boolean [^ArityType at]
   (or (.varargs? at) (.variadic? at)))
 
 (defn fixed-parameter-count ^int [^ArityType at]
   (- (.parameter-count at) (int (translates-to-varargs? at))))
-
-
-;;; Array of AritySpec is in parameter count order by default.  Source
-;;; code order can be reconstructed via `source-idx`.  Note: `code` is
-;;; initially nil.
-(deftype AritySpec [^ArityType at ^seq body ^DirectMethodHandleDesc redirection
-                    ^seq error-context ^Expr code ^int source-idx])
-
-(defn source-order-idxs ^int/1 [^AritySpec/1 arity-specs]
-  (let [source-order (new int/1 (alength arity-specs))]
-    (dotimes [i (alength arity-specs)]
-      (aset source-order (.source-idx (aget arity-specs i)) i))
-    source-order))
 
 ;;; ------------------------------------------------------------------------
 
@@ -158,8 +152,8 @@
   ;; with type information available during compilation, dynamic (and
   ;; generic) function call during runtime, or some specialized
   ;; primitive function translation pattern.
-  (arity-specs ^AritySpec/1 [])
-  (invoke* ^Expr [^long fctx ^seq form ^CodeEmitter opt-f ^int at-idx
+  (method-specs ^MethodSpec/1 [])
+  (invoke* ^Expr [^long fctx ^seq form ^CodeEmitter opt-f ^int m-idx
                   ^Exprs xs])
   
   ;; The level of the scope that bounds visibility and accessibility
@@ -172,6 +166,29 @@
   (emit-store ^CodeBuilder [^CodeBuilder xb])            ;optional
   (emit-iinc ^CodeBuilder [^CodeBuilder xb ^int const])) ;optional
 
+;;; Note: A function's AritySpec array is in source code order.
+(deftype AritySpec [^ArityType at ^seq body ^seq error-context])
+
+;;; Note: A function's MethodSpec arrays is in parameter count order.
+;;; Source code order can be reconstructed via `source-idx`.
+(deftype MethodSpec [^ArityType at ^CodeEmitter code ^Expr x-body
+                     ^Entity/1 parameters ^int source-idx
+                     ^String method-name]) ;for deftype*
+
+(deftype FieldSpec [^String field-name ^symbol type-tag ^int flags
+                    ^ClassDesc type-desc ^Class type])
+(defn with-field-type ^FieldSpec [^FieldSpec spec ^Class type]
+  (FieldSpec. (.field-name spec) (.type-tag spec) (.flags spec)
+              (.type-desc spec) type))
+
+(defn mtd-of-fields ^MethodTypeDesc [^FieldSpec/1 fields]
+  (->> ^java.util.List (map FieldSpec/.type-desc fields)
+       (MethodTypeDesc/of ConstantDescs/CD_void)))
+
+
+(def method-specs-primitive-fn nil) ;not invoked as a regular function
+(def method-specs-invoke-dynamic (new MethodSpec/1 0)) ;runtime invoke only
+
 (defn entity? ^boolean [^CodeEmitter ce]
   (instance? Entity ce))
 
@@ -180,20 +197,20 @@
      (.value-type-exact ^Entity ce)
      (reflect/describe-class or-else)))
 
-(def arity-specs-primitive-fn nil)  ;not invoked as a regular function
-(def arity-specs-invoke-dynamic (new AritySpec/1 0)) ;runtime invoke only
-
-(defn arity-specs-of ^AritySpec/1 [^CodeEmitter ce]
+(defn method-specs-of ^MethodSpec/1 [^CodeEmitter ce]
   (if (entity? ce)
-    (.arity-specs ^Entity ce)
-    arity-specs-invoke-dynamic))
+    (.method-specs ^Entity ce)
+    method-specs-invoke-dynamic))
 
 (def closure-level-constant 0) ;scope of constants spans all namespaces
 (def closure-level-def 1)      ;entity is a def on namespace level
 (def closure-level-clinit 2) ;scope of entity is a namespace segment's <clinit>
 
-(defn entity-id-of ^int [^int closure-level]
-  (bit-shift-left closure-level 16))
+(defn entity-id-of
+  (^int [^int closure-level]
+   (bit-shift-left closure-level 16))
+  (^int [^int closure-level ^int index]
+   (bit-or (entity-id-of closure-level) (inc index))))
 (defn closure-level ^int [^Entity ent]
   (unsigned-bit-shift-right (.entity-id ent) 16))
 (defn sequence-number ^int [^Entity ent]
@@ -210,13 +227,13 @@
 
 (definterface LoadFromCopyWhenBound
   :extends [Entity]
-  ;; Called from non-alias Binding with a negative `param-no`, or from
-  ;; a method code's prologue with a non-negative `param-no`.  A let
-  ;; binding usually allocates a local variable and stores in it the
-  ;; initial value, causing all later `emit-insn*` calls to emit a
-  ;; `loadLoad` instruction.  A def binding works similar, using a
-  ;; static field or a static method.  Returns false if control then
-  ;; leaves the method.
+  ;; Called from non-alias Binding with a `param-no` of -2, or from a
+  ;; method code's prologue with a non-negative `param-no` or -1 for
+  ;; the receiver.  A let binding usually allocates a local variable
+  ;; and stores in it the initial value, causing all later
+  ;; `emit-insn*` calls to emit a `loadLoad` instruction.  A def
+  ;; binding works similar, using a static field or a static method.
+  ;; Returns false if control then leaves the method.
   (emit-setup-code? ^boolean [^CodeBuilder xb ^int param-no]))
 
 
@@ -242,15 +259,15 @@
   (instance? ImmediateEntity ce))
 
 
-;;; A binding represents the place in a code sequence where some
-;;; entity `bound-to` is associated with a name.
-(definterface Binding
-  :extends [CodeEmitter]
-  ;; The runtime entity for which this binding provides a name.
-  (bound-to ^Entity [])
-
-  ;; The name assigned to the entity `bound-to`.
-  (name ^String []))
+;;; A binding marks the place in the code sequence where entity
+;;; `bound-to` is associated with a name.
+(deftype Binding [^Entity bound-to ^String name ^boolean alias?]
+  java.lang.Record
+  CodeEmitter
+  (emit-insn* [this xb _ _]
+    (when (or alias? (LoadFromCopyWhenBound/.emit-setup-code? bound-to xb -2))
+      Void/TYPE)))
+(def mk-binding Binding/new)
 
 ;;; ------------------------------------------------------------------------
 
@@ -296,8 +313,9 @@
 ;;; concurrency, `lookup-class` may return class instances defined in
 ;;; parallel or at a later point.
 (definterface Resolver
-  (ns-str ^String [])                   ;the name of this namespace
-  (lookup-namespace ^String [^String alias]) ;nil if not found
+  (ns-str ^String [])                ;the name of this namespace
+  (globals ^map [])                  ;only call from namespace thread!
+  (lookup-namespace ^String [^String alias]) ;nil -> ns-str, not found -> nil
 
   ;; Called by the reader to replace a syntax quoted simple name with
   ;; its namespace qualified equivalent.  Returns nil if there is no
@@ -365,8 +383,7 @@
   ;; expression as `init` if no intial value is provided.
   (new-def-immutable ^Expr [^String nm ^Expr init])
   (new-def-mutable ^Expr [^String nm ^Expr init])
-  (new-def-alias ^Expr [^String nm ^Entity other-ent
-                        ^String other-nmsp ^String other-nm])
+  (new-def-alias ^Expr [^String nm ^Entity other-ent ^String other-qname])
 
   ;; FIXME... see tcljc/emitter/namespace.cljt
   ;; hack for dependency chain core_print.cljt
@@ -392,7 +409,13 @@
                                 ^Consumer class-handler]
   (NmspClass. this-class super-if-class class-handler nil nil))
 
+(defn with-class-handler ^NmspClass [^NmspClass ncl ^Consumer cbh]
+  (NmspClass. (.this-class ncl) (.super-if-class ncl) cbh nil nil))
+
 ;;; ------------------------------------------------------------------------
+
+(definterface ParseArityBody
+  (apply ^MethodSpec [^Parser parser ^AritySpec aspec ^int source-idx]))
 
 ;;; An ExprFactory provides an API to the parser to generate a
 ;;; representation of the namespace's entities and their executable
@@ -420,8 +443,8 @@
   ;; is accepted for `value`: instances of ConstantDesc, instances of
   ;; Constable, and structured values provided by Clojure (symbol,
   ;; keyword, vector, and so on).
-  (constant-entity ^Entity [^Object value ^Class type]) ;ConstantDesc or Class
-  (class-member-entity ^Entity [^Match m])
+  (entity-constant ^Entity [^Object value ^Class type]) ;ConstantDesc or Class
+  (entity-class-member ^Entity [^Match m])
   
   ;; Create a symbol, a keyword, a collection, or a regex Pattern.
   ;; `value` usually is the compile time data structure as provided by
@@ -455,17 +478,18 @@
 
   (assignment ^Expr [^Entity ent ^Expr value])
 
-  (new-parameter ^Expr [^String name ^Class type])
+  (binding-parameter ^Binding [^String name ^Class type])
   
-  (binding-alias ^Expr [^long fctx ^String name ^Entity ent])
-  (binding-fresh ^Expr [^long fctx ^Class opt-type ^String name ^Expr init])
-  (block-let ^Expr [^long fctx ^Exprs bindings ^Expr body])
+  (binding-alias ^Binding [^long fctx ^String name ^Entity ent])
+  (binding-fresh ^Binding [^long fctx ^Class opt-type ^String name ^Expr init])
+  (block-bindings ^Expr [^long fctx ^Binding/1 bindings ^Expr body
+                         ^boolean recur-to-body?])
   
+  (emitter-method ^CodeEmitter [^long fctx ^Expr body])
   (with-recur-variables ^ExprFactory [^Entity/1 variables])
-  (block-recurrable ^Expr [^long fctx ^Exprs loop-bindings ^Expr body])
   (recur-expr ^Expr [^long fctx ^Exprs args])
   
-  (new-catching-local ^Expr [^long fctx ^Class type ^String name])
+  (binding-catching-local ^Binding [^long fctx ^Class type ^String name])
   (try-catch-finally ^Expr [^long fctx ^Exprs body+catches ^Class/1 catch-types
                             ^Exprs finally])
   
@@ -473,11 +497,11 @@
 
   ;; Replaces any arity return types `auto-return-marker` with their
   ;; corresponding body's expression type.
-  (new-function ^Expr [^Parser parser ^BiFunction parse-arity-body
+  (new-function ^Expr [^Parser parser ^ParseArityBody parse-arity-body
                        ^symbol fn-nm ^AritySpec/1 arity-specs])
-  (new-itf-fn ^Expr [^Parser parser ^BiFunction parse-arity-body
+  (new-itf-fn ^Expr [^Parser parser ^ParseArityBody parse-arity-body
                      ^Class itf-class ^DirectMethodHandleDesc method
-                      ^AritySpec/1 arity-specs])
+                     ^AritySpec/1 arity-specs])
   
   ;; ### interop
 
@@ -501,7 +525,10 @@
   (throw-expr ^Expr [^long fctx ^Expr arg])
   
   (ephemeral-class ^Expr [^Class eph-class])
-  (stage-nmsp-class ^void [^NmspClass ncl]))
+  (stage-nmsp-class ^void [^NmspClass ncl])
+  (new-deftype ^Expr [^Parser parser ^ParseArityBody parse-method-body
+                      ^NmspClass eph-ncl ^FieldSpec/1 field-specs
+                      ^AritySpec/1 arity-specs ^boolean defrecord?]))
 
 (definterface Parser
   (parse-form ^Expr [^long fctx form])
@@ -523,7 +550,7 @@
   (with-expr-factory ^Parser [^ExprFactory expr-factory]))
 
 (defn new-constant ^Expr [^ExprFactory ef ^Object value ^Class type]
-  (.value-of ef (.constant-entity ef value type) nil))
+  (.value-of ef (.entity-constant ef value type) nil))
 
 (defn exprs-of ^Exprs [^ExprFactory ef & ^Expr/1 xs*]
   (let [xs (.new-exprs ef (alength xs*))]
@@ -531,26 +558,24 @@
       (.set xs i (aget xs* i)))
     xs))
 
-(defn parameter-bindings ^Exprs [^Parser parser ^ArityType at]
+(defn parameter-bindings ^Binding/1 [^Parser parser ^ArityType at]
   (let [ef (.expr-factory parser)
-        xs (.new-exprs ef (.parameter-count at))]
-    (dotimes [i (.length xs)]
-      (.set xs i (.new-parameter ef (.parameter-name at i)
-                                 (.parameter-type at i))))
-    xs))
+        bnds (new Binding/1 (.parameter-count at))]
+    (dotimes [i (alength bnds)]
+      (aset bnds i (.binding-parameter ef (.parameter-name at i)
+                                       (.parameter-type at i))))
+    bnds))
 
 (defn with-local-binding
-  (^Parser [^Parser parser ^Expr binding-expr]
-   (let [bnd ^Binding (.emitter binding-expr)]
-     (with-local-binding parser (.name bnd) (.bound-to bnd))))
+  (^Parser [^Parser parser ^Binding bnd]
+   (with-local-binding parser (.name bnd) (.bound-to bnd)))
   (^Parser [^Parser parser ^String nm ^Entity ent]
    (.with-bindings* parser (assoc (.bindings* parser) nm ent))))
 
-(defn with-local-bindings ^Parser [^Parser parser ^Exprs binding-exprs]
-  (loop [locals (transient (.bindings* parser))
-         i 0]
-    (if (< i (.length binding-exprs))
-      (let [bnd ^Binding (.emitter binding-exprs i)]
+(defn with-local-bindings ^Parser [^Parser parser ^Binding/1 bnds]
+  (loop [locals (transient (.bindings* parser)), i 0]
+    (if (< i (alength bnds))
+      (let [bnd (aget bnds i)]
         (recur (assoc! locals (.name bnd) (.bound-to bnd)) (inc i)))
       (.with-bindings* parser (persistent! locals)))))
 

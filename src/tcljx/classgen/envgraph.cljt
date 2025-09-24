@@ -1,5 +1,5 @@
 (ns tcljx.classgen.envgraph
-  (:require (tcljx.data [model :as model]))
+  (:require (tcljx.data [config :as cfg] [model :as model]))
   (:import (tcljx.data.model CodeEmitter Entity Expr NmspClass)
            (java.lang.constant ClassDesc ConstantDescs)
            (java.util ArrayList HashMap Map$Entry)
@@ -27,43 +27,69 @@
   :extends [Entity]
   (set-emit-entity! ^void [^Entity ent])
   (get-emit-entity ^Entity []))
+(definterface IEnvProxy
+  :extends [IEmitProxy]
+  (materialized-as-value? ^boolean [])
+  (mark-as-materialized! ^void []))
 
 ;;; Local copy of a value taken from the entity `origin`, where
 ;;; `origin` is defined by a parent of the current function (or reify,
 ;;; or interface function).
 (deftype EnvProxy [^Entity origin ^int local-entity-id ^String local-name
-                   ^:unsynchronized-mutable ^Entity __emit-entity]
+                   ^:unsynchronized-mutable ^Entity __emit
+                   ^:unsynchronized-mutable ^boolean __materialized?]
   CodeEmitter
   (emit-insn* [_ xb consumed-type then-leave?]
-    (.emit-insn* __emit-entity xb consumed-type then-leave?))
+    (.emit-insn* __emit xb consumed-type then-leave?))
   Entity
   (value-type [_]
     (.value-type origin))
   (entity-id [_]
     local-entity-id)
-  (invoke* [this fctx form opt-f at-idx xs]
-    (.invoke* origin fctx form this at-idx xs))
-  IEmitProxy
+  (invoke* [this fctx form opt-f m-idx xs]
+    (.invoke* origin fctx form this m-idx xs))
+  IEnvProxy
   (set-emit-entity! [_ ent]
-    (set! __emit-entity ent))
+    (set! __emit ent))
   (get-emit-entity [_]
-    __emit-entity))
+    __emit)
+  (materialized-as-value? [_]
+    __materialized?)
+  (mark-as-materialized! [_]
+    (set! __materialized? true)))
 
 (deftype OriginProxyPairs [^Entity/1 aorigin, ^EnvProxy/1 aproxy])
 
-(defn sorted-ops ^OriginProxyPairs [^HashMap origin-to-proxy]
-  (let [n (.size origin-to-proxy)
-        aorigin (new Entity/1 n)
-        aproxy (new EnvProxy/1 n)
-        it (-> origin-to-proxy .entrySet .iterator)]
-    (loop [i 0]
-      (when (.hasNext it)
-        (let [entry ^Map$Entry (.next it)]
-          (aset aorigin i (.getKey entry))
-          (aset aproxy i (.getValue entry))
-          (recur (inc i)))))
-    (assert (<= n 1))
-    (OriginProxyPairs. aorigin aproxy)))
+(letfn [(sort-by-origin ^OriginProxyPairs [^Entity/1 aorigin ^EnvProxy/1 aproxy]
+          (let [n (alength aorigin)
+                aorigin* (new Entity/1 n)
+                aproxy* (new EnvProxy/1 n)
+                idxs (new long/1 n)]
+            (dotimes [i n]
+              (aset idxs i (-> (long (.entity-id (aget aorigin i)))
+                               (bit-shift-left 16)
+                               (bit-or i))))
+            (java.util.Arrays/sort idxs)
+            (dotimes [i n]
+              (let [j (bit-and (int (aget idxs i)) 0xFFFF)]
+                (aset aorigin* i (aget aorigin j))
+                (aset aproxy* i (aget aproxy j))))
+            (OriginProxyPairs. aorigin* aproxy*)))]
+  
+  (defn sorted-ops ^OriginProxyPairs [^HashMap origin-to-proxy]
+    (let [n (.size origin-to-proxy)
+          aorigin (new Entity/1 n)
+          aproxy (new EnvProxy/1 n)
+          it (-> origin-to-proxy .entrySet .iterator)]
+      (loop [i 0]
+        (when (.hasNext it)
+          (let [entry ^Map$Entry (.next it)]
+            (aset aorigin i (.getKey entry))
+            (aset aproxy i (.getValue entry))
+            (recur (inc i)))))
+      (if (<= n 1)
+        (OriginProxyPairs. aorigin aproxy)
+        (sort-by-origin aorigin aproxy)))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -117,7 +143,7 @@
   (next-entity-id ^int [])
   
   (stage-task! ^void [task])
-  (add-env-proxy! ^Entity [^Entity origin ^String local-name]))
+  (env-proxy-of! ^EnvProxy [^Entity origin ^String local-name]))
 
 ;;; An EnvMethod acts as a buffer between the information gathering
 ;;; phase of parsing and the build step that emits the class files.
@@ -130,7 +156,6 @@
                     ^EnvMethod parent ;provides this environment's values
                     ^HashMap origin-to-proxy
                     ^String this-name   ;name of any receiver locals
-                    ^Entity this-fn-proxy ;to detect self recursive calls
                     ^ArrayList tasks
                     ^EnvSegment segment]
   Object
@@ -146,23 +171,17 @@
   
   (stage-task! [_ task]
     (.add tasks task))
-  (add-env-proxy! [this origin local-name]
+  (env-proxy-of! [this origin local-name]
     #_(prn :closure-level (model/closure-level ent)
            :sequence-number (model/sequence-number ent)
            :using-scope (.scope-name cbp))
     (->> (^Function fn [origin]
-          (EnvProxy. origin (.next-entity-id this) local-name nil))
+          (EnvProxy. origin (.next-entity-id this) local-name nil false))
          (.computeIfAbsent origin-to-proxy origin))))
 
 (defn mk-method-clinit ^EnvMethod [^EnvSegment segm]
   (let [initial-entity-id (model/entity-id-of model/closure-level-clinit)]
-    (EnvMethod. 0 initial-entity-id nil nil nil nil nil (.tasks segm) segm)))
-
-(def ^:private this-fn-reference ;FIXME... is this only a temporary workaround?
-  (reify Entity
-    (emit-insn* [_ xb _ _]
-      (.aload xb (.receiverSlot xb))
-      tinyclj.lang.AFnMh)))
+    (EnvMethod. 0 initial-entity-id nil nil nil nil (.tasks segm) segm)))
 
 (defn- closes-over? ^boolean [^EnvMethod em ^Entity ent]
   (let [origin (model/closure-level ent)]
@@ -178,14 +197,13 @@
          :ent-class (class ent)
          :closes-over? (closes-over? em ent))
   (if (closes-over? em ent)
-    (.add-env-proxy! em ent (name ^symbol form))
+    (doto (.env-proxy-of! em ent (name ^symbol form))
+      (.mark-as-materialized!))
     ent))
 
 (defn invocation-of ^Entity [^EnvMethod em ^Entity inv ^seq form]
   (if (closes-over? em inv)
-    (if (identical? (.this-fn-proxy em) inv)
-      this-fn-reference      ;invocation of fn from one of its arities
-      (.add-env-proxy! em inv (name ^symbol (first form))))
+    (.env-proxy-of! em inv (name ^symbol (first form)))
     inv))
 
 ;;; ------------------------------------------------------------------------
@@ -210,36 +228,38 @@
 (defn run-task ^SegmentAcc [^SegmentAcc acc ^PreparationTask task ^EnvClass class]
   (.extend-segment task acc class))
 
-(letfn [(method ^EnvMethod [^EnvMethod parent
-                            ^String unique-nm ^int method-index
-                            ^String this-name ^Entity this-fn-proxy]
-          (let [level' (if (some? unique-nm)
-                         (inc (.closure-level parent))
-                         model/closure-level-clinit)]
-            (EnvMethod. method-index (model/entity-id-of level') unique-nm
-                        parent (HashMap.) this-name this-fn-proxy (ArrayList.)
-                        (.segment parent))))]
-  
-  (defn mk-methods
-    (^EnvMethod/1 [^EnvMethod parent ^Class itf-class]
-     (mk-methods parent (.getSimpleName itf-class) nil 1))
-    (^EnvMethod/1 [^EnvMethod parent ^String scope-name-suffix
-                   ^Entity this-fn-proxy ^int n]
+(defn mk-methods
+  (^EnvMethod/1 [^EnvMethod parent ^Class itf-class]
+   (mk-methods parent (.getSimpleName itf-class) 1 0))
+  (^EnvMethod/1 [^EnvMethod parent ^String scope-name-suffix
+                 ^int n ^int preassigned-entity-ids]
+   (letfn [(method ^EnvMethod [^String unique-nm ^int method-index]
+             (let [level' (if (some? unique-nm)
+                            (inc (.closure-level parent))
+                            model/closure-level-clinit)
+                   entity-id (model/entity-id-of level' preassigned-entity-ids)]
+               (EnvMethod. method-index entity-id unique-nm parent (HashMap.)
+                           scope-name-suffix (ArrayList.) (.segment parent))))]
      (let [parent-name (.scope-name parent)
-           nm-str (cond->> scope-name-suffix
+           nm-str (cond->> (cfg/munge-name scope-name-suffix)
                     (some? parent-name) (str parent-name "$"))
            unique-nm (pick-unique-name (.segment parent) nm-str)
            a (new EnvMethod/1 n)]
        (dotimes [i (alength a)]
-         (aset a i (method parent unique-nm i scope-name-suffix this-fn-proxy)))
+         (aset a i (method unique-nm i)))
        a))))
 
-(defn closes-over-env? ^boolean [^EnvClass class]
-  (let [ms (.methods class)]
-    (loop [i (dec (alength ms))]
-      (cond (neg? i) false
-            (.isEmpty (.origin-to-proxy (aget ms i))) (recur (dec i))
-            :else true))))
+(letfn [(method-closes-over-env? ^boolean [^EnvMethod m]
+          (let [it (-> m .origin-to-proxy .values .iterator)]
+            (loop [] (when (.hasNext it)
+                       (or (.materialized-as-value? ^EnvProxy (.next it))
+                           (recur))))))]
+  (defn fn-closes-over-env? ^boolean [^EnvClass class]
+    (let [ms (.methods class)]
+      (loop [i (dec (alength ms))]
+        (cond (neg? i) false
+              (method-closes-over-env? (aget ms i)) true
+              :else (recur (dec i)))))))
 
 (defn class-origin-to-proxy ^HashMap [^EnvClass class]
   (let [methods (.methods class), n (alength methods)]

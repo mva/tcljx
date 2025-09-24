@@ -11,7 +11,8 @@
   (:import
    (java.lang.constant ClassDesc)
    (java.lang.invoke MethodHandles$Lookup)
-   (java.lang.reflect Method Constructor Executable Field Member Modifier)))
+   (java.lang.reflect Method Constructor Executable Field Member Modifier)
+   (java.util Arrays)))
 
 ;; Third party Java libraries cannot have a static method called
 ;; `new`, because in Java `new` is a keyword and not an identifier.
@@ -119,6 +120,11 @@
                 ^int invocation-mode]
   java.lang.Record)
 
+(defn- mk-match ^Match [^Class owner ^Member member ^Class/1 parameter-types
+                        ^Class return-type ^int invocation-mode]
+  (Match. (if (.isArray owner) Object owner)
+          member parameter-types return-type invocation-mode))
+
 (defn- with-invocation-mode ^Match [^Match m ^int invocation-mode]
   (Match. (.owner m) (.member m) (.parameter-types m) (.return-type m)
           invocation-mode))
@@ -150,12 +156,14 @@
   (^boolean [^boolean static? ^Member m]
    (= (static-member? m) static?)))
 
-(defn- cons-executable-exact ^seq [^Class owner ^Executable e ^Class return-type
-                                   ^seq acc]
-  (cond->> acc
-    (or (not (.isVarArgs e))
-        (not (.isAnnotationPresent e ann-polymorphic-signature)))
-    (cons (Match. owner e (.getParameterTypes e) return-type invoke-standard))))
+(defn- cons-executable-exact
+  (^seq [^Class owner ^Method m ^seq acc]
+   (cons-executable-exact owner m (.getReturnType m) acc))
+  (^seq [^Class owner ^Executable e ^Class return-type ^seq acc]
+   (cond->> acc
+     (or (not (.isVarArgs e))
+         (not (.isAnnotationPresent e ann-polymorphic-signature)))
+     (cons (mk-match owner e (.getParameterTypes e) return-type invoke-standard)))))
 
 (defn- cons-executable-candidate ^seq [^Class owner ^Executable e
                                        ^Class return-type ^seq acc]
@@ -167,7 +175,7 @@
         rt (if (= mode invoke-polymorphic)
              type/polymorphic ;polymorphic return determined by context
              return-type)]
-    (cons (Match. owner e (.getParameterTypes e) rt mode) acc)))
+    (cons (mk-match owner e (.getParameterTypes e) rt mode) acc)))
 
 (defn method-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm
                          ^Class/1 atypes]
@@ -175,7 +183,7 @@
             (let [m (.getMethod owner nm atypes)] ;works for class and array
               (cond->> acc
                 (static-member? static? m)
-                (cons-executable-exact owner m (.getReturnType m)))))]
+                (cons-executable-exact owner m))))]
     (try
       (method-or-throw owner)
       (catch NoSuchMethodException _
@@ -219,7 +227,7 @@
 
 (def empty-class-array (new Class/1 0))
 (defn- cons-field-candidate ^seq [^Class owner ^Field f ^seq acc]
-  (cons (Match. owner f empty-class-array (.getType f) invoke-standard) acc))
+  (cons (mk-match owner f empty-class-array (.getType f) invoke-standard) acc))
 
 (defn field-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm
                         ^Class/1 atypes]
@@ -402,3 +410,71 @@
           (assert (= (count abs-ms) 1))
           abs-ms)
         (filter abstract-method? ms)))))
+
+;;; ------------------------------------------------------------------------
+
+(letfn [(vp? ^boolean [^Method m]
+          (let [mods (.getModifiers m)]
+            (and (not (Modifier/isStatic mods))
+                 (Modifier/isProtected mods)
+                 (not (.isBridge m)))))
+        (protected-methods [^Class cl]
+          (when (some? cl)
+            (lazy-seq (concat (filter vp? (.getDeclaredMethods cl))
+                              (protected-methods (.getSuperclass cl))))))
+        (vpp? ^boolean [^Method m]
+          (let [mods (.getModifiers m)]
+            (and (not (Modifier/isStatic mods))
+                 (or (Modifier/isPublic mods) (Modifier/isProtected mods))
+                 (not (.isBridge m)))))
+        (public-or-protected-methods [^Class cl]
+          (concat
+           (filter vpp? (.getMethods cl)) ;all public methods (incl. inherited)
+           (protected-methods cl))) ;protected methods from superclass chain
+
+        ;; Picks up any matching virtual method, public *or*
+        ;; protected.  Used to override protected method in reify*.
+        (method-exact-pp ^Match [^Class owner ^String nm ^Class/1 ptypes]
+          (letfn [(pred ^boolean [^Method m]
+                    (and (= (.getName m) nm)
+                         (Arrays/equals (.getParameterTypes m) ptypes)))]
+            (when-some [m (-> (filter pred (public-or-protected-methods owner))
+                              (first))]
+              (-> (cons-executable-exact owner m nil)
+                  (first)))))
+
+        (drop-equal-parameters [ms]
+          ;; get rid of any matches with different owners but equal
+          ;; parameter types, like
+          ;; (.containsKey ^boolean [clojure.lang.Associative Object]
+          ;; (.containsKey ^boolean [java.util.Map Object]
+          (if (next ms)
+            (let [m ^Method (first ms)
+                  pred (fn ^boolean [^Method o]
+                         (and (= (.isVarArgs m) (.isVarArgs o))
+                              (Arrays/equals (.getParameterTypes m)
+                                             (.getParameterTypes o))))]
+              (cons m (lazy-seq (->> (remove pred (rest ms))
+                                     (drop-equal-parameters)))))
+            ms))]
+  
+  ;; Picks up public or protected virtual method.
+  (defn itf-methods-with-name ^seq [^Class owner ^String nm ^int arity]
+    (->> (public-or-protected-methods owner)
+         (filter (fn ^boolean [^Method m]
+                   (and (= nm (.getName m))
+                        (= arity (.getParameterCount m)))))
+         (drop-equal-parameters)))
+
+  ;; If `return-type` is not nil, then it must match the return type
+  ;; of the method.
+  (defn itf-method-exact ^Method [^Class owner ^String nm ^Class return-type
+                                  ^Class/1 atypes]
+    (when-some [^Match m (or (first (method-exact nil false owner nm atypes))
+                             (method-exact-pp owner nm atypes))]
+      (when (or (nil? return-type)
+                (type/same? (.return-type m) return-type))
+        (.member m)))))
+
+(defn virtual-method ^Match [^Class owner ^String nm & ^Class/1 ptypes]
+  (first (method-exact nil false owner nm ptypes)))

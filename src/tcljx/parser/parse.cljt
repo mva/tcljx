@@ -73,7 +73,7 @@
       (or (.valAt (.bindings* parser) nm nil)
           (.lookup-def (.resolver parser) nil nm))))) ;to cover all defs
 
-;;; Returns nil if `nm` does not resolve to a class name.
+;;; Returns nil if `alias` does not resolve to a namespace name.
 (defn lookup-namespace ^String [^Parser parser ^String alias]
   (.lookup-namespace (.resolver parser) alias))
 

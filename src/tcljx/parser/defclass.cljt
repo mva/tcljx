@@ -1,43 +1,51 @@
 (ns tcljx.parser.defclass
-  (:require (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
-                        [reflect :as reflect] [model :as model])
-            (tcljx.parser [syntax :as syntax] [interop :as interop]))
-  (:import (tcljx.data.model Resolver NmspClass)
-           (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
-           (java.lang.classfile ClassFile ClassBuilder MethodBuilder)
-           (java.util List)
-           (java.util.function Consumer)))
+  (:require
+   (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
+               [context :as context] [reflect :as reflect] [model :as model])
+   (tcljx.parser [syntax :as syntax] [interop :as interop] [parse :as parse]
+                 [loop :as loop] [fn :as fn]))
+  (:import
+   (tcljx.data.model Expr ArityType AritySpec MethodSpec FieldSpec NmspClass
+                     Parser ParseArityBody Resolver)
+   (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
+   (java.lang.classfile ClassFile ClassBuilder MethodBuilder CodeBuilder
+                        TypeKind)
+   (java.util List)
+   (java.util.function Consumer)))
 
-(defn- parse-opts [s]
+(defn- parse-opts ^vector [^seq s]
   (loop [opts {} [k v & rs :as s] s]
     (if (keyword? k)
       (recur (assoc opts k v) rs)
-      [opts s])))
+      [opts (into-array clojure.lang.ISeq s)])))
 
-(defn- tag-desc-of ^ClassDesc [^Resolver rsv form ^boolean void?
-                               ^ClassDesc no-hint]
+(defn- type-desc-of ^ClassDesc [^Resolver rsv ^symbol tag ^boolean void?
+                                ^ClassDesc no-hint]
   (letfn [(class-desc-of ^ClassDesc [^String x]
             (try
               (ClassDesc/of x)
               (catch IllegalArgumentException _
                 (throw (syntax/info "invalid class name" x)))))
-          (symbol-class-desc ^ClassDesc [^symbol x]
-            (or (some-> (interop/lookup-type rsv x) (reflect/describe-class))
-                (let [nm (.toString x)]
+          (symbol-class-desc ^ClassDesc [^symbol tag]
+            (or (some-> (interop/lookup-type rsv tag) (reflect/describe-class))
+                (let [nm (.toString tag)]
                   (class-desc-of (cond->> nm
                                    (neg? (.indexOf nm (int \.)))
                                    (str (.ns-str rsv) "."))))))]
     
-    (if-some [x (interop/tag-of form)]
-      (let [n (interop/array-rank (name x))]
-        (when (and (not void?) (= x 'void))
+    (if (some? tag)
+      (let [n (interop/array-rank (name tag))]
+        (when (and (not void?) (= tag 'void))
           (throw (syntax/info "`void` tag not applicable in this context")))
         (if (zero? n)
-          (symbol-class-desc x)
-          (-> (symbol nil (namespace x))
+          (symbol-class-desc tag)
+          (-> (symbol nil (namespace tag))
               (symbol-class-desc)
               (.arrayType n))))
       no-hint)))
+(defn- tag-desc-of ^ClassDesc [^Resolver rsv form ^boolean void?
+                                ^ClassDesc no-hint]
+  (type-desc-of rsv (interop/tag-of form) void? no-hint))
 
 (defn- method-lookup-type ^MethodTypeDesc [^Resolver rsv msig]
   (loop [acc []
@@ -78,7 +86,7 @@
                 (wrong/other (str "method result tag " (wrong/q tag) " must be "
                                   "placed on the parameter vector, not the "
                                   "method name")))
-              (let [mnm (cfg/munge-name mname)
+              (let [mnm (name mname)
                     mtd (method-lookup-type rsv msig)
                     flags (cond-> (model/acc* public abstract)
                             (< (.parameterCount mtd) (count msig))
@@ -101,3 +109,152 @@
             eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)]
         (.import-class rsv eph-cl)
         (NmspClass. this-class nil cbh nil eph-cl)))))
+
+;;; ------------------------------------------------------------------------
+
+(deftype Supers [^ClassDesc super-class
+                 ^ClassDesc/1 interfaces
+                 ^boolean java-record?])
+
+(defn- supers-of
+  (^Supers [implements]                 ;`implements` is unordered!
+   (loop [super nil
+          interfaces ^seq ()
+          [^Class cl & clr] (seq implements)]
+     (cond
+       (nil? cl)
+       (supers-of super (reverse interfaces))
+       (.isInterface cl)
+       (recur super (cons cl interfaces) clr)
+       (.isArray cl)
+       (throw (wrong/wr-info "class cannot implement array type"))
+       (.isPrimitive cl)
+       (throw (wrong/wr-info "class cannot implement primitive type"))
+       (some? super)
+       (throw (wrong/wr-info "class can only extend a single class"))
+       :else
+       (recur cl interfaces clr))))
+  (^Supers [^Class super ^seq interfaces]
+   ;; Right now, this does not check whether a constructor with this
+   ;; signature exists.  This check is complicated by the fact that
+   ;; the constructor may be non-public, like PrintWriter-on in
+   ;; core_print.cljt using the protected constructor of Writer.
+   (Supers. (reflect/describe-class (or super Object))
+            (reflect/describe-class* (into-array Class interfaces))
+            (identical? java.lang.Record super))))
+
+(defn- constructor ^ClassBuilder [^ClassBuilder cb ^ClassDesc this-class
+                                  ^FieldSpec/1 fields ^ClassDesc super-class]
+  (let [mtd (model/mtd-of-fields fields)]
+    (->> (^Consumer fn ^void [^CodeBuilder xb]
+          (dotimes [i (alength fields)]
+            (let [spec (aget fields i), tk (TypeKind/from (.type-desc spec))]
+              (-> (.aload xb (.receiverSlot xb))
+                  (.loadLocal tk (.parameterSlot xb i))
+                  (.putfield this-class (.field-name spec) (.type-desc spec)))))
+          (-> (.aload xb (.receiverSlot xb))
+              (.invokespecial super-class ConstantDescs/INIT_NAME
+                              ConstantDescs/MTD_void)
+              (.return_)))
+         (.withMethodBody cb ConstantDescs/INIT_NAME mtd
+                          (model/acc* public synthetic)))))
+(defn- constructor-n ^ClassBuilder [^ClassBuilder cb ^ClassDesc this-class
+                                    ^FieldSpec/1 fields ^int n]
+  (let [mtd-0 (model/mtd-of-fields fields)]
+    (->> (^Consumer fn ^void [^CodeBuilder xb]
+          (.aload xb (.receiverSlot xb))
+          (dotimes [i (- (alength fields) n)]
+            (let [tk (TypeKind/from (.type-desc (aget fields i)))]
+              (.loadLocal xb tk (.parameterSlot xb i))))
+          (cond-> xb
+            (>= n 4) (-> (.aconst_null) (.aconst_null))
+            (>= n 2) (-> (.iconst_0) (.iconst_0))
+            true (.invokespecial this-class ConstantDescs/INIT_NAME mtd-0)
+            true (.return_)))
+         (.withMethodBody cb ConstantDescs/INIT_NAME
+                          (.dropParameterTypes mtd-0 (- (alength fields) n)
+                                               (alength fields))
+                          (model/acc* public synthetic)))))
+
+(defn- parse-fields ^FieldSpec/1 [^Resolver rsv ^boolean java-record?
+                                  ^vector fieldv]
+  (letfn [(parse-field ^FieldSpec [form]
+            (let [sym (syntax/simple-symbol form)
+                  tag (interop/tag-of form)
+                  tpd (type-desc-of rsv tag false ConstantDescs/CD_Object)
+                  m (meta sym)
+                  flags (cond
+                          (:unsynchronized-mutable m) (model/acc* private)
+                          (:volatile-mutable m) (model/acc* private volatile)
+                          java-record? (model/acc* private final)
+                          :else (model/acc* public final))]
+              (when (and java-record?
+                         (not (zero? (bit-and flags (model/acc* final)))))
+                (wrong/other (str "java.lang.Record cannot have mutable field "
+                                  (wrong/q sym))))
+              (FieldSpec. (name sym) tag flags tpd nil)))]
+    (let [a (new FieldSpec/1 (count fieldv))]
+      (dotimes [i (alength a)]
+        (aset a i (parse-field (nth fieldv i))))
+      a)))
+
+(def ^:private defrecord-tail (doto (new String/1 4)
+                                (aset 0 "__meta") (aset 1 "__extmap")
+                                (aset 2 "__hash") (aset 3 "__hasheq")))
+(defn- defrecord-tail? ^boolean [^FieldSpec/1 specs]
+  (let [base (- (alength specs) (alength defrecord-tail))]
+    (letfn [(match? ^boolean [^int i]
+            (= (.field-name (aget specs (+ base i))) (aget defrecord-tail i)))]
+      (and (>= base 0) (match? 0) (match? 1) (match? 2) (match? 3)))))
+
+;; Note: Only do rudimentary error messages because this form is
+;; produced by a macro.
+(defn parse-deftype* ^Expr [^Parser parser ^long fctx
+                            [_ ^symbol fq-sym ^symbol binary-sym ^vector fieldv
+                             & opts+specs]]
+  (letfn [(arity-spec-of ^AritySpec [^Class eph-cl [nm paramv & body :as form]]
+            (context/with-line-from-list [fctx form]
+              (-> (.resolver parser)
+                  (interop/parse-method-type eph-cl (syntax/simple-symbol nm)
+                                             paramv)
+                  (AritySpec. body form))))]
+    (let [rsv (.resolver parser)
+          short-sym (symbol nil (name fq-sym))
+          [opts ^seq/1 methods] (parse-opts opts+specs)
+          this-class (ClassDesc/of (name binary-sym))
+          supers (->> (:implements opts)
+                      (mapv #(interop/resolve-class rsv %)) ;eager
+                      (supers-of))
+          fields (parse-fields rsv (.java-record? supers) fieldv)
+          defrecord? (defrecord-tail? fields)
+          cbh (^Consumer fn ^void [^ClassBuilder cb]
+               (-> (cfg/with-class-version cb)
+                   (.withInterfaceSymbols (.interfaces supers))
+                   (.withFlags (cond-> (model/acc* public final)
+                                 (:abstract opts)
+                                 (bit-xor (model/acc* final abstract)))))
+               (doseq [^FieldSpec spec fields]
+                 (.withField cb (.field-name spec) (.type-desc spec)
+                             (.flags spec)))
+               (constructor cb this-class fields (.super-class supers))
+               (when defrecord?
+                 (constructor-n cb this-class fields 4)
+                 (constructor-n cb this-class fields 2)))
+          bs (.build (ClassFile/of) this-class cbh)
+          eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)]
+      
+      (.import-class rsv eph-cl)
+      (dotimes [i (alength fields)]
+        (let [spec (aget fields i)
+              tp (interop/resolve-class rsv (.type-tag spec) Object)]
+          (aset fields i (model/with-field-type spec tp))))
+      
+      (let [n (alength methods)
+            arity-specs (new AritySpec/1 n)
+            eph-ncl (NmspClass. this-class (.super-class supers) cbh
+                                nil eph-cl)
+            pmb (fn/mk-parse-arity-body fctx true)]
+        (dotimes [i n]
+          (aset arity-specs i (arity-spec-of eph-cl (aget methods i))))
+        (.new-deftype (.expr-factory parser) parser pmb eph-ncl
+                      fields arity-specs defrecord?)))))

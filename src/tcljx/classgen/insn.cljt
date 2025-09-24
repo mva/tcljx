@@ -43,9 +43,9 @@
 (defn insn-boolean ^Insn [^boolean value] (if value insn-true insn-false))
 
 (def insn-int-zero (mk-insn entity/entity-int-zero Integer/TYPE))
-(def insn-int-one (mk-insn (entity/mk-constant 1 Integer/TYPE) Integer/TYPE))
-(def insn-int-m1 (mk-insn (entity/mk-constant -1 Integer/TYPE) Integer/TYPE))
-(def insn-float-one (mk-insn (entity/mk-constant 1.0f Float/TYPE) Float/TYPE))
+(def insn-int-one (mk-insn (entity/constant 1 Integer/TYPE) Integer/TYPE))
+(def insn-int-m1 (mk-insn (entity/constant -1 Integer/TYPE) Integer/TYPE))
+(def insn-float-one (mk-insn (entity/constant 1.0f Float/TYPE) Float/TYPE))
 
 (defn value-of ^Insn [^Entity ent form]
   (if-some [tp (.value-type ent)]
@@ -54,7 +54,7 @@
                                " has no runtime value")))))
 
 (defn constant-insn ^Insn [^Object value ^Class type]
-  (value-of (entity/mk-constant value type) nil))
+  (value-of (entity/constant value type) nil))
 
 
 ;;; This indicates an error regarding the type *of* an expression.
@@ -245,7 +245,7 @@
 
 ;;; Emit `insn` using its own logical type, without any applying any
 ;;; additional conversion or cast instructions on top.
-(defn emit-insn-logical? ^boolean [^CodeBuilder xb ^Insn insn]
+(defn emit-logical? ^boolean [^CodeBuilder xb ^Insn insn]
   (emit/insn? xb context/fctx-none (logical-type insn) (.emitter insn)))
 
 (defn- emit-new-array ^CodeBuilder [^CodeBuilder xb ^Class component-type
@@ -291,11 +291,6 @@
 (definterface PlainInvokeTest ;to identify fn arity redirecting to class member
   (redirecting-to ^DirectMethodHandleDesc [^Class return-type ^boolean varargs?
                                            ^Entity/1 params]))
-
-(defn redirecting-to ^DirectMethodHandleDesc [^Insn x ^Class return-type
-                                              ^boolean varargs? ^Entity/1 params]
-  (when (instance? PlainInvokeTest (.emitter x))
-    (.redirecting-to ^PlainInvokeTest (.emitter x) return-type varargs? params)))
 
 (defn invoke-member ^Insn [^Match m ^Insn receiver ^Insns args ^long fctx]
   (-> (reify

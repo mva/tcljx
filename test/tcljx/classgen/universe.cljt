@@ -44,8 +44,12 @@
   Resolver
   (ns-str [_]
     ns-str)
+  (globals [_]                       ;only call from namespace thread!
+    globals)
   (lookup-namespace [_ alias]
-    (.valAt ns-alias alias nil))
+    (if (or (nil? alias) (= alias ns-str))
+      ns-str
+      (.valAt ns-alias alias nil)))
   (lookup-class [_ nm]
     (or
      (.valAt imports nm nil)
@@ -76,22 +80,25 @@
         (.import-class this cl)
         (throw (wrong/info-class-not-found nm))))
     this)
-  ;; (add-def [_ nm bnd]
-  ;;   (set! globals (assoc globals nm bnd))
-  ;;   bnd)
   (new-def-immutable [_ nm init]
-    (let [bnd (defgen/new-def-immutable segment nm init)
+    (let [ent (defgen/entity-def-immutable (.segment-class segment) nm init)
+          bnd (model/mk-binding ent nm false)
           init-ce (.emitter init)]
+      (.stage-task! segment ent)
       (set! globals (assoc globals nm (if (entity/jvm-const? init-ce)
                                         init-ce
                                         (.bound-to bnd))))
-      (insn/mk-insn bnd Void/TYPE)))
+      (insn/mk-insn bnd (insn/expr-type init))))
   (new-def-mutable [_ nm init]
-    (let [bnd (defgen/new-def-mutable segment nm init)]
+    (let [ent (defgen/entity-def-mutable (.segment-class segment) nm init)
+          bnd (model/mk-binding ent nm false)]
+      (.stage-task! segment ent)
       (set! globals (assoc globals nm (.bound-to bnd)))
-      (insn/mk-insn bnd Void/TYPE)))
-  (new-def-alias [_ nm other-ent other-nmsp other-nm]
-    (assert false))
+      (insn/mk-insn bnd (insn/expr-type init))))
+  (new-def-alias [_ nm other-ent other-qname]
+    (.stage-task! segment (defgen/task-def-alias nm other-ent other-qname))
+    (set! globals (assoc globals nm other-ent))
+    (insn/mk-insn other-ent (.value-type other-ent)))
 
   (load-file [this path-str]
     (assert false))

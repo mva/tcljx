@@ -123,39 +123,33 @@
                 true))
             (negate [_]
               (mk-ifpred opcode-eq (negate-test cmp-opcd) arg-type args
-                         fctx))))
-
-        ;; Creates a comparison predicate from the IFXXX family of
-        ;; opcodes.  It can appear either as a standalone boolean
-        ;; predicate (with the conditional paths delivering `true` and
-        ;; `false` respectively), *or* as the branching condition of a
-        ;; conditional statement (where the `if` expression provides
-        ;; the conditional paths).
-        (mk-cmp-pred ^Branching [^Opcode eq-opc ^int cmp-opcd ^Class arg-type
-                                 ^CodeEmitter/1 args ^long fctx]
-          (loop [opcd cmp-opcd, left (aget args 0), right (aget args 1)]
-            ;; loop body is executed at most twice
-            (cond
-              (entity/entity-zero? right) ;slide if_icmpeq to ifeq
-              (mk-ifpred (- (.bytecode eq-opc) 6) opcd arg-type
-                         (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
-              
-              (entity/entity-zero? left)
-              (recur (swap-cmp opcd) right left)
-              
-              (entity/entity-null? right) ;slide if_acmpeq to ifnull
-              (mk-ifpred (+ (.bytecode eq-opc) 33) opcd arg-type
-                         (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
-              
-              (entity/entity-null? left)
-              (recur (swap-cmp opcd) right left)
-              
-              :else
-              (mk-ifpred (.bytecode eq-opc) opcd arg-type
-                         (doto (new CodeEmitter/1 2)
-                           (aset 0 left)
-                           (aset 1 right))
                          fctx))))]
+  ;; Creates a comparison predicate from the IFXXX family of opcodes.
+  ;; It can appear either as a standalone boolean predicate (with the
+  ;; conditional paths delivering `true` and `false` respectively),
+  ;; *or* as the branching condition of a conditional statement (where
+  ;; the `if` expression provides the conditional paths).
+  (defn mk-cmp-pred ^Branching [^Opcode eq-opc ^int cmp-opcd ^Class arg-type
+                                ^CodeEmitter/1 args ^long fctx]
+    (loop [opcd cmp-opcd, left (aget args 0), right (aget args 1)]
+      ;; loop body is executed at most twice
+      (cond
+        (entity/entity-zero? right)     ;slide if_icmpeq to ifeq
+        (mk-ifpred (- (.bytecode eq-opc) 6) opcd arg-type
+                   (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
+              
+        (entity/entity-zero? left) (recur (swap-cmp opcd) right left)
+              
+        (entity/entity-null? right)     ;slide if_acmpeq to ifnull
+        (mk-ifpred (+ (.bytecode eq-opc) 33) opcd arg-type
+                   (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
+              
+        (entity/entity-null? left) (recur (swap-cmp opcd) right left)
+              
+        :else
+        (mk-ifpred (.bytecode eq-opc) opcd arg-type
+                   (doto (new CodeEmitter/1 2) (aset 0 left) (aset 1 right))
+                   fctx))))
 
   (defn cmp-insn ^Insn [^Opcode eq-opc ^int cmp-opcd ^Class arg-type
                         ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
@@ -259,7 +253,7 @@
                     (signum (if (== n0 n1) 0 (Double/compare n0 n1))))))))]
     
     (if (some? c)
-      (entity/mk-constant c Integer/TYPE)
+      (entity/constant c Integer/TYPE)
       
       (^CodeEmitter fn [xb _ _]
        (when (emit/insn? xb fctx arg-type ce0)

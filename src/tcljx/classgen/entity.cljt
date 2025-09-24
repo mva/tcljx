@@ -62,7 +62,7 @@
         
         :else loadable-value))))
 
-(def mk-collection CollectionConstant/new)
+(def collection CollectionConstant/new)
 
 ;;; ------------------------------------------------------------------------
 
@@ -136,7 +136,7 @@
 (def entity-false (JvmConstant. 0 Boolean/TYPE))
 (def entity-true (JvmConstant. 1 Boolean/TYPE))
 
-(defn mk-constant ^JvmConstant [^Object computational-value ^Class type]
+(defn constant ^JvmConstant [^Object computational-value ^Class type]
   (cond                   ;enforce singleton for null, false, and true
     (identical? ConstantDescs/NULL computational-value)
     entity-null
@@ -154,7 +154,7 @@
   (when (const? ce)
     (Constant/.computational-value ce)))
 
-(def entity-int-zero (mk-constant 0 Integer/TYPE))
+(def entity-int-zero (constant 0 Integer/TYPE))
 (defn entity-zero? ^boolean [^CodeEmitter ce]
   (and (const? ce) (zero? (const-value ce))))
 
@@ -180,9 +180,9 @@
     (reflect/describe-class (.value-type this)))
   (entity-id [_]
     entity-id)
-  (arity-specs [_]
-    model/arity-specs-invoke-dynamic)
-  (invoke* [this fctx form _ at-idx xs]
+  (method-specs [_]
+    model/method-specs-invoke-dynamic)
+  (invoke* [this fctx form _ m-idx xs]
     (throw (IllegalStateException.)))
   (emit-store [_ xb]
     (.storeLocal xb (TypeKind/from type) slot))
@@ -191,7 +191,7 @@
   
   LoadFromCopyWhenBound
   (emit-setup-code? [_ xb param-no]
-    (if (neg? param-no)             ;let binding or parameter binding?
+    (if (< param-no -1)             ;let binding or parameter binding?
       (let [tk (TypeKind/from type), label (.newLabel xb)]
         (when-some [on-stack-type (.emit-insn* init xb type false)]
           (assert (identical? type on-stack-type))
@@ -201,7 +201,9 @@
               (.localVariable slot name (reflect/describe-class type)
                               label (.endLabel xb)))
           true))
-      (do (set! slot (.parameterSlot xb param-no))
+      (do (set! slot (if (neg? param-no)
+                       (.receiverSlot xb)
+                       (.parameterSlot xb param-no)))
           (.localVariable xb slot name (reflect/describe-class type)
                           (.startLabel xb) (.endLabel xb))
           true))))
@@ -211,21 +213,3 @@
   (LocalVariable. name type (.next-entity-id owner) init -1))
 (defn parameter ^Entity [^EnvMethod owner ^String name ^Class type]
   (local-variable owner name type emitter-empty)) ;`param-no` provided late
-
-;;; ------------------------------------------------------------------------
-
-(deftype BindingImpl [^Entity bound-to ^String name ^boolean alias?]
-  Binding
-  (emit-insn* [this xb consumed-type then-leave?]
-    (when (or alias? (.emit-setup-code? ^LoadFromCopyWhenBound bound-to xb -1))
-      (with-void-empty-if-requested consumed-type
-        (.emit-insn* bound-to xb consumed-type then-leave?))))
-  (bound-to [_]
-    bound-to)
-  (name [_]
-    name))
-
-(def mk-binding BindingImpl/new)
-
-(defn parameter-binding ^Binding [^EnvMethod owner ^String name ^Class type]
-  (mk-binding (parameter owner name type) name false))

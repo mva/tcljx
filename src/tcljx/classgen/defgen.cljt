@@ -1,96 +1,107 @@
 (ns tcljx.classgen.defgen
   (:require
-   (tcljx.data [config :as cfg] [reflect :as reflect] [context :as context]
-               [model :as model])
-   (tcljx.classgen [classfile :as classfile] [insn :as insn] [entity :as entity]
-                   [emit :as emit] [envgraph :as envgraph]))
+   (tcljx.data
+    [config :as cfg] [reflect :as reflect] [context :as context]
+    [model :as model])
+   (tcljx.classgen
+    [classfile :as classfile] [runtime :as runtime] [insn :as insn]
+    [entity :as entity] [emit :as emit] [envgraph :as envgraph]))
   (:import
-   (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound Binding)
-   (tcljx.classgen.envgraph EnvSegment IEmitProxy PreparationTask)
+   (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound ImmediateEntity
+                     Binding)
+   (tcljx.classgen.envgraph IEmitProxy PreparationTask)
    (tcljx.classgen.insn Insn)
-   (java.lang.classfile ClassBuilder)
-   (java.lang.constant MethodTypeDesc ClassDesc)
+   (java.lang.classfile ClassBuilder FieldBuilder AnnotationElement
+                        Annotation)
+   (java.lang.classfile.attribute RuntimeVisibleAnnotationsAttribute)   
+   (java.lang.constant MethodTypeDesc ClassDesc ConstantDescs)
    (java.util.function Consumer)))
 
 (def ^:private acc-final (model/acc* final))
 (defn- field-fragment ^Entity [^int or-flags ^ClassDesc owner ^String nm
                                ^Class tp ^CodeEmitter init-ce]
-  (reify
-    CodeEmitter
-    (emit-insn* [_ xb consumed-type _]
-      (entity/with-void-empty-if-requested consumed-type
-        (.getstatic xb owner nm (model/value-type-exact init-ce tp))
-        tp))
-    Entity
-    (value-type [_]
-      tp)
-    (entity-id [_]
-      model/entity-id-def)
-    (arity-specs [_]
-      (if (= or-flags acc-final)
-        (model/arity-specs-of init-ce)
-        model/arity-specs-invoke-dynamic))
-    (invoke* [this fctx form _ at-idx xs]
-      (.invoke* ^Entity init-ce fctx form this at-idx xs))
-    LoadFromCopyWhenBound
-    (emit-setup-code? [_ xb _]
-      (or (entity/emitter-empty? init-ce)
-          (when (emit/insn? xb context/fctx-none tp init-ce)
-            (.putstatic xb owner nm (model/value-type-exact init-ce tp))
-            true)))
-    PreparationTask
-    (extend-segment [_ acc _]
-      (->> (^Consumer fn ^void [^ClassBuilder cb]
-            (.withField cb nm (model/value-type-exact init-ce tp)
-                        (bit-or (model/acc* static public)
-                                ;;... unless namespace private?
-                                or-flags)))
-           (envgraph/add-segment-elements acc)))))
+  (let [mnm (cfg/munge-name nm)]
+    (reify
+      CodeEmitter
+      (emit-insn* [_ xb consumed-type _]
+        (entity/with-void-empty-if-requested consumed-type
+          (.getstatic xb owner mnm (model/value-type-exact init-ce tp))
+          tp))
+      ImmediateEntity
+      (value-type [_]
+        tp)
+      (entity-id [_]
+        model/entity-id-def)
+      (method-specs [_]
+        (if (= or-flags acc-final)
+          (model/method-specs-of init-ce)
+          model/method-specs-invoke-dynamic))
+      (invoke* [this fctx form _ m-idx xs]
+        (.invoke* ^Entity init-ce fctx form this m-idx xs))
+      LoadFromCopyWhenBound
+      (emit-setup-code? [_ xb _]
+        (or (entity/emitter-empty? init-ce)
+            (when (emit/insn? xb context/fctx-none tp init-ce)
+              (.putstatic xb owner mnm (model/value-type-exact init-ce tp))
+              true)))
+      PreparationTask
+      (extend-segment [_ acc _]
+        (->> (^Consumer fn ^void [^ClassBuilder cb]
+              (.withField cb mnm (model/value-type-exact init-ce tp)
+                          (bit-or (model/acc* public static)
+                                  ;;... unless namespace private?
+                                  or-flags)))
+             (envgraph/add-segment-elements acc))))))
 
 (defn- method-fragment ^Entity [^ClassDesc owner ^String nm
                                 ^Class tp ^Entity init-ce]
-  (reify
-    CodeEmitter
-    (emit-insn* [_ xb consumed-type _]
-      (entity/with-void-empty-if-requested consumed-type
-        (let [tpd (model/value-type-exact init-ce tp)]
-          (.invokestatic xb owner nm (MethodTypeDesc/of tpd))
-          tp)))
-    Entity
-    (value-type [_]
-      tp)
-    (entity-id [_]
-      model/entity-id-def)
-    (arity-specs [_]
-      (.arity-specs init-ce))
-    (invoke* [this fctx form _ at-idx xs]
-      (.invoke* init-ce fctx form this at-idx xs))
-    LoadFromCopyWhenBound
-    (emit-setup-code? [_ xb _]
-      true)
-    PreparationTask
-    (extend-segment [_ acc _]
-      (->> (^Consumer fn ^void [^ClassBuilder cb]
-            (let [tpd (model/value-type-exact init-ce tp)]
-              (classfile/with-method-body-> cb
-                [nm (MethodTypeDesc/of tpd) classfile/acc-method-static]
-                (emit/then-leave? cfg/no-line-number tp init-ce true))))
-           (envgraph/add-segment-elements acc)))))
+  (let [mnm (cfg/munge-name nm)]
+    (reify
+      CodeEmitter
+      (emit-insn* [_ xb consumed-type _]
+        (entity/with-void-empty-if-requested consumed-type
+          (let [tpd (model/value-type-exact init-ce tp)]
+            (.invokestatic xb owner mnm (MethodTypeDesc/of tpd))
+            tp)))
+      ImmediateEntity
+      (value-type [_]
+        tp)
+      (value-type-exact [_]
+        (.value-type-exact init-ce))
+      (entity-id [_]
+        model/entity-id-def)
+      (method-specs [_]
+        (.method-specs init-ce))
+      (invoke* [this fctx form _ m-idx xs]
+        (.invoke* init-ce fctx form this m-idx xs))
+      LoadFromCopyWhenBound
+      (emit-setup-code? [_ xb _]
+        true)
+      PreparationTask
+      (extend-segment [_ acc _]
+        (->> (^Consumer fn ^void [^ClassBuilder cb]
+              (let [tpd (model/value-type-exact init-ce tp)]
+                (classfile/with-method-body-> cb
+                  [mnm (MethodTypeDesc/of tpd) classfile/acc-method-static]
+                  (emit/then-leave? cfg/no-line-number tp init-ce true))))
+             (envgraph/add-segment-elements acc))))))
 
 (deftype DefOfProxy [^ClassDesc owner ^String nm ^Class tp ^IEmitProxy proxy
                      ^:unsynchronized-mutable ^LoadFromCopyWhenBound __entity]
   CodeEmitter
   (emit-insn* [_ xb consumed-type then-leave?]
     (.emit-insn* __entity xb consumed-type then-leave?))
-  Entity
+  ImmediateEntity
   (value-type [_]
     tp)
+  (value-type-exact [_]
+    (.value-type-exact __entity))
   (entity-id [_]
     model/entity-id-def)
-  (arity-specs [_]
-    (.arity-specs proxy))
-  (invoke* [this fctx form opt-f at-idx xs]
-    (.invoke* proxy fctx form this at-idx xs))
+  (method-specs [_]
+    (.method-specs proxy))
+  (invoke* [this fctx form opt-f m-idx xs]
+    (.invoke* proxy fctx form this m-idx xs))
   LoadFromCopyWhenBound
   (emit-setup-code? [_ xb param-no]
     (.emit-setup-code? __entity xb param-no))
@@ -103,24 +114,31 @@
       (set! __entity ent)
       (envgraph/run-task acc ^PreparationTask ent class))))
 
-(defn new-def-immutable ^Binding [^EnvSegment segm ^String nm ^Insn init]
+(defn entity-def-immutable ^Entity [^ClassDesc owner ^String nm ^Insn init]
   (let [sink-type (insn/logical-type init)
-        init-ce (insn/emitter init)
-        owner (.segment-class segm)
-        ent (cond
-              (entity/const? init-ce)
-              (method-fragment owner nm sink-type init-ce)
-              (instance? IEmitProxy init-ce)
-              (DefOfProxy. owner nm sink-type init-ce nil)
-              :else
-              (field-fragment acc-final owner nm sink-type init-ce))]
-    (.stage-task! segm ent)
-    (entity/mk-binding ent nm false)))
+        init-ce (insn/emitter init)]
+    (cond
+      (entity/const? init-ce)
+      (method-fragment owner nm sink-type init-ce)
+      (instance? IEmitProxy init-ce)
+      (DefOfProxy. owner nm sink-type init-ce nil)
+      :else
+      (field-fragment acc-final owner nm sink-type init-ce))))
 
-(defn new-def-mutable ^Binding [^EnvSegment segm ^String nm ^Insn init]
+(defn entity-def-mutable ^Entity [^ClassDesc owner ^String nm ^Insn init]
   (let [sink-type (insn/logical-type init)
-        init-ce (insn/emitter init)
-        owner (.segment-class segm)
-        ent (field-fragment (model/acc* volatile) owner nm sink-type init-ce)]
-    (.stage-task! segm ent)
-    (entity/mk-binding ent nm false)))
+        init-ce (insn/emitter init)]
+    (field-fragment (model/acc* volatile) owner nm sink-type init-ce)))
+
+(defn task-def-alias ^PreparationTask [^String nm ^Entity other-ent
+                                       ^String other-qname]
+  (let [mnm (cfg/munge-name nm)]
+    (^PreparationTask fn [acc _]
+     (->> (^Consumer fn ^void [^ClassBuilder cb]
+           (->> (^Consumer fn ^void [^FieldBuilder fb]
+                 (let [ae (AnnotationElement/ofString "of" other-qname)]
+                   (-> (.withFlags fb (model/acc* public static final))
+                       (.with (RuntimeVisibleAnnotationsAttribute/of
+                               (Annotation/of runtime/Alias ae))))))
+                (.withField cb mnm ConstantDescs/CD_Object)))
+          (envgraph/add-segment-elements acc)))))

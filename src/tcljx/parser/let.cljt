@@ -5,15 +5,15 @@
   (:import
    (tcljx.data.model Expr ExprFactory Binding Entity Parser)))
 
-(letfn [(binding-for-entity ^Expr [^ExprFactory expr-factory ^long fctx
-                                   ^String name ^Entity ent ^Object ent-form]
+(letfn [(binding-for-entity ^Binding [^ExprFactory expr-factory ^long fctx
+                                      ^String name ^Entity ent ^Object ent-form]
           (if (model/alias-when-let-value? ent)
             (.binding-alias expr-factory fctx name ent)
             (let [x (.value-of expr-factory ent ent-form)]
               (.binding-fresh expr-factory fctx nil name x))))
 
-        (binding-for-init ^Expr [^ExprFactory expr-factory ^long fctx
-                                 ^Class opt-type ^String name ^Expr init]
+        (binding-for-init ^Binding [^ExprFactory expr-factory ^long fctx
+                                    ^Class opt-type ^String name ^Expr init]
           (if (and (nil? opt-type) (model/alias-when-let-value? (.emitter init)))
             (.binding-alias expr-factory fctx name (.emitter init))
             (.binding-fresh expr-factory fctx opt-type name init)))]
@@ -22,7 +22,7 @@
     (let [bindings (syntax/vector bindings true)
           n (quot (count bindings) 2)
           ef (.expr-factory parser)
-          bnd-xs (.new-exprs ef n)]
+          bnds (new Binding/1 n)]
       (loop [parser parser, i 0]
         (if (< i n)
           (let [nm-sym (nth bindings (* i 2))
@@ -32,10 +32,10 @@
                 ent (when (and (nil? opt-type) (symbol? init))
                       (or (parse/lookup parser init)
                           (interop/lookup-class-entity parser init)))
-                bnd-x (if (some? ent)
-                        (binding-for-entity ef fctx nm ent init)
-                        (binding-for-init ef fctx opt-type nm
-                                          (parse/arg parser fctx init)))]
-            (.set bnd-xs i bnd-x)
-            (recur (model/with-local-binding parser bnd-x) (inc i)))
-          (.block-let ef fctx bnd-xs (parse/progn parser fctx body)))))))
+                bnd (if (some? ent)
+                      (binding-for-entity ef fctx nm ent init)
+                      (binding-for-init ef fctx opt-type nm
+                                        (parse/arg parser fctx init)))]
+            (aset bnds i bnd)
+            (recur (model/with-local-binding parser bnd) (inc i)))
+          (.block-bindings ef fctx bnds (parse/progn parser fctx body) false))))))

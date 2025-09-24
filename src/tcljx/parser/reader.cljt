@@ -48,7 +48,7 @@
         sym)))
 
 (defn- rewrite-synquote-name ^Named [^Named nm ^Resolver resolver]
-  (letfn [(resolve-class-name ^String [^String nm]
+  (letfn [(lookup-class-name ^String [^String nm]
             (if-some [tp (.lookup-class resolver nm)]
               (.getName tp)
               (when-not (neg? (.indexOf nm (int \.)))
@@ -57,13 +57,12 @@
             (.substring nm 0 (dec (.length nm))))
 
           (rewrite-qualified-name ^symbol [^symbol sym]
-            (let [nm (name sym)
-                  ns-part (namespace sym)]
-              (if-some [ns-part' (and ns-part
-                                      (or (.lookup-namespace resolver ns-part)
-                                          (resolve-class-name ns-part)))]
-                (symbol ns-part' nm)
-                sym)))
+            (if-some [ns-part (namespace sym)]
+              (if-some [ns-part' (or (.lookup-namespace resolver ns-part)
+                                     (lookup-class-name ns-part))]
+                (symbol ns-part' (name sym))
+                sym)
+              sym))
           (rewrite-name-without-nmsp ^symbol [^symbol sym]
             (let [nm (name sym)]
               (cond
@@ -71,13 +70,13 @@
                 sym
                 
                 (.endsWith nm ".")      ;shorthand for (new ...)
-                (if-some [nm' (resolve-class-name (trim-last nm))]
+                (if-some [nm' (lookup-class-name (trim-last nm))]
                   (symbol nil (str nm' "."))
                   sym)
                 
                 :else
                 (or (.lookup-global-qname resolver nm)
-                    (if-some [nm' (resolve-class-name nm)]
+                    (if-some [nm' (lookup-class-name nm)]
                       (symbol nil nm')
                       (symbol (.ns-str resolver) nm))))))]
     

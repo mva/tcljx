@@ -6,7 +6,8 @@
   (:import
    (tcljx.data.resolve Match)
    (tcljx.data.model Resolver Expr Entity ExprFactory Parser ArityType)
-   (clojure.lang IMeta)))
+   (clojure.lang IMeta)
+   (java.lang.reflect Method)))
 
 (defn array-rank ^int [^String nm] ;returns 0 if not in [1-9]
   (when (= (.length nm) 1)
@@ -31,26 +32,28 @@
 
 ;;; ------------------------------------------------------------------------
 
+(defn resolve-class
+  (^Class [^Resolver rsv ^symbol sym]
+   (or (lookup-type rsv sym)
+       (throw (wrong/info-class-not-found sym))))
+  (^Class [^Resolver rsv ^symbol sym ^Class or-else]
+   (if (some? sym) (resolve-class rsv sym) or-else)))
+(defn resolve-interface ^Class [^Resolver rsv ^symbol sym]
+  (let [tp (resolve-class rsv sym)]
+    (if (.isInterface tp)
+      tp
+      (wrong/other "not an interface class" tp))))
+
 (defn untagged? ^boolean [form]
   (nil? (meta/get-tag (meta form))))
 (defn tag-of ^symbol [form]
   (when-some [tag (meta/get-tag (meta form))]
     (syntax/symbol tag)))
-(defn resolve-tag* ^Class [^Resolver rsv ^symbol tag ^Class or-else]
-  (if (some? tag)
-    (or (lookup-type rsv tag) (throw (wrong/info-class-not-found tag)))
-    or-else))
 (defn resolve-tag
   (^Class [^Resolver rsv ^IMeta form]
    (resolve-tag rsv form Object))
   (^Class [^Resolver rsv ^IMeta form ^Class or-else]
-   (resolve-tag* rsv (tag-of form) or-else)))
-(defn resolve-interface ^Class [^Resolver rsv ^symbol sym]
-  (if-some [tp (lookup-type rsv sym)]
-    (if (.isInterface tp)
-      tp
-      (wrong/other "not an interface class" tp))
-    (throw (wrong/info-class-not-found sym))))
+   (resolve-class rsv (tag-of form) or-else)))
 
 (defn get-param-tags ^Object [^map form-meta] ;nil if no param tags are given
   (when (some? form-meta)
@@ -108,16 +111,16 @@
             (if-some [nmsp (namespace sym)]
               (when-some [cl (.lookup-class rsv nmsp)]
                 (if-some [tp (lookup-type rsv cl nm)]
-                  (.constant-entity ef tp Class) ;array type
+                  (.entity-constant ef tp Class) ;array type
                   (let [ptags (-> (get-param-tags (.meta sym))
                                   (parse-param-tags rsv)) m (resolve cl nm ptags)
-                        ent (.class-member-entity ef m)]
+                        ent (.entity-class-member ef m)]
                     (if (and (nil? ptags) (resolve/static-field? m))
                       (.invoke* ent context/fctx-none nil nil 0
                                 (.new-exprs ef 0))
                       ent))))
               (when-some [cl (.lookup-class rsv nm)]
-                (.constant-entity ef cl Class)))))]
+                (.entity-constant ef cl Class)))))]
   
   (defn lookup-class-entity ^Entity [^Parser parser ^symbol sym]
     (let [x (lookup (.resolver parser) (.expr-factory parser) sym)]
@@ -152,9 +155,43 @@
      (let [return-tag (tag-of paramv)]
        (-> (if (= meta/auto-return-type return-tag)
              type/auto-return-marker
-             (resolve-tag* rsv return-tag or-else-type))
+             (resolve-class rsv return-tag or-else-type))
            (ArityType. ptypes pnames varargs?)))))
   (^ArityType [^Resolver rsv ^long fctx paramv ^Class or-else-type
                ^seq error-context]
    (context/with-line-from-list [fctx error-context]
      (parse-arity-type rsv paramv or-else-type))))
+
+(defn unhinted-arity-type? ^boolean [^ArityType at ^int start]
+  (and (nil? (.return-type at))
+       (let [a (.parameter-types at)]
+         (loop [i (dec (alength a))]
+           (cond (< i start) true
+                 (some? (aget a i)) false
+                 :else (recur (dec i)))))))
+
+(defn parse-method-type ^ArityType [^Resolver rsv ^Class owner
+                                    ^symbol method-name paramv]
+  (let [at (parse-arity-type rsv paramv nil)
+        mnm (name method-name)
+        n (dec (.parameter-count at))]
+    (letfn [(select-method-by-arity ^Method [^ArityType at]
+              (if-some [ms (seq (resolve/itf-methods-with-name owner mnm n))]
+                (if (nil? (next ms))
+                  (first ms)
+                  (-> (str "multiple virtual " n "-parameter methods matching ")
+                      (wrong/other method-name)))
+                (-> (str "no virtual " n "-parameter method matching ")
+                    (wrong/other method-name))))
+            (select-matching-method ^Method [^ArityType at]
+              (if-some [m (resolve/itf-method-exact owner mnm (.return-type at)
+                                                    (.parameter-types at))]
+                m
+                (wrong/other "no virtual method matching " method-name)))]
+      
+      (when-not (untagged? (first paramv))
+        (throw (syntax/info "no type tag allowed for receiver parameter")))
+      (aset (.parameter-types at) 0 owner) ;type of receiver
+      (model/with-method-type at (if (unhinted-arity-type? at 1)
+                                   (select-method-by-arity at)
+                                   (select-matching-method at))))))

@@ -116,14 +116,16 @@
                 (do (syntax/empty-tail (next formr))
                     (first formr))
                 formr))
+            (field-members-only ^String [^String mnm ^Exprs xs]
+              (when (and (> (.length mnm) 1) (= (.charAt mnm 0) \-)
+                         (.empty? xs))
+                (.substring mnm 1)))
             (parse-dot ^Expr [^long fctx [_ owner & formr]]
               (let [[member & args] (unpack-member-args formr)
                     mnm (syntax/simple-symbol-str member) ;implies owner exists
                     owner-expr (parse/arg this fctx owner)
                     xs (parse/args this fctx args)
-                    fnm (when (and (> (.length mnm) 1) (= (.charAt mnm 0) \-)
-                                   (.empty? xs))
-                          (.substring mnm 1))]
+                    fnm (field-members-only mnm xs)]
                 (if-some [owner (model/type-literal owner-expr owner)]
                   (if fnm
                     (.get-static-field expr-factory fctx owner fnm)
@@ -142,8 +144,10 @@
                 (let [mnm (.substring nm 1)
                       receiver (parse/arg this fctx (syntax/first formr))
                       xs (parse/args this fctx (rest formr))]
-                  (.invoke-virtual-member expr-factory fctx receiver
-                                          nil mnm xs))))
+                  (if-some [fnm (field-members-only mnm xs)]
+                    (.get-virtual-field expr-factory fctx receiver fnm)
+                    (.invoke-virtual-member expr-factory fctx receiver
+                                            nil mnm xs)))))
             (parse-class-dot ^Expr [^String nm ^long fctx [_ & formr]]
               (let [clnm (.substring nm 0 (dec (.length nm)))]
                 (parse-dot fctx (list* \. (symbol nil clnm) 'new formr))))
@@ -199,6 +203,8 @@
               (let [ncl (defclass/parse-definterface* resolver fctx form)]
                 (.stage-nmsp-class expr-factory ncl)
                 (.ephemeral-class expr-factory (.defined-class ncl))))
+            (parse-deftype* ^Expr [^long fctx ^seq form]
+              (defclass/parse-deftype* this fctx form))
             (parse-invocation ^Expr [op ^long fctx ^seq form] ;discards meta
               (if (symbol? op)
                 (let [nm (name op), nmsp (namespace op)]
@@ -222,7 +228,7 @@
                       "import*" (parse-import* form)
                       "." (parse-dot fctx form)
                       ;; set! (set!-form form)
-                      ;; deftype* (deftype*-form form)
+                      "deftype*" (parse-deftype* fctx form)
                       ;; reify* (reify*-form form)
                       "try" (parse-try-or-extract fctx form)
                       "throw" (parse-throw fctx form)

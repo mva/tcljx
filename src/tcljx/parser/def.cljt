@@ -22,10 +22,7 @@
                    (nil? (.meta ^symbol init))
                    (nil? (meta/get-tag nm-meta))
                    (identical? ent (.lookup-def (.resolver parser)
-                                                (namespace init) nm))))
-            (init-namespace ^String [] ;pre: `init` is symbol
-              (when-some [x (namespace init)]
-                (.lookup-namespace (.resolver parser) (namespace init))))]
+                                                (namespace init) (name init)))))]
       (if-some [prior-def (.lookup-def (.resolver parser) nil nm)]
         (.assignment (.expr-factory parser) prior-def x-init)
 
@@ -37,7 +34,8 @@
             (symbol? init)
             (let [ent ^Entity (.emitter x-init)]
               (if (of-immutable-def? ent)
-                (.new-def-alias nmsp nm ent (init-namespace) (name init))
+                (let [ns (.lookup-namespace (.resolver parser) (namespace init))]
+                  (.new-def-alias nmsp nm ent (str ns "/" (name init))))
                 (.new-def-immutable nmsp nm x-init)))
 
             :else

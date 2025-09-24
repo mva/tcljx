@@ -38,7 +38,6 @@
            (ALOAD_0)
            (INVOKEVIRTUAL "int[]" "clone" "()Ljava/lang/Object;")
            (CHECKCAST "int[]")
-           (INVOKEVIRTUAL "int[]" "toString" "()Ljava/lang/String;")
+           (INVOKEVIRTUAL Object "toString" "()Ljava/lang/String;")
            (ARETURN)]
          (asm-expr [^int/1 x] (.toString (aclone x))))))
-
