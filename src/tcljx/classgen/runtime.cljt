@@ -20,7 +20,9 @@
 (def ^:private Lookup ConstantDescs/CD_MethodHandles_Lookup)
 (def ^:private MethodType ConstantDescs/CD_MethodType)
 (def ^:private CallSite ConstantDescs/CD_CallSite)
+(def ^:private TypeDescriptor (ClassDesc/of "java.lang.invoke.TypeDescriptor"))
 (def ^:private LambdaMetafactory (ClassDesc/of "java.lang.invoke.LambdaMetafactory"))
+(def ^:private ObjectMethods (ClassDesc/of "java.lang.runtime.ObjectMethods"))
 
 (def ^:private Object ConstantDescs/CD_Object)
 (def ^:private ObjectArray (.arrayType Object))
@@ -66,6 +68,9 @@
 (def bsm-metafactory (mhd-static [LambdaMetafactory "metafactory"]
                                  CallSite [Lookup String MethodType MethodType
                                            MethodHandle MethodType]))
+(def bsm-object-method (mhd-static [ObjectMethods "bootstrap"]
+                                   Object [Lookup String TypeDescriptor
+                                           Class String MethodHandleArray]))
 
 ;;; ------------------------------------------------------------------------
 
@@ -98,6 +103,8 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def mtd-void-string (MethodTypeDesc/of ConstantDescs/CD_void
-                                        ConstantDescs/CD_String))
+(def mtd-String-void (MethodTypeDesc/of ConstantDescs/CD_String))
+(def mtd-int-void (MethodTypeDesc/of ConstantDescs/CD_int))
 (def mtd-void-map (MethodTypeDesc/of ConstantDescs/CD_void map))
+(def mtd-boolean-Object (MethodTypeDesc/of ConstantDescs/CD_boolean
+                                           ConstantDescs/CD_Object))

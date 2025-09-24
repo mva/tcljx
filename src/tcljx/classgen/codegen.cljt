@@ -460,10 +460,11 @@
       (throw (wrong/wr-info "cannot define class in this position")))
     (let [const (.entity-constant this eph-class Class)]
       (.value-of this const nil)))
-  (stage-nmsp-class [_ ncl]
-    (.stage-task! method ncl))
+  (new-definterface [this eph-ncl]
+    (.stage-task! method (fngen/task-definterface* eph-ncl))
+    (.ephemeral-class this (.defined-class eph-ncl)))
   (new-deftype [this parser parse-method-body eph-ncl field-specs arity-specs
-                defrecord?]
+                java-record? defrecord?]
     (let [eph-cl (.defined-class eph-ncl)
           cl-name (.getSimpleName eph-cl)
           n-fields (alength field-specs)
@@ -490,7 +491,7 @@
           (aset arity-methods i mspec)))
       
       (let [dt (fngen/task-deftype* eph-ncl field-specs arity-methods
-                                    defrecord?)
+                                    java-record? defrecord?)
             class (EnvClass. dt (.segment method) cl-name methods')]
         (.stage-task! method class)
         (.ephemeral-class this eph-cl)))))

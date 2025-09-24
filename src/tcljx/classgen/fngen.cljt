@@ -4,7 +4,8 @@
                [reflect :as reflect] [resolve :as resolve] [model :as model])
    (tcljx.classgen [classfile :as classfile] [runtime :as runtime]
                    [emit :as emit] [runtime :as rt] [entity :as entity]
-                   [insn :as insn] [condgen :as condgen] [envgraph :as envgraph]))
+                   [insn :as insn] [condgen :as condgen] [envgraph :as envgraph])
+   (tinyclj [string :as str]))
   (:import
    (tcljx.data.model CodeEmitter Entity Constant ArityType AritySpec MethodSpec
                      FieldSpec NmspClass)
@@ -14,7 +15,8 @@
    (tcljx.classgen.insn Insn Insns PlainInvokeTest)
    (tcljx.classgen.envgraph EnvClass OriginProxyPairs PreparationTask)
    (clojure.lang IPersistentMap Keyword)
-   (java.lang.classfile ClassBuilder CodeBuilder TypeKind Opcode)
+   (java.lang.classfile ClassBuilder CodeBuilder TypeKind Opcode
+                        BootstrapMethodEntry)
    (java.lang.classfile.instruction SwitchCase)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDesc DirectMethodHandleDesc ConstantDescs
@@ -550,6 +552,15 @@
 
 ;;; ------------------------------------------------------------------------
 
+(deftype DefInterface [^NmspClass eph-ncl]
+  PreparationTask
+  (extend-segment [_ acc _]
+    (envgraph/add-class-file acc eph-ncl)))
+
+(def task-definterface* DefInterface/new)
+
+;;; ------------------------------------------------------------------------
+
 (def ^:private m-valAt (resolve/virtual-method IPersistentMap
                                                "valAt" Object Object))
 (def ^:pricate mtd-seqOrElse (MethodTypeDesc/of ConstantDescs/CD_Object
@@ -596,16 +607,81 @@
                                 (.dropParameterTypes 0 1))
                             (model/acc* public))))))
 
-(deftype Deftype [^NmspClass eph-ncl ^FieldSpec/1 field-specs
-                  ^MethodSpec/1 method-specs ^boolean defrecord?]
+(defn- missing-record-methods ^map [^FieldSpec/1 field-specs
+                                    ^MethodSpec/1 method-specs]
+  (reduce (fn ^map [^map acc ^MethodSpec spec]
+            (if-some [mtd (get acc (.method-name spec))]
+              (cond-> acc
+                (= mtd (-> (mtd-of-arity-type (.at spec))
+                           (.dropParameterTypes 0 1)))
+                (dissoc (.method-name spec)))
+              acc))
+          (into {"toString" runtime/mtd-String-void
+                 "hashCode" runtime/mtd-int-void
+                 "equals" runtime/mtd-boolean-Object}
+                (map (fn ^vector [^FieldSpec spec]
+                       [(.field-name spec)
+                        (MethodTypeDesc/of (.type-desc spec))]))
+                field-specs)
+          method-specs))
+
+(defn- object-method ^void [^ClassBuilder cb ^BootstrapMethodEntry bsm-entry
+                            ^ClassDesc this-class ^String nm
+                            ^MethodTypeDesc mtd]
+  (->> (^Consumer fn ^void [^CodeBuilder xb]
+        (let [cp (.constantPool xb)
+              t (.insertParameterTypes mtd 0 this-class)
+              n+t (.nameAndTypeEntry cp nm t)]
+          (.aload xb (.receiverSlot xb))
+          (dotimes [i (.parameterCount mtd)]
+            (.loadLocal xb (TypeKind/from (.parameterType mtd i))
+                        (.parameterSlot xb i)))
+          (-> (.invokedynamic xb (.invokeDynamicEntry cp bsm-entry n+t))
+              (.return_ (TypeKind/from (.returnType mtd))))))
+       (.withMethodBody cb nm mtd (model/acc* public synthetic))))
+
+(defn- record-methods ^void [^ClassBuilder cb ^ClassDesc this-class
+                             ^FieldSpec/1 field-specs
+                             ^MethodSpec/1 method-specs]
+  (let [missing (missing-record-methods field-specs method-specs)
+        cp (.constantPool cb)
+        fnames (->> (map FieldSpec/.field-name field-specs)
+                    (str/join ";"))
+        field-getter-mhd (fn ^DirectMethodHandleDesc [^FieldSpec spec]
+                           (MethodHandleDesc/ofField
+                            DirectMethodHandleDesc$Kind/GETTER
+                            this-class (.field-name spec)
+                            (.type-desc spec)))
+        bsm-entry (.bsmEntry cp runtime/bsm-object-method
+                             ^List (->> (map field-getter-mhd field-specs)
+                                        (list* this-class fnames)))]
+    (doseq [nm ["toString" "hashCode" "equals"]]
+      (when-some [mtd (get missing nm)]
+        (object-method cb bsm-entry this-class nm mtd)))
+    
+    (dotimes [i (alength field-specs)]
+      (let [spec (aget field-specs i), nm (.field-name spec)]
+        (when-some [mtd (get missing nm)]
+          (->> (^Consumer fn ^void [^CodeBuilder xb]
+                (-> (.aload xb (.receiverSlot xb))
+                    (.getfield this-class nm (.type-desc spec))
+                    (.return_ (TypeKind/from (.type-desc spec)))))
+               (.withMethodBody cb nm mtd (model/acc* public synthetic))))))))
+
+(deftype DefType [^NmspClass eph-ncl ^FieldSpec/1 field-specs
+                  ^MethodSpec/1 method-specs
+                  ^boolean java-record? ^boolean defrecord?]
   PreparationTask
   (extend-segment [_ acc class]
     (->> (.andThen (.class-handler eph-ncl)
                    (^Consumer fn ^void [^ClassBuilder cb]
                     (when defrecord?
                       (dt-create-record cb (.this-class eph-ncl) field-specs))
-                    (dt-virtual-methods cb method-specs)))
+                    (dt-virtual-methods cb method-specs)
+                    (when java-record?
+                      (record-methods cb (.this-class eph-ncl)
+                                      field-specs method-specs))))
          (model/with-class-handler eph-ncl)
          (envgraph/add-class-file acc))))
 
-(def task-deftype* Deftype/new)
+(def task-deftype* DefType/new)

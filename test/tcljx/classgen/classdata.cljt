@@ -39,7 +39,7 @@
    rt/bsm-invoke-fn :bsm-invoke-fn
    rt/bsm-clause-code :bsm-clause-code
    rt/bsm-metafactory :bsm-metafactory
-   #_#_rt/bsm-object-method :bsm-object-method
+   rt/bsm-object-method :bsm-object-method
 
    ConstantDescs/BSM_NULL_CONSTANT :bsm-null
    ConstantDescs/BSM_EXPLICIT_CAST :bsm-explicit-cast

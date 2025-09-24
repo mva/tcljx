@@ -200,9 +200,7 @@
                                  form))
                      (.parse-form this fctx))))
             (parse-definterface* ^Expr [^long fctx ^seq form]
-              (let [ncl (defclass/parse-definterface* resolver fctx form)]
-                (.stage-nmsp-class expr-factory ncl)
-                (.ephemeral-class expr-factory (.defined-class ncl))))
+              (defclass/parse-definterface* resolver expr-factory fctx form))
             (parse-deftype* ^Expr [^long fctx ^seq form]
               (defclass/parse-deftype* this fctx form))
             (parse-invocation ^Expr [op ^long fctx ^seq form] ;discards meta

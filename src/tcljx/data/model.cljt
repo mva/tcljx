@@ -525,10 +525,11 @@
   (throw-expr ^Expr [^long fctx ^Expr arg])
   
   (ephemeral-class ^Expr [^Class eph-class])
-  (stage-nmsp-class ^void [^NmspClass ncl])
+  (new-definterface ^Expr [^NmspClass ncl])
   (new-deftype ^Expr [^Parser parser ^ParseArityBody parse-method-body
                       ^NmspClass eph-ncl ^FieldSpec/1 field-specs
-                      ^AritySpec/1 arity-specs ^boolean defrecord?]))
+                      ^AritySpec/1 arity-specs
+                      ^boolean java-record? ^boolean defrecord?]))
 
 (definterface Parser
   (parse-form ^Expr [^long fctx form])

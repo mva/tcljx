@@ -6,12 +6,18 @@
                  [loop :as loop] [fn :as fn]))
   (:import
    (tcljx.data.model Expr ArityType AritySpec MethodSpec FieldSpec NmspClass
-                     Parser ParseArityBody Resolver)
+                     Parser ParseArityBody Resolver ExprFactory)
    (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
    (java.lang.classfile ClassFile ClassBuilder MethodBuilder CodeBuilder
                         TypeKind)
+   (java.lang.classfile.attribute RecordAttribute RecordComponentInfo)
    (java.util List)
    (java.util.function Consumer)))
+
+(defn- with-abstract-method ^ClassBuilder [^ClassBuilder cb ^String name
+                                           ^MethodTypeDesc mtd ^int flags]
+  (.withMethod cb name mtd (bit-or (model/acc* abstract) flags)
+               (^Consumer fn ^void [^MethodBuilder mb] #_none)))
 
 (defn- parse-opts ^vector [^seq s]
   (loop [opts {} [k v & rs :as s] s]
@@ -72,9 +78,8 @@
       (let [tp (tag-desc-of rsv p false ConstantDescs/CD_Object)]
         (recur (conj acc tp) (next params))))))
 
-(def ^:private empty-method (^Consumer fn ^void [^MethodBuilder mb] #_none))
-(defn parse-definterface* ^NmspClass [^Resolver rsv ^long fctx
-                                      [_ itf-nm & opts+sigs]]
+(defn parse-definterface* ^Expr [^Resolver rsv ^ExprFactory ef ^long fctx
+                                 [_ itf-nm & opts+sigs]]
   (letfn [(lookup-interface ^ClassDesc [^symbol sym]
             (reflect/describe-class (interop/resolve-interface rsv sym)))
           
@@ -83,16 +88,16 @@
                   msig (syntax/vector msig)]
               (syntax/empty-tail methodr)
               (when-some [tag (interop/tag-of mname)]
-                (wrong/other (str "method result tag " (wrong/q tag) " must be "
-                                  "placed on the parameter vector, not the "
+                (wrong/other (str "method result tag " (wrong/q tag) " must "
+                                  "be placed on the parameter vector, not the "
                                   "method name")))
               (let [mnm (name mname)
                     mtd (method-lookup-type rsv msig)
-                    flags (cond-> (model/acc* public abstract)
+                    flags (cond-> (model/acc* public)
                             (< (.parameterCount mtd) (count msig))
                             (bit-or (model/acc* varargs)))]
                 (^Consumer fn ^void [^ClassBuilder cb]
-                 (.withMethod cb mnm mtd flags empty-method)))))]
+                 (with-abstract-method cb mnm mtd flags)))))]
     
     (let [[opts methods] (parse-opts opts+sigs)
           itf-nm (syntax/simple-symbol itf-nm)
@@ -108,7 +113,7 @@
       (let [bs (.build (ClassFile/of) this-class cbh)
             eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)]
         (.import-class rsv eph-cl)
-        (NmspClass. this-class nil cbh nil eph-cl)))))
+        (.new-definterface ef (NmspClass. this-class nil cbh nil eph-cl))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -176,23 +181,43 @@
                                                (alength fields))
                           (model/acc* public synthetic)))))
 
+(defn- record-attribute ^ClassBuilder [^ClassBuilder cb ^FieldSpec/1 fields]
+  (let [a (new RecordComponentInfo/1 (alength fields))]
+    (dotimes [i (alength a)]
+      (let [spec (aget fields i)]
+        (->> (RecordComponentInfo/of (.field-name spec) (.type-desc spec))
+             (aset a i))))
+    (.with cb (RecordAttribute/of a))))
+
+;;; See JLS "8.10.1 Record Components": It is a compile-time error for
+;;; a record declaration to declare a record component with the name
+;;; `clone`, `finalize`, `getClass`, `hashCode`, `notify`,
+;;; `notifyAll`, `toString`, or `wait`.
+(def ^:private prohibited-record-fields
+  #{"clone" "finalize" "getClass" "hashCode" "notify" "notifyAll"
+    "toString" "wait"})
+
 (defn- parse-fields ^FieldSpec/1 [^Resolver rsv ^boolean java-record?
                                   ^vector fieldv]
   (letfn [(parse-field ^FieldSpec [form]
             (let [sym (syntax/simple-symbol form)
-                  tag (interop/tag-of form)
+                  tag (interop/tag-of sym)
                   tpd (type-desc-of rsv tag false ConstantDescs/CD_Object)
+                  nm (name sym)
                   m (meta sym)
                   flags (cond
                           (:unsynchronized-mutable m) (model/acc* private)
                           (:volatile-mutable m) (model/acc* private volatile)
                           java-record? (model/acc* private final)
                           :else (model/acc* public final))]
-              (when (and java-record?
-                         (not (zero? (bit-and flags (model/acc* final)))))
-                (wrong/other (str "java.lang.Record cannot have mutable field "
-                                  (wrong/q sym))))
-              (FieldSpec. (name sym) tag flags tpd nil)))]
+              (when java-record?
+                (when (zero? (bit-and flags (model/acc* final)))
+                  (wrong/other (str "java.lang.Record cannot have mutable field "
+                                    (wrong/q sym))))
+                (when (contains? prohibited-record-fields nm)
+                  (wrong/other (str "java.lang.Record cannot declare field with name "
+                                    "of no-arg Object method " (wrong/q (symbol nm))))))
+              (FieldSpec. nm tag flags tpd nil)))]
     (let [a (new FieldSpec/1 (count fieldv))]
       (dotimes [i (alength a)]
         (aset a i (parse-field (nth fieldv i))))
@@ -227,20 +252,29 @@
                       (supers-of))
           fields (parse-fields rsv (.java-record? supers) fieldv)
           defrecord? (defrecord-tail? fields)
-          cbh (^Consumer fn ^void [^ClassBuilder cb]
-               (-> (cfg/with-class-version cb)
-                   (.withInterfaceSymbols (.interfaces supers))
-                   (.withFlags (cond-> (model/acc* public final)
-                                 (:abstract opts)
-                                 (bit-xor (model/acc* final abstract)))))
-               (doseq [^FieldSpec spec fields]
-                 (.withField cb (.field-name spec) (.type-desc spec)
-                             (.flags spec)))
-               (constructor cb this-class fields (.super-class supers))
-               (when defrecord?
-                 (constructor-n cb this-class fields 4)
-                 (constructor-n cb this-class fields 2)))
-          bs (.build (ClassFile/of) this-class cbh)
+          cbh-0 (^Consumer fn ^void [^ClassBuilder cb]
+                 (-> (cfg/with-class-version cb)
+                     (.withSuperclass (.super-class supers))
+                     (.withInterfaceSymbols (.interfaces supers))
+                     (.withFlags (cond-> (model/acc* public final)
+                                   (:abstract opts)
+                                   (bit-xor (model/acc* final abstract)))))
+                 (when (.java-record? supers)
+                   (record-attribute cb fields))
+                 (doseq [^FieldSpec spec fields]
+                   (.withField cb (.field-name spec) (.type-desc spec)
+                               (.flags spec)))
+                 (constructor cb this-class fields (.super-class supers))
+                 (when defrecord?
+                   (constructor-n cb this-class fields 4)
+                   (constructor-n cb this-class fields 2)))
+          cbh-1 (^Consumer fn ^void [^ClassBuilder cb]
+                 (when (.java-record? supers)
+                   (doseq [^FieldSpec spec fields]
+                     (with-abstract-method cb
+                       (.field-name spec) (MethodTypeDesc/of (.type-desc spec))
+                       (model/acc* public abstract synthetic)))))
+          bs (.build (ClassFile/of) this-class (.andThen cbh-0 cbh-1))
           eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)]
       
       (.import-class rsv eph-cl)
@@ -251,10 +285,10 @@
       
       (let [n (alength methods)
             arity-specs (new AritySpec/1 n)
-            eph-ncl (NmspClass. this-class (.super-class supers) cbh
+            eph-ncl (NmspClass. this-class (.super-class supers) cbh-0
                                 nil eph-cl)
             pmb (fn/mk-parse-arity-body fctx true)]
         (dotimes [i n]
           (aset arity-specs i (arity-spec-of eph-cl (aget methods i))))
         (.new-deftype (.expr-factory parser) parser pmb eph-ncl
-                      fields arity-specs defrecord?)))))
+                      fields arity-specs (.java-record? supers) defrecord?)))))
