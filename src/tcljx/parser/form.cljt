@@ -218,26 +218,29 @@
                       "if" (parse-if fctx form)
                       "case*" (parse-case* fctx form)
                       "let*" (let/parse-let* this fctx form)
-                      ;; letfn* (letfn*-form form)
+                      ;; "letfn*" (letfn*-form form)
                       "do" (parse-do fctx form)
                       "fn*" (fn/parse-fn* this fctx form)
                       "quote" (parse-quote form)
-                      ;; var (var-form form)
+                      ;; "var" (var-form form)
                       "import*" (parse-import* form)
                       "." (parse-dot fctx form)
-                      ;; set! (set!-form form)
+                      ;; "set!" (set!-form form)
                       "deftype*" (parse-deftype* fctx form)
-                      ;; reify* (reify*-form form)
+                      
+                      "reify*" (let [m (or (parse-meta fctx (meta form))
+                                           (.empty-expr expr-factory))]
+                                 (defclass/parse-reify* this fctx m form))
                       "try" (parse-try-or-extract fctx form)
                       "throw" (parse-throw fctx form)
-                      ;; monitor-enter (monitor-form Opcode/MONITORENTER form)
-                      ;; monitor-exit (monitor-form Opcode/MONITOREXIT form)
-                      ;; catch is only special within `try-form`
-                      ;; finally is only special within `try-form`
+                      ;; "monitor-enter" (monitor-form Opcode/MONITORENTER form)
+                      ;; "monitor-exit" (monitor-form Opcode/MONITOREXIT form)
+                      ;; "catch" is only special within `try-form`
+                      ;; "finally" is only special within `try-form`
                       "new" (let [arg (syntax/second form)
                                   tp (interop/parse-type-symbol resolver arg)]
                               (new/parse-new this tp fctx form))
-                      ;; & is only special within arity signature
+                      ;; "&" is only special within arity signature
                       
                       ;; special forms that are not special in Clojure:
                       "definterface*" (parse-definterface* fctx form)

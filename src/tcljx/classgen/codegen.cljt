@@ -485,16 +485,39 @@
               parser' (-> (.with-expr-factory parser expr-factory')
                           (.with-bindings* (-> parser .resolver .globals))
                           (model/with-local-bindings fbnds))
-              spec (aget arity-specs i)
-              mspec (.apply parse-method-body parser' spec i)]
-          (insn/ensure-assignable (-> spec .at .return-type) (.x-body mspec))
+              aspec (aget arity-specs i)
+              mspec (.apply parse-method-body parser' aspec i)]
+          (insn/ensure-assignable (-> mspec .at .return-type) (.x-body mspec))
           (aset arity-methods i mspec)))
       
-      (let [dt (fngen/task-deftype* eph-ncl field-specs arity-methods
-                                    java-record? defrecord?)
-            class (EnvClass. dt (.segment method) cl-name methods')]
+      (let [class (-> (fngen/task-deftype* eph-ncl field-specs arity-methods
+                                           java-record? defrecord?)
+                      (EnvClass. (.segment method) cl-name methods'))]
         (.stage-task! method class)
-        (.ephemeral-class this eph-cl)))))
+        (.ephemeral-class this eph-cl))))
+  (class-name-for-reify [_]
+    (let [segm (.segment method)]
+      (ClassDesc/of (.pkg-name segm)
+                    (.pick-unique-name segm (.scope-name method) "reify"))))
+  (new-reify [this parser parse-method-body eph-ncl interfaces meta arity-specs]
+    (let [eph-cl (.defined-class eph-ncl)
+          cl-name (.getSimpleName eph-cl)
+          n-methods (alength arity-specs)
+          arity-methods (new MethodSpec/1 n-methods)
+          methods' (envgraph/mk-methods method cl-name n-methods 0)]
+      (dotimes [i n-methods]
+        (let [method' (aget methods' i)
+              expr-factory' (.with-method this method')
+              parser' (.with-expr-factory parser expr-factory')
+              aspec (aget arity-specs i)
+              mspec (.apply parse-method-body parser' aspec i)]
+          (insn/ensure-assignable (-> mspec .at .return-type) (.x-body mspec))
+          (aset arity-methods i mspec)))
+      
+      (let [reify (fngen/mk-reify* eph-ncl interfaces meta arity-methods)
+            class (EnvClass. reify (.segment method) cl-name methods')]
+        (.stage-task! method class)
+        (insn/mk-insn reify (.defined-class eph-ncl))))))
 
 (defn mk-factory ^ExprFactory [^EnvMethod segment]
   (InsnFactoryImpl. segment nil nil))

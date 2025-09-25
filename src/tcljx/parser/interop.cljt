@@ -183,11 +183,17 @@
                       (wrong/other method-name)))
                 (-> (str "no virtual " n "-parameter method matching ")
                     (wrong/other method-name))))
+            (unhinted-to-Object ^Class [^Class tp]
+              (or tp Object))
             (select-matching-method ^Method [^ArityType at]
-              (if-some [m (resolve/itf-method-exact owner mnm (.return-type at)
-                                                    (.parameter-types at))]
-                m
-                (wrong/other "no virtual method matching " method-name)))]
+              (let [rt (.return-type at) ;inferred if unhinted
+                    pts (new Class/1 n)]
+                (dotimes [i (alength pts)]
+                  (aset pts i (-> (aget (.parameter-types at) (inc i))
+                                  (unhinted-to-Object))))
+                (if-some [m (resolve/itf-method-exact owner mnm rt pts)]
+                  m
+                  (wrong/other "no virtual method matching " method-name))))]
       
       (when-not (untagged? (first paramv))
         (throw (syntax/info "no type tag allowed for receiver parameter")))

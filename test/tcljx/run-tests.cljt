@@ -62,7 +62,7 @@
     tcljx.classgen.itf-fn-test
     tcljx.classgen.deftype-test
     tcljx.classgen.record-test
-    #_tcljx.classgen.reify-test
+    tcljx.classgen.reify-test
     
     #_tcljx.classgen.namespace-test
     #_tcljx.classgen.variadic-test

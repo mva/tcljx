@@ -3,8 +3,9 @@
   (:import
    (tcljx.data.model FieldSpec)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
-   (java.lang.constant MethodTypeDesc MethodHandleDesc
-                       DirectMethodHandleDesc DirectMethodHandleDesc$Kind)
+   (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
+                       DirectMethodHandleDesc DirectMethodHandleDesc$Kind
+                       ConstantDescs)
    (java.util.function Consumer)))
 
 (defn load-parameter ^CodeBuilder [^CodeBuilder xb ^FieldSpec fs ^int param-no]
@@ -32,3 +33,26 @@
         (-> xb (get-field fs) (.return_ (TypeKind/from (.type-desc fs)))))
        (.withMethodBody cb (.field-name fs) (MethodTypeDesc/of (.type-desc fs))
                         (model/acc* public synthetic))))
+
+(defn mtd-of-fields ^MethodTypeDesc [^FieldSpec/1 fields]
+  (->> ^java.util.List (map FieldSpec/.type-desc fields)
+       (MethodTypeDesc/of ConstantDescs/CD_void)))
+(defn constructor
+  (^ClassBuilder [^ClassBuilder cb ^FieldSpec/1 fields ^ClassDesc super-class 
+                  ^int flags]
+   (constructor cb fields super-class flags (new ClassDesc/1 0)))
+  (^ClassBuilder [^ClassBuilder cb ^FieldSpec/1 fields ^ClassDesc super-class 
+                  ^int flags ^ClassDesc/1 super-params]
+   (let [mtd (-> fields (mtd-of-fields) (.insertParameterTypes 0 super-params))]
+     (->> (^Consumer fn ^void [^CodeBuilder xb]
+           (let [n (alength super-params)
+                 mtd-super (MethodTypeDesc/of ConstantDescs/CD_void super-params)]
+             (dotimes [i (alength fields)]
+               (put-field xb (aget fields i) (+ i n)))
+             (.aload xb (.receiverSlot xb))
+             (dotimes [i n]
+               (.loadLocal xb (TypeKind/from (aget super-params i))
+                           (.parameterSlot xb i)))
+             (.invokespecial xb super-class ConstantDescs/INIT_NAME mtd-super)
+             (.return_ xb)))
+          (.withMethodBody cb ConstantDescs/INIT_NAME mtd flags)))))

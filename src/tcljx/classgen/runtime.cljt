@@ -42,6 +42,7 @@
 (def mtd-dmh-method (MethodTypeDesc/of MethodHandleArray))
 (def name-factory-method "__create")
 (def name-with-meta-impl "__withMetaImpl")
+(def name-meta-method "meta")
 
 ;;; ------------------------------------------------------------------------
 

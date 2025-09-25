@@ -181,10 +181,6 @@
   (FieldSpec. (.owner spec) (.field-name spec) (.type-tag spec)
               (.flags spec) (.type-desc spec) type))
 
-(defn mtd-of-fields ^MethodTypeDesc [^FieldSpec/1 fields]
-  (->> ^java.util.List (map FieldSpec/.type-desc fields)
-       (MethodTypeDesc/of ConstantDescs/CD_void)))
-
 
 (def method-specs-primitive-fn nil) ;not invoked as a regular function
 (def method-specs-invoke-dynamic (new MethodSpec/1 0)) ;runtime invoke only
@@ -529,7 +525,11 @@
   (new-deftype ^Expr [^Parser parser ^ParseArityBody parse-method-body
                       ^NmspClass eph-ncl ^FieldSpec/1 field-specs
                       ^AritySpec/1 arity-specs
-                      ^boolean java-record? ^boolean defrecord?]))
+                      ^boolean java-record? ^boolean defrecord?])
+  (class-name-for-reify ^ClassDesc [])
+  (new-reify ^Expr [^Parser parser ^ParseArityBody parse-method-body
+                    ^NmspClass eph-ncl ^ClassDesc/1 interfaces
+                    ^CodeEmitter meta ^AritySpec/1 arity-specs]))
 
 (definterface Parser
   (parse-form ^Expr [^long fctx form])

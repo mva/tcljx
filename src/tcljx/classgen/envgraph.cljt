@@ -95,8 +95,10 @@
 
 (definterface IEnvSegment
   (stage-task! ^void [task])
-  (size-staged ^int []))
+  (size-staged ^int [])
+  (pick-unique-name ^String [^String opt-prefix ^String dflt-nm]))
 
+(def ^:private ZERO (object 0))
 (deftype EnvSegment [^ConcurrentHashMap private-name-map
                      ^ClassDesc segment-class
                      ^ArrayList tasks
@@ -107,7 +109,19 @@
   (stage-task! [_ task]
     (.add tasks task))
   (size-staged [_]
-    (.size tasks)))
+    (.size tasks))
+  
+  ;; Generates unique names for fn* and reify* instances within a
+  ;; given namespace.  In case of name clashes the result is not
+  ;; deterministic, unless all of the namespace's processing happens
+  ;; within a single thread.
+  (pick-unique-name [_ opt-prefix dflt-nm]
+    (let [nm (cond->> (cfg/munge-name dflt-nm)
+               (some? opt-prefix) (str opt-prefix "$"))
+          n ^int (.compute private-name-map nm
+                           (^BiFunction fn ^Integer [_ ^Integer v]
+                            (if (nil? v) ZERO (object (inc ^int v)))))]
+      (cond-> nm (pos? n) (str "^" n)))))
 
 (letfn [(segment-cld ^ClassDesc [^String pkg-name ^int segm-id]
           (ClassDesc/of pkg-name (str "_" segm-id)))]
@@ -122,18 +136,6 @@
 
 (defn capstone-class ^ClassDesc [^EnvSegment segm]
   (ClassDesc/of (.pkg-name segm) "___"))
-
-(def ^:private ZERO (object 0))
-
-;; Generates unique names for fn* and reify* instances within a given
-;; namespace.  In case of name clashes the result is not
-;; deterministic, unless all of the namespace's processing happens
-;; within a single thread.
-(defn- pick-unique-name ^String [^EnvSegment segm ^String dflt-nm]
-  (let [n ^int (.compute (.private-name-map segm) dflt-nm
-                         (^BiFunction fn ^Integer [_ ^Integer v]
-                          (if (nil? v) ZERO (object (inc ^int v)))))]
-    (cond-> dflt-nm (pos? n) (str "^" n))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -241,9 +243,8 @@
                (EnvMethod. method-index entity-id unique-nm parent (HashMap.)
                            scope-name-suffix (ArrayList.) (.segment parent))))]
      (let [parent-name (.scope-name parent)
-           nm-str (cond->> (cfg/munge-name scope-name-suffix)
-                    (some? parent-name) (str parent-name "$"))
-           unique-nm (pick-unique-name (.segment parent) nm-str)
+           unique-nm (.pick-unique-name (.segment parent) parent-name
+                                        scope-name-suffix)
            a (new EnvMethod/1 n)]
        (dotimes [i (alength a)]
          (aset a i (method unique-nm i)))
