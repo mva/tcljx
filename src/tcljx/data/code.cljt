@@ -1,0 +1,34 @@
+(ns tcljx.data.code
+  (:require (tcljx.data [model :as model]))
+  (:import
+   (tcljx.data.model FieldSpec)
+   (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
+   (java.lang.constant MethodTypeDesc MethodHandleDesc
+                       DirectMethodHandleDesc DirectMethodHandleDesc$Kind)
+   (java.util.function Consumer)))
+
+(defn load-parameter ^CodeBuilder [^CodeBuilder xb ^FieldSpec fs ^int param-no]
+  (.loadLocal xb (TypeKind/from (.type-desc fs)) (.parameterSlot xb param-no)))
+(defn put-field ^CodeBuilder [^CodeBuilder xb ^FieldSpec fs ^int param-no]
+  (-> (.aload xb (.receiverSlot xb))
+      (load-parameter fs param-no)
+      (.putfield (.owner fs) (.field-name fs) (.type-desc fs))))
+(defn get-field ^CodeBuilder [^CodeBuilder xb ^FieldSpec fs]
+  (-> (.aload xb (.receiverSlot xb))
+      (.getfield (.owner fs) (.field-name fs) (.type-desc fs))))
+
+(defn with-field ^ClassBuilder [^ClassBuilder cb ^FieldSpec fs]
+  (.withField cb (.field-name fs) (.type-desc fs) (.flags fs)))
+(defn with-field* ^ClassBuilder [^ClassBuilder cb ^FieldSpec/1 fields]
+  (dotimes [i (alength fields)]
+    (with-field cb (aget fields i)))
+  cb)
+
+(defn getter-mhd ^DirectMethodHandleDesc [^FieldSpec fs]
+  (MethodHandleDesc/ofField DirectMethodHandleDesc$Kind/GETTER
+                            (.owner fs) (.field-name fs) (.type-desc fs)))
+(defn with-getter ^ClassBuilder [^ClassBuilder cb ^FieldSpec fs]
+  (->> (^Consumer fn ^void [^CodeBuilder xb]
+        (-> xb (get-field fs) (.return_ (TypeKind/from (.type-desc fs)))))
+       (.withMethodBody cb (.field-name fs) (MethodTypeDesc/of (.type-desc fs))
+                        (model/acc* public synthetic))))

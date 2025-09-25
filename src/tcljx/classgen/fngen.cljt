@@ -1,7 +1,8 @@
 (ns tcljx.classgen.fngen
   (:require
    (tcljx.data [config :as cfg] [context :as context] [type :as type]
-               [reflect :as reflect] [resolve :as resolve] [model :as model])
+               [reflect :as reflect] [resolve :as resolve] [model :as model]
+               [code :as code])
    (tcljx.classgen [classfile :as classfile] [runtime :as runtime]
                    [emit :as emit] [runtime :as rt] [entity :as entity]
                    [insn :as insn] [condgen :as condgen] [envgraph :as envgraph])
@@ -100,10 +101,10 @@
 ;;; ------------------------------------------------------------------------
 
 (defn- factory-mtd-for ^MethodTypeDesc [^ClassDesc this-class ^Entity/1 ents]
-  (let [tps (new Class/1 (alength ents))]
-    (dotimes [i (alength tps)]
-      (aset tps i (.value-type (aget ents i))))
-    (MethodTypeDesc/of this-class (reflect/describe-class* tps))))
+  (let [tpds (new ClassDesc/1 (alength ents))]
+    (dotimes [i (alength tpds)]
+      (aset tpds i (.value-type-exact (aget ents i))))
+    (MethodTypeDesc/of this-class tpds)))
 
 (defn- load-origin-values ^CodeBuilder [^CodeBuilder xb ^Entity/1 aorigin]
   ;; FIXME... origin does not work when not provided by the parent method
@@ -216,50 +217,34 @@
 
 (def ^:private fn-virtual-class-flags (model/acc* public final))
 
-(defn- entity-getfield ^Entity [^ClassDesc owner ^String nm ^Class type]
-  (let [type-desc (reflect/describe-class type)]
-    (reify Entity
-      (emit-insn* [_ xb _ _]
-        (-> (.aload xb (.receiverSlot xb))
-            (.getfield owner nm type-desc))
-        type)
-      (value-type [_]
-        type)
-      (value-type-exact [_]
-        type-desc)
-      (entity-id [_]
-        -1))))
+(defn- entity-getfield ^Entity [^FieldSpec fs]
+  (reify Entity
+    (emit-insn* [_ xb _ _] (code/get-field xb fs) (.type fs))
+    (value-type [_] (.type fs))
+    (value-type-exact [_] (.type-desc fs))
+    (entity-id [_] -1)))
 (defn- entity-this ^Entity [^ClassDesc owner]
   (reify Entity
-    (emit-insn* [_ xb _ _]
-      (.aload xb (.receiverSlot xb))
-      tinyclj.lang.AFnMh)
-    (value-type [_]
-      tinyclj.lang.AFnMh)
-    (value-type-exact [_]
-      owner)
-    (entity-id [_]
-      -1)))
+    (emit-insn* [_ xb _ _] (.aload xb (.receiverSlot xb)) tinyclj.lang.AFnMh)
+    (value-type [_] tinyclj.lang.AFnMh)
+    (value-type-exact [_] owner)
+    (entity-id [_] -1)))
 
-(defn- field-type ^Class [^OriginProxyPairs construction-ops ^int i]
-  (.value-type (aget (.aorigin construction-ops) i)))
-(defn- field-type-desc ^ClassDesc [^OriginProxyPairs construction-ops ^int i]
-  (reflect/describe-class (field-type construction-ops i)))
-(defn- munged-field-names ^String/1 [^OriginProxyPairs construction-ops]
-  (let [aproxy (.aproxy construction-ops)
-        a (new String/1 (alength aproxy))]
+(defn- env-fields-exact ^FieldSpec/1 [^ClassDesc owner
+                                      ^OriginProxyPairs construction-ops]
+  (let [aorigin (.aorigin construction-ops),  aproxy (.aproxy construction-ops)
+        a (new FieldSpec/1 (alength aproxy))]
     (dotimes [i (alength a)]
-      (aset a i (cfg/munge-name (.local-name (aget aproxy i)))))
+      (let [origin (aget aorigin i), proxy (aget aproxy i)]
+        (aset a i (FieldSpec. owner (cfg/munge-name (.local-name proxy))
+                              nil (model/acc* private final)
+                              (.value-type-exact origin)
+                              (.value-type origin)))))
     a))
-(defn- field-getters ^HashMap [^ClassDesc owner
-                               ^OriginProxyPairs construction-ops]
-  (let [aorigin (.aorigin construction-ops)
-        aproxy (.aproxy construction-ops)
-        acc (HashMap.)]
-    (dotimes [i (alength aorigin)]
-      (let [origin (aget aorigin i)]
-        (.put acc origin (entity-getfield owner (.local-name (aget aproxy i))
-                                          (.value-type origin)))))
+(defn- field-entity-map ^HashMap [^Entity/1 aorigin ^FieldSpec/1 fields]
+  (let [acc (HashMap.)]
+    (dotimes [i (alength fields)]
+      (.put acc (aget aorigin i) (entity-getfield (aget fields i))))
     acc))
 
 (defn- set-virtual-mhd! ^void [^DirectMethodHandleDesc/1 mhds
@@ -319,16 +304,14 @@
                                        ^DirectMethodHandleDesc/1 mhds
                                        ^ClassDesc this-class ^String this-name
                                        ^MethodTypeDesc factory-mtd
-                                       ^String/1 afield-mnm
+                                       ^FieldSpec/1 fields
                                        ^HashMap origin-to-load
                                        ^EnvMethod/1 ems]
     (let [constr-mtd (-> factory-mtd
                          (.insertParameterTypes 0 runtime/map)
                          (.changeReturnType ConstantDescs/CD_void))]
       ;; virtual fields holding the closed over environment
-      (dotimes [i (alength afield-mnm)]
-        (.withField cb (aget afield-mnm i) (.parameterType factory-mtd i)
-                    (model/acc* private final)))
+      (code/with-field* cb fields)
       ;; virtual methods implementing the function arities
       (let [source-order (source-order-idxs specs)]
         (dotimes [j (alength specs)]
@@ -363,11 +346,7 @@
       ;; private constructor <init>
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (dotimes [i (dec (.parameterCount constr-mtd))]
-              (-> (.aload xb (.receiverSlot xb))
-                  (.loadLocal (TypeKind/from (.parameterType constr-mtd (inc i)))
-                              (.parameterSlot xb (inc i)))
-                  (.putfield this-class (aget afield-mnm i)
-                             (.parameterType constr-mtd (inc i)))))
+              (code/put-field xb (aget fields i) (inc i)))
             (-> (.aload xb (.receiverSlot xb))
                 (.aload (.parameterSlot xb 0))
                 (.invokespecial runtime/AFn ConstantDescs/INIT_NAME
@@ -394,11 +373,8 @@
             (-> (.new_ xb this-class)
                 (.dup)
                 (.aload (.parameterSlot xb 0)))
-            ;; FIXME... use field entities' emit method
-            (dotimes [i (alength afield-mnm)]
-              (-> (.aload xb (.receiverSlot xb))
-                  (.getfield this-class (aget afield-mnm i)
-                             (.parameterType constr-mtd (inc i)))))
+            (dotimes [i (alength fields)]
+              (code/get-field xb (aget fields i)))
             (-> (.invokespecial xb this-class ConstantDescs/INIT_NAME
                                 constr-mtd)
                 (.areturn)))
@@ -421,20 +397,20 @@
     (set-virtual-mhd! mhds this-class method-specs)
     
     (->> (^Consumer fn ^void [^ClassBuilder cb]
-          (let [factory-mtd (-> this-class
-                                (factory-mtd-for (.aorigin construction-ops)))
-                constr-mtd (-> factory-mtd
-                               (.insertParameterTypes 0 runtime/map)
+          (let [factory-mtd (factory-mtd-for this-class
+                                             (.aorigin construction-ops))
+                constr-mtd (-> (.insertParameterTypes factory-mtd 0 runtime/map)
                                (.changeReturnType ConstantDescs/CD_void))
-                origin-to-load (doto (field-getters this-class construction-ops)
-                                 (.put fn-proxy (entity-this this-class)))
-                afield-mnm (munged-field-names construction-ops)]
+                fields (env-fields-exact this-class construction-ops)
+                origin-to-load (-> (.aorigin construction-ops)
+                                   (field-entity-map fields)
+                                   (doto (.put fn-proxy (entity-this this-class))))]
             (-> (cfg/with-class-version cb)
                 (.withFlags fn-virtual-class-flags)
                 (.withSuperclass super-class)
                 (class-elements-virtual method-specs mhds
                                         this-class (.class-name class)
-                                        factory-mtd afield-mnm
+                                        factory-mtd fields
                                         origin-to-load (.methods class)))))
          (model/mk-nmsp-class this-class super-class)
          (envgraph/add-class-file acc))))
@@ -619,9 +595,8 @@
           (into {"toString" runtime/mtd-String-void
                  "hashCode" runtime/mtd-int-void
                  "equals" runtime/mtd-boolean-Object}
-                (map (fn ^vector [^FieldSpec spec]
-                       [(.field-name spec)
-                        (MethodTypeDesc/of (.type-desc spec))]))
+                (map (fn ^vector [^FieldSpec fs]
+                       [(.field-name fs) (MethodTypeDesc/of (.type-desc fs))]))
                 field-specs)
           method-specs))
 
@@ -629,15 +604,15 @@
                             ^ClassDesc this-class ^String nm
                             ^MethodTypeDesc mtd]
   (->> (^Consumer fn ^void [^CodeBuilder xb]
-        (let [cp (.constantPool xb)
-              t (.insertParameterTypes mtd 0 this-class)
-              n+t (.nameAndTypeEntry cp nm t)]
-          (.aload xb (.receiverSlot xb))
-          (dotimes [i (.parameterCount mtd)]
-            (.loadLocal xb (TypeKind/from (.parameterType mtd i))
-                        (.parameterSlot xb i)))
-          (-> (.invokedynamic xb (.invokeDynamicEntry cp bsm-entry n+t))
-              (.return_ (TypeKind/from (.returnType mtd))))))
+        (.aload xb (.receiverSlot xb))
+        (dotimes [i (.parameterCount mtd)]
+          (.loadLocal xb (TypeKind/from (.parameterType mtd i))
+                      (.parameterSlot xb i)))
+        (-> (.invokedynamic xb (let [cp (.constantPool xb)]
+                                 (->> (.insertParameterTypes mtd 0 this-class)
+                                      (.nameAndTypeEntry cp nm)
+                                      (.invokeDynamicEntry cp bsm-entry))))
+            (.return_ (TypeKind/from (.returnType mtd)))))
        (.withMethodBody cb nm mtd (model/acc* public synthetic))))
 
 (defn- record-methods ^void [^ClassBuilder cb ^ClassDesc this-class
@@ -647,26 +622,16 @@
         cp (.constantPool cb)
         fnames (->> (map FieldSpec/.field-name field-specs)
                     (str/join ";"))
-        field-getter-mhd (fn ^DirectMethodHandleDesc [^FieldSpec spec]
-                           (MethodHandleDesc/ofField
-                            DirectMethodHandleDesc$Kind/GETTER
-                            this-class (.field-name spec)
-                            (.type-desc spec)))
         bsm-entry (.bsmEntry cp runtime/bsm-object-method
-                             ^List (->> (map field-getter-mhd field-specs)
+                             ^List (->> (map code/getter-mhd field-specs)
                                         (list* this-class fnames)))]
     (doseq [nm ["toString" "hashCode" "equals"]]
       (when-some [mtd (get missing nm)]
         (object-method cb bsm-entry this-class nm mtd)))
     
-    (dotimes [i (alength field-specs)]
-      (let [spec (aget field-specs i), nm (.field-name spec)]
-        (when-some [mtd (get missing nm)]
-          (->> (^Consumer fn ^void [^CodeBuilder xb]
-                (-> (.aload xb (.receiverSlot xb))
-                    (.getfield this-class nm (.type-desc spec))
-                    (.return_ (TypeKind/from (.type-desc spec)))))
-               (.withMethodBody cb nm mtd (model/acc* public synthetic))))))))
+    (doseq [^FieldSpec spec field-specs
+            :when (contains? missing (.field-name spec))]
+      (code/with-getter cb spec))))
 
 (deftype DefType [^NmspClass eph-ncl ^FieldSpec/1 field-specs
                   ^MethodSpec/1 method-specs

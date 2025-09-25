@@ -1,15 +1,15 @@
 (ns tcljx.parser.defclass
   (:require
    (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
-               [context :as context] [reflect :as reflect] [model :as model])
+               [context :as context] [reflect :as reflect] [model :as model]
+               [code :as code])
    (tcljx.parser [syntax :as syntax] [interop :as interop] [parse :as parse]
                  [loop :as loop] [fn :as fn]))
   (:import
    (tcljx.data.model Expr ArityType AritySpec MethodSpec FieldSpec NmspClass
                      Parser ParseArityBody Resolver ExprFactory)
    (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
-   (java.lang.classfile ClassFile ClassBuilder MethodBuilder CodeBuilder
-                        TypeKind)
+   (java.lang.classfile ClassFile ClassBuilder MethodBuilder CodeBuilder)
    (java.lang.classfile.attribute RecordAttribute RecordComponentInfo)
    (java.util List)
    (java.util.function Consumer)))
@@ -148,15 +148,12 @@
             (reflect/describe-class* (into-array Class interfaces))
             (identical? java.lang.Record super))))
 
-(defn- constructor ^ClassBuilder [^ClassBuilder cb ^ClassDesc this-class
-                                  ^FieldSpec/1 fields ^ClassDesc super-class]
+(defn- constructor ^ClassBuilder [^ClassBuilder cb ^FieldSpec/1 fields
+                                  ^ClassDesc super-class]
   (let [mtd (model/mtd-of-fields fields)]
     (->> (^Consumer fn ^void [^CodeBuilder xb]
           (dotimes [i (alength fields)]
-            (let [spec (aget fields i), tk (TypeKind/from (.type-desc spec))]
-              (-> (.aload xb (.receiverSlot xb))
-                  (.loadLocal tk (.parameterSlot xb i))
-                  (.putfield this-class (.field-name spec) (.type-desc spec)))))
+            (code/put-field xb (aget fields i) i))
           (-> (.aload xb (.receiverSlot xb))
               (.invokespecial super-class ConstantDescs/INIT_NAME
                               ConstantDescs/MTD_void)
@@ -169,13 +166,12 @@
     (->> (^Consumer fn ^void [^CodeBuilder xb]
           (.aload xb (.receiverSlot xb))
           (dotimes [i (- (alength fields) n)]
-            (let [tk (TypeKind/from (.type-desc (aget fields i)))]
-              (.loadLocal xb tk (.parameterSlot xb i))))
+            (code/load-parameter xb (aget fields i) i))
           (cond-> xb
             (>= n 4) (-> (.aconst_null) (.aconst_null))
-            (>= n 2) (-> (.iconst_0) (.iconst_0))
-            true (.invokespecial this-class ConstantDescs/INIT_NAME mtd-0)
-            true (.return_)))
+            (>= n 2) (-> (.iconst_0) (.iconst_0)))
+          (-> (.invokespecial xb this-class ConstantDescs/INIT_NAME mtd-0)
+              (.return_)))
          (.withMethodBody cb ConstantDescs/INIT_NAME
                           (.dropParameterTypes mtd-0 (- (alength fields) n)
                                                (alength fields))
@@ -197,8 +193,8 @@
   #{"clone" "finalize" "getClass" "hashCode" "notify" "notifyAll"
     "toString" "wait"})
 
-(defn- parse-fields ^FieldSpec/1 [^Resolver rsv ^boolean java-record?
-                                  ^vector fieldv]
+(defn- parse-fields ^FieldSpec/1 [^Resolver rsv ^ClassDesc owner
+                                  ^boolean java-record? ^vector fieldv]
   (letfn [(parse-field ^FieldSpec [form]
             (let [sym (syntax/simple-symbol form)
                   tag (interop/tag-of sym)
@@ -217,7 +213,7 @@
                 (when (contains? prohibited-record-fields nm)
                   (wrong/other (str "java.lang.Record cannot declare field with name "
                                     "of no-arg Object method " (wrong/q (symbol nm))))))
-              (FieldSpec. nm tag flags tpd nil)))]
+              (FieldSpec. owner nm tag flags tpd nil)))]
     (let [a (new FieldSpec/1 (count fieldv))]
       (dotimes [i (alength a)]
         (aset a i (parse-field (nth fieldv i))))
@@ -250,7 +246,7 @@
           supers (->> (:implements opts)
                       (mapv #(interop/resolve-class rsv %)) ;eager
                       (supers-of))
-          fields (parse-fields rsv (.java-record? supers) fieldv)
+          fields (parse-fields rsv this-class (.java-record? supers) fieldv)
           defrecord? (defrecord-tail? fields)
           cbh-0 (^Consumer fn ^void [^ClassBuilder cb]
                  (-> (cfg/with-class-version cb)
@@ -261,19 +257,15 @@
                                    (bit-xor (model/acc* final abstract)))))
                  (when (.java-record? supers)
                    (record-attribute cb fields))
-                 (doseq [^FieldSpec spec fields]
-                   (.withField cb (.field-name spec) (.type-desc spec)
-                               (.flags spec)))
-                 (constructor cb this-class fields (.super-class supers))
+                 (code/with-field* cb fields)
+                 (constructor cb fields (.super-class supers))
                  (when defrecord?
                    (constructor-n cb this-class fields 4)
                    (constructor-n cb this-class fields 2)))
           cbh-1 (^Consumer fn ^void [^ClassBuilder cb]
                  (when (.java-record? supers)
                    (doseq [^FieldSpec spec fields]
-                     (with-abstract-method cb
-                       (.field-name spec) (MethodTypeDesc/of (.type-desc spec))
-                       (model/acc* public abstract synthetic)))))
+                     (code/with-getter cb spec))))
           bs (.build (ClassFile/of) this-class (.andThen cbh-0 cbh-1))
           eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)]
       

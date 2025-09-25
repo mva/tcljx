@@ -175,11 +175,11 @@
                      ^Entity/1 parameters ^int source-idx
                      ^String method-name]) ;for deftype*
 
-(deftype FieldSpec [^String field-name ^symbol type-tag ^int flags
-                    ^ClassDesc type-desc ^Class type])
+(deftype FieldSpec [^ClassDesc owner ^String field-name ^symbol type-tag
+                    ^int flags ^ClassDesc type-desc ^Class type])
 (defn with-field-type ^FieldSpec [^FieldSpec spec ^Class type]
-  (FieldSpec. (.field-name spec) (.type-tag spec) (.flags spec)
-              (.type-desc spec) type))
+  (FieldSpec. (.owner spec) (.field-name spec) (.type-tag spec)
+              (.flags spec) (.type-desc spec) type))
 
 (defn mtd-of-fields ^MethodTypeDesc [^FieldSpec/1 fields]
   (->> ^java.util.List (map FieldSpec/.type-desc fields)

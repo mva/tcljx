@@ -121,6 +121,7 @@
   (defn adapt-stack ^void [^CodeBuilder xb ^long consumer-fctx
                            ^Class consumed-type ^Class on-stack-type]
     ;; pre: (some? on-stack-type)
+    #_(prn :skip-adapt (identical? on-stack-type consumed-type)) ;FIXME... 16%?
     (when-not (identical? on-stack-type consumed-type)
       (cond
         (identical? Void/TYPE consumed-type)
