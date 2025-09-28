@@ -101,15 +101,15 @@
   (letfn [(no-tag? ^boolean [x]
             (not (contains? (meta x) :tag)))]
     ['(ns pkg.ns0)
-     (list 'fn* 'fnbody (cond-> params
-                          (no-tag? params)
-                          (vary-meta assoc :tag meta/auto-return-type))
+     (list 'fn* #_unnamed (cond-> params
+                            (no-tag? params)
+                            (vary-meta assoc :tag meta/auto-return-type))
            ;; note: some forms must be wrapped in (do nil ...) to
            ;; prevent them from disappearing
            form)]))
 
 (defn method-name [params]
-  (str "fnbody~" (count params)))
+  (str "fn~" (count params)))
 
 (defn fn-method-body [params form]
   (letfn [(matches-class? [internal-name]

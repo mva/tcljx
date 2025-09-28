@@ -52,8 +52,9 @@
                               (.body spec) (.error-context spec)))
     specs))
 
-(defn- arity-specs-of ^AritySpec/1 [^Parser parser ^long fctx ^seq form
-                                    ^Class or-else-type ^seq more]
+(defn- arity-specs-of ^AritySpec/1 [^Resolver rsv ^long fctx ^seq form
+                                    ^Class or-else-type ^boolean unnamed-fn?
+                                    ^seq more]
   (letfn [(max-parameter-count ^int [^AritySpec/1 specs]
             (loop [n 0, i (dec (alength specs))]
               (if (neg? i)
@@ -62,8 +63,7 @@
                        (dec i)))))
           (arity-spec-of ^AritySpec [paramv ^seq body ^seq error-context]
             (context/with-line-from-list [fctx error-context]
-              (-> (interop/parse-arity-type (.resolver parser) paramv
-                                            or-else-type)
+              (-> (interop/parse-arity-type rsv paramv or-else-type unnamed-fn?)
                   (AritySpec. body error-context))))
           
           (specs-1 ^AritySpec/1 [paramv ^seq body ^seq error-context]
@@ -121,11 +121,14 @@
 
 (defn parse-fn* ^Expr [^Parser parser ^long fctx ^seq form]
   (letfn [(new-fn ^Expr [^symbol fn-nm ^Class itf-class ^seq more]
-            (let [pab (mk-parse-arity-body fctx false)]
+            (let [rsv (.resolver parser)
+                  pab (mk-parse-arity-body fctx false)]
               (if (nil? itf-class)
-                (.new-function (.expr-factory parser) parser pab fn-nm
-                               (arity-specs-of parser fctx form Object more))
-                (let [specs (arity-specs-of parser fctx form nil more)
+                (let [specs (arity-specs-of rsv fctx form Object
+                                            (nil? fn-nm) more)] 
+                  (.new-function (.expr-factory parser) parser pab fn-nm
+                                 specs))
+                (let [specs (arity-specs-of rsv fctx form nil true more)
                       m (itf-method specs itf-class)]
                   (.new-itf-fn (.expr-factory parser) parser pab itf-class
                                (reflect/mhd-of-method itf-class m)

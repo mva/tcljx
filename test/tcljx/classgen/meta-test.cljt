@@ -81,14 +81,14 @@
                    [[STATIC . "add2~2" "(II)I"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "mk-add1~1" "(I)Ltinyclj/lang/AFnMh;")
+            [(METHOD [PUBLIC STATIC FINAL] "fn~1" "(I)Ltinyclj/lang/AFnMh;")
              ["LOCAL 0: int a"]
              (ILOAD_0)
-             (INVOKESTATIC mk-add1$add1 "__create" "(I)Lpkg/ns0/mk-add1$add1;")
+             (INVOKESTATIC fn$add1 "__create" "(I)Lpkg/ns0/fn$add1;")
              (ARETURN)]
             [(METHOD [PUBLIC STATIC FINAL] "mk-add1" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-                   [[STATIC . "mk-add1~1" "(I)Ltinyclj/lang/AFnMh;"]]])
+                   [[STATIC . "fn~1" "(I)Ltinyclj/lang/AFnMh;"]]])
              (ARETURN)]
             
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
@@ -102,7 +102,7 @@
              (PUTSTATIC . "sfn" "Lclojure/lang/IPersistentMap;")
              
              (ICONST_1)
-             (INVOKESTATIC . "mk-add1~1" "(I)Ltinyclj/lang/AFnMh;")
+             (INVOKESTATIC . "fn~1" "(I)Ltinyclj/lang/AFnMh;")
              (ACONST_NULL)
              (INVOKEVIRTUAL AFnMh "withMeta" "(Lclojure/lang/IPersistentMap;)Lclojure/lang/IObj;")
              (INVOKEINTERFACE IObj "meta" "()Lclojure/lang/IPersistentMap;" :itf)
@@ -115,11 +115,11 @@
              (LDC "tinyclj.core")
              (ARETURN)]]
            
-           [(CLASS Vx [PUBLIC FINAL] "pkg/ns0/mk-add1$add1" nil "tinyclj/lang/AFnMh")
+           [(CLASS Vx [PUBLIC FINAL] "pkg/ns0/fn$add1" nil "tinyclj/lang/AFnMh")
             [(FIELD [PRIVATE FINAL] "a" "I")]
             
             [(METHOD [PUBLIC FINAL] "fn1" "(I)I")
-             ["LOCAL 0: mk-add1$add1 add1"]
+             ["LOCAL 0: fn$add1 add1"]
              ["LOCAL 1: int b"]
              (ALOAD_0)
              (GETFIELD . "a" "I")
@@ -129,7 +129,7 @@
             
             [(METHOD [PUBLIC FINAL SYNTHETIC] "__arityOrNull"
                      "(I)Ljava/lang/invoke/MethodHandle;")
-             #_["LOCAL 0: mk-add1$add1 __this"]
+             #_["LOCAL 0: fn$add1 __this"]
              #_["LOCAL 1: int n"]
              (ILOAD_1)
              (ICONST_1)
@@ -142,7 +142,7 @@
             
             [(METHOD [PUBLIC FINAL SYNTHETIC] "__directMethodHandles"
                      "()[Ljava/lang/invoke/MethodHandle;")
-             #_["LOCAL 0: mk-add1$add1 __this"]
+             #_["LOCAL 0: fn$add1 __this"]
              (ICONST_1)
              (ANEWARRAY "MethodHandle[]")
              (DUP)
@@ -165,19 +165,19 @@
              (RETURN)]
             
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "__create"
-                     "(I)Lpkg/ns0/mk-add1$add1;")
+                     "(I)Lpkg/ns0/fn$add1;")
              #_["LOCAL 0: int a"]
-             (NEW mk-add1$add1) (DUP)
+             (NEW fn$add1) (DUP)
              (ACONST_NULL)
              (ILOAD_0)
              (INVOKESPECIAL . "<init>" "(Lclojure/lang/IPersistentMap;I)V")
              (ARETURN)]
             
             [(METHOD [PROTECTED FINAL SYNTHETIC] "__withMetaImpl"
-                     "(Lclojure/lang/IPersistentMap;)Lpkg/ns0/mk-add1$add1;")
-             #_["LOCAL 0: mk-add1$add1 __this"]
+                     "(Lclojure/lang/IPersistentMap;)Lpkg/ns0/fn$add1;")
+             #_["LOCAL 0: fn$add1 __this"]
              #_["LOCAL 1: IPersistentMap __meta"]
-             (NEW mk-add1$add1) (DUP)
+             (NEW fn$add1) (DUP)
              (ALOAD_1)
              (ALOAD_0)
              (GETFIELD . "a" "I")
@@ -186,7 +186,7 @@
          (nmsp '[(ns pkg.ns0)
                  (def add2 (fn* add2 ^int [^int a ^int b]
                                 (+ a b)))
-                 (def mk-add1 (fn* mk-add1 ^auto-return-type [^int a]
+                 (def mk-add1 (fn* ^__auto-return-type__ [^int a]
                                    (fn* add1 ^int [^int b]
                                         (+ a b))))
                  ;; meta on StaticFn

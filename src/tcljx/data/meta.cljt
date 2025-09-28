@@ -1,7 +1,7 @@
 (ns tcljx.data.meta
   (:import (clojure.lang IMeta)))
 
-(def auto-return-type 'auto-return-type) ;FIXME... prefix with double underscore?
+(def auto-return-type '__auto-return-type__)
 
 (defn get-line ^Integer [^map form-meta] ;nil if no line number present
   (when (some? form-meta)

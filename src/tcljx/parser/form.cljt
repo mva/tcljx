@@ -195,9 +195,9 @@
             (parse-try-or-extract ^Expr [^long fctx ^seq form]
               (if (context/can-inline-tcf? fctx)
                 (trycatch/parse-try this fctx form)
-                ;; FIXME... must not clobber name `try` here!
-                (->> (list (list 'fn* 'try (with-meta [] {:tag 'auto-return-type})
-                                 form))
+                (->> (list 'fn* (with-meta [] {:tag meta/auto-return-type})
+                           form)
+                     (list)
                      (.parse-form this fctx))))
             (parse-definterface* ^Expr [^long fctx ^seq form]
               (defclass/parse-definterface* resolver expr-factory fctx form))

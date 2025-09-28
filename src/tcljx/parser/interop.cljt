@@ -135,33 +135,6 @@
 
 ;;; ------------------------------------------------------------------------
 
-;;; If `paramv` is tagged with `auto-return-type`, then the arity's
-;;; return type is set to the temporary `auto-return-marker`.
-(defn parse-arity-type
-  (^ArityType [^Resolver rsv paramv]
-   (parse-arity-type rsv paramv Object))
-  (^ArityType [^Resolver rsv paramv ^Class or-else-type]
-   (let [paramv (syntax/vector paramv)
-         n (count paramv)
-         ptypes (new Class/1 n)
-         pnames (new String/1 n)
-         varargs? false]                ;FIXME...
-     (assert (not= '& (nth paramv (- n 2) nil)))
-     (dotimes [i (alength ptypes)]
-       (let [param (nth paramv i)
-             psym (syntax/simple-symbol param)]
-         (aset ptypes i (resolve-tag rsv psym or-else-type))
-         (aset pnames i (name psym))))
-     (let [return-tag (tag-of paramv)]
-       (-> (if (= meta/auto-return-type return-tag)
-             type/auto-return-marker
-             (resolve-class rsv return-tag or-else-type))
-           (ArityType. ptypes pnames varargs?)))))
-  (^ArityType [^Resolver rsv ^long fctx paramv ^Class or-else-type
-               ^seq error-context]
-   (context/with-line-from-list [fctx error-context]
-     (parse-arity-type rsv paramv or-else-type))))
-
 (defn unhinted-arity-type? ^boolean [^ArityType at ^int start]
   (and (nil? (.return-type at))
        (let [a (.parameter-types at)]
@@ -170,34 +143,65 @@
                  (some? (aget a i)) false
                  :else (recur (dec i)))))))
 
-(defn parse-method-type ^ArityType [^Resolver rsv ^Class owner
-                                    ^symbol method-name paramv]
-  (let [at (parse-arity-type rsv paramv nil)
-        mnm (name method-name)
-        n (dec (.parameter-count at))]
-    (letfn [(select-method-by-arity ^Method [^ArityType at]
-              (if-some [ms (seq (resolve/itf-methods-with-name owner mnm n))]
-                (if (nil? (next ms))
-                  (first ms)
-                  (-> (str "multiple virtual " n "-parameter methods matching ")
-                      (wrong/other method-name)))
-                (-> (str "no virtual " n "-parameter method matching ")
-                    (wrong/other method-name))))
-            (unhinted-to-Object ^Class [^Class tp]
-              (or tp Object))
-            (select-matching-method ^Method [^ArityType at]
-              (let [rt (.return-type at) ;inferred if unhinted
-                    pts (new Class/1 n)]
-                (dotimes [i (alength pts)]
-                  (aset pts i (-> (aget (.parameter-types at) (inc i))
-                                  (unhinted-to-Object))))
-                (if-some [m (resolve/itf-method-exact owner mnm rt pts)]
-                  m
-                  (wrong/other "no virtual method matching " method-name))))]
-      
-      (when-not (untagged? (first paramv))
-        (throw (syntax/info "no type tag allowed for receiver parameter")))
-      (aset (.parameter-types at) 0 owner) ;type of receiver
-      (model/with-method-type at (if (unhinted-arity-type? at 1)
-                                   (select-method-by-arity at)
-                                   (select-matching-method at))))))
+(letfn [(parse-return ^Class [^Resolver rsv ^vector paramv
+                              ^Class or-else-type ^boolean accept-art?]
+          (let [return-tag (tag-of paramv)]
+            (if (= meta/auto-return-type return-tag)
+              (if accept-art?
+                type/auto-return-marker
+                (throw (syntax/info (str (wrong/q meta/auto-return-type)
+                                         " not applicable in this context"))))
+              (resolve-class rsv return-tag or-else-type))))
+        (parse-parameters ^ArityType [^Class return-type ^Resolver rsv
+                                      ^vector paramv ^Class or-else-type]
+          (let [n (count paramv)
+                ptypes (new Class/1 n)
+                pnames (new String/1 n)
+                varargs? false]         ;FIXME...
+            (assert (not= '& (nth paramv (- n 2) nil)))
+            (dotimes [i (alength ptypes)]
+              (let [param (nth paramv i)
+                    psym (syntax/simple-symbol param)]
+                (aset ptypes i (resolve-tag rsv psym or-else-type))
+                (aset pnames i (name psym))))
+            (ArityType. return-type ptypes pnames varargs?)))]
+  
+  (defn parse-arity-type ^ArityType [^Resolver rsv paramv ^Class or-else-type
+                                     ^boolean unnamed-fn?]
+    (let [paramv (syntax/vector paramv)]
+      (-> (parse-return rsv paramv or-else-type unnamed-fn?)
+          (parse-parameters rsv paramv or-else-type))))
+
+  (defn parse-method-type ^ArityType [^Resolver rsv ^Class owner
+                                      ^symbol method-name paramv]
+    (let [paramv (syntax/vector paramv)
+          at (-> (parse-return rsv paramv nil false)
+                 (parse-parameters rsv paramv nil))
+          mnm (name method-name)
+          n (dec (.parameter-count at))]
+      (letfn [(select-method-by-arity ^Method [^ArityType at]
+                (if-some [ms (seq (resolve/itf-methods-with-name owner mnm n))]
+                  (if (nil? (next ms))
+                    (first ms)
+                    (-> (str "multiple virtual " n "-parameter methods matching ")
+                        (wrong/other method-name)))
+                  (-> (str "no virtual " n "-parameter method matching ")
+                      (wrong/other method-name))))
+              (unhinted-to-Object ^Class [^Class tp]
+                (or tp Object))
+              (select-matching-method ^Method [^ArityType at]
+                (let [rt (.return-type at) ;inferred if unhinted
+                      pts (new Class/1 n)]
+                  (dotimes [i (alength pts)]
+                    (aset pts i (-> (aget (.parameter-types at) (inc i))
+                                    (unhinted-to-Object))))
+                  (if-some [m (resolve/itf-method-exact owner mnm rt pts)]
+                    m
+                    (wrong/other "no virtual method matching " method-name))))]
+        
+        (when-not (untagged? (first paramv))
+          (throw (syntax/info "no type tag allowed for receiver parameter")))
+        (aset (.parameter-types at) 0 owner) ;type of receiver
+        (model/with-method-type at (if (unhinted-arity-type? at 1)
+                                     (select-method-by-arity at)
+                                     (select-matching-method at)))))))
