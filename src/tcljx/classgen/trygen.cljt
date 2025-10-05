@@ -1,10 +1,10 @@
 (ns tcljx.classgen.trygen
   (:require
    (tcljx.data [type :as type] [wrong :as wrong] [reflect :as reflect]
-               [model :as model])
+               [ir :as ir])
    (tcljx.classgen [emit :as emit] [insn :as insn]))
   (:import
-   (tcljx.data.model CodeEmitter)
+   (tcljx.data.ir CodeEmitter)
    (java.lang.classfile CodeBuilder Label)))
 
 (defn emit-b+cs? ^boolean [^CodeEmitter/1 body+catch-ces ^Class/1 catch-types

@@ -1,27 +1,28 @@
 (ns tcljx.parser.let
   (:require
-   (tcljx.data [wrong :as wrong] [model :as model])
+   (tcljx.data [wrong :as wrong] [ir :as ir])
    (tcljx.parser [syntax :as syntax] [parse :as parse] [interop :as interop]))
   (:import
-   (tcljx.data.model Expr ExprFactory Binding Entity Parser)))
+   (tcljx.data.ir Expr ExprFactory EntityFactory Binding Entity Parser)))
 
-(letfn [(binding-for-entity ^Binding [^ExprFactory expr-factory ^long fctx
-                                      ^String name ^Entity ent ^Object ent-form]
-          (if (model/alias-when-let-value? ent)
-            (.binding-alias expr-factory fctx name ent)
-            (let [x (.value-of expr-factory ent ent-form)]
-              (.binding-fresh expr-factory fctx nil name x))))
+(defn binding-for-entity ^Binding [^EntityFactory entity-factory ^long fctx
+                                   ^String name ^Entity ent ^Object ent-form]
+  (if (ir/alias-when-let-value? ent)
+    (.binding-alias entity-factory fctx name ent)
+    (let [x (.value-of entity-factory ent ent-form)]
+      (.binding-fresh entity-factory fctx nil name x))))
 
-        (binding-for-init ^Binding [^ExprFactory expr-factory ^long fctx
+(letfn [(binding-for-init ^Binding [^EntityFactory entity-factory ^long fctx
                                     ^Class opt-type ^String name ^Expr init]
-          (if (and (nil? opt-type) (model/alias-when-let-value? (.emitter init)))
-            (.binding-alias expr-factory fctx name (.emitter init))
-            (.binding-fresh expr-factory fctx opt-type name init)))]
+          (if (and (nil? opt-type) (ir/alias-when-let-value? (.emitter init)))
+            (.binding-alias entity-factory fctx name (.emitter init))
+            (.binding-fresh entity-factory fctx opt-type name init)))]
 
   (defn parse-let* ^Expr [^Parser parser ^long fctx [_ bindings & body :as form]]
     (let [bindings (syntax/vector bindings true)
           n (quot (count bindings) 2)
-          ef (.expr-factory parser)
+          xf (.expr-factory parser)
+          etf (.entity-factory parser)
           bnds (new Binding/1 n)]
       (loop [parser parser, i 0]
         (if (< i n)
@@ -33,9 +34,9 @@
                       (or (parse/lookup parser init)
                           (interop/lookup-class-entity parser init)))
                 bnd (if (some? ent)
-                      (binding-for-entity ef fctx nm ent init)
-                      (binding-for-init ef fctx opt-type nm
+                      (binding-for-entity etf fctx nm ent init)
+                      (binding-for-init etf fctx opt-type nm
                                         (parse/arg parser fctx init)))]
             (aset bnds i bnd)
-            (recur (model/with-local-binding parser bnd) (inc i)))
-          (.block-bindings ef fctx bnds (parse/progn parser fctx body) false))))))
+            (recur (ir/with-local-binding parser bnd) (inc i)))
+          (.block-bindings xf fctx bnds false (parse/progn parser fctx body)))))))

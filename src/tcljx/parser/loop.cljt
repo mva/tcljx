@@ -1,20 +1,13 @@
 (ns tcljx.parser.loop
   (:require
-   (tcljx.data [wrong :as wrong] [context :as context] [model :as model])
+   (tcljx.data [wrong :as wrong] [context :as context] [ir :as ir])
    (tcljx.parser [parse :as parse] [syntax :as syntax] [interop :as interop]))
   (:import
-   (tcljx.data.model Expr Exprs Binding Entity Parser)))
+   (tcljx.data.ir Expr Exprs Binding Entity Parser)))
 
-(defn binding-variables ^Entity/1 [^Binding/1 bnds]
-  (let [a (new Entity/1 (alength bnds))]
-    (dotimes [i (alength a)]
-      (aset a i (.bound-to (aget bnds i))))
-    a))
-          
 (defn parse-loop* ^Expr [^Parser parser ^long fctx [_ bindings & body :as form]]
   (let [bindings (syntax/vector bindings true)
         n (quot (count bindings) 2)
-        ef (.expr-factory parser)
         bnds (new Binding/1 n)]
     (loop [parser parser, i 0]
       (if (< i n)
@@ -22,15 +15,16 @@
               nm (syntax/simple-symbol-str nm-sym)
               init (nth bindings (inc (* i 2)))
               opt-type (interop/resolve-tag (.resolver parser) nm-sym nil)
-              bnd (.binding-fresh ef fctx opt-type nm
-                                    (parse/arg parser fctx init))]
+              bnd (.binding-fresh (.entity-factory parser) fctx opt-type nm
+                                  (parse/arg parser fctx init))]
           (aset bnds i bnd)
-          (recur (model/with-local-binding parser bnd) (inc i)))
+          (recur (ir/with-local-binding parser bnd) (inc i)))
         (let [fctx' (context/with-recur fctx)
-              bnd-vs (binding-variables bnds)
-              parser' (.with-recur-variables parser bnd-vs)]
-          (.block-bindings (.expr-factory parser') fctx' bnds
-                           (parse/progn parser' fctx' body) true))))))
+              bnd-vs (parse/binding-variables bnds)
+              xf' (.with-recur-variables (.expr-factory parser) bnd-vs)]
+          (.block-bindings xf' fctx' bnds true
+                           (-> (.with-expr-factory parser xf')
+                               (parse/progn fctx' body))))))))
 
 (defn parse-recur ^Expr [^Parser parser ^long fctx [_ & args :as form]]
   (if (context/can-recur? fctx)

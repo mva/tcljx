@@ -1,12 +1,12 @@
 (ns tcljx.classgen.condgen
   (:require
-   (tcljx.data [type :as type] [resolve :as resolve] [model :as model]
+   (tcljx.data [type :as type] [resolve :as resolve] [ir :as ir]
                [wrong :as wrong])
-   (tcljx.classgen [classfile :as classfile] [insn :as insn] [entity :as entity]
-                   [emit :as emit]))
+   (tcljx.classgen [classfile :as classfile] [constgen :as constgen]
+                   [insn :as insn] [emit :as emit]))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.model CodeEmitter)
+   (tcljx.data.ir CodeEmitter)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile CodeBuilder Opcode Label TypeKind)
    (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)))
@@ -37,13 +37,13 @@
 
 (defn- some-code? ^boolean [^CodeEmitter ce ^Class consumed-type]
   (not (and (type/same? Void/TYPE consumed-type)
-            (or (entity/emitter-empty? ce) (entity/const? ce)))))
+            (or (constgen/emitter-empty? ce) (constgen/const? ce)))))
 
 ;;; Turn a branching instruction IFXXX into a complete conditional
 ;;; expression with a "true" path and a "false" path.
 (defn- conditional
   (^CodeEmitter [^Branching branch ^long fctx]
-   (conditional branch Boolean/TYPE entity/entity-true entity/entity-false
+   (conditional branch Boolean/TYPE constgen/entity-true constgen/entity-false
                 fctx))
   (^CodeEmitter [^Branching branch ^Class produced-type
                  ^CodeEmitter if-true ^CodeEmitter if-false ^long fctx]
@@ -73,17 +73,17 @@
 (defn negation ^CodeEmitter [^CodeEmitter ce ^long fctx]
   ;; pre: `ce` is boolean
   (cond
-    (identical? entity/entity-false ce)
-    entity/entity-true
+    (identical? constgen/entity-false ce)
+    constgen/entity-true
     
-    (identical? entity/entity-true ce)
-    entity/entity-false
+    (identical? constgen/entity-true ce)
+    constgen/entity-false
     
     (instance? Negatable ce)
     (.negate ^Negatable ce)
     
     (instance? Branching ce)
-    (conditional ce Boolean/TYPE entity/entity-false entity/entity-true fctx)
+    (conditional ce Boolean/TYPE constgen/entity-false constgen/entity-true fctx)
 
     :else
     (reify CodeEmitter Negatable
@@ -134,17 +134,17 @@
     (loop [opcd cmp-opcd, left (aget args 0), right (aget args 1)]
       ;; loop body is executed at most twice
       (cond
-        (entity/entity-zero? right)     ;slide if_icmpeq to ifeq
+        (constgen/entity-zero? right)     ;slide if_icmpeq to ifeq
         (mk-ifpred (- (.bytecode eq-opc) 6) opcd arg-type
                    (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
               
-        (entity/entity-zero? left) (recur (swap-cmp opcd) right left)
+        (constgen/entity-zero? left) (recur (swap-cmp opcd) right left)
               
-        (entity/entity-null? right)     ;slide if_acmpeq to ifnull
+        (constgen/entity-null? right)     ;slide if_acmpeq to ifnull
         (mk-ifpred (+ (.bytecode eq-opc) 33) opcd arg-type
                    (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
               
-        (entity/entity-null? left) (recur (swap-cmp opcd) right left)
+        (constgen/entity-null? left) (recur (swap-cmp opcd) right left)
               
         :else
         (mk-ifpred (.bytecode eq-opc) opcd arg-type
@@ -162,10 +162,10 @@
                             ^CodeEmitter if-true ^CodeEmitter if-false
                             ^long fctx]
     (cond
-      (identical? entity/entity-true test)
+      (identical? constgen/entity-true test)
       if-true
       
-      (identical? entity/entity-false test)
+      (identical? constgen/entity-false test)
       if-false
       
       :else
@@ -174,7 +174,7 @@
             (mk-cmp-pred Opcode/IF_ICMPEQ cmp-ne Boolean/TYPE ;compare to zero!
                          (doto (new CodeEmitter/1 2)
                            (aset 0 test) ;the boolean value to test
-                           (aset 1 entity/entity-false))
+                           (aset 1 constgen/entity-false))
                          fctx)) 
           (conditional expr-type if-true if-false fctx)))))
 
@@ -189,7 +189,7 @@
             (cond (nil? c) (if (insn/const? x)
                              Boolean/FALSE     ;is never null
                              nil)              ;may be null
-                  (entity/null? c) Boolean/TRUE ;is always null
+                  (constgen/null? c) Boolean/TRUE ;is always null
                   :else Boolean/FALSE)))]      ;is never null
   
   (defn acmp ^Insn [^Insn arg0 ^Insn arg1 ^int cmp-opcd ^long fctx]
@@ -203,8 +203,8 @@
 
 (defn- icmp ^Insn [^Class arg-type ^CodeEmitter ce0 ^CodeEmitter ce1
                    ^int cmp-opcd ^long fctx]
-  (or (when-some [c0 ^Integer (entity/const-value ce0)]
-        (when-some [c1 ^Integer (entity/const-value ce1)]
+  (or (when-some [c0 ^Integer (constgen/const-value ce0)]
+        (when-some [c1 ^Integer (constgen/const-value ce1)]
           (let [n0 ^int c0, n1 ^int c1]
             (when (or c0 c1)         ;both non-null means "don't know"
               (-> (case cmp-opcd
@@ -232,8 +232,8 @@
 (defn- xcmp-signum ^CodeEmitter [^int bytecode ^Class arg-type
                                  ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
   (let [signum #(object (Integer/signum ^int %))
-        c (when-some [c0 (entity/const-value ce0)]
-            (when-some [c1 (entity/const-value ce1)]
+        c (when-some [c0 (constgen/const-value ce0)]
+            (when-some [c1 (constgen/const-value ce1)]
               ;; Never constant fold if a NaN is involved; this avoids
               ;; the subleties of [fd]cmpl vs [fd]cmpg.  A floating
               ;; point comparison of -0.0 to 0.0 must return zero --
@@ -253,7 +253,7 @@
                     (signum (if (== n0 n1) 0 (Double/compare n0 n1))))))))]
     
     (if (some? c)
-      (entity/constant c Integer/TYPE)
+      (constgen/constant c Integer/TYPE)
       
       (^CodeEmitter fn [xb _ _]
        (when (emit/insn? xb fctx arg-type ce0)
@@ -278,7 +278,7 @@
                                        2 (nan-opcode #_fcmpg 150 #_fcmpl 149)
                                        3 (nan-opcode #_dcmpg 152 #_dcmpl 151))
                                      (.class-primitive wtop) ce0 ce1 fctx)]
-                (icmp Integer/TYPE ce0 entity/entity-int-zero cmp-opcd fctx)))))
+                (icmp Integer/TYPE ce0 constgen/entity-int-zero cmp-opcd fctx)))))
         (xcmp-n-branch-if-false ^void [^Wrapper wtop ^CodeEmitter/1 ce-left
                                        ^CodeEmitter/1 ce-right ^int cmp-opcd
                                        ^CodeBuilder xb ^long fctx ^Label target]
@@ -287,9 +287,9 @@
               (let [cmp (.emitter (xcmp-2* wtop (aget ce-left i)
                                            (aget ce-right i) cmp-opcd fctx))]
                 (cond
-                  (identical? entity/entity-false cmp)
+                  (identical? constgen/entity-false cmp)
                   (.goto_ xb target)
-                  (identical? entity/entity-true cmp)
+                  (identical? constgen/entity-true cmp)
                   (recur (inc i))
                   :else (when (.emit-branch-on? ^Branching cmp xb false target)
                           (recur (inc i))))))))
@@ -315,7 +315,7 @@
                     ce-left (new CodeEmitter/1 n)]
                 (dotimes [i n]
                   (->> (let [ce (aget ces i)]
-                         (if (or (zero? i) (entity/const? ce))
+                         (if (or (zero? i) (constgen/const? ce))
                            ce
                            (^CodeEmitter fn [xb _ _]
                             (.loadLocal xb (.type-kind wtop) temp)
@@ -327,7 +327,7 @@
                     ce-right (new CodeEmitter/1 n)]
                 (dotimes [i n]
                   (->> (let [ce (aget ces (inc i))]
-                         (if (or (= i (dec n)) (entity/const? ce))
+                         (if (or (= i (dec n)) (constgen/const? ce))
                            ce
                            (^CodeEmitter fn [xb _ _]
                             (when (emit/insn? xb fctx (.class-primitive wtop) ce)
@@ -441,7 +441,7 @@
       (insn/prog2 arg (insn/insn-boolean (not (type/same? Void/TYPE arg-tp))))
 
       ;; arg is reference; important: any nil value is logically false
-      (entity/entity-null? (.emitter arg)) ;argument is literal nil
+      (constgen/entity-null? (.emitter arg)) ;argument is literal nil
       insn/insn-false
       
       (.isAssignableFrom arg-tp Boolean) ;argument may be Boolean instance

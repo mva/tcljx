@@ -1,0 +1,38 @@
+(ns tcljx.data.member
+  (:import (java.lang.reflect Executable Field Member Modifier)))
+
+(def invoke-polymorphic -1) ;tail arguments & return type are polymorphic
+(def invoke-standard 0)     ;regular invocation
+(def invoke-tail-into-array 1)         ;pack tail arguments into array
+
+(deftype MemberHandle [^Class owner     ;where the search started
+                       ^Member member   ;method, field, or constructor
+                       ^Class/1 parameter-types ;excluding any receiver
+                       ^Class return-type
+                       ^int invocation-mode]
+  java.lang.Record)
+
+(defn mk-match ^MemberHandle [^Class owner ^Member member ^Class/1 parameter-types
+                        ^Class return-type ^int invocation-mode]
+  (MemberHandle. (if (.isArray owner) Object owner)
+          member parameter-types return-type invocation-mode))
+
+(defn with-invocation-mode ^MemberHandle [^MemberHandle m ^int invocation-mode]
+  (MemberHandle. (.owner m) (.member m) (.parameter-types m) (.return-type m)
+          invocation-mode))
+
+(defn field? ^boolean [^MemberHandle m]
+  (instance? Field (.member m)))
+(defn static-field? ^boolean [^MemberHandle m]
+  (let [member (.member m)] (and (instance? Field member)
+                                 (Modifier/isStatic (.getModifiers member)))))
+(defn varargs? ^boolean [^MemberHandle m]
+  (and (instance? Executable (.member m)) (.isVarArgs ^Executable (.member m))))
+
+(defn parameter-count ^int [^MemberHandle m]
+  (alength (.parameter-types m)))
+(defn end-of-fixed-parameters ^int [^MemberHandle m]
+  (- (parameter-count m) (bit-and (.invocation-mode m) 1)))
+(defn varargs-parameter-type ^Class [^MemberHandle m] ;nil if invoke-standard
+  (when (not= (.invocation-mode m) invoke-standard)
+    (aget (.parameter-types m) (end-of-fixed-parameters m))))

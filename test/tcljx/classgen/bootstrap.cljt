@@ -15,7 +15,7 @@
    [tcljx.alpha.ptest :as ptest]            ;for is
    [tcljx.alpha.ptest__impl :as ptest__impl]) ;for get-test-context
   (:import
-   (tcljx.data.model NmspClass)
+   (tcljx.data.ir NmspClass)
    (tcljx.classgen.classfile Loader)
    (java.lang.invoke MethodHandle MethodType)
    (java.lang.reflect Method)

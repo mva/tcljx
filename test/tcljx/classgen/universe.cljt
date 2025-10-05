@@ -2,18 +2,19 @@
   (:require
    (tcljx.data
     [config :as cfg] [files :as files] [resolve :as resolve] [meta :as meta]
-    [wrong :as wrong] [context :as context] [model :as model])
+    [wrong :as wrong] [context :as context] [ir :as ir])
    (tcljx.parser
     [form :as form] [parse :as parse] [namespace :as namespace])
    (tcljx.classgen
-    [classfile :as classfile] [runtime :as rt] [envgraph :as envgraph]
-    [entity :as entity] [emit :as emit] [insn :as insn] [build :as build]
-    [codegen :as codegen] [defgen :as defgen] [primitive :as primitive]))
+    [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
+    [segment :as segment][envgraph :as envgraph] [emit :as emit] [insn :as insn]
+    [build :as build] [codegen :as codegen] [entity :as entity]
+    [defgen :as defgen] [primitive :as primitive]))
   (:import
-   (tcljx.data.model Resolver NamespaceProvider ProvidedNamespace
-                     NamespaceBuilder Expr ExprFactory Parser)
+   (tcljx.data.ir Resolver NamespaceProvider ProvidedNamespace
+                  NamespaceBuilder Expr ExprFactory EntityFactory Parser)
    (tcljx.classgen.classfile Loader PackageBuilder)
-   (tcljx.classgen.envgraph EnvSegment EnvMethod)
+   (tcljx.classgen.segment Segment)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassFile ClassBuilder CodeBuilder)
    (java.lang.invoke MethodType MethodHandle MethodHandles)
@@ -33,7 +34,8 @@
 (deftype NmspBuilderImpl [^NamespaceProvider universe
                           ^String ns-str
                           ^ExprFactory code-gen
-                          ^:unsynchronized-mutable ^EnvSegment segment
+                          ^EntityFactory entity-gen
+                          ^:unsynchronized-mutable ^Segment segment
                           ^PackageBuilder pkg-build
                           ^:unsynchronized-mutable ^map globals
                           ^:unsynchronized-mutable ^map known-ns
@@ -81,25 +83,25 @@
         (throw (wrong/info-class-not-found nm))))
     this)
   (new-def-immutable [_ nm init]
-    (let [ent (defgen/entity-def-immutable (.segment-class segment) nm init)
-          bnd (model/mk-binding ent nm false)
+    (let [p (defgen/promise-def-immutable (.segment-class segment) nm init)
+          bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)
           init-ce (.emitter init)]
-      (.stage-task! segment ent)
-      (set! globals (assoc globals nm (if (entity/jvm-const? init-ce)
+      (segment/stage-segment-task! segment p)
+      (set! globals (assoc globals nm (if (constgen/jvm-const? init-ce)
                                         init-ce
                                         (.bound-to bnd))))
       (insn/mk-insn bnd (insn/expr-type init))))
   (new-def-mutable [_ nm init]
-    (let [ent (defgen/entity-def-mutable (.segment-class segment) nm init)
-          bnd (model/mk-binding ent nm false)]
-      (.stage-task! segment ent)
+    (let [p (defgen/promise-def-mutable (.segment-class segment) nm init)
+          bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)]
+      (segment/stage-segment-task! segment p)
       (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/mk-insn bnd (insn/expr-type init))))
   (new-def-alias [_ nm other-ent other-qname]
-    (.stage-task! segment (defgen/task-def-alias nm other-ent other-qname))
-    (set! globals (assoc globals nm other-ent))
-    (insn/mk-insn other-ent (.value-type other-ent)))
-
+    (let [p (defgen/promise-def-alias nm other-ent other-qname)]
+      (segment/stage-segment-task! segment p)
+      (set! globals (assoc globals nm other-ent))
+      (.expr-of p)))
   (load-file [this path-str]
     (assert false))
   
@@ -107,9 +109,9 @@
     ;; This method is only called for expression forms that do not
     ;; manipulate `known-ns` or `ns-alias`.  The `globals` at start is
     ;; stored as part of of `scope`.
-    (let [parser (form/mk-parser code-gen this globals)
+    (let [parser (form/mk-parser code-gen entity-gen this globals)
           imports-at-start imports
-          segm-size-at-start (.size-staged segment)
+          segm-size-at-start (segment/size-segment-tasks segment)
           expr (try
                  (parse/form parser fctx form)
                  (catch ImplementationUnavailableException _
@@ -118,20 +120,21 @@
                    (.commit-segment-and-revert
                     this segm-size-at-start (.bindings* parser)
                     imports-at-start)
-                   (parse/form parser fctx form)))]
-      (.stage-task! segment expr)
+                   (set! ephemeral-of nil) ;may contain stale classes
+                   (parse/form parser fctx form)))] ;try again *once*
+      (segment/stage-segment-task! segment expr)
       this))
 
   (finish [this]
-    (.commit-segment-and-revert this (.size-staged segment) globals imports)
+    (.commit-segment-and-revert this (segment/size-segment-tasks segment) globals imports)
     (build/capstone pkg-build segment)
     (ProvidedNamespace. ns-str))
   (commit-segment-and-revert [this end-of-segment then-globals then-imports]
-    (let [segm-acc (build/prepare-segment (.tasks segment) end-of-segment)]
+    (let [segm-acc (build/prepare-segment segment end-of-segment)]
       (build/segment pkg-build current-source-file segment segm-acc this))
     
     ;; revert back to requested state & move to next segment
-    (set! segment (envgraph/next-segment segment))
+    (set! segment (segment/next-segment segment))
     (set! globals then-globals)
     (set! imports then-imports)))
 
@@ -146,12 +149,12 @@
     (letfn [(mk-nmsp-builder ^NamespaceBuilder [^String ns-str]
               (let [source-file nil
                     pkg-build (classfile/mk-package-builder loader ns-str)
-                    segment (envgraph/mk-first-segment ns-str)
-                    ef (-> (envgraph/mk-method-clinit segment)
-                           (codegen/mk-factory))
+                    segment (segment/mk-first-segment ns-str)
+                    etf (entity/mk-clinit-etf ns-str (.tasks segment))
+                    xf (codegen/mk-factory)
                     globals primitive/primitive-nmsp-globals
                     imports (resolve/predefined-imports (.rt-lookup loader))]
-                (NmspBuilderImpl. this ns-str ef segment pkg-build
+                (NmspBuilderImpl. this ns-str xf etf segment pkg-build
                                   globals known-ns ns-alias imports
                                   source-file nil)))
             

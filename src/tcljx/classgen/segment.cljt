@@ -1,0 +1,78 @@
+(ns tcljx.classgen.segment
+  (:require (tcljx.data [ir :as ir]))
+  (:import (tcljx.data.ir Expr MethodSpec NmspClass)
+           (java.lang.constant ClassDesc ConstantDescs)
+           (java.util ArrayList)
+           (java.util.function Consumer)))
+
+(deftype SegmentAcc [^ArrayList class-elements ;of Consumer
+                     ^ArrayList clinit-statms  ;of Expr
+                     ^ArrayList other-classes ;of NmspClass
+                     ^ClassDesc segment-class]
+  java.lang.Record)
+
+(defn add-elements ^SegmentAcc [^SegmentAcc acc ^Consumer class-handler]
+  (.add (.class-elements acc) class-handler)
+  acc)
+(defn add-clinit-statm ^SegmentAcc [^SegmentAcc acc ^Expr expr]
+  (.add (.clinit-statms acc) expr)
+  acc)
+(defn add-class-file ^SegmentAcc [^SegmentAcc acc ^NmspClass ncl]
+  (.add (.other-classes acc) ncl)
+  acc)
+
+;;; FIXME... drop this? the pkg-name is availabe by other means
+(defn namespace-class ^ClassDesc [^SegmentAcc acc ^String class-name]
+  (ClassDesc/of (-> acc .segment-class .packageName) class-name))
+
+
+(deftype Segment [^ClassDesc segment-class
+                  ^ArrayList tasks
+                  ^String pkg-name
+                  ^ClassDesc super-class
+                  ^int segment-id])
+
+(defn stage-segment-task! ^void [^Segment segm task]
+  (.add (.tasks segm) task))
+(defn size-segment-tasks ^int [^Segment segm]
+  (.size (.tasks segm)))
+
+(letfn [(segment-cld ^ClassDesc [^String pkg-name ^int segm-id]
+          (ClassDesc/of pkg-name (str "_" segm-id)))]
+  (defn mk-first-segment ^Segment [^String pkg-name]
+    (let [segm-id 10]
+      (Segment. (segment-cld pkg-name segm-id) (ArrayList.) pkg-name
+                ConstantDescs/CD_Object segm-id)))
+  (defn next-segment ^Segment [^Segment segm]
+    (let [pkg-name (-> segm .pkg-name), segm-id (-> segm .segment-id (inc))]
+      (Segment. (segment-cld pkg-name segm-id) (ArrayList.) pkg-name
+                (.segment-class segm) segm-id))))
+
+(defn capstone-class ^ClassDesc [^Segment segm]
+  (ClassDesc/of (.pkg-name segm) "___"))
+
+
+;;; Created during the parsing phase.  `generate-and-deliver` is
+;;; called before the emit phase, to add elements to the segment class
+;;; under construction, or whole classes accompanying it.  Note:
+;;; `!nested-parts` may be filled in by a thread other than the one
+;;; that created this object.
+(definterface CodePromise
+  (expr-of ^Expr [])
+  (child-methods ^MethodSpec/1 [])       ;nil if lacking methods
+  (!nested-parts ^ArrayList []) ;SegmentParts, nil if lacking own EntityFactory
+  (generate-and-deliver ^SegmentAcc [^SegmentAcc acc]))
+
+(defn flatten ^CodePromise/1 [^ArrayList parts ^int parts-end]
+  (let [acc-parts (ArrayList.)]
+    (letfn [(add-part! ^void [^CodePromise part]
+              (when-some [nested (.!nested-parts part)]
+                (let [it (.iterator nested)]
+                  (loop [] (when (.hasNext it) (add-part! (.next it))
+                                 (recur)))))
+              (.add acc-parts part))]
+      (dotimes [i parts-end]
+        (let [part (.get parts i)]
+          (when (instance? CodePromise part)
+            (add-part! part))))
+      (.toArray acc-parts (new CodePromise/1 0)))))

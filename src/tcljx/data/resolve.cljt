@@ -7,8 +7,9 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.data.resolve
   (:require
-   (tcljx.data [type :as type]))
+   (tcljx.data [member :as member] [type :as type]))
   (:import
+   (tcljx.data.member MemberHandle)
    (java.lang.constant ClassDesc)
    (java.lang.invoke MethodHandles$Lookup)
    (java.lang.reflect Method Constructor Executable Field Member Modifier)
@@ -109,52 +110,16 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def invoke-polymorphic -1) ;tail arguments & return type are polymorphic
-(def invoke-standard 0)     ;regular invocation
-(def invoke-tail-into-array 1)         ;pack tail arguments into array
-
-(deftype Match [^Class owner            ;where the search started
-                ^Member member          ;method, field, or constructor
-                ^Class/1 parameter-types ;excluding any receiver
-                ^Class return-type
-                ^int invocation-mode]
-  java.lang.Record)
-
-(defn- mk-match ^Match [^Class owner ^Member member ^Class/1 parameter-types
-                        ^Class return-type ^int invocation-mode]
-  (Match. (if (.isArray owner) Object owner)
-          member parameter-types return-type invocation-mode))
-
-(defn- with-invocation-mode ^Match [^Match m ^int invocation-mode]
-  (Match. (.owner m) (.member m) (.parameter-types m) (.return-type m)
-          invocation-mode))
-
-(defn field? ^boolean [^Match m]
-  (instance? Field (.member m)))
-(defn static-field? ^boolean [^Match m]
-  (let [member (.member m)] (and (instance? Field member)
-                                 (Modifier/isStatic (.getModifiers member)))))
-(defn varargs? ^boolean [^Match m]
-  (and (instance? Executable (.member m)) (.isVarArgs ^Executable (.member m))))
-
-(defn parameter-count ^int [^Match m]
-  (alength (.parameter-types m)))
-(defn end-of-fixed-parameters ^int [^Match m]
-  (- (parameter-count m) (bit-and (.invocation-mode m) 1)))
-(defn varargs-parameter-type ^Class [^Match m] ;nil if invoke-standard
-  (when (not= (.invocation-mode m) invoke-standard)
-    (aget (.parameter-types m) (end-of-fixed-parameters m))))
+(defn- static-member?
+  (^boolean [^Member m]
+   (Modifier/isStatic (.getModifiers m)))
+  (^boolean [^boolean expected? ^Member m]
+   (= (static-member? m) expected?)))
 
 ;;; Problem: class MethodHandle.PolymorphicSignature is not public
 (def ^:private ann-polymorphic-signature
   (Class/forName "java.lang.invoke.MethodHandle$PolymorphicSignature"
                  false (ClassLoader/getPlatformClassLoader)))
-
-(defn static-member?
-  (^boolean [^Member m]
-   (Modifier/isStatic (.getModifiers m)))
-  (^boolean [^boolean static? ^Member m]
-   (= (static-member? m) static?)))
 
 (defn- cons-executable-exact
   (^seq [^Class owner ^Method m ^seq acc]
@@ -163,19 +128,20 @@
    (cond->> acc
      (or (not (.isVarArgs e))
          (not (.isAnnotationPresent e ann-polymorphic-signature)))
-     (cons (mk-match owner e (.getParameterTypes e) return-type invoke-standard)))))
+     (cons (member/mk-match owner e (.getParameterTypes e) return-type
+                            member/invoke-standard)))))
 
 (defn- cons-executable-candidate ^seq [^Class owner ^Executable e
                                        ^Class return-type ^seq acc]
   (let [mode (if (.isVarArgs e)
                (if (.isAnnotationPresent e ann-polymorphic-signature)
-                 invoke-polymorphic
-                 invoke-tail-into-array) ;preliminary, subject to arg types
-               invoke-standard)
-        rt (if (= mode invoke-polymorphic)
+                 member/invoke-polymorphic
+                 member/invoke-tail-into-array) ;preliminary, subject to arg types
+               member/invoke-standard)
+        rt (if (= mode member/invoke-polymorphic)
              type/polymorphic ;polymorphic return determined by context
              return-type)]
-    (cons (mk-match owner e (.getParameterTypes e) rt mode) acc)))
+    (cons (member/mk-match owner e (.getParameterTypes e) rt mode) acc)))
 
 (defn method-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm
                          ^Class/1 atypes]
@@ -227,7 +193,7 @@
 
 (def empty-class-array (new Class/1 0))
 (defn- cons-field-candidate ^seq [^Class owner ^Field f ^seq acc]
-  (cons (mk-match owner f empty-class-array (.getType f) invoke-standard) acc))
+  (cons (member/mk-match owner f empty-class-array (.getType f) member/invoke-standard) acc))
 
 (defn field-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm
                         ^Class/1 atypes]
@@ -261,7 +227,7 @@
 ;;; no match.
 (defn members-by-param-tags ^seq [^boolean static? ^Class owner ^String mnm
                                   ^Class/1 ptags]
-  (letfn [(matches-ptags? ^boolean [^Match candidate] ;pre: (some? ptags)
+  (letfn [(matches-ptags? ^boolean [^MemberHandle candidate] ;pre: (some? ptags)
             (let [ptypes (.parameter-types candidate)]
               (and (= (alength ptypes) (alength ptags))
                    (loop [i (dec (alength ptypes))]
@@ -290,7 +256,7 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- cons-atypes-match ^seq [^Class/1 atypes ^Match candidate ^seq acc]
+(defn- cons-atypes-match ^seq [^Class/1 atypes ^MemberHandle candidate ^seq acc]
   (letfn [(argument-compatible? ^boolean [^Class ptype ^Class atype]
             (type/assignable-from? ptype atype))
           (fixed-arguments-compatible? ^boolean [^Class/1 ptypes ^int end]
@@ -316,48 +282,48 @@
     
     (let [ptypes (.parameter-types candidate)
           an (alength atypes)
-          fixed (end-of-fixed-parameters candidate)]
+          fixed (member/end-of-fixed-parameters candidate)]
       (if (and (<= fixed an) (fixed-arguments-compatible? ptypes fixed))
         (cond
           (= fixed an)           ;fixed parameters cover all arguments
           (cons candidate acc)
 
-          (= (.invocation-mode candidate) invoke-standard)
+          (= (.invocation-mode candidate) member/invoke-standard)
           acc       ;parameter/argument count mismatch but not varargs
           
           (and (= (inc fixed) an)     ;directly pass array to varargs?
-               (= (.invocation-mode candidate) invoke-tail-into-array)
+               (= (.invocation-mode candidate) member/invoke-tail-into-array)
                (argument-compatible? (aget ptypes fixed)
                                      (aget atypes fixed)))
-          (cons (with-invocation-mode candidate invoke-standard) acc)
+          (cons (member/with-invocation-mode candidate member/invoke-standard) acc)
 
-          (let [varargs-type (varargs-parameter-type candidate)]
-            (or (= invoke-polymorphic (.invocation-mode candidate))
+          (let [varargs-type (member/varargs-parameter-type candidate)]
+            (or (= member/invoke-polymorphic (.invocation-mode candidate))
                 (var-arguments-compatible? varargs-type fixed)))
           (cons candidate acc)
 
           :else acc)
         acc))))
 
-(letfn [#_(parameter-count-match? ^boolean [^Match as ^Match e]
+(letfn [#_(parameter-count-match? ^boolean [^MemberHandle as ^MemberHandle e]
             (let [n-p (parameter-count e)
                   n-a (parameter-count as)]
               (or (= n-p n-a)
                   (and (not= (.invocation-mode e) invoke-standard)
                        (>= n-a (dec n-p))))))
-        (compatible-args? ^boolean [^Match as ^Match e]
+        (compatible-args? ^boolean [^MemberHandle as ^MemberHandle e]
           (and #_(parameter-count-match? as e)
                (some? (cons-atypes-match (.parameter-types as) e nil))))]
   
   (defn- filter-dominators [es]
-    (letfn [(dominates-all? ^boolean [^Match e]
+    (letfn [(dominates-all? ^boolean [^MemberHandle e]
               (every? #(compatible-args? e %) es))]
       (if (next es) ;nothing to do if there are less than two elements
         (or (seq (filter dominates-all? es)) es)
         es)))
   
   (defn- dominating-matches ^seq [^seq ms]
-    (letfn [(dominates-all? ^boolean [^Match m]
+    (letfn [(dominates-all? ^boolean [^MemberHandle m]
               (every? #(compatible-args? m %) ms))]
       (if (next ms) ;nothing to do if there are less than two elements
         (or (seq (filter dominates-all? ms)) ms)
@@ -380,14 +346,14 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn runtime-method ^Match [^Class owner ^String method-name ^Class/1 ptypes]
+(defn runtime-method ^MemberHandle [^Class owner ^String method-name ^Class/1 ptypes]
   ;; match excatly on varargs array type, and then adjust invocation
   ;; mode of the returned match
   (let [ms (method-exact nil true owner method-name ptypes)
-        m ^Match (first ms)]
+        m ^MemberHandle (first ms)]
     (cond-> m
       (.isVarArgs ^Method (.member m))
-      (with-invocation-mode invoke-tail-into-array))))
+      (member/with-invocation-mode member/invoke-tail-into-array))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -434,7 +400,7 @@
 
         ;; Picks up any matching virtual method, public *or*
         ;; protected.  Used to override protected method in reify*.
-        (method-exact-pp ^Match [^Class owner ^String nm ^Class/1 ptypes]
+        (method-exact-pp ^MemberHandle [^Class owner ^String nm ^Class/1 ptypes]
           (letfn [(pred ^boolean [^Method m]
                     (and (= (.getName m) nm)
                          (Arrays/equals (.getParameterTypes m) ptypes)))]
@@ -470,11 +436,26 @@
   ;; of the method.
   (defn itf-method-exact ^Method [^Class owner ^String nm ^Class return-type
                                   ^Class/1 atypes]
-    (when-some [^Match m (or (first (method-exact nil false owner nm atypes))
-                             (method-exact-pp owner nm atypes))]
+    (when-some [^MemberHandle m (or (first (method-exact nil false owner nm atypes))
+                                    (method-exact-pp owner nm atypes))]
       (when (or (nil? return-type)
                 (type/same? (.return-type m) return-type))
         (.member m)))))
 
-(defn virtual-method ^Match [^Class owner ^String nm & ^Class/1 ptypes]
+(defn virtual-method ^MemberHandle [^Class owner ^String nm & ^Class/1 ptypes]
   (first (method-exact nil false owner nm ptypes)))
+
+;;; ------------------------------------------------------------------------
+
+(letfn [(find-factory ^MemberHandle [^String method-name]
+          (runtime-method tinyclj.lang.Literal method-name
+                          (doto (new Class/1 1) (aset 0 Object/1))))]
+  (def literal-vector (find-factory "vector")) ;type/vector
+  (def literal-map (find-factory "map"))       ;type/map
+  (def literal-set (find-factory "set"))       ;type/set
+  (def literal-list (find-factory "list"))     ;type/list
+  (def literal-with-meta
+    (runtime-method tinyclj.lang.Literal "with_meta"
+                    (doto (new Class/1 2)
+                      (aset 0 clojure.lang.IObj)
+                      (aset 1 clojure.lang.IPersistentMap)))))

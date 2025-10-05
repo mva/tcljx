@@ -1,11 +1,11 @@
 (ns tcljx.classgen.switchgen
   (:require
    (tcljx.data [type :as type] [wrong :as wrong] [context :as context]
-               [resolve :as resolve] [model :as model])
-   (tcljx.classgen [runtime :as rt] [emit :as emit] [entity :as entity]
+               [resolve :as resolve] [ir :as ir])
+   (tcljx.classgen [runtime :as rt] [constgen :as constgen] [emit :as emit]
                    [insn :as insn]))
   (:import
-   (tcljx.data.model Exprs CodeEmitter Constant)
+   (tcljx.data.ir Exprs CodeEmitter Constant)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile CodeBuilder Label)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
@@ -98,7 +98,7 @@
                               (table-switch? low high (.size scs))))))
           (^void [^ArrayList a ^CodeEmitter/1 ces ^Label target]
            (dotimes [i (alength ces)]
-             (let [cv ^int (entity/const-value (aget ces i))]
+             (let [cv ^int (constgen/const-value (aget ces i))]
                (.add a (SwitchCase/of cv target))))))
         (indexes-to-switch-cases ^SwitchLayout [^CodeBuilder xb ^Exprs/1 guards]
           (let [targets (mk-targets xb (alength guards))
@@ -158,7 +158,7 @@
              les (for [^Insns xs guards]
                    (-> (if (= (.length xs) 1)
                          (insn/emitter xs 0)
-                         (entity/collection (.emitters xs) type/list false))
+                         (constgen/collection (.emitters xs) type/list false))
                        (Constant/.loadable-entry cpb false)))
              bsm (.bsmEntry cpb mhe les)
              mtd (MethodTypeDesc/of ConstantDescs/CD_int

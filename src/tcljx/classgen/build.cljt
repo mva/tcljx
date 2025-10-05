@@ -1,34 +1,33 @@
 (ns tcljx.classgen.build
   (:require
    (tcljx.data [config :as cfg] [files :as files] [type :as type]
-               [context :as context] [model :as model] [resolve :as resolve])
+               [context :as context] [ir :as ir] [resolve :as resolve])
    (tcljx.classgen [classfile :as classfile] [runtime :as rt]
                    [envgraph :as envgraph] [emit :as emit] [insn :as insn]
-                   [entity :as entity] [fngen :as fngen])
+                   [segment :as segment] [fngen :as fngen])
    [tinyclj.string :as str])
   (:import
-   (tcljx.data.model CodeEmitter Resolver NmspClass)
+   (tcljx.data.ir CodeEmitter Resolver NmspClass)
    (tcljx.classgen.classfile PackageBuilder)
-   (tcljx.classgen.envgraph EnvSegment EnvClass EnvMethod PreparationTask
-                            SegmentAcc)
+   (tcljx.classgen.segment Segment CodePromise SegmentAcc)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassBuilder CodeBuilder)
    (java.lang.constant ClassDesc ConstantDescs MethodTypeDesc)
    (java.util ArrayList)
    (java.util.function Consumer)))
 
-(def ^:private segment-class-flags (model/acc* public abstract))
+(def ^:private segment-class-flags (ir/acc* public abstract))
 
 (defn- with-requires ^ClassBuilder [^ClassBuilder cb ^String req-str]
   (classfile/with-method-body->
     cb [rt/name-requires (MethodTypeDesc/of ConstantDescs/CD_String)
-        (bit-or classfile/acc-method-static (model/acc* synthetic))]
+        (bit-or classfile/acc-method-static (ir/acc* synthetic))]
     (-> (.ldc req-str) (.areturn))))
 
 (def ^:private mtd-void-String
   (MethodTypeDesc/of ConstantDescs/CD_void ConstantDescs/CD_String))
 (defn segment ^NmspClass [^PackageBuilder pkg-build ^String source-file
-                          ^EnvSegment segm ^SegmentAcc segm-acc ^Resolver rsv]
+                          ^Segment segm ^SegmentAcc segm-acc ^Resolver rsv]
   (doseq [ncl (.other-classes segm-acc)]
     (classfile/declare-class pkg-build ncl))
   (doseq [^NmspClass ncl (.other-classes segm-acc)]
@@ -48,13 +47,13 @@
           (-> (cfg/with-class-version cb)
               (classfile/with-source-file source-file)
               (.withFlags segment-class-flags))
-          (let [al (.segment-elements segm-acc)]
+          (let [al (.class-elements segm-acc)]
             (dotimes [i (.size al)]
               (.accept ^Consumer (.get al i) cb)))
       
           (.withMethodBody
            cb ConstantDescs/CLASS_INIT_NAME ConstantDescs/MTD_void
-           (model/acc* public static)
+           (ir/acc* public static)
            (^Consumer fn ^void [^CodeBuilder xb]
             (when (identical? ConstantDescs/CD_Object (.super-class segm))
               (invoke-create-nmsp xb))
@@ -66,12 +65,12 @@
                   (do (when (cfg/core-lib? (.pkg-name segm))
                         (invoke-mark-core-init xb))
                       (.return_ xb))))))))
-         (model/mk-nmsp-class (.segment-class segm) (.super-class segm))
+         (ir/mk-nmsp-class (.segment-class segm) (.super-class segm))
          (classfile/bwdi pkg-build))))
 
 ;;; ------------------------------------------------------------------------
 
-(defn capstone ^NmspClass [^PackageBuilder pkg-build ^EnvSegment segm]
+(defn capstone ^NmspClass [^PackageBuilder pkg-build ^Segment segm]
   (let [req-str (if (cfg/core-lib? (.pkg-name segm))
                   ""            ;suppress internal details of core lib
                   ;; FIXME... use real requires
@@ -81,40 +80,33 @@
                          (.withFlags segment-class-flags)
                          (.withSuperclass (.super-class segm))
                          (with-requires req-str)))
-         (model/mk-nmsp-class (envgraph/capstone-class segm)
-                              (.super-class segm))
+         (ir/mk-nmsp-class (segment/capstone-class segm) (.super-class segm))
          (classfile/bwdi pkg-build))))
 
 ;;; ------------------------------------------------------------------------
 
-(defn prepare-segment ^SegmentAcc [^ArrayList tasks ^int tasks-end]
-  (let [eg (envgraph/mk-graph tasks tasks-end)]
-    (letfn [(index-of-class ^int [^EnvClass class ^int start]
+(defn prepare-segment ^SegmentAcc [^Segment segm ^int tasks-end]
+  (let [tasks (.tasks segm)
+        sps (segment/flatten (.tasks segm) tasks-end)]
+    (letfn [(index-of-promise ^int [^CodePromise promise ^int start]
               (loop [i start]
-                (if (identical? class (aget (.classes eg) i))
+                (if (identical? promise (aget sps i))
                   i
                   (recur (inc i)))))
-            (prepare-classes ^SegmentAcc [^SegmentAcc acc ^int start ^int end]
+            (deliver-promises ^SegmentAcc [^SegmentAcc acc ^int start ^int end]
               (loop [acc acc, i start]
                 (if (< i end)
-                  (let [class (aget (.classes eg) i)]
-                    (recur (envgraph/run-task acc (.class-task class) class)
-                           (inc i)))
+                  (recur (.generate-and-deliver (aget sps i) acc) (inc i))
                   acc)))
             (mk-segment-acc ^SegmentAcc []
-              (SegmentAcc. (ArrayList.) (ArrayList.) (ArrayList.)))]
+              (SegmentAcc. (ArrayList.) (ArrayList.) (ArrayList.)
+                           (.segment-class segm)))]
       
       (loop [acc (mk-segment-acc), i-clinit 0, i-eg 0]
         (if (< i-clinit tasks-end)
-          (let [frag (.get tasks i-clinit)]
-            (condp instance? frag
-              EnvClass
-              (let [end-eg (inc (index-of-class frag i-eg))]
-                (recur (prepare-classes acc i-eg end-eg) (inc i-clinit) end-eg))
-              PreparationTask
-              (recur (envgraph/run-task acc frag nil) (inc i-clinit) i-eg)
-              NmspClass                 ;definterface* or deftype*
-              (recur (envgraph/add-class-file acc frag) (inc i-clinit) i-eg)
-              #_else
-              (recur (envgraph/add-clinit-statm acc frag) (inc i-clinit) i-eg)))
+          (let [task (.get tasks i-clinit)]
+            (if (instance? CodePromise task)
+              (let [end-eg (inc (index-of-promise task i-eg))]
+                (recur (deliver-promises acc i-eg end-eg) (inc i-clinit) end-eg))
+              (recur (segment/add-clinit-statm acc task) (inc i-clinit) i-eg)))
           acc)))))

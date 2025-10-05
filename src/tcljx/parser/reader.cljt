@@ -7,9 +7,9 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.reader
   (:require (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
-                        [model :as model])
+                        [ir :as ir])
             [tinyclj.string :as str])
-  (:import (tcljx.data.model Resolver)
+  (:import (tcljx.data.ir Resolver)
            (tcljx.data.wrong WrongInfo)
            (tinyclj.lang Literal)
            (clojure.lang IMapEntry IRecord Named)

@@ -1,9 +1,9 @@
 (ns tcljx.parser.new
   (:require
-   (tcljx.data [type :as type] [model :as model])
+   (tcljx.data [type :as type] [ir :as ir])
    (tcljx.parser [syntax :as syntax] [parse :as parse]))
   (:import
-   (tcljx.data.model Expr Parser)))
+   (tcljx.data.ir Expr Parser)))
 
 (defn parse-new ^Expr [^Parser parser ^Class owner ^long fctx [_ _ & args]]
   (let [n (type/type-dimensions owner)]

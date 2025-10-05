@@ -61,6 +61,9 @@ clean:
 print-line-count:
 	find src/tcljx -name "*.cljt" | grep -v src/tcljx/alpha/ | xargs wc -l | sort -n
 
+print-lines-of-code:
+	find src/tcljx -name "*.cljt" | grep -v src/tcljx/alpha/ | xargs grep -v '^ *\($$\|;\)' | wc -l
+
 .PHONY: compile watch-and-compile test watch-and-test clean
 
 

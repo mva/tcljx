@@ -1,10 +1,11 @@
 (ns tcljx.classgen.emit
   (:require
    (tcljx.data [config :as cfg] [context :as context] [type :as type]
-               [model :as model] [reflect :as reflect]))
+               [ir :as ir] [reflect :as reflect])
+   (tcljx.classgen util))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.model CodeEmitter Entity LoadFromCopyWhenBound)
+   (tcljx.data.ir CodeEmitter Entity LoadFromCopyWhenBound MethodSpec)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
    (java.lang.constant MethodTypeDesc ConstantDesc ClassDesc ConstantDescs)))
 
@@ -182,3 +183,12 @@
      (or (>= i end)
          (and (insn? xb consumer-fctx (aget consumed-types i) (aget ces i))
               (recur (inc i)))))))
+
+(defn body ^void [^CodeBuilder xb ^MethodSpec spec ^int first-param-no]
+  (let [return-type (-> spec .at .return-type)
+        parameters (.parameters spec)]
+    (dotimes [i (alength parameters)]
+      (let [param-no (+ first-param-no i)
+            ent ^tcljx.classgen.util.LocalVariable (aget parameters i)]
+        (.emit-setup-code? ent xb param-no)))
+    (then-leave? xb cfg/no-line-number return-type (.code spec) true)))

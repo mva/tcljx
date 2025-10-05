@@ -1,12 +1,12 @@
 (ns tcljx.classgen.insn
   (:require
    (tcljx.data
-    [config :as cfg] [wrong :as wrong] [context :as context] [type :as type]
-    [model :as model] [reflect :as reflect] [resolve :as resolve])
-   (tcljx.classgen [emit :as emit] [entity :as entity]))
+    [config :as cfg] [wrong :as wrong] [context :as context] [member :as member]
+    [type :as type] [ir :as ir] [reflect :as reflect])
+   (tcljx.classgen [emit :as emit] [constgen :as constgen]))
   (:import
-   (tcljx.data.model Expr Exprs CodeEmitter Entity Binding ArityType)
-   (tcljx.data.resolve Match)
+   (tcljx.data.ir Expr Exprs CodeEmitter Entity Binding ArityType)
+   (tcljx.data.member MemberHandle)
    (java.lang.classfile CodeBuilder TypeKind Opcode)
    (java.lang.constant MethodTypeDesc DirectMethodHandleDesc
                        DirectMethodHandleDesc$Kind ConstantDescs)
@@ -35,17 +35,17 @@
 (def mk-insn Insn/new)
 (defn mk-statm ^Insn [^CodeEmitter emitter]
   (mk-insn emitter type/polymorphic))
-(def insn-empty (mk-statm entity/emitter-empty))
+(def insn-empty (mk-statm constgen/emitter-empty))
 
-(def insn-null (mk-insn entity/entity-null type/poly-reference))
-(def insn-false (mk-insn entity/entity-false Boolean/TYPE))
-(def insn-true (mk-insn entity/entity-true Boolean/TYPE))
+(def insn-null (mk-insn constgen/entity-null type/poly-reference))
+(def insn-false (mk-insn constgen/entity-false Boolean/TYPE))
+(def insn-true (mk-insn constgen/entity-true Boolean/TYPE))
 (defn insn-boolean ^Insn [^boolean value] (if value insn-true insn-false))
 
-(def insn-int-zero (mk-insn entity/entity-int-zero Integer/TYPE))
-(def insn-int-one (mk-insn (entity/constant 1 Integer/TYPE) Integer/TYPE))
-(def insn-int-m1 (mk-insn (entity/constant -1 Integer/TYPE) Integer/TYPE))
-(def insn-float-one (mk-insn (entity/constant 1.0f Float/TYPE) Float/TYPE))
+(def insn-int-zero (mk-insn constgen/entity-int-zero Integer/TYPE))
+(def insn-int-one (mk-insn (constgen/constant 1 Integer/TYPE) Integer/TYPE))
+(def insn-int-m1 (mk-insn (constgen/constant -1 Integer/TYPE) Integer/TYPE))
+(def insn-float-one (mk-insn (constgen/constant 1.0f Float/TYPE) Float/TYPE))
 
 (defn value-of ^Insn [^Entity ent form]
   (if-some [tp (.value-type ent)]
@@ -54,7 +54,7 @@
                                " has no runtime value")))))
 
 (defn constant-insn ^Insn [^Object value ^Class type]
-  (value-of (entity/constant value type) nil))
+  (value-of (constgen/constant value type) nil))
 
 
 ;;; This indicates an error regarding the type *of* an expression.
@@ -126,14 +126,14 @@
 
 (defn const?
   (^boolean [^Insn x]
-   (entity/const? (.emitter x)))
+   (constgen/const? (.emitter x)))
   (^boolean [^Insns xs ^int i]
-   (entity/const? (.emitter xs i))))
+   (constgen/const? (.emitter xs i))))
 (defn const-value
   (^Object [^Insn x]                    ;nil if `x` is not a Constant
-   (entity/const-value (.emitter x)))
+   (constgen/const-value (.emitter x)))
   (^Object [^Insns xs ^int i]        ;nil if `xs[i]` is not a Constant
-   (entity/const-value (.emitter xs i))))
+   (constgen/const-value (.emitter xs i))))
 
 (defn loadables? ^boolean [^Insns insns]
   (loop [i (dec (.length insns))]
@@ -210,7 +210,7 @@
            (.emit-insn* (.emitter insn-n) xb consumed-type then-leave?)))
         (mk-insn (expr-type insn-n)))))
 (defn prog2 ^Insn [^Insn statm ^Insn insn-n]
-  (if (entity/const? (.emitter statm))
+  (if (constgen/const? (.emitter statm))
     insn-n            ;constant `statm` does not have any side effects
     (progn (insns-of statm) insn-n)))
 
@@ -224,7 +224,7 @@
       ;; polymorphic method invocation
       arg
 
-      (and (entity/entity-null? (.emitter arg))
+      (and (constgen/entity-null? (.emitter arg))
            #_(type/poly-reference? x-tp)
            #_(not (.isPrimitive target-type)))
       (mk-insn (.emitter arg) target-type)
@@ -292,7 +292,7 @@
   (redirecting-to ^DirectMethodHandleDesc [^Class return-type ^boolean varargs?
                                            ^Entity/1 params]))
 
-(defn invoke-member ^Insn [^Match m ^Insn receiver ^Insns args ^long fctx]
+(defn invoke-member ^Insn [^MemberHandle m ^Insn receiver ^Insns args ^long fctx]
   (-> (reify
         CodeEmitter
         (emit-insn* [_ xb consumed-type _]
@@ -304,8 +304,8 @@
                         (-> (emit/with-line-number xb fctx)
                             (reflect/invoke-member (.owner m) (.member m) mtd))
                         consumed-type)))]
-            (let [fixed (resolve/end-of-fixed-parameters m)
-                  varargs-tp (resolve/varargs-parameter-type m)]
+            (let [fixed (member/end-of-fixed-parameters m)
+                  varargs-tp (member/varargs-parameter-type m)]
               ;; new-dup-dance when creating a new instance of `owner`
               (when (instance? java.lang.reflect.Constructor (.member m))
                 (-> xb (.new_ (reflect/describe-class (.owner m))) (.dup)))
@@ -341,10 +341,10 @@
                           (recur (dec i))
                           :else false))))]
             
-            (when (and (not= resolve/invoke-polymorphic (.invocation-mode m))
+            (when (and (not= member/invoke-polymorphic (.invocation-mode m))
                        (or (type/auto-return-marker? return-type)
                            (type/same? return-type (.return-type m)))
-                       (= varargs? (resolve/varargs? m))
+                       (= varargs? (member/varargs? m))
                        (direct-to-args? (.parameter-types m) (int (some? receiver)))
                        (or (nil? receiver)
                            (identical? (aget params 0) (.emitter receiver))))
@@ -375,7 +375,7 @@
 
 (defn emit-invoke-arity ^Class [^DirectMethodHandleDesc mhd ^ArityType at
                                 ^Insns args ^long fctx ^CodeBuilder xb]
-  (let [fixed (model/fixed-parameter-count at)
+  (let [fixed (ir/fixed-parameter-count at)
         parameter-types (.parameter-types at)
         varargs-tp (when (< fixed (alength parameter-types))
                      (aget parameter-types fixed))]
@@ -395,7 +395,7 @@
         (.return-type at)))))
 
 ;;; Invoke static runtime method without line number information.
-(defn invoke-runtime ^Insn [^Match m ^Insns args]
+(defn invoke-runtime ^Insn [^MemberHandle m ^Insns args]
   (invoke-member m nil args context/fctx-none))
 
 ;;; ------------------------------------------------------------------------

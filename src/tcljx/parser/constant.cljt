@@ -1,8 +1,8 @@
 (ns tcljx.parser.constant
   (:require
-   (tcljx.data [wrong :as wrong] [type :as type] [model :as model]))
+   (tcljx.data [wrong :as wrong] [type :as type] [ir :as ir]))
   (:import
-   (tcljx.data.model Expr Parser)
+   (tcljx.data.ir Expr Parser)
    (java.lang.constant ConstantDesc ConstantDescs)
    (java.util.regex Pattern)))
 
@@ -29,28 +29,28 @@
 ;;; that may be injected via macros, like Byte or Short.
 (defn parse-constant-nometa ^Expr [^Parser parser form]
   ;; pre: (not (instance? IMeta form))
-  (let [ef (.expr-factory parser)]
+  (let [etf (.entity-factory parser)]
     (cond
       (nil? form)
-      (model/new-constant ef ConstantDescs/NULL type/poly-reference)
+      (ir/new-constant etf ConstantDescs/NULL type/poly-reference)
       
       (instance? ConstantDesc form)
-      (model/new-constant ef form (primitive-type-of (.getClass form)))
+      (ir/new-constant etf form (primitive-type-of (.getClass form)))
       
       (keyword? form)
-      (.new-loadable ef form type/keyword)
+      (.new-loadable etf form type/keyword)
       
       (boolean? form)
-      (model/new-constant ef (int ^boolean form) Boolean/TYPE)
+      (ir/new-constant etf (int ^boolean form) Boolean/TYPE)
       
       (char? form)
-      (model/new-constant ef (int ^char form) Character/TYPE)
+      (ir/new-constant etf (int ^char form) Character/TYPE)
       
       (number? form)      ;any non-ConstantDesc number: Byte and Short
-      (model/new-constant ef (.intValue ^Number form)
+      (ir/new-constant etf (.intValue ^Number form)
                           (primitive-type-of (.getClass form)))
 
       (instance? Pattern form)
-      (.new-loadable ef form Pattern)
+      (.new-loadable etf form Pattern)
 
       :else (wrong/other "unsupported literal value" (class form)))))

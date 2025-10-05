@@ -11,7 +11,7 @@
             [tcljx.parser.reader :as reader]
             [tinyclj.string :as str]
             [tcljx.alpha.ptest :refer :all])
-  (:import (tcljx.data.model Resolver)
+  (:import (tcljx.data.ir Resolver)
            (tcljx.data.wrong WrongInfo)
            (tcljx.parser.reader FormBuilder TokenParser)
            (java.lang.invoke MethodHandles)))

@@ -1,7 +1,7 @@
 (ns tcljx.parser.syntax
   (:require (tcljx.data [config :as cfg] [wrong :as wrong])
             [tinyclj.core :as core])
-  (:refer-clojure :exclude [vector map symbol first second]))
+  (:refer-clojure :exclude [vector list map symbol first second]))
 
 (defn info
   (^Throwable [^String msg]
@@ -36,6 +36,11 @@
      (if (and even? (odd? (count x)))
        (throw (info "expect vector with even number of elements" form))
        x))))
+
+(defn list ^seq [form]
+  (if (seq? form)
+    form
+    (throw (info "expect list" form))))
 
 (defn map ^map [form]
   (if (map? form)

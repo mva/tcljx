@@ -1,8 +1,8 @@
 (ns tcljx.parser.parse
-  (:require (tcljx.data [meta :as meta] [wrong :as wrong] [model :as model]
+  (:require (tcljx.data [meta :as meta] [wrong :as wrong] [ir :as ir]
                         [context :as context]))
-  (:import (tcljx.data.model Resolver NamespaceBuilder Entity Binding
-                             Expr Exprs ExprFactory Parser)
+  (:import (tcljx.data.ir Resolver NamespaceBuilder Entity Binding
+                          Expr Exprs ExprFactory Parser AritySpec MethodSpec)
            (tcljx.data.wrong WrongInfo)))
 
 (defn new-exprs ^Exprs [^Parser parser ^int n]
@@ -86,3 +86,29 @@
     (if (instance? NamespaceBuilder rsv)
       rsv
       (throw (wrong/wr-info "cannot manipulate namespace data in this position")))))
+
+;;; ------------------------------------------------------------------------
+
+(defn binding-variables ^Entity/1 [^Binding/1 bnds]
+  (let [a (new Entity/1 (alength bnds))]
+    (dotimes [i (alength a)]
+      (aset a i (.bound-to (aget bnds i))))
+    a))
+
+(defn method-spec-template ^MethodSpec [^AritySpec aspec ^int source-idx
+                                        ^String name]
+  (MethodSpec. (.at aspec) nil nil nil source-idx name (java.util.HashMap.)))
+
+(defn body-into ^MethodSpec [^MethodSpec mspec ^boolean inst-method?
+                             ^Parser parser ^long fctx ^AritySpec aspec]
+  (let [pbnds (ir/parameter-bindings parser (.at aspec))
+        pvars (binding-variables pbnds)
+        rvars (cond-> pvars
+                inst-method?
+                ^Entity/1 (java.util.Arrays/copyOfRange 1 (alength pvars)))
+        xf' (.with-recur-variables (.expr-factory parser) rvars)
+        fctx' (context/with-recur context/fctx-initial)
+        x-body (-> (ir/with-local-bindings parser pbnds)
+                   (.with-expr-factory xf')
+                   (progn (.error-context aspec) fctx' (.body aspec)))]
+    (.complete-method xf' mspec pvars fctx' x-body)))

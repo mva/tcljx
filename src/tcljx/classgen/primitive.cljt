@@ -1,13 +1,14 @@
 (ns tcljx.classgen.primitive
   (:require
    (tcljx.data [config :as cfg] [type :as type] [resolve :as resolve]
-               [reflect :as reflect] [model :as model] [wrong :as wrong])
-   (tcljx.classgen [classfile :as classfile] [emit :as emit] [insn :as insn]
-                   [entity :as entity] [runtime :as rt] [condgen :as condgen])
+               [reflect :as reflect] [ir :as ir] [wrong :as wrong])
+   (tcljx.classgen [classfile :as classfile] [constgen :as constgen]
+                   [emit :as emit] [insn :as insn] [runtime :as rt]
+                   [condgen :as condgen])
    (tinyclj [string :as str]))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.model CodeEmitter Entity Constant)
+   (tcljx.data.ir CodeEmitter Entity Constant)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile Opcode CodeBuilder TypeKind)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
@@ -21,9 +22,9 @@
   (value-type [_]
     nil)
   (entity-id [_]
-    model/entity-id-def)
-  (method-specs [ _]
-    model/method-specs-primitive-fn))
+    ir/entity-id-def)
+  (invoke-methods [ _]
+    ir/invoke-methods-primitive-fn))
 
 (defmacro with-primitive-invoke [^vector paramv & body]
   `(reify PrimitiveFnEntity (~'invoke* ~paramv ~@body)))
@@ -144,7 +145,7 @@
 (def ^:private no-iinc Integer/MIN_VALUE) ;outside range of IINC instruction
 (defn iinc-delta ^int [^CodeEmitter entity ^CodeEmitter ce]
   (letfn [(delta ^int [^CodeEmitter arg]
-            (if-some [c (entity/const-value arg)]
+            (if-some [c (constgen/const-value arg)]
               (.intValue ^Number c)  ;accept any number representation
               no-iinc))]
     (cond
@@ -219,7 +220,7 @@
                   #_long 1 (object (const-fold-long bytecode c0 c1))
                   #_float 2 (object (const-fold-float bytecode c0 c1))
                   #_double 3 (object (const-fold-double bytecode c0 c1))))
-              (entity/constant (op-type opcd0))))
+              (constgen/constant (op-type opcd0))))
 
         (info-type-mismatch ^Throwable [form ^Insns args ^int i ^String exp]
           (-> (str (wrong/q (first form)) " expects " exp " type for argument #"
@@ -278,8 +279,8 @@
         
         (op-2 ^CodeEmitter [^OpSpec op ^int opcd0 ^int opcd1
                             ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
-          (let [c0 (entity/const-value ce0)
-                c1 (entity/const-value ce1)]
+          (let [c0 (constgen/const-value ce0)
+                c1 (constgen/const-value ce1)]
             (cond
               (left-identity? op c0)
               ce1
@@ -299,11 +300,11 @@
         (unary ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter ce ^long fctx]
           (condp identical? (.base-opcode op)
             Opcode/ISUB
-            (if-some [c (entity/const-value ce)]
+            (if-some [c (constgen/const-value ce)]
               (folded-constant op opcd (.right-identity op) c)
               (Op2. (+ (.bytecode Opcode/INEG) opcd) opcd opcd ce nil fctx))
             Opcode/IDIV
-            (if-some [c (entity/const-value ce)]
+            (if-some [c (constgen/const-value ce)]
               (folded-constant op opcd (.right-identity op) c)
               (op-2 op opcd opcd (.emitter insn/insn-int-one) ce fctx))
             #_else ce))
@@ -333,7 +334,7 @@
             wop-type (top-type-of op form args)
             op-type (.class-primitive wop-type)]
         (-> (case (.length args)
-              0 (entity/constant (.right-identity op) op-type)
+              0 (constgen/constant (.right-identity op) op-type)
               1 (unary op (.computational-id wop-type) (insn/emitter args 0) fctx)
               #_else (op-n op (.computational-id wop-type) (.emitters args) fctx))
             (insn/mk-insn op-type)))))
@@ -375,7 +376,7 @@
             tp (.expr-type arg)]
         (cond
           (type/same? Void/TYPE tp) insn/insn-empty
-          (.isPrimitive tp) (-> 0 (entity/constant tp) (insn/mk-insn tp))
+          (.isPrimitive tp) (-> 0 (constgen/constant tp) (insn/mk-insn tp))
           :else insn/insn-null))))
   
   (defn mk-binary-shift ^Entity [^Opcode base-opc]

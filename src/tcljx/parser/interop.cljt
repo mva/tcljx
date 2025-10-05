@@ -1,11 +1,12 @@
 (ns tcljx.parser.interop
   (:require
-   (tcljx.data [meta :as meta] [type :as type] [resolve :as resolve]
-               [wrong :as wrong] [context :as context] [model :as model])
+   (tcljx.data [meta :as meta] [member :as member] [type :as type]
+               [resolve :as resolve] [wrong :as wrong] [context :as context]
+               [ir :as ir])
    (tcljx.parser [syntax :as syntax]))
   (:import
-   (tcljx.data.resolve Match)
-   (tcljx.data.model Resolver Expr Entity ExprFactory Parser ArityType)
+   (tcljx.data.member MemberHandle)
+   (tcljx.data.ir Resolver Expr Entity ExprFactory EntityFactory Parser ArityType)
    (clojure.lang IMeta)
    (java.lang.reflect Method)))
 
@@ -73,8 +74,8 @@
   (let [tp (parse-type-symbol (.resolver parser) tag)]
     (.type-cast (.expr-factory parser) fctx tp x)))
 
-(defn- class-member-match ^Match [^boolean static? ^Class owner ^String mnm
-                                  ^Class/1 ptags]
+(defn- class-member-match ^MemberHandle [^boolean static? ^Class owner
+                                         ^String mnm ^Class/1 ptags]
   (let [ms (resolve/members-by-param-tags static? owner mnm ptags)
         wr-info (fn ^Throwable []
                   (let [sym (wrong/q-as-symbol owner mnm)]
@@ -87,7 +88,7 @@
                               (str "multiple " label " members matching " sym)
                               (str "no " label " member matching " sym))))
                         (wrong/wr-info))))]
-    (let [m ^Match (first ms)]
+    (let [m ^MemberHandle (first ms)]
       (if (and (some? m) (nil? (next ms)))
         m
         (throw (wr-info))))))
@@ -102,35 +103,37 @@
                               type/polymorphic
                               (parse-type-symbol resolver sym)))))
               a)))
-        (resolve ^Match [^Class owner ^String nm ^Class/1 ptags]
+        (resolve ^MemberHandle [^Class owner ^String nm ^Class/1 ptags]
           (if (.startsWith nm ".")
             (class-member-match false owner (.substring nm 1) ptags)
             (class-member-match true owner nm ptags)))
-        (lookup ^Object [^Resolver rsv ^ExprFactory ef ^symbol sym]
+        (lookup ^Object [^Resolver rsv ^ExprFactory xf ^EntityFactory etf
+                         ^symbol sym]
           (let [nm (name sym)]
             (if-some [nmsp (namespace sym)]
               (when-some [cl (.lookup-class rsv nmsp)]
                 (if-some [tp (lookup-type rsv cl nm)]
-                  (.entity-constant ef tp Class) ;array type
+                  (.entity-constant etf tp Class) ;array type
                   (let [ptags (-> (get-param-tags (.meta sym))
                                   (parse-param-tags rsv)) m (resolve cl nm ptags)
-                        ent (.entity-class-member ef m)]
-                    (if (and (nil? ptags) (resolve/static-field? m))
+                        ent (.entity-class-member etf m)]
+                    (if (and (nil? ptags) (member/static-field? m))
                       (.invoke* ent context/fctx-none nil nil 0
-                                (.new-exprs ef 0))
+                                (.new-exprs xf 0))
                       ent))))
               (when-some [cl (.lookup-class rsv nm)]
-                (.entity-constant ef cl Class)))))]
+                (.entity-constant etf cl Class)))))]
   
   (defn lookup-class-entity ^Entity [^Parser parser ^symbol sym]
-    (let [x (lookup (.resolver parser) (.expr-factory parser) sym)]
+    (let [x (lookup (.resolver parser) (.expr-factory parser)
+                    (.entity-factory parser) sym)]
       (when (instance? Entity x)        ;filter out getstatic
         x)))
   (defn lookup-class-expr ^Expr [^Parser parser ^symbol sym]
-    (let [ef (.expr-factory parser)
-          x (lookup (.resolver parser) ef sym)]
+    (let [etf (.entity-factory parser)
+          x (lookup (.resolver parser) (.expr-factory parser) etf sym)]
       (if (instance? Entity x)
-        (.value-of ef x sym)
+        (.value-of etf x sym)
         x))))                           ;pass through getstatic
 
 ;;; ------------------------------------------------------------------------
@@ -202,6 +205,6 @@
         (when-not (untagged? (first paramv))
           (throw (syntax/info "no type tag allowed for receiver parameter")))
         (aset (.parameter-types at) 0 owner) ;type of receiver
-        (model/with-method-type at (if (unhinted-arity-type? at 1)
+        (ir/with-method-type at (if (unhinted-arity-type? at 1)
                                      (select-method-by-arity at)
                                      (select-matching-method at)))))))

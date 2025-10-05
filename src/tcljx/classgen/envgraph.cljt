@@ -1,43 +1,22 @@
 (ns tcljx.classgen.envgraph
-  (:require (tcljx.data [config :as cfg] [model :as model]))
-  (:import (tcljx.data.model CodeEmitter Entity Expr NmspClass)
-           (java.lang.constant ClassDesc ConstantDescs)
-           (java.util ArrayList HashMap Map$Entry)
-           (java.util.concurrent ConcurrentHashMap)
-           (java.util.function Consumer Function BiFunction)))
+  (:require (tcljx.data [config :as cfg] [ir :as ir] [code :as code]))
+  (:import (tcljx.data.ir CodeEmitter Entity EntityFactory MethodSpec FieldSpec)
+           (java.lang.constant ClassDesc)
+           (java.util HashMap Map$Entry)))
 
-(deftype SegmentAcc [^ArrayList segment-elements ;of Consumer
-                     ^ArrayList clinit-statms    ;of Expr
-                     ^ArrayList other-classes]   ;of NmspClass
-  java.lang.Record)
-
-(defn add-segment-elements ^SegmentAcc [^SegmentAcc acc ^Consumer class-handler]
-  (.add (.segment-elements acc) class-handler)
-  acc)
-(defn add-clinit-statm ^SegmentAcc [^SegmentAcc acc ^Expr expr]
-  (.add (.clinit-statms acc) expr)
-  acc)
-(defn add-class-file ^SegmentAcc [^SegmentAcc acc ^NmspClass ncl]
-  (.add (.other-classes acc) ncl)
-  acc)
-
-;;; ------------------------------------------------------------------------
-
-(definterface IEmitProxy
-  :extends [Entity]
-  (set-emit-entity! ^void [^Entity ent])
-  (get-emit-entity ^Entity []))
-(definterface IEnvProxy
-  :extends [IEmitProxy]
+(definterface IFnPromise
+  (get-emit-entity ^Entity [])          ;for code generation of `def`
   (materialized-as-value? ^boolean [])
   (mark-as-materialized! ^void []))
+
+(definterface IDisplay
+  (set-emit-entity! ^void [^Entity ent]))
 
 ;;; Local copy of a value taken from the entity `origin`, where
 ;;; `origin` is defined by a parent of the current function (or reify,
 ;;; or interface function).
-(deftype EnvProxy [^Entity origin ^int local-entity-id ^String local-name
-                   ^:unsynchronized-mutable ^Entity __emit
-                   ^:unsynchronized-mutable ^boolean __materialized?]
+(deftype Display [^Entity origin ^int local-entity-id ^String local-name
+                  ^:unsynchronized-mutable ^Entity __emit]
   CodeEmitter
   (emit-insn* [_ xb consumed-type then-leave?]
     (.emit-insn* __emit xb consumed-type then-leave?))
@@ -48,22 +27,18 @@
     local-entity-id)
   (invoke* [this fctx form opt-f m-idx xs]
     (.invoke* origin fctx form this m-idx xs))
-  IEnvProxy
+  IDisplay
   (set-emit-entity! [_ ent]
-    (set! __emit ent))
-  (get-emit-entity [_]
-    __emit)
-  (materialized-as-value? [_]
-    __materialized?)
-  (mark-as-materialized! [_]
-    (set! __materialized? true)))
+    (set! __emit ent)))
 
-(deftype OriginProxyPairs [^Entity/1 aorigin, ^EnvProxy/1 aproxy])
+;;; ------------------------------------------------------------------------
 
-(letfn [(sort-by-origin ^OriginProxyPairs [^Entity/1 aorigin ^EnvProxy/1 aproxy]
+(deftype EnvDisplayPairs [^Entity/1 aorigin, ^Display/1 adisplay])
+
+(letfn [(sort-by-origin ^EnvDisplayPairs [^Entity/1 aorigin ^Display/1 adisplay]
           (let [n (alength aorigin)
                 aorigin* (new Entity/1 n)
-                aproxy* (new EnvProxy/1 n)
+                adisplay* (new Display/1 n)
                 idxs (new long/1 n)]
             (dotimes [i n]
               (aset idxs i (-> (long (.entity-id (aget aorigin i)))
@@ -73,224 +48,88 @@
             (dotimes [i n]
               (let [j (bit-and (int (aget idxs i)) 0xFFFF)]
                 (aset aorigin* i (aget aorigin j))
-                (aset aproxy* i (aget aproxy j))))
-            (OriginProxyPairs. aorigin* aproxy*)))]
+                (aset adisplay* i (aget adisplay j))))
+            (EnvDisplayPairs. aorigin* adisplay*)))]
   
-  (defn sorted-ops ^OriginProxyPairs [^HashMap origin-to-proxy]
-    (let [n (.size origin-to-proxy)
+  (defn sorted-eds ^EnvDisplayPairs [^HashMap origin-to-display]
+    (let [n (.size origin-to-display)
           aorigin (new Entity/1 n)
-          aproxy (new EnvProxy/1 n)
-          it (-> origin-to-proxy .entrySet .iterator)]
+          adisplay (new Display/1 n)
+          it (-> origin-to-display .entrySet .iterator)]
       (loop [i 0]
         (when (.hasNext it)
           (let [entry ^Map$Entry (.next it)]
             (aset aorigin i (.getKey entry))
-            (aset aproxy i (.getValue entry))
+            (aset adisplay i (.getValue entry))
             (recur (inc i)))))
       (if (<= n 1)
-        (OriginProxyPairs. aorigin aproxy)
-        (sort-by-origin aorigin aproxy)))))
+        (EnvDisplayPairs. aorigin adisplay)
+        (sort-by-origin aorigin adisplay)))))
 
-;;; ------------------------------------------------------------------------
-
-(definterface IEnvSegment
-  (stage-task! ^void [task])
-  (size-staged ^int [])
-  (pick-unique-name ^String [^String opt-prefix ^String dflt-nm]))
-
-(def ^:private ZERO (object 0))
-(deftype EnvSegment [^ConcurrentHashMap private-name-map
-                     ^ClassDesc segment-class
-                     ^ArrayList tasks
-                     ^String pkg-name
-                     ^ClassDesc super-class
-                     ^int segment-id]
-  IEnvSegment
-  (stage-task! [_ task]
-    (.add tasks task))
-  (size-staged [_]
-    (.size tasks))
-  
-  ;; Generates unique names for fn* and reify* instances within a
-  ;; given namespace.  In case of name clashes the result is not
-  ;; deterministic, unless all of the namespace's processing happens
-  ;; within a single thread.
-  (pick-unique-name [_ opt-prefix dflt-nm]
-    (let [nm (cond->> (cfg/munge-name dflt-nm)
-               (some? opt-prefix) (str opt-prefix "$"))
-          n ^int (.compute private-name-map nm
-                           (^BiFunction fn ^Integer [_ ^Integer v]
-                            (if (nil? v) ZERO (object (inc ^int v)))))]
-      (cond-> nm (pos? n) (str "^" n)))))
-
-(letfn [(segment-cld ^ClassDesc [^String pkg-name ^int segm-id]
-          (ClassDesc/of pkg-name (str "_" segm-id)))]
-  (defn mk-first-segment ^EnvSegment [^String pkg-name]
-    (let [segm-id 10]
-      (EnvSegment. (ConcurrentHashMap.) (segment-cld pkg-name segm-id)
-                   (ArrayList.) pkg-name ConstantDescs/CD_Object segm-id)))
-  (defn next-segment ^EnvSegment [^EnvSegment segm]
-    (let [pkg-name (-> segm .pkg-name), segm-id (-> segm .segment-id (inc))]
-      (EnvSegment. (.private-name-map segm) (segment-cld pkg-name segm-id)
-                   (ArrayList.) pkg-name (.segment-class segm) segm-id))))
-
-(defn capstone-class ^ClassDesc [^EnvSegment segm]
-  (ClassDesc/of (.pkg-name segm) "___"))
-
-;;; ------------------------------------------------------------------------
-
-(definterface IEnvMethod
-  (scope-name ^String [])
-  (closure-level ^int [])               ;of this class/entity
-  (next-entity-id ^int [])
-  
-  (stage-task! ^void [task])
-  (env-proxy-of! ^EnvProxy [^Entity origin ^String local-name]))
-
-;;; An EnvMethod acts as a buffer between the information gathering
-;;; phase of parsing and the build step that emits the class files.
-;;; It encapsulates mutable state and all updates are initiated from a
-;;; single thread.  EnvMethods are usually nested, and capture
-;;; information about a given closure's environment.
-(deftype EnvMethod [^int method-index   ;within this EnvClass
-                    ^:unsynchronized-mutable ^int curr-entity-id
-                    ^String class-name  ;if turned into separate class
-                    ^EnvMethod parent ;provides this environment's values
-                    ^HashMap origin-to-proxy
-                    ^String this-name   ;name of any receiver locals
-                    ^ArrayList tasks
-                    ^EnvSegment segment]
-  Object
-  (toString [_]
-    (str class-name "[" method-index "]"))
-  IEnvMethod
-  (scope-name [_]
-    class-name)
-  (closure-level [_]
-    (unsigned-bit-shift-right curr-entity-id 16))
-  (next-entity-id [_]
-    (set! curr-entity-id (inc curr-entity-id)))
-  
-  (stage-task! [_ task]
-    (.add tasks task))
-  (env-proxy-of! [this origin local-name]
-    #_(prn :closure-level (model/closure-level ent)
-           :sequence-number (model/sequence-number ent)
-           :using-scope (.scope-name cbp))
-    (->> (^Function fn [origin]
-          (EnvProxy. origin (.next-entity-id this) local-name nil false))
-         (.computeIfAbsent origin-to-proxy origin))))
-
-(defn mk-method-clinit ^EnvMethod [^EnvSegment segm]
-  (let [initial-entity-id (model/entity-id-of model/closure-level-clinit)]
-    (EnvMethod. 0 initial-entity-id nil nil nil nil (.tasks segm) segm)))
-
-(defn- closes-over? ^boolean [^EnvMethod em ^Entity ent]
-  (let [origin (model/closure-level ent)]
-    (and (>= origin model/closure-level-clinit)
-         (not= origin (.closure-level em)))))
-
-(defn value-of ^Entity [^EnvMethod em ^Entity ent ^Object form]
+(defn value-of ^Entity [^EntityFactory etf ^Entity ent ^Object form]
   #_(prn :cbp-level (.closure-level em)
-         :ent-level (model/closure-level ent)
-         :sequence-number (model/sequence-number ent)
+         :ent-level (ir/closure-level ent)
+         :sequence-number (ir/sequence-number ent)
          :using-scope (.scope-name em)
          :form form
          :ent-class (class ent)
          :closes-over? (closes-over? em ent))
-  (if (closes-over? em ent)
-    (doto (.env-proxy-of! em ent (name ^symbol form))
-      (.mark-as-materialized!))
+  (if (.closes-over? etf ent)
+    (do (when (instance? IFnPromise ent)
+          (.mark-as-materialized! ^IFnPromise ent))
+        (.display-of! etf ent (name ^symbol form)))
     ent))
 
-(defn invocation-of ^Entity [^EnvMethod em ^Entity inv ^seq form]
-  (if (closes-over? em inv)
-    (.env-proxy-of! em inv (name ^symbol (first form)))
+(defn invocation-of ^Entity [^EntityFactory etf ^Entity inv ^seq form]
+  (if (.closes-over? etf inv)
+    (.display-of! etf inv (name ^symbol (first form)))
     inv))
 
-;;; ------------------------------------------------------------------------
+(letfn [(some-materialized-display? ^boolean [^MethodSpec spec]
+          (let [it (-> spec .env-to-display .keySet .iterator)]
+            (loop []
+              (when (.hasNext it)
+                (let [origin (.next it)]
+                  (if (instance? IFnPromise origin)
+                    (or (.materialized-as-value? ^IFnPromise origin)
+                        (recur))
+                    true))))))]
+  (defn fn-closes-over-env? ^boolean [^MethodSpec/1 method-specs]
+    (loop [i (dec (alength method-specs))]
+      (cond (neg? i) false
+            (some-materialized-display? (aget method-specs i)) true
+            :else (recur (dec i))))))
 
-;;; Can add clinit code, class elements, or whole classes to the
-;;; segment under construction.
-(definterface PreparationTask
-  (extend-segment ^SegmentAcc [^SegmentAcc acc ^EnvClass class]))
+(defn merged-env-to-display ^HashMap [^MethodSpec/1 method-specs]
+  (let [acc (HashMap.)]
+    (loop [i (dec (alength method-specs))]
+      (when-not (neg? i)
+        (.putAll acc (.env-to-display (aget method-specs i)))
+        (recur (dec i))))
+    acc))
 
-;;; Represents an entity that may be turned into a decicated class
-;;; description while compiling.  Other alternative: a lambda
-;;; expression generating a hidden class, a generic shared class
-;;; provided by the core library, or the class is elided altogether.
-(deftype EnvClass [^PreparationTask class-task
-                   ^EnvSegment segment
-                   ^String class-name   ;if turned into separate class
-                   ^EnvMethod/1 methods])
-
-(defn namespace-class ^ClassDesc [^EnvClass class]
-  (ClassDesc/of (-> class .segment .pkg-name) (-> class .class-name)))
-
-(defn run-task ^SegmentAcc [^SegmentAcc acc ^PreparationTask task ^EnvClass class]
-  (.extend-segment task acc class))
-
-(defn mk-methods
-  (^EnvMethod/1 [^EnvMethod parent ^Class itf-class]
-   (mk-methods parent (.getSimpleName itf-class) 1 0))
-  (^EnvMethod/1 [^EnvMethod parent ^String scope-name-suffix
-                 ^int n ^int preassigned-entity-ids]
-   (letfn [(method ^EnvMethod [^String unique-nm ^int method-index]
-             (let [level' (if (some? unique-nm)
-                            (inc (.closure-level parent))
-                            model/closure-level-clinit)
-                   entity-id (model/entity-id-of level' preassigned-entity-ids)]
-               (EnvMethod. method-index entity-id unique-nm parent (HashMap.)
-                           scope-name-suffix (ArrayList.) (.segment parent))))]
-     (let [parent-name (.scope-name parent)
-           unique-nm (.pick-unique-name (.segment parent) parent-name
-                                        scope-name-suffix)
-           a (new EnvMethod/1 n)]
-       (dotimes [i (alength a)]
-         (aset a i (method unique-nm i)))
-       a))))
-
-(letfn [(method-closes-over-env? ^boolean [^EnvMethod m]
-          (let [it (-> m .origin-to-proxy .values .iterator)]
-            (loop [] (when (.hasNext it)
-                       (or (.materialized-as-value? ^EnvProxy (.next it))
-                           (recur))))))]
-  (defn fn-closes-over-env? ^boolean [^EnvClass class]
-    (let [ms (.methods class)]
-      (loop [i (dec (alength ms))]
-        (cond (neg? i) false
-              (method-closes-over-env? (aget ms i)) true
-              :else (recur (dec i)))))))
-
-(defn class-origin-to-proxy ^HashMap [^EnvClass class]
-  (let [methods (.methods class), n (alength methods)]
-    (if (= n 1)
-      (.origin-to-proxy (aget methods 0))
-      (let [acc ^HashMap (.clone (.origin-to-proxy (aget methods (dec n))))]
-        (loop [i (- n 2)]
-          (when (>= i 0)
-            (.putAll acc (.origin-to-proxy (aget methods i)))
-            (recur (dec i))))
-        acc))))
-
-
-(deftype EnvGraph [^EnvClass/1 classes])
-
-;;; ------------------------------------------------------------------------
-
-(defn mk-graph ^EnvGraph [^ArrayList tasks ^int tasks-end]
-  (let [acc-classes (ArrayList.)]
-    (letfn [(add-class! ^void [^EnvMethod parent ^EnvClass class]
-              (let [n (alength (.methods class))]
-                (dotimes [i n]
-                  (let [method (aget (.methods class) i)
-                        tasks (.tasks method)]
-                    (add-tasks! method tasks (.size tasks))))
-                (.add acc-classes class)))
-            (add-tasks! ^void [^EnvMethod parent ^ArrayList tasks ^int tasks-end]
-              (dotimes [i tasks-end]
-                (let [task (.get tasks i)]
-                  (when (instance? EnvClass task)
-                    (add-class! parent task)))))]
-      (add-tasks! nil tasks tasks-end)
-      (EnvGraph. (.toArray acc-classes (new EnvClass/1 0))))))
+;;; FIXME... is there a way that different environment values get
+;;; assigned the same field name?  when both name and type align, this
+;;; would result in an invalid class file (applies to fn* and reify*)
+(defn fields-exact ^FieldSpec/1 [^int d ^ClassDesc owner
+                                 ^EnvDisplayPairs construction-ops]
+  (let [aorigin (.aorigin construction-ops),  adisplay (.adisplay construction-ops)
+        a (new FieldSpec/1 (+ (alength aorigin) d))]
+    (dotimes [i (alength aorigin)]
+      (let [origin (aget aorigin i), display (aget adisplay i)]
+        (aset a (+ i d) (FieldSpec. owner (cfg/munge-name (.local-name display))
+                                    nil (ir/acc* private final)
+                                    (.value-type-exact origin)
+                                    (.value-type origin)))))
+    a))
+(defn- entity-getfield ^Entity [^FieldSpec fs]
+  (reify Entity
+    (emit-insn* [_ xb _ _] (code/get-field xb fs) (.type fs))
+    (value-type [_] (.type fs))
+    (value-type-exact [_] (.type-desc fs))
+    (entity-id [_] -1)))
+(defn field-entity-map ^HashMap [^Entity/1 aorigin ^FieldSpec/1 fields ^int d]
+  (let [acc (HashMap.)]
+    (dotimes [i (alength aorigin)]
+      (.put acc (aget aorigin i) (entity-getfield (aget fields (+ i d)))))
+    acc))

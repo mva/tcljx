@@ -1,39 +1,22 @@
 (ns tcljx.classgen.codegen
   (:require
    (tcljx.data
-    [config :as cfg] [wrong :as wrong] [context :as context] [type :as type]
-    [model :as model] [resolve :as resolve] [reflect :as reflect])
+    [config :as cfg] [wrong :as wrong] [context :as context] [member :as member]
+    [type :as type] [ir :as ir] [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen
-    [classfile :as classfile] [runtime :as rt] [emit :as emit]
-    [envgraph :as envgraph] [insn :as insn] [entity :as entity]
+    [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
+    [emit :as emit] [insn :as insn] [segment :as segment]
     [primitive :as primitive] [condgen :as condgen] [switchgen :as switchgen]
-    [trygen :as trygen] [defgen :as defgen] [fngen :as fngen]))
+    [trygen :as trygen] [fngen :as fngen]))
   (:import
-   (tcljx.data.model Expr Exprs ExprFactory CodeEmitter Binding Entity
-                     ArityType MethodSpec FieldSpec NamespaceBuilder)
-   (tcljx.data.resolve Match)
-   (tcljx.classgen.envgraph EnvClass EnvMethod)
-   (tcljx.classgen.entity LocalVariable)
+   (tcljx.data.ir Expr Exprs ExprFactory CodeEmitter Binding Entity
+                  ArityType MethodSpec FieldSpec NamespaceBuilder
+                  NmspClass Parser EntityFactory)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile ClassBuilder CodeBuilder Opcode Label TypeKind)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
                        ConstantDescs)
    (java.util.function Consumer)))
-
-(letfn [(find-factory ^Match [^String method-name]
-          (resolve/runtime-method tinyclj.lang.Literal method-name
-                                  (doto (new Class/1 1) (aset 0 Object/1))))]
-  (def ^:private literal-vector (find-factory "vector")) ;type/vector
-  (def ^:private literal-map (find-factory "map"))       ;type/map
-  (def ^:private literal-set (find-factory "set"))       ;type/set
-  (def ^:private literal-list (find-factory "list"))     ;type/list
-  (def ^:private literal-with-meta
-    (resolve/runtime-method tinyclj.lang.Literal "with_meta"
-                            (doto (new Class/1 2)
-                              (aset 0 clojure.lang.IObj)
-                              (aset 1 clojure.lang.IPersistentMap)))))
-
-;;; ------------------------------------------------------------------------
 
 (defn- invoke-single-match ^Insn [^seq ms ^Insn receiver ^Insns args ^long fctx]
   (when (nil? (next ms))
@@ -57,8 +40,6 @@
       (aset a i (primitive/iinc-delta (aget entities i) (aget ces i))))
     a))
 
-;;; ------------------------------------------------------------------------
-
 (defn- method-index ^int [^MethodSpec/1 method-specs ^int arg-count]
   (loop [i (dec (alength method-specs))]
     (cond
@@ -66,35 +47,22 @@
       (= (-> method-specs (aget i) .at .parameter-count) arg-count) i
       :else (recur (dec i)))))
 
-(defn- select-method-for-arity ^int [^MethodSpec/1 method-specs ^Insns xs]
-  (let [m-idx (method-index method-specs (.length xs))
-        at (.at (aget method-specs m-idx))
+(defn- select-method-for-arity ^int [^Entity inv ^Insns xs]
+  (let [specs (.invoke-methods inv)
+        m-idx (method-index specs (.length xs))
+        at (.at (aget specs m-idx))
         ptypes (.parameter-types at)
-        fixed (model/fixed-parameter-count at)]
+        fixed (ir/fixed-parameter-count at)]
     (insn/ensure-assignables ptypes xs fixed)
     (when (< fixed (alength ptypes)) ;any arguments passed as varargs?
       (insn/ensure-assignable* (.getComponentType (aget ptypes fixed))
                                xs fixed))
     m-idx))
 
-(defn- entity-dt-field [^ClassDesc owner ^FieldSpec spec ^int entity-id]
-  (reify Entity
-    (emit-insn* [_ xb _ _]
-      (-> (.aload xb (.receiverSlot xb))
-          (.getfield owner (.field-name spec) (.type-desc spec)))
-      (.type spec))
-    (value-type [_]
-      (.type spec))
-    (value-type-exact [_]
-      (.type-desc spec))
-    (entity-id [_]
-      entity-id)))
-
 (definterface InsnFactory
   :extends [ExprFactory]
   (get-recur-target ^Label [])
-  (set-recur-target! ^void [^Label target]) ;on this copy of InsnFactory!
-  (with-method ^InsnFactory [^EnvMethod method]))
+  (set-recur-target! ^void [^Label target])) ;on this copy of InsnFactory!
 
 ;;; Note: To save work, this code generator assumes that it can use
 ;;; types available at compile time to refer to runtime types of the
@@ -104,7 +72,7 @@
 ;;; Likewise for symbols, keywords, vectors, and so on.  This works
 ;;; only as long as compiler and application agree on the names of
 ;;; their runtime classes.
-(deftype InsnFactoryImpl [^EnvMethod method ^Entity/1 recur-variables
+(deftype InsnFactoryImpl [^Entity/1 recur-variables
                           ^:unsynchronized-mutable ^Label __recur-target]
   InsnFactory
   (empty-expr [_]
@@ -113,28 +81,10 @@
     (if (zero? n)
       insn/empty-insns
       (Insns. (new CodeEmitter/1 n) (new Class/1 n))))
-
-  (value-of [_ ent form]
-    (insn/value-of (envgraph/value-of method ent form) form))
-  (invoke-entity [this fctx form inv args]
-    (let [specs (.method-specs inv)]
-      (condp identical? specs
-        model/method-specs-primitive-fn
-        (.invoke* inv fctx form nil -1 args)
-        model/method-specs-invoke-dynamic
-        (.invoke-value this fctx (.value-of this inv (first form)) args)
-        #_else
-        (let [m-idx (select-method-for-arity specs args)
-              inv* (envgraph/invocation-of method inv form)]
-          (.invoke* inv fctx form inv* m-idx args)))))
   
-  (entity-constant [_ value type]
-    (entity/constant value type))
-  (entity-class-member [this m]
-    (fngen/class-member-fn m))
-  
-  (new-loadable [_ value expr-type]
-    (-> value (entity/collection expr-type false) (insn/mk-insn expr-type)))
+  (invoke-arity [this fctx form inv inv* args]
+    (let [m-idx (select-method-for-arity inv args)]
+      (.invoke* inv fctx form inv* m-idx args)))
 
   (attach-meta-to [this meta arg]
     (if (and (insn/const? arg) (insn/const? meta))
@@ -142,19 +92,9 @@
         (-> (doto (new CodeEmitter/1 2)
               (aset 0 (.emitter arg))
               (aset 1 (.emitter meta)))
-            (entity/collection tp true)
+            (constgen/collection tp true)
             (insn/mk-insn tp)))
-      (insn/invoke-runtime literal-with-meta (insn/insns-of arg meta))))
-  (new-collection [this coll-type args]
-    (let [args ^Insns args]
-      (if (insn/loadables? args)
-        (.new-loadable this (.emitters args) coll-type)
-        (-> (condp identical? coll-type
-              type/vector literal-vector
-              type/map literal-map
-              type/set literal-set
-              type/list literal-list)
-            (insn/invoke-runtime args)))))
+      (insn/invoke-runtime resolve/literal-with-meta (insn/insns-of arg meta))))
   (new-array [_ fctx array-type dims]
     (let [dims ^Insns dims]
       (insn/ensure-assignable* Integer/TYPE dims)
@@ -226,18 +166,7 @@
         (throw (insn/wr-type "called function's type does not implement `IFn`"
                              f)))))
   
-  (binding-parameter [_ name type]
-    (model/mk-binding (entity/parameter method name type) name false))
-
-  (binding-alias [_ fctx name ent]
-    (model/mk-binding ent name true))
-  (binding-fresh [_ fctx opt-type name init]
-    (when opt-type
-      (insn/ensure-assignable opt-type init))
-    (let [tp (or opt-type (insn/logical-type init))
-          ce (-> init (insn/cast-to tp fctx) .emitter)]
-      (model/mk-binding (entity/local-variable method name tp ce) name false)))
-  (block-bindings [this fctx bindings body recur-to-body?]
+  (block-bindings [this fctx bindings recur-to-body? body]
     (-> (^CodeEmitter fn [xb consumed-type then-leave?]
          (.block xb (^Consumer fn ^void [^CodeBuilder xb]
                      (when (emit/statms? xb bindings)
@@ -250,11 +179,20 @@
          (when-not then-leave? ;can the then-leave? above return true?
            consumed-type))
         (insn/mk-insn (insn/expr-type body))))
-  (emitter-method [this fctx body]
-    (^CodeEmitter fn [xb consumed-type then-leave?]
-     (.set-recur-target! this (.startLabel xb)) ;method recur goes to bci 0
-     (when (emit/then-leave? xb fctx consumed-type (.emitter body) then-leave?)
-       consumed-type)))
+  (complete-method [this mspec pvars fctx body]
+    (let [rt (-> mspec .at .return-type)
+          at (if (type/auto-return-marker? rt)
+               (let [logical-tp (type/expr-to-logical (insn/expr-type body))]
+                 (ir/with-return-type (.at mspec) logical-tp))
+               (do (insn/ensure-assignable rt body)
+                   (.at mspec)))
+          code (^CodeEmitter fn [xb consumed-type then-leave?]
+                (.set-recur-target! this (.startLabel xb)) ;recur to bci 0
+                (when (emit/then-leave? xb fctx consumed-type (.emitter body)
+                                        then-leave?)
+                  consumed-type))]
+      (MethodSpec. at code body pvars (.source-idx mspec) (.name mspec)
+                   (.env-to-display mspec))))
 
   (set-recur-target! [this target]
     (assert (nil? __recur-target)) ;wrong if single `finally` is emitted twice
@@ -262,7 +200,7 @@
   (get-recur-target [this]
     __recur-target)
   (with-recur-variables [_ variables]
-    (InsnFactoryImpl. method variables nil)) ;clear __recur-target
+    (InsnFactoryImpl. variables nil))   ;clear __recur-target
   (recur-expr [this fctx args]
     (let [args ^Insns args
           arg-types (.expr-types args)
@@ -307,9 +245,6 @@
                        (recur (dec i)))))))))
           (insn/mk-statm))))        ;`void` is type used while parsing
   
-  (binding-catching-local [this fctx type name]
-    (let [ex-provider (insn/mk-insn (^CodeEmitter fn [_ _ _] type) type)]
-      (.binding-fresh this fctx type name ex-provider)))
   (try-catch-finally [_ fctx body+catches catch-types finally]
     (let [insns ^Insns body+catches
           tp (condgen/join-type (.expr-types insns) 0 (.length insns))]
@@ -319,50 +254,6 @@
             (trygen/try-catch tp (.emitters insns) catch-types fctx))
           (insn/mk-insn tp))))
 
-  (with-method [_ method]
-    (InsnFactoryImpl. method recur-variables __recur-target))
-  (new-function [this parser parse-arity-body fn-nm arity-specs]
-    (let [name-suffix (if (some? fn-nm) (name fn-nm) "fn")
-          fn-proxy (fngen/partial-fn-literal (.next-entity-id method) arity-specs)
-          n (alength arity-specs)
-          arity-methods (new MethodSpec/1 n)
-          methods' (envgraph/mk-methods method name-suffix n 0)]
-      (dotimes [i n]
-        (let [method' (aget methods' i)
-              expr-factory' (.with-method this method')
-              parser' (cond-> (.with-expr-factory parser expr-factory')
-                        (some? fn-nm)
-                        (model/with-local-binding (name fn-nm) fn-proxy))
-              
-              spec (aget arity-specs i)
-              mspec (.apply parse-arity-body parser' spec i)
-              rt (-> spec .at .return-type)]
-          (when-not (type/auto-return-marker? rt)
-            (insn/ensure-assignable rt (.x-body mspec)))
-          (aset arity-methods i mspec)))
-      
-      (let [fn-proxy (fngen/update-arities fn-proxy arity-methods)
-            scope-name' (.scope-name (aget methods' 0))
-            class (EnvClass. fn-proxy (.segment method) scope-name' methods')]
-        (.stage-task! method class)
-        (.value-of this fn-proxy nil))))
-  (new-itf-fn [this parser parse-arity-body itf-class itf-method arity-specs]
-    (let [arity-methods (new MethodSpec/1 1)
-          itf-fn (fngen/itf-fn arity-methods itf-class itf-method)
-          methods' (envgraph/mk-methods method itf-class)]
-      
-      (let [expr-factory' (.with-method this (aget methods' 0))
-            parser' (.with-expr-factory parser expr-factory')
-            aspec (aget arity-specs 0)
-            mspec (.apply parse-arity-body parser' aspec 0)]
-        (insn/ensure-assignable (-> aspec .at .return-type) (.x-body mspec))
-        (aset arity-methods 0 mspec))
-      
-      (let [scope-name' (.scope-name (aget methods' 0))
-            class (EnvClass. itf-fn (.segment method) scope-name' methods')]
-        (.stage-task! method class)
-        (insn/mk-insn itf-fn itf-class))))
-  
   (type-cast [this fctx target-type arg]
     (let [arg-tp (insn/expr-type arg)]
       (letfn [(wr-info-invalid-cast ^Throwable []
@@ -411,7 +302,7 @@
       ;; (prn :ms (seq ms))
       ;; (prn :invoke-member-if-field? invoke-member-if-field?)
       (or (when-some [insn (invoke-single-match ms nil args fctx)]
-            (if (and invoke-member-if-field? (resolve/field? (first ms)))
+            (if (and invoke-member-if-field? (member/field? (first ms)))
               (assert false "not yet implemented")
               insn))
           (throw (info-unresolved-member ms owner mnm args "static")))))
@@ -453,71 +344,7 @@
                (-> xb (emit/with-line-number fctx) (.athrow))
                nil))         ;operand type reported when emitting code
             (insn/mk-insn Void/TYPE))   ;type used while parsing
-        (throw (insn/info-type "expect instance of Throwable" arg)))))
-  
-  (ephemeral-class [this eph-class]
-    (when (not= (.closure-level method) model/closure-level-clinit)
-      (throw (wrong/wr-info "cannot define class in this position")))
-    (let [const (.entity-constant this eph-class Class)]
-      (.value-of this const nil)))
-  (new-definterface [this eph-ncl]
-    (.stage-task! method (fngen/task-definterface* eph-ncl))
-    (.ephemeral-class this (.defined-class eph-ncl)))
-  (new-deftype [this parser parse-method-body eph-ncl field-specs arity-specs
-                java-record? defrecord?]
-    (let [eph-cl (.defined-class eph-ncl)
-          cl-name (.getSimpleName eph-cl)
-          n-fields (alength field-specs)
-          n-methods (alength arity-specs)
-          fbnds (new Binding/1 (alength field-specs))
-          arity-methods (new MethodSpec/1 n-methods)
-          methods' (envgraph/mk-methods method cl-name n-methods n-fields)]
-      (dotimes [i n-fields]
-        (let [spec (aget field-specs i)
-              ent-id (model/entity-id-of (inc (.closure-level method)) i)]
-          (aset fbnds i (-> (entity-dt-field (.this-class eph-ncl) spec ent-id)
-                            (model/mk-binding (.field-name spec) false)))))
-      
-      (dotimes [i n-methods]
-        (let [method' (aget methods' i)
-              expr-factory' (.with-method this method')
-              ;; note: can call Resolver.globals() only on namespace thread
-              parser' (-> (.with-expr-factory parser expr-factory')
-                          (.with-bindings* (-> parser .resolver .globals))
-                          (model/with-local-bindings fbnds))
-              aspec (aget arity-specs i)
-              mspec (.apply parse-method-body parser' aspec i)]
-          (insn/ensure-assignable (-> mspec .at .return-type) (.x-body mspec))
-          (aset arity-methods i mspec)))
-      
-      (let [class (-> (fngen/task-deftype* eph-ncl field-specs arity-methods
-                                           java-record? defrecord?)
-                      (EnvClass. (.segment method) cl-name methods'))]
-        (.stage-task! method class)
-        (.ephemeral-class this eph-cl))))
-  (class-name-for-reify [_]
-    (let [segm (.segment method)]
-      (ClassDesc/of (.pkg-name segm)
-                    (.pick-unique-name segm (.scope-name method) "reify"))))
-  (new-reify [this parser parse-method-body eph-ncl interfaces meta arity-specs]
-    (let [eph-cl (.defined-class eph-ncl)
-          cl-name (.getSimpleName eph-cl)
-          n-methods (alength arity-specs)
-          arity-methods (new MethodSpec/1 n-methods)
-          methods' (envgraph/mk-methods method cl-name n-methods 0)]
-      (dotimes [i n-methods]
-        (let [method' (aget methods' i)
-              expr-factory' (.with-method this method')
-              parser' (.with-expr-factory parser expr-factory')
-              aspec (aget arity-specs i)
-              mspec (.apply parse-method-body parser' aspec i)]
-          (insn/ensure-assignable (-> mspec .at .return-type) (.x-body mspec))
-          (aset arity-methods i mspec)))
-      
-      (let [reify (fngen/mk-reify* eph-ncl interfaces meta arity-methods)
-            class (EnvClass. reify (.segment method) cl-name methods')]
-        (.stage-task! method class)
-        (insn/mk-insn reify (.defined-class eph-ncl))))))
+        (throw (insn/info-type "expect instance of Throwable" arg))))))
 
-(defn mk-factory ^ExprFactory [^EnvMethod segment]
-  (InsnFactoryImpl. segment nil nil))
+(defn mk-factory ^ExprFactory []
+  (InsnFactoryImpl. nil nil))

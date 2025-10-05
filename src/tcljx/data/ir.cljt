@@ -1,14 +1,14 @@
-(ns tcljx.data.model
+(ns tcljx.data.ir
   (:require
-   (tcljx.data [config :as cfg] resolve [reflect :as reflect]))
+   (tcljx.data [config :as cfg] member [reflect :as reflect]))
   (:import
-   (tcljx.data.resolve Match)
-   (java.lang.classfile CodeBuilder ClassBuilder)
+   (tcljx.data.member MemberHandle)
+   (java.lang.classfile CodeBuilder)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry)
-   (java.lang.constant DirectMethodHandleDesc ClassDesc MethodTypeDesc
-                       ConstantDescs)
+   (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
    (java.lang.invoke MethodHandle)
    (java.lang.reflect Method)
+   (java.util ArrayList HashMap)
    (java.util.function Consumer)))
 
 ;;; Emit instruction code into the CodeBuilder instance.  Return the
@@ -152,7 +152,7 @@
   ;; with type information available during compilation, dynamic (and
   ;; generic) function call during runtime, or some specialized
   ;; primitive function translation pattern.
-  (method-specs ^MethodSpec/1 [])
+  (invoke-methods ^MethodSpec/1 [])
   (invoke* ^Expr [^long fctx ^seq form ^CodeEmitter opt-f ^int m-idx
                   ^Exprs xs])
   
@@ -173,7 +173,8 @@
 ;;; Source code order can be reconstructed via `source-idx`.
 (deftype MethodSpec [^ArityType at ^CodeEmitter code ^Expr x-body
                      ^Entity/1 parameters ^int source-idx
-                     ^String method-name]) ;for deftype*
+                     ^String name     ;fn name or deftype* method name
+                     ^HashMap env-to-display]) ;closed over entities
 
 (deftype FieldSpec [^ClassDesc owner ^String field-name ^symbol type-tag
                     ^int flags ^ClassDesc type-desc ^Class type])
@@ -182,8 +183,8 @@
               (.flags spec) (.type-desc spec) type))
 
 
-(def method-specs-primitive-fn nil) ;not invoked as a regular function
-(def method-specs-invoke-dynamic (new MethodSpec/1 0)) ;runtime invoke only
+(def invoke-methods-primitive-fn nil) ;not invoked as a regular function
+(def invoke-methods-dynamic (new MethodSpec/1 0)) ;runtime invoke only
 
 (defn entity? ^boolean [^CodeEmitter ce]
   (instance? Entity ce))
@@ -193,10 +194,10 @@
      (.value-type-exact ^Entity ce)
      (reflect/describe-class or-else)))
 
-(defn method-specs-of ^MethodSpec/1 [^CodeEmitter ce]
+(defn invoke-methods-of ^MethodSpec/1 [^CodeEmitter ce]
   (if (entity? ce)
-    (.method-specs ^Entity ce)
-    method-specs-invoke-dynamic))
+    (.invoke-methods ^Entity ce)
+    invoke-methods-dynamic))
 
 (def closure-level-constant 0) ;scope of constants spans all namespaces
 (def closure-level-def 1)      ;entity is a def on namespace level
@@ -410,23 +411,13 @@
 
 ;;; ------------------------------------------------------------------------
 
-(definterface ParseArityBody
-  (apply ^MethodSpec [^Parser parser ^AritySpec aspec ^int source-idx]))
-
-;;; An ExprFactory provides an API to the parser to generate a
-;;; representation of the namespace's entities and their executable
-;;; code.
-;;; 
-;;; Threading: Confined to a single thread, either one parsing a
-;;; function or to the thread parsing the non-function parts of a
-;;; namespace.
-(definterface ExprFactory
-  (empty-expr ^Expr [])
-  (new-exprs ^Exprs [^int length])
-
-  ;; hook into entity tracking to build environment of a closure:
+(definterface EntityFactory
+  (scope-name ^String [])
+  (closure-level ^int [])               ;of this class/entity
+  (closes-over? ^boolean [^Entity ent])
+  (display-of! ^Entity [^Entity origin ^String local-name])
   (value-of ^Expr [^Entity ent ^symbol form])
-  (invoke-entity ^Expr [^long fctx ^seq form ^Entity inv ^Exprs args])
+  (invocation-of ^Entity [^Entity inv ^seq form])
   
   ;; Create an entity denoting the constant `value` of type `type`.
   ;; For the most part, there is a one-to-one correspondence between
@@ -440,8 +431,8 @@
   ;; Constable, and structured values provided by Clojure (symbol,
   ;; keyword, vector, and so on).
   (entity-constant ^Entity [^Object value ^Class type]) ;ConstantDesc or Class
-  (entity-class-member ^Entity [^Match m])
-  
+  (entity-class-member ^Entity [^MemberHandle m])
+
   ;; Create a symbol, a keyword, a collection, or a regex Pattern.
   ;; `value` usually is the compile time data structure as provided by
   ;; the reader.  Alternatively and only for collections (incl. the
@@ -449,10 +440,52 @@
   ;; of constant folded expressions, i.e. instances of `Loadable`.
   ;; Non-Constant loadables are never nil.
   (new-loadable ^Expr [^Object value ^Class expr-type])
+  (new-collection ^Expr [^Class coll-type ^Exprs args])
+  
+  (next-entity-id ^int [])
+  (local-variable ^Entity [^String name ^Class type ^CodeEmitter init])
+  (parameter ^Entity [^String name ^Class type])
+  ;; FIXME... rename later
+  (entity-fn ^Entity [^AritySpec/1 arity-specs ^String unique-nm
+                               ^ArrayList !fn-parts])
+  (expr-fn ^Expr [^Entity fn-entity ^MethodSpec/1 arity-methods])
+  (expr-itf-fn ^Expr [^MethodSpec/1 method-specs ^String unique-nm
+                      ^Class itf-class ^Method method ^ArrayList !itf-parts])
+  (deftype-field ^Entity [^int entity-id ^FieldSpec spec])
+
+  (expr-deftype ^Expr [^NmspClass eph-ncl ^FieldSpec/1 field-specs
+                       ^boolean java-record? ^boolean defrecord?
+                       ^ArrayList !dt-parts ^MethodSpec/1 method-specs])
+  (expr-reify ^Expr [^NmspClass eph-ncl ^ClassDesc/1 interfaces
+                     ^CodeEmitter meta
+                     ^ArrayList !reify-parts ^MethodSpec/1 method-specs])
+  (expr-definterface ^Object [^NmspClass ncl])
+  (class-name-for-reify ^ClassDesc [])
+  
+  (binding-alias ^Binding [^long fctx ^String name ^Entity ent])
+  (binding-fresh ^Binding [^long fctx ^Class opt-type ^String name ^Expr init])
+  (binding-catching-local ^Binding [^long fctx ^Class type ^String name])
+  
+  (unique-name! ^String [^String name-suffix])
+  (mk-nested ^EntityFactory [^String unique-nm ^int used-entity-ids
+                             ^HashMap env-to-display ^ArrayList nested-tasks])
+  (stage-part! ^Expr [part]))
+
+;;; An ExprFactory provides an API to the parser to generate a
+;;; representation of the namespace's entities and their executable
+;;; code.
+;;; 
+;;; Threading: Confined to a single thread, either one parsing a
+;;; function or to the thread parsing the non-function parts of a
+;;; namespace.
+(definterface ExprFactory
+  (empty-expr ^Expr [])
+  (new-exprs ^Exprs [^int length])
+  
+  (invoke-arity ^Expr [^long fctx ^seq form ^Entity inv ^Entity inv* ^Exprs args])
   
   ;; These methods return a constant expression when possible:
   (attach-meta-to ^Expr [^Expr meta ^Expr arg])
-  (new-collection ^Expr [^Class coll-type ^Exprs args])
   (new-array ^Expr [^long fctx ^Class array-type ^Exprs dims])
 
   ;; ### basics
@@ -474,30 +507,17 @@
 
   (assignment ^Expr [^Entity ent ^Expr value])
 
-  (binding-parameter ^Binding [^String name ^Class type])
+  (block-bindings ^Expr [^long fctx ^Binding/1 bindings ^boolean recur-to-body?
+                         ^Expr body])
   
-  (binding-alias ^Binding [^long fctx ^String name ^Entity ent])
-  (binding-fresh ^Binding [^long fctx ^Class opt-type ^String name ^Expr init])
-  (block-bindings ^Expr [^long fctx ^Binding/1 bindings ^Expr body
-                         ^boolean recur-to-body?])
-  
-  (emitter-method ^CodeEmitter [^long fctx ^Expr body])
+  (complete-method ^MethodSpec [^MethodSpec mspec ^Entity/1 pvars
+                                ^long fctx ^Expr body])
   (with-recur-variables ^ExprFactory [^Entity/1 variables])
   (recur-expr ^Expr [^long fctx ^Exprs args])
   
-  (binding-catching-local ^Binding [^long fctx ^Class type ^String name])
   (try-catch-finally ^Expr [^long fctx ^Exprs body+catches ^Class/1 catch-types
                             ^Exprs finally])
-  
-  ;; ### functions
 
-  ;; Replaces any arity return types `auto-return-marker` with their
-  ;; corresponding body's expression type.
-  (new-function ^Expr [^Parser parser ^ParseArityBody parse-arity-body
-                       ^symbol fn-nm ^AritySpec/1 arity-specs])
-  (new-itf-fn ^Expr [^Parser parser ^ParseArityBody parse-arity-body
-                     ^Class itf-class ^DirectMethodHandleDesc method
-                     ^AritySpec/1 arity-specs])
   
   ;; ### interop
 
@@ -518,18 +538,7 @@
   (get-virtual-field ^Expr [^long fctx ^Expr receiver ^String mnm])
   
   (instanceof-expr ^Expr [^long fctx ^Class type ^Expr arg])
-  (throw-expr ^Expr [^long fctx ^Expr arg])
-  
-  (ephemeral-class ^Expr [^Class eph-class])
-  (new-definterface ^Expr [^NmspClass ncl])
-  (new-deftype ^Expr [^Parser parser ^ParseArityBody parse-method-body
-                      ^NmspClass eph-ncl ^FieldSpec/1 field-specs
-                      ^AritySpec/1 arity-specs
-                      ^boolean java-record? ^boolean defrecord?])
-  (class-name-for-reify ^ClassDesc [])
-  (new-reify ^Expr [^Parser parser ^ParseArityBody parse-method-body
-                    ^NmspClass eph-ncl ^ClassDesc/1 interfaces
-                    ^CodeEmitter meta ^AritySpec/1 arity-specs]))
+  (throw-expr ^Expr [^long fctx ^Expr arg]))
 
 (definterface Parser
   (parse-form ^Expr [^long fctx form])
@@ -539,7 +548,10 @@
 
   ;; Frequency of change: one for every `loop*` expression.
   (expr-factory ^ExprFactory [])
-  
+
+  ;; Frequency of change: one for every fn or class scope
+  (entity-factory ^EntityFactory [])
+
   ;; Maps simple name string to its associated binding.  The map can
   ;; be incomplete if a namespace `def` was parsed after creation of
   ;; the scope instance.  In this case, a second lookup using
@@ -547,24 +559,25 @@
   ;; Frequency of change: moderate.
   (bindings* ^map [])
   (with-bindings* ^Parser [^map bindings])
-  (with-recur-variables ^Parser [^Entity/1 variables])
-  (with-expr-factory ^Parser [^ExprFactory expr-factory]))
+  (with-expr-factory ^Parser [^ExprFactory xf])
+  (with-entity-factory ^Parser [^EntityFactory etf]))
 
-(defn new-constant ^Expr [^ExprFactory ef ^Object value ^Class type]
-  (.value-of ef (.entity-constant ef value type) nil))
+(defn new-constant ^Expr [^EntityFactory etf ^Object value ^Class type]
+  (.value-of etf (.entity-constant etf value type) nil))
 
-(defn exprs-of ^Exprs [^ExprFactory ef & ^Expr/1 xs*]
-  (let [xs (.new-exprs ef (alength xs*))]
+(defn exprs-of ^Exprs [^ExprFactory xf & ^Expr/1 xs*]
+  (let [xs (.new-exprs xf (alength xs*))]
     (dotimes [i (.length xs)]
       (.set xs i (aget xs* i)))
     xs))
 
 (defn parameter-bindings ^Binding/1 [^Parser parser ^ArityType at]
-  (let [ef (.expr-factory parser)
+  (let [etf (.entity-factory parser)
         bnds (new Binding/1 (.parameter-count at))]
     (dotimes [i (alength bnds)]
-      (aset bnds i (.binding-parameter ef (.parameter-name at i)
-                                       (.parameter-type at i))))
+      (let [nm (.parameter-name at i)
+            param (.parameter etf nm (.parameter-type at i))]
+        (aset bnds i (mk-binding param nm false))))
     bnds))
 
 (defn with-local-binding

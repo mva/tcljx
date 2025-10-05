@@ -1,22 +1,21 @@
-(ns tcljx.parser.defclass
+(ns tcljx.parser.deftype
   (:require
    (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
-               [context :as context] [reflect :as reflect] [model :as model]
+               [context :as context] [reflect :as reflect] [ir :as ir]
                [code :as code])
-   (tcljx.parser [syntax :as syntax] [interop :as interop] [parse :as parse]
-                 [loop :as loop] [fn :as fn]))
+   (tcljx.parser [syntax :as syntax] [interop :as interop] [parse :as parse]))
   (:import
-   (tcljx.data.model Expr ArityType AritySpec MethodSpec FieldSpec
-                     NmspClass Parser ParseArityBody Resolver ExprFactory)
+   (tcljx.data.ir Expr Binding ArityType AritySpec MethodSpec FieldSpec NmspClass
+                  Parser Resolver ExprFactory EntityFactory)
    (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
    (java.lang.classfile ClassFile ClassBuilder MethodBuilder CodeBuilder)
    (java.lang.classfile.attribute RecordAttribute RecordComponentInfo)
-   (java.util List)
+   (java.util List ArrayList)
    (java.util.function Consumer)))
 
 (defn- with-abstract-method ^ClassBuilder [^ClassBuilder cb ^String name
                                            ^MethodTypeDesc mtd ^int flags]
-  (.withMethod cb name mtd (bit-or (model/acc* abstract) flags)
+  (.withMethod cb name mtd (bit-or (ir/acc* abstract) flags)
                (^Consumer fn ^void [^MethodBuilder mb] #_none)))
 
 (defn- parse-opts ^vector [^seq s]
@@ -78,7 +77,7 @@
       (let [tp (tag-desc-of rsv p false ConstantDescs/CD_Object)]
         (recur (conj acc tp) (next params))))))
 
-(defn parse-definterface* ^Expr [^Resolver rsv ^ExprFactory ef ^long fctx
+(defn parse-definterface* ^Expr [^Resolver rsv ^EntityFactory etf ^long fctx
                                  [_ itf-nm & opts+sigs]]
   (letfn [(lookup-interface ^ClassDesc [^symbol sym]
             (reflect/describe-class (interop/resolve-interface rsv sym)))
@@ -93,9 +92,9 @@
                                   "method name")))
               (let [mnm (name mname)
                     mtd (method-lookup-type rsv msig)
-                    flags (cond-> (model/acc* public)
+                    flags (cond-> (ir/acc* public)
                             (< (.parameterCount mtd) (count msig))
-                            (bit-or (model/acc* varargs)))]
+                            (bit-or (ir/acc* varargs)))]
                 (^Consumer fn ^void [^ClassBuilder cb]
                  (with-abstract-method cb mnm mtd flags)))))]
     
@@ -107,13 +106,13 @@
           cbh (^Consumer fn ^void [^ClassBuilder cb]
                (-> (cfg/with-class-version cb)
                    (.withInterfaceSymbols ^List extends-itfs)
-                   (.withFlags (model/acc* public interface abstract)))
+                   (.withFlags (ir/acc* public interface abstract)))
                (doseq [^Consumer cbh method-cbhs]
                  (.accept cbh cb)))]
       (let [bs (.build (ClassFile/of) this-class cbh)
             eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)]
         (.import-class rsv eph-cl)
-        (.new-definterface ef (NmspClass. this-class nil cbh nil eph-cl))))))
+        (.expr-definterface etf (NmspClass. this-class nil cbh nil eph-cl))))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -163,7 +162,7 @@
          (.withMethodBody cb ConstantDescs/INIT_NAME
                           (.dropParameterTypes mtd-0 (- (alength fields) n)
                                                (alength fields))
-                          (model/acc* public synthetic)))))
+                          (ir/acc* public synthetic)))))
 
 (defn- record-attribute ^ClassBuilder [^ClassBuilder cb ^FieldSpec/1 fields]
   (let [a (new RecordComponentInfo/1 (alength fields))]
@@ -190,12 +189,12 @@
                   nm (name sym)
                   m (meta sym)
                   flags (cond
-                          (:unsynchronized-mutable m) (model/acc* private)
-                          (:volatile-mutable m) (model/acc* private volatile)
-                          java-record? (model/acc* private final)
-                          :else (model/acc* public final))]
+                          (:unsynchronized-mutable m) (ir/acc* private)
+                          (:volatile-mutable m) (ir/acc* private volatile)
+                          java-record? (ir/acc* private final)
+                          :else (ir/acc* public final))]
               (when java-record?
-                (when (zero? (bit-and flags (model/acc* final)))
+                (when (zero? (bit-and flags (ir/acc* final)))
                   (wrong/other (str "java.lang.Record cannot have mutable field "
                                     (wrong/q sym))))
                 (when (contains? prohibited-record-fields nm)
@@ -223,12 +222,31 @@
                                    paramv)
         (AritySpec. body form))))
 
+(defn- method-name ^String [^AritySpec aspec]
+  (-> aspec .error-context (first) (name)))
+
+(defn- complete-methods ^MethodSpec/1 [^Parser parser ^Class eph-cl
+                                       ^String unique-nm ^long fctx
+                                       ^int n-fields ^seq/1 methods
+                                       ^ArrayList parts]
+  (let [arity-methods (new MethodSpec/1 (alength methods))]
+    (dotimes [i (alength arity-methods)]
+      (let [aspec (arity-spec-of (.resolver parser) fctx eph-cl (aget methods i))
+            mspec* (parse/method-spec-template aspec i (method-name aspec))
+            etf' (.mk-nested (.entity-factory parser) unique-nm n-fields
+                             (.env-to-display mspec*) parts)
+            parser' (.with-entity-factory parser etf')
+            mspec (parse/body-into mspec* true parser' fctx aspec)]
+        (aset arity-methods i mspec)))
+    arity-methods))
+
 ;; Note: Only do rudimentary error messages because this form is
 ;; produced by a macro.
 (defn parse-deftype* ^Expr [^Parser parser ^long fctx
                             [_ ^symbol fq-sym ^symbol binary-sym ^vector fieldv
                              & opts+specs]]
   (let [rsv (.resolver parser)
+        etf (.entity-factory parser)
         short-sym (symbol nil (name fq-sym))
         [opts ^seq/1 methods] (parse-opts opts+specs)
         this-class (ClassDesc/of (name binary-sym))
@@ -241,14 +259,14 @@
                (-> (cfg/with-class-version cb)
                    (.withSuperclass (.super-class supers))
                    (.withInterfaceSymbols (.interfaces supers))
-                   (.withFlags (cond-> (model/acc* public final)
+                   (.withFlags (cond-> (ir/acc* public final)
                                  (:abstract opts)
-                                 (bit-xor (model/acc* final abstract)))))
+                                 (bit-xor (ir/acc* final abstract)))))
                (when (.java-record? supers)
                  (record-attribute cb fields))
                (code/with-field* cb fields)
                (code/constructor cb fields (.super-class supers)
-                                 (model/acc* public synthetic))
+                                 (ir/acc* public synthetic))
                (when defrecord?
                  (constructor-n cb this-class fields 4)
                  (constructor-n cb this-class fields 2)))
@@ -257,47 +275,51 @@
                  (doseq [^FieldSpec spec fields]
                    (code/with-getter cb spec))))
         bs (.build (ClassFile/of) this-class (.andThen cbh-0 cbh-1))
-        eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)]
+        eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)
+        fbnds (new Binding/1 (alength fields))]
     
     (.import-class rsv eph-cl)
     (dotimes [i (alength fields)]
-      (let [spec (aget fields i)
-            tp (interop/resolve-class rsv (.type-tag spec) Object)]
-        (aset fields i (model/with-field-type spec tp))))
+      (let [fspec* (aget fields i)
+            tp (interop/resolve-class rsv (.type-tag fspec*) Object)
+            fspec (ir/with-field-type fspec* tp)
+            ent-id (ir/entity-id-of (inc (.closure-level etf)) i)]
+        (aset fields i fspec)
+        (aset fbnds i (-> (.deftype-field etf ent-id fspec)
+                          (ir/mk-binding (.field-name fspec) false)))))
     
-    (let [n (alength methods)
-          arity-specs (new AritySpec/1 n)
-          eph-ncl (NmspClass. this-class (.super-class supers) cbh-0
-                              nil eph-cl)
-          pmb (fn/mk-parse-arity-body fctx true)]
-      (dotimes [i n]
-        (aset arity-specs i (arity-spec-of rsv fctx eph-cl (aget methods i))))
-      (.new-deftype (.expr-factory parser) parser pmb eph-ncl
-                    fields arity-specs (.java-record? supers) defrecord?))))
+    (let [eph-ncl (NmspClass. this-class (.super-class supers) cbh-0 nil eph-cl)
+          deftype-parts (ArrayList.)]
+          ;; note: can call Resolver.globals() only on namespace thread
+      (->> (complete-methods (-> (.with-bindings* parser (.globals rsv))
+                                 (ir/with-local-bindings fbnds)) eph-cl
+                             (.unique-name! etf (.displayName this-class))
+                             fctx (alength fields) methods deftype-parts)
+           (.expr-deftype etf eph-ncl fields (.java-record? supers)
+                          defrecord? deftype-parts)))))
 
 ;;; ------------------------------------------------------------------------
 
 (defn parse-reify* ^Expr [^Parser parser ^long fctx ^Expr meta
                           [_ ^vector implementv & methods :as form]]
   (let [rsv (.resolver parser)
-        this-class (.class-name-for-reify (.expr-factory parser))
+        etf (.entity-factory parser)
+        this-class (.class-name-for-reify etf)
         supers (->> (map #(interop/resolve-class rsv %) implementv)
                     (cons clojure.lang.IObj)
                     (supers-of))
         methods ^seq/1 (into-array clojure.lang.ISeq methods)
-        pmb (fn/mk-parse-arity-body fctx true)
         cbh (^Consumer fn ^void [^ClassBuilder cb]
              (-> (cfg/with-class-version cb)
                  (.withSuperclass (.super-class supers))
                  (.withInterfaceSymbols (.interfaces supers))
-                 (.withFlags (model/acc* public final))))
+                 (.withFlags (ir/acc* public final))))
         bs (.build (ClassFile/of) this-class cbh)
         eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)
-    
-        n (alength methods)
-        arity-specs (new AritySpec/1 n)
-        eph-ncl (NmspClass. this-class (.super-class supers) cbh nil eph-cl)]
-    (dotimes [i n]
-      (aset arity-specs i (arity-spec-of rsv fctx eph-cl (aget methods i))))
-    (.new-reify (.expr-factory parser) parser pmb eph-ncl (.interfaces supers)
-                (.emitter meta) arity-specs)))
+        
+        eph-ncl (NmspClass. this-class (.super-class supers) cbh nil eph-cl)
+        reify-parts (ArrayList.)]
+    (->> (complete-methods parser eph-cl (.displayName this-class) fctx 0
+                           methods reify-parts)
+         (.expr-reify etf eph-ncl (.interfaces supers) (.emitter meta)
+                      reify-parts))))

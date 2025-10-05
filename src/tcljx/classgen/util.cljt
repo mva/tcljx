@@ -1,0 +1,85 @@
+(ns tcljx.classgen.util
+  (:require (tcljx.data [reflect :as reflect] [ir :as ir]))
+  (:import (tcljx.data.ir CodeEmitter Entity ArityType)
+           (java.lang.classfile CodeBuilder TypeKind)
+           (java.lang.constant ClassDesc MethodTypeDesc)))
+
+(defmacro with-void-empty-if-requested [consumed-type & body]
+  (assert (symbol? consumed-type))
+  `(if (identical? Void/TYPE ~consumed-type)
+     Void/TYPE
+     (do ~@body)))
+
+
+(defn mtd-of-arity-type ^MethodTypeDesc [^ArityType at]
+  (MethodTypeDesc/of (reflect/describe-class (.return-type at))
+                     (reflect/describe-class* (.parameter-types at))))
+
+(defn entity-type-exact* ^ClassDesc/1 [^Entity/1 ents]
+  (let [a (new ClassDesc/1 (alength ents))]
+    (dotimes [i (alength a)]
+      (aset a i (.value-type-exact (aget ents i))))
+    a))
+(defn mtd-factory ^MethodTypeDesc [^ClassDesc this-class ^Entity/1 ents]
+  (MethodTypeDesc/of this-class (entity-type-exact* ents)))
+
+(defn load-origin-values ^CodeBuilder [^CodeBuilder xb ^Entity/1 aorigin]
+  ;; FIXME... origin does not work when not provided by the parent method
+  (dotimes [i (alength aorigin)]
+    (let [ent (aget aorigin i)]
+      (.emit-insn* ent xb (.value-type ent) false)))
+  xb)
+
+;;; ------------------------------------------------------------------------
+
+(deftype LocalVariable [^String name ^Class type ^int entity-id
+                        ^CodeEmitter init ^:unsynchronized-mutable ^int slot]
+  CodeEmitter
+  (emit-insn* [_ xb consumed-type _]
+    (with-void-empty-if-requested consumed-type
+      (.loadLocal xb (TypeKind/from type) slot)
+      type))
+  
+  Entity
+  (value-type [_]
+    type)
+  (value-type-exact [this]
+    (reflect/describe-class (.value-type this)))
+  (entity-id [_]
+    entity-id)
+  (invoke-methods [_]
+    ir/invoke-methods-dynamic)
+  (invoke* [this fctx form _ m-idx xs]
+    (throw (IllegalStateException.)))
+  (emit-store [_ xb]
+    (.storeLocal xb (TypeKind/from type) slot))
+  (emit-iinc [_ xb const]
+    (.iinc xb slot const))
+  
+  tcljx.data.ir.LoadFromCopyWhenBound
+  (emit-setup-code? [_ xb param-no]
+    (if (< param-no -1)             ;let binding or parameter binding?
+      (let [tk (TypeKind/from type), label (.newLabel xb)]
+        (when-some [on-stack-type (.emit-insn* init xb type false)]
+          (assert (identical? type on-stack-type))
+          (set! slot (.allocateLocal xb tk))
+          (-> (.storeLocal xb tk slot)
+              (.labelBinding label)
+              (.localVariable slot name (reflect/describe-class type)
+                              label (.endLabel xb)))
+          true))
+      (do (set! slot (if (neg? param-no)
+                       (.receiverSlot xb)
+                       (.parameterSlot xb param-no)))
+          (.localVariable xb slot name (reflect/describe-class type)
+                          (.startLabel xb) (.endLabel xb))
+          true))))
+
+(defn parameter* ^Entity [^CodeBuilder xb ^String opt-name
+                          ^Class type ^int param-no]
+  (let [slot (.parameterSlot xb param-no)
+        ent (LocalVariable. opt-name type 0 nil slot)]
+    (when (some? opt-name)
+      (.localVariable xb slot opt-name (reflect/describe-class type)
+                      (.startLabel xb) (.endLabel xb)))
+    ent))

@@ -2,16 +2,19 @@
   (:require
    (tcljx.data
     [meta :as meta] [wrong :as wrong] [type :as type] [context :as context]
-    [model :as model])
+    [ir :as ir])
    (tcljx.parser
     [interop :as interop] [syntax :as syntax] [parse :as parse] [def :as def]
-    [let :as let] [loop :as loop] [fn :as fn] [new :as new]
-    [constant :as constant] [trycatch :as trycatch] [defclass :as defclass]))
+    [constant :as constant] [let :as let] [loop :as loop] [new :as new]
+    [trycatch :as trycatch] [fn :as fn] [deftype :as deftype]))
   (:import
-   (tcljx.data.model Resolver Expr Exprs ExprFactory Entity Parser)
-   (clojure.lang IMeta)))
+   (tcljx.data.ir Resolver Expr Exprs ExprFactory Entity Binding Parser
+                  MethodSpec EntityFactory)
+   (clojure.lang IMeta)
+   (java.util ArrayList)))
 
 (deftype ParserImpl [^ExprFactory expr-factory
+                     ^EntityFactory entity-factory
                      ^Resolver resolver
                      ^map bindings*]
   java.lang.Record
@@ -36,7 +39,7 @@
                              (mapcat identity form)
                              (seq form))
                            (parse/args this fctx)
-                           (.new-collection expr-factory coll-tp))]
+                           (.new-collection entity-factory coll-tp))]
                 (if (some? x-meta)
                   (.attach-meta-to expr-factory x-meta x)
                   x)))
@@ -45,7 +48,7 @@
               (if (instance? IMeta form)
                 ;; symbol, list, vector, map, set
                 (let [tp (type/of-quoted-form form)]
-                  (.new-loadable expr-factory form tp))
+                  (.new-loadable entity-factory form tp))
                 ;; adjust type to primitive if possible
                 (constant/parse-constant-nometa this form)))
             (parse-quote ^Expr [[_ & args]]
@@ -99,7 +102,7 @@
             (parse-instanceof* ^Expr [^long fctx [_ & args]]
               (let [xs (parse/args this fctx args)]
                 (syntax/empty-tail 2 args)
-                (if-some [tp (model/type-literal (.get xs 0) (first args))]
+                (if-some [tp (ir/type-literal (.get xs 0) (first args))]
                   (.instanceof-expr expr-factory fctx tp (.get xs 1))
                   (.invoke-virtual-member expr-factory fctx (.get xs 0)
                                           nil "isInstance" (.drop xs 1)))))
@@ -126,7 +129,7 @@
                     owner-expr (parse/arg this fctx owner)
                     xs (parse/args this fctx args)
                     fnm (field-members-only mnm xs)]
-                (if-some [owner (model/type-literal owner-expr owner)]
+                (if-some [owner (ir/type-literal owner-expr owner)]
                   (if fnm
                     (.get-static-field expr-factory fctx owner fnm)
                     (.invoke-static-member expr-factory fctx false owner mnm xs))
@@ -158,6 +161,16 @@
                  ;; namespace exists: def lookup must have failed
                  (str "no public def " (wrong/q op))
                  (str "no namespace or class " (wrong/q-namespace op)))))
+            (invoke-entity ^Expr [^long fctx ^seq form ^Entity inv ^Exprs args]
+              (let [specs (.invoke-methods inv)]
+                (condp identical? specs
+                  ir/invoke-methods-primitive-fn
+                  (.invoke* inv fctx form nil -1 args)
+                  ir/invoke-methods-dynamic
+                  (.invoke-value expr-factory fctx (.value-of entity-factory inv (first form)) args)
+                  #_else
+                  (let [inv* (.invocation-of entity-factory inv form)]
+                    (.invoke-arity expr-factory fctx form inv inv* args)))))
             (parse-invocation-qname ^Expr [^symbol op ^long fctx ^seq form
                                            ^String nmsp ^String nm]
               ;; `op` is qualified symbol: either a reference to
@@ -166,8 +179,8 @@
               (if-some [cl (parse/lookup-class this nmsp)]
                 (if-some [ent (when (some? (interop/param-tags-of op))
                                 (interop/lookup-class-entity this op))]
-                  (.invoke-entity expr-factory fctx form ent
-                                  (parse/args this fctx (rest form)))
+                  (invoke-entity fctx form ent
+                                 (parse/args this fctx (rest form)))
                   (if (= (.charAt nm 0) \.) ;syntax is Class/.member
                     (.invoke-virtual-member
                      expr-factory fctx
@@ -189,8 +202,8 @@
               (let [op (parse/arg this fctx (first form))
                     ce (.emitter op)
                     args (parse/args this fctx (rest form))]
-                (if (model/entity? ce)
-                  (.invoke-entity expr-factory fctx form ce args)
+                (if (ir/entity? ce)
+                  (invoke-entity fctx form ce args)
                   (.invoke-value expr-factory fctx op args))))
             (parse-try-or-extract ^Expr [^long fctx ^seq form]
               (if (context/can-inline-tcf? fctx)
@@ -200,9 +213,9 @@
                      (list)
                      (.parse-form this fctx))))
             (parse-definterface* ^Expr [^long fctx ^seq form]
-              (defclass/parse-definterface* resolver expr-factory fctx form))
+              (deftype/parse-definterface* resolver entity-factory fctx form))
             (parse-deftype* ^Expr [^long fctx ^seq form]
-              (defclass/parse-deftype* this fctx form))
+              (deftype/parse-deftype* this fctx form))
             (parse-invocation ^Expr [op ^long fctx ^seq form] ;discards meta
               (if (symbol? op)
                 (let [nm (name op), nmsp (namespace op)]
@@ -218,9 +231,9 @@
                       "if" (parse-if fctx form)
                       "case*" (parse-case* fctx form)
                       "let*" (let/parse-let* this fctx form)
-                      ;; "letfn*" (letfn*-form form)
-                      "do" (parse-do fctx form)
+                      "letfn*" (fn/parse-letfn* this fctx form)
                       "fn*" (fn/parse-fn* this fctx form)
+                      "do" (parse-do fctx form)
                       "quote" (parse-quote form)
                       ;; "var" (var-form form)
                       "import*" (parse-import* form)
@@ -230,7 +243,7 @@
                       
                       "reify*" (let [m (or (parse-meta fctx (meta form))
                                            (.empty-expr expr-factory))]
-                                 (defclass/parse-reify* this fctx m form))
+                                 (deftype/parse-reify* this fctx m form))
                       "try" (parse-try-or-extract fctx form)
                       "throw" (parse-throw fctx form)
                       ;; "monitor-enter" (monitor-form Opcode/MONITORENTER form)
@@ -252,15 +265,15 @@
                                (parse-class-dot nm fctx form)
                                :else
                                (if-some [inv (parse/lookup this op)]
-                                 (.invoke-entity expr-factory fctx form inv
-                                                 (parse/args this fctx (rest form)))
+                                 (invoke-entity fctx form inv
+                                                (parse/args this fctx (rest form)))
                                  (throw (wrong/info-unresolved op)))))
                     (parse-invocation-qname op fctx form nmsp nm)))
                 (parse-invocation-other op fctx form)))
             
             (parse-symbol ^Expr [^symbol sym]
               (if-some [ent (parse/lookup this sym)]
-                (.value-of expr-factory ent sym)
+                (.value-of entity-factory ent sym)
                 (if-some [x (interop/lookup-class-expr this sym)]
                   x
                   (throw (wrong/info-unresolved sym)))))]
@@ -289,11 +302,10 @@
         (constant/parse-constant-nometa this form))))
 
   (with-bindings* [_ bindings]
-    (ParserImpl. expr-factory resolver bindings))
-  (with-recur-variables [_ variables]
-    (-> (.with-recur-variables expr-factory variables)
-        (ParserImpl. resolver bindings*)))
-  (with-expr-factory [_ expr-factory]
-    (ParserImpl. expr-factory resolver bindings*)))
+    (ParserImpl. expr-factory entity-factory resolver bindings))
+  (with-expr-factory [_ xf]
+    (ParserImpl. xf entity-factory resolver bindings*))
+  (with-entity-factory [_ etf]
+    (ParserImpl. expr-factory etf resolver bindings*)))
 
 (def mk-parser ParserImpl/new)

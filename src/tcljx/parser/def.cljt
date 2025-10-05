@@ -1,10 +1,10 @@
 (ns tcljx.parser.def
   (:require
    (tcljx.data [meta :as meta] [wrong :as wrong] [context :as context]
-               [model :as model] [type :as type])
+               [ir :as ir] [type :as type])
    (tcljx.parser [syntax :as syntax] [interop :as interop] [parse :as parse]))
   (:import
-   (tcljx.data.model Expr Entity Parser)))
+   (tcljx.data.ir Expr Entity Parser)))
 
 (defn parse-def ^Expr [^Parser parser ^long fctx [_ nm-sym & [init :as args]]]
   (let [nm (syntax/simple-symbol-str nm-sym)
@@ -17,8 +17,8 @@
     (syntax/empty-tail (next args))
     
     (letfn [(of-immutable-def? ^boolean [^Entity ent] ;pre: `init` is symbol
-              (and (model/immediate-entity? ent)
-                   (model/alias-when-let-value? ent)
+              (and (ir/immediate-entity? ent)
+                   (ir/alias-when-let-value? ent)
                    (nil? (.meta ^symbol init))
                    (nil? (meta/get-tag nm-meta))
                    (identical? ent (.lookup-def (.resolver parser)

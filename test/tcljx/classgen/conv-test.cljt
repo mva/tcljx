@@ -197,86 +197,93 @@
   (is (= '[["LOCAL 0: int a"] (ILOAD_0) (ICONST_2) (IADD) (IRETURN)]
          (asm-expr [^int a] (+ a 2)))))
 
-;; (deftest type-conv
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "f~1" "(I)Ljava/lang/Object;")
-;;              ["LOCAL 0: int i"]
-;;              (ACONST_NULL)
-;;              (ARETURN)]
+(deftest type-conv
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(I)Ljava/lang/Object;")
+             ["LOCAL 0: int i"]
+             (ACONST_NULL)
+             (ARETURN)]
             
-;;             [(METHOD [PUBLIC STATIC FINAL] "prim-arg-cast~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
-;;              ["LOCAL 0: Object x"]
-;;              (ALOAD_0)
-;;              (CHECKCAST Integer)
-;;              (INVOKEVIRTUAL Integer "intValue" "()I")
-;;              (INVOKESTATIC . "f~1" "(I)Ljava/lang/Object;")
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "prim-arg-conv~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
-;;              ["LOCAL 0: Object x"]
-;;              (ALOAD_0)
-;;              (INVOKESTATIC RT "intCast" "(Ljava/lang/Object;)I")
-;;              (INVOKESTATIC . "f~1" "(I)Ljava/lang/Object;")
-;;              (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "prim-arg-cast~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+             ["LOCAL 0: Object x"]
+             (ALOAD_0)
+             (CHECKCAST Integer)
+             (INVOKEVIRTUAL Integer "intValue" "()I")
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/Object;")
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "prim-arg-conv~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+             ["LOCAL 0: Object x"]
+             (ALOAD_0)
+             (CHECKCAST Number)
+             (INVOKEVIRTUAL Number "intValue" "()I")
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/Object;")
+             (ARETURN)]
             
-;;             [(METHOD [PUBLIC STATIC FINAL] "prim-result-cast~1" "(Ljava/lang/Object;)I")
-;;              ["LOCAL 0: Object x"]
-;;              (ALOAD_0)
-;;              (CHECKCAST Integer)
-;;              (INVOKEVIRTUAL Integer "intValue" "()I")
-;;              (IRETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "prim-result-conv~1" "(Ljava/lang/Object;)I")
-;;              ["LOCAL 0: Object x"]
-;;              (ALOAD_0)
-;;              (INVOKESTATIC RT "intCast" "(Ljava/lang/Object;)I")
-;;              (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "prim-result-cast~1" "(Ljava/lang/Object;)I")
+             ["LOCAL 0: Object x"]
+             (ALOAD_0)
+             (CHECKCAST Integer)
+             (INVOKEVIRTUAL Integer "intValue" "()I")
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "prim-result-conv~1" "(Ljava/lang/Object;)I")
+             ["LOCAL 0: Object x"]
+             (ALOAD_0)
+             (CHECKCAST Number)
+             (INVOKEVIRTUAL Number "intValue" "()I")
+             (IRETURN)]
             
-;;             [(METHOD [PUBLIC STATIC FINAL] "prim-result-generic-cast~1" "(Ljava/lang/Object;)I")
-;;              ["LOCAL 0: Object g"]
-;;              (ALOAD_0)
-;;              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)I" :bsm-invoke-fn [])
-;;              (IRETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "prim-result-generic-conv~1" "(Ljava/lang/Object;)I")
-;;              ["LOCAL 0: Object g"]
-;;              (ALOAD_0)
-;;              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;" :bsm-invoke-fn [])
-;;              (INVOKESTATIC RT "intCast" "(Ljava/lang/Object;)I")
-;;              (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "prim-result-generic-cast-1~1" "(Ljava/lang/Object;)I")
+             ["LOCAL 0: Object g"]
+             (ALOAD_0)
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)I" :bsm-invoke-fn [])
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "prim-result-generic-cast-2~1" "(Ljava/lang/Object;)I")
+             ["LOCAL 0: Object g"]
+             (ALOAD_0)
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)I" :bsm-invoke-fn [])
+             (ISTORE_1)
+             ["LOCAL 1: int i"]
+             (ALOAD_0)
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)I" :bsm-invoke-fn [])
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "prim-result-generic-conv~1" "(Ljava/lang/Object;)I")
+             ["LOCAL 0: Object g"]
+             (ALOAD_0)
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;" :bsm-invoke-fn [])
+             (CHECKCAST Number)
+             (INVOKEVIRTUAL Number "intValue" "()I")
+             (IRETURN)]
 
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (letfn* [(f [^int i]
-;;                              nil)
-;;                           (prim-arg-cast [^Object x]
-;;                                          (f ^int x))
-;;                           ;; (int reference-value) works like ^int and
-;;                           ;; expects an Integer
-;;                           (prim-arg-conv [^Object x]
-;;                                          (f (int x)))
-;;                           (prim-result-cast ^int [^Object x]
-;;                                             ^int x)
-;;                           ;; (int reference-value) works like ^int and
-;;                           ;; expects an Integer
-;;                           (prim-result-conv ^int [^Object x]
-;;                                             (int x))
-;;                           (prim-result-generic-cast ^int [g]
-;;                                                     ^int (g))
-;;                           ;; unlike ^int reference-value, (int
-;;                           ;; reference-value) does not push the
-;;                           ;; expected result type into a polymorphic
-;;                           ;; invoke
-;;                           (prim-result-generic-conv ^int [g]
-;;                                                     (int (g)))
-;;                           ;; (prim-result-generic-error ^int [g]
-;;                           ;;   (let [^int i (g)])            ;incompatible types
-;;                           ;;   (g))                          ;incompatible types
-;;                           ])]))))
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (letfn* [(f [^int i]
+                             nil)
+                          (prim-arg-cast [^Object x]
+                                         (f ^int x))
+                          (prim-arg-conv [^Object x]
+                                         (f (int x)))
+                          (prim-result-cast ^int [^Object x]
+                                            ^int x)
+                          (prim-result-conv ^int [^Object x]
+                                            (int x))
+                          (prim-result-generic-cast-1 ^int [g]
+                                                      ^int (g))
+                          (prim-result-generic-cast-2 ^int [g]
+                                                      (let* [^int i (g)])
+                                                      (g))
+                          ;; unlike ^int reference-value, (int
+                          ;; reference-value) does not push the
+                          ;; expected result type into a polymorphic
+                          ;; invoke
+                          (prim-result-generic-conv ^int [g]
+                                                    (int (g)))])]))))
 
 (deftest number-conv-test
   (is (= '[["LOCAL 0: Number n"]

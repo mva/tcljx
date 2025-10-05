@@ -15,10 +15,10 @@
                    array-test clone-test switch-test cond-test logic-test
                    xcmp-test try-test loop-test unboxing-test boxing-test
                    fn-member-test fn-test definterface-test itf-fn-test
-                   deftype-test record-test reify-test)
+                   deftype-test record-test reify-test letfn-test)
    
    (tcljx #_namespace-test #_variadic-test #_macro-test #_set-test #_closure-test
-          #_line-test #_letfn-test #_require-test #_main-test
+          #_line-test #_require-test #_main-test
 
           #_rtiow-nocore-test)
    
@@ -63,6 +63,7 @@
     tcljx.classgen.deftype-test
     tcljx.classgen.record-test
     tcljx.classgen.reify-test
+    tcljx.classgen.letfn-test
     
     #_tcljx.classgen.namespace-test
     #_tcljx.classgen.variadic-test
@@ -70,7 +71,6 @@
     #_tcljx.classgen.set-test
     #_tcljx.classgen.closure-test
     #_tcljx.classgen.line-test
-    #_tcljx.classgen.letfn-test
     #_tcljx.classgen.require-test
     #_tcljx.main-test]
 
