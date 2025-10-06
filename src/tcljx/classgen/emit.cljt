@@ -1,7 +1,7 @@
 (ns tcljx.classgen.emit
   (:require
-   (tcljx.data [config :as cfg] [context :as context] [type :as type]
-               [ir :as ir] [reflect :as reflect])
+   (tcljx.data [context :as context] [type :as type] [ir :as ir]
+               [reflect :as reflect])
    (tcljx.classgen util))
   (:import
    (tcljx.data.type Wrapper)
@@ -93,7 +93,7 @@
             (.invokestatic xb cd-box "valueOf" mtd)
             ;; there should be no scenario where the additonal cast
             ;; fails, so drop the line number for now
-            (cast-from-reference* xb cfg/no-line-number consumed-type box-type)))
+            (cast-from-reference* xb context/fctx-none consumed-type box-type)))
 
         (convert-from-primitive* ^void [^CodeBuilder xb ^Class consumed-type
                                         ^Class on-stack-type]
@@ -191,4 +191,4 @@
       (let [param-no (+ first-param-no i)
             ent ^tcljx.classgen.util.LocalVariable (aget parameters i)]
         (.emit-setup-code? ent xb param-no)))
-    (then-leave? xb cfg/no-line-number return-type (.code spec) true)))
+    (then-leave? xb context/fctx-none return-type (.code spec) true)))

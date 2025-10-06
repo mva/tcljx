@@ -264,7 +264,7 @@
       (if (< i end)
         (let [ce (aget ces i)]
           (-> xb (.dup) (.loadConstant (- i start)))
-          (when (emit/insn? xb cfg/no-line-number component-type ce)
+          (when (emit/insn? xb context/fctx-none component-type ce)
             (.arrayStore xb component-tk)
             (recur (inc i))))
         true))))

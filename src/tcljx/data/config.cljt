@@ -37,8 +37,6 @@
         minor 0 #_ClassFile/PREVIEW_MINOR_VERSION]
     (.withVersion cb major minor)))
 
-(def no-line-number 0)
-
 (def core-lib "tinyclj.core")
 ;; (def core-lib-sym (symbol nil core-lib))
 (defn core-lib? ^boolean [^String ns-str] (= core-lib ns-str))

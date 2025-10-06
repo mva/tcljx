@@ -94,7 +94,7 @@
           (let [tpd (ir/value-type-exact init-ce tp)]
             (classfile/with-method-body-> cb
               [mnm (MethodTypeDesc/of tpd) classfile/acc-method-static]
-              (emit/then-leave? cfg/no-line-number tp init-ce true))))
+              (emit/then-leave? context/fctx-none tp init-ce true))))
          (segment/add-elements acc))))
 (defn- promise-method ^CodePromise [^ClassDesc owner ^String nm ^Class tp
                                     ^Entity init-ce]
