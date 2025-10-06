@@ -186,9 +186,9 @@
 
 (defn body ^void [^CodeBuilder xb ^MethodSpec spec ^int first-param-no]
   (let [return-type (-> spec .at .return-type)
-        parameters (.parameters spec)]
-    (dotimes [i (alength parameters)]
-      (let [param-no (+ first-param-no i)
-            ent ^tcljx.classgen.util.LocalVariable (aget parameters i)]
-        (.emit-setup-code? ent xb param-no)))
+        params (.parameters spec)
+        names (-> spec .at .parameter-names)]
+    (dotimes [i (alength params)]
+      (-> ^tcljx.classgen.util.LocalVariable (aget params i)
+          (.emit-setup-code? xb (+ first-param-no i) (aget names i))))
     (then-leave? xb context/fctx-none return-type (.code spec) true)))

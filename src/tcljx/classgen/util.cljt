@@ -32,8 +32,8 @@
 
 ;;; ------------------------------------------------------------------------
 
-(deftype LocalVariable [^String name ^Class type ^int entity-id
-                        ^CodeEmitter init ^:unsynchronized-mutable ^int slot]
+(deftype LocalVariable [^Class type ^int entity-id ^CodeEmitter init
+                        ^:unsynchronized-mutable ^int slot]
   CodeEmitter
   (emit-insn* [_ xb consumed-type _]
     (with-void-empty-if-requested consumed-type
@@ -57,8 +57,8 @@
     (.iinc xb slot const))
   
   tcljx.data.ir.LoadFromCopyWhenBound
-  (emit-setup-code? [_ xb param-no]
-    (if (< param-no -1)             ;let binding or parameter binding?
+  (emit-setup-code? [_ xb param-no name]
+    (if (= param-no -2) ;let binding if no param-no given, otherwise parameter
       (let [tk (TypeKind/from type), label (.newLabel xb)]
         (when-some [on-stack-type (.emit-insn* init xb type false)]
           (assert (identical? type on-stack-type))
@@ -74,12 +74,13 @@
           (.localVariable xb slot name (reflect/describe-class type)
                           (.startLabel xb) (.endLabel xb))
           true))))
+(defn entity-local ^LocalVariable [^Class type ^int entity-id ^CodeEmitter init]
+  (LocalVariable. type entity-id init -1))
 
 (defn parameter* ^Entity [^CodeBuilder xb ^String opt-name
                           ^Class type ^int param-no]
-  (let [slot (.parameterSlot xb param-no)
-        ent (LocalVariable. opt-name type 0 nil slot)]
+  (let [slot (.parameterSlot xb param-no)]
     (when (some? opt-name)
       (.localVariable xb slot opt-name (reflect/describe-class type)
                       (.startLabel xb) (.endLabel xb)))
-    ent))
+    (LocalVariable. type 0 nil slot)))

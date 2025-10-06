@@ -4,12 +4,10 @@
     [config :as cfg] [wrong :as wrong] [type :as type] [ir :as ir]
     [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen
-    [constgen :as constgen] segment [envgraph :as envgraph] [insn :as insn]
-    [fngen :as fngen] [typegen :as typegen]))
+    [util :as util] [constgen :as constgen] segment [envgraph :as envgraph]
+    [insn :as insn] [fngen :as fngen] [typegen :as typegen]))
   (:import
-   (tcljx.data.ir CodeEmitter Entity LoadFromCopyWhenBound
-                  MethodSpec EntityFactory)
-   (tcljx.classgen.util LocalVariable)
+   (tcljx.data.ir CodeEmitter Entity MethodSpec EntityFactory)
    (tcljx.classgen.envgraph Display)
    (tcljx.classgen.insn Insn Insns)
    (tcljx.classgen.fngen FnPromise)
@@ -62,10 +60,10 @@
   
   (next-entity-id [_]
     (set! curr-entity-id (inc curr-entity-id)))
-  (local-variable [this name type init]
-    (LocalVariable. name type (.next-entity-id this) init -1))
-  (parameter [this name type]           ;`param-no` provided late
-    (LocalVariable. name type (.next-entity-id this) constgen/emitter-empty -1))
+  (local-variable [this type init]
+    (util/entity-local type (.next-entity-id this) init))
+  (parameter [this type]                ;`param-no` provided late
+    (util/entity-local type (.next-entity-id this) constgen/emitter-empty))
   (entity-fn [this arity-specs unique-nm !fn-parts]
     (let [method-specs (new MethodSpec/1 (alength arity-specs))]
       (dotimes [i (alength method-specs)]
@@ -128,7 +126,7 @@
       (insn/ensure-assignable opt-type init))
     (let [tp (or opt-type (insn/logical-type init))
           ce (-> init (insn/cast-to tp fctx) .emitter)]
-      (ir/mk-binding (.local-variable this name tp ce) name false)))
+      (ir/mk-binding (.local-variable this tp ce) name false)))
   (binding-catching-local [this fctx type name]
     (let [ex-provider (insn/mk-insn (^CodeEmitter fn [_ _ _] type) type)]
       (.binding-fresh this fctx type name ex-provider)))

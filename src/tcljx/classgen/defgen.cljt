@@ -38,7 +38,7 @@
   (invoke* [this fctx form _ m-idx xs]
     (.invoke* ^Entity init-ce fctx form this m-idx xs))
   LoadFromCopyWhenBound
-  (emit-setup-code? [_ xb _]
+  (emit-setup-code? [_ xb _ _]
     (or (constgen/emitter-empty? init-ce)
         (when (emit/insn? xb context/fctx-none tp init-ce)
           (.putstatic xb owner mnm (ir/value-type-exact init-ce tp))
@@ -80,7 +80,7 @@
   (invoke* [this fctx form _ m-idx xs]
     (.invoke* init-ce fctx form this m-idx xs))
   LoadFromCopyWhenBound
-  (emit-setup-code? [_ xb _]
+  (emit-setup-code? [_ xb _ _]
     true)
   CodePromise
   (expr-of [this]
@@ -117,8 +117,8 @@
   (invoke* [this fctx form opt-f m-idx xs]
     (.invoke* init-ce fctx form this m-idx xs))
   LoadFromCopyWhenBound
-  (emit-setup-code? [_ xb param-no]
-    (.emit-setup-code? __entity xb param-no))
+  (emit-setup-code? [_ xb param-no name]
+    (.emit-setup-code? __entity xb param-no name))
   CodePromise
   (expr-of [this]
     (insn/mk-insn this tp))

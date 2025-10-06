@@ -231,13 +231,13 @@
   ;; `emit-insn*` calls to emit a `loadLoad` instruction.  A def
   ;; binding works similar, using a static field or a static method.
   ;; Returns false if control then leaves the method.
-  (emit-setup-code? ^boolean [^CodeBuilder xb ^int param-no]))
+  (emit-setup-code? ^boolean [^CodeBuilder xb ^int param-no ^String name]))
 
 
 (definterface CopyOnRead
-  ;; Create an alias for this entity when it appears as value of a let
-  ;; binding?  Returns false if a binding *must* create a copy of the
-  ;; entity's value.
+  ;; True whens to create an alias for this entity when it appears as
+  ;; value of a let binding.  Returns false if a binding *must* create
+  ;; a copy of the entity's value.
   (alias-when-let-value? ^boolean []))
 
 (defn alias-when-let-value? ^boolean [^CodeEmitter ce]
@@ -262,7 +262,8 @@
   java.lang.Record
   CodeEmitter
   (emit-insn* [this xb _ _]
-    (when (or alias? (LoadFromCopyWhenBound/.emit-setup-code? bound-to xb -2))
+    (when (or alias?
+              (LoadFromCopyWhenBound/.emit-setup-code? bound-to xb -2 name))
       Void/TYPE)))
 (def mk-binding Binding/new)
 
@@ -443,11 +444,10 @@
   (new-collection ^Expr [^Class coll-type ^Exprs args])
   
   (next-entity-id ^int [])
-  (local-variable ^Entity [^String name ^Class type ^CodeEmitter init])
-  (parameter ^Entity [^String name ^Class type])
-  ;; FIXME... rename later
+  (local-variable ^Entity [^Class type ^CodeEmitter init])
+  (parameter ^Entity [^Class type])
   (entity-fn ^Entity [^AritySpec/1 arity-specs ^String unique-nm
-                               ^ArrayList !fn-parts])
+                      ^ArrayList !fn-parts])
   (expr-fn ^Expr [^Entity fn-entity ^MethodSpec/1 arity-methods])
   (expr-itf-fn ^Expr [^MethodSpec/1 method-specs ^String unique-nm
                       ^Class itf-class ^Method method ^ArrayList !itf-parts])
@@ -576,7 +576,7 @@
         bnds (new Binding/1 (.parameter-count at))]
     (dotimes [i (alength bnds)]
       (let [nm (.parameter-name at i)
-            param (.parameter etf nm (.parameter-type at i))]
+            param (.parameter etf (.parameter-type at i))]
         (aset bnds i (mk-binding param nm false))))
     bnds))
 
