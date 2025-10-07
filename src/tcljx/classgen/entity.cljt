@@ -37,12 +37,16 @@
     (->> (^Function fn [origin] (Display. origin 0 local-name nil))
          (.computeIfAbsent env-to-display origin)))
   (value-of [this ent form]
-    (insn/value-of (envgraph/value-of this ent form) form))
+    (assert (some? form))
+    (if-some [tp (.value-type ent)]
+      (insn/mk-insn (envgraph/value-of this ent form) tp)
+      (throw (wrong/wr-info (str "entity " (wrong/q form)
+                                 " has no runtime value")))))
   (invocation-of [this inv form]
     (envgraph/invocation-of this inv form))
   
-  (entity-constant [_ value type]
-    (constgen/constant value type))
+  (expr-constant [_ value type]
+    (insn/constant-insn value type))
   (entity-class-member [this m]
     (fngen/class-member-fn m))
   (new-loadable [_ value expr-type]

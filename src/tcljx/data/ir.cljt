@@ -417,7 +417,7 @@
   (closure-level ^int [])               ;of this class/entity
   (closes-over? ^boolean [^Entity ent])
   (display-of! ^Entity [^Entity origin ^String local-name])
-  (value-of ^Expr [^Entity ent ^symbol form])
+  (value-of ^Expr [^Entity ent ^symbol form]) ;throw if (nil? (.value-type ent))
   (invocation-of ^Entity [^Entity inv ^seq form])
   
   ;; Create an entity denoting the constant `value` of type `type`.
@@ -431,7 +431,7 @@
   ;; is accepted for `value`: instances of ConstantDesc, instances of
   ;; Constable, and structured values provided by Clojure (symbol,
   ;; keyword, vector, and so on).
-  (entity-constant ^Entity [^Object value ^Class type]) ;ConstantDesc or Class
+  (expr-constant ^Expr [^Object value ^Class type]) ;ConstantDesc or Class
   (entity-class-member ^Entity [^MemberHandle m])
 
   ;; Create a symbol, a keyword, a collection, or a regex Pattern.
@@ -561,9 +561,6 @@
   (with-bindings* ^Parser [^map bindings])
   (with-expr-factory ^Parser [^ExprFactory xf])
   (with-entity-factory ^Parser [^EntityFactory etf]))
-
-(defn new-constant ^Expr [^EntityFactory etf ^Object value ^Class type]
-  (.value-of etf (.entity-constant etf value type) nil))
 
 (defn exprs-of ^Exprs [^ExprFactory xf & ^Expr/1 xs*]
   (let [xs (.new-exprs xf (alength xs*))]

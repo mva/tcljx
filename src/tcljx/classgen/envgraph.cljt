@@ -66,7 +66,7 @@
         (EnvDisplayPairs. aorigin adisplay)
         (sort-by-origin aorigin adisplay)))))
 
-(defn value-of ^Entity [^EntityFactory etf ^Entity ent ^Object form]
+(defn value-of ^Entity [^EntityFactory etf ^Entity ent ^symbol form]
   #_(prn :cbp-level (.closure-level em)
          :ent-level (ir/closure-level ent)
          :sequence-number (ir/sequence-number ent)
@@ -75,9 +75,7 @@
          :ent-class (class ent)
          :closes-over? (closes-over? em ent))
   (if (.closes-over? etf ent)
-    (do (when (instance? IFnPromise ent)
-          (.mark-as-materialized! ^IFnPromise ent))
-        (.display-of! etf ent (name ^symbol form)))
+    (.display-of! etf ent (name form))
     ent))
 
 (defn invocation-of ^Entity [^EntityFactory etf ^Entity inv ^seq form]

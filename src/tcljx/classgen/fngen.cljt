@@ -374,7 +374,7 @@
   
   CodePromise
   (expr-of [this]
-    (insn/mk-insn this (.value-type this)))
+    (insn/value-of* this))
   (child-methods [_]
     method-specs)
   (!nested-parts [_]

@@ -32,23 +32,23 @@
   (let [etf (.entity-factory parser)]
     (cond
       (nil? form)
-      (ir/new-constant etf ConstantDescs/NULL type/poly-reference)
+      (.expr-constant etf ConstantDescs/NULL type/poly-reference)
       
       (instance? ConstantDesc form)
-      (ir/new-constant etf form (primitive-type-of (.getClass form)))
+      (.expr-constant etf form (primitive-type-of (.getClass form)))
       
       (keyword? form)
       (.new-loadable etf form type/keyword)
       
       (boolean? form)
-      (ir/new-constant etf (int ^boolean form) Boolean/TYPE)
+      (.expr-constant etf (int ^boolean form) Boolean/TYPE)
       
       (char? form)
-      (ir/new-constant etf (int ^char form) Character/TYPE)
+      (.expr-constant etf (int ^char form) Character/TYPE)
       
       (number? form)      ;any non-ConstantDesc number: Byte and Short
-      (ir/new-constant etf (.intValue ^Number form)
-                          (primitive-type-of (.getClass form)))
+      (.expr-constant etf (.intValue ^Number form)
+                      (primitive-type-of (.getClass form)))
 
       (instance? Pattern form)
       (.new-loadable etf form Pattern)

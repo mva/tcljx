@@ -113,7 +113,7 @@
             (if-some [nmsp (namespace sym)]
               (when-some [cl (.lookup-class rsv nmsp)]
                 (if-some [tp (lookup-type rsv cl nm)]
-                  (.entity-constant etf tp Class) ;array type
+                  (.emitter (.expr-constant etf tp Class)) ;array type
                   (let [ptags (-> (get-param-tags (.meta sym))
                                   (parse-param-tags rsv)) m (resolve cl nm ptags)
                         ent (.entity-class-member etf m)]
@@ -122,7 +122,7 @@
                                 (.new-exprs xf 0))
                       ent))))
               (when-some [cl (.lookup-class rsv nm)]
-                (.entity-constant etf cl Class)))))]
+                (.emitter (.expr-constant etf cl Class))))))]
   
   (defn lookup-class-entity ^Entity [^Parser parser ^symbol sym]
     (let [x (lookup (.resolver parser) (.expr-factory parser)

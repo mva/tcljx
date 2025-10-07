@@ -47,14 +47,11 @@
 (def insn-int-m1 (mk-insn (constgen/constant -1 Integer/TYPE) Integer/TYPE))
 (def insn-float-one (mk-insn (constgen/constant 1.0f Float/TYPE) Float/TYPE))
 
-(defn value-of ^Insn [^Entity ent form]
-  (if-some [tp (.value-type ent)]
-    (mk-insn ent tp)
-    (throw (wrong/wr-info (str "entity " (wrong/q form)
-                               " has no runtime value")))))
+(defn value-of* ^Insn [^Entity ent]    ;pre: (some? (.value-type ent))
+  (mk-insn ent (.value-type ent)))
 
 (defn constant-insn ^Insn [^Object value ^Class type]
-  (value-of (constgen/constant value type) nil))
+  (value-of* (constgen/constant value type)))
 
 
 ;;; This indicates an error regarding the type *of* an expression.
