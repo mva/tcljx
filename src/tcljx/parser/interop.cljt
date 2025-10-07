@@ -93,48 +93,36 @@
         m
         (throw (wr-info))))))
 
-(letfn [(parse-param-tags ^Class/1 [^Object ptags ^Resolver resolver]
-          (when (some? ptags)
-            (let [ptags (syntax/vector ptags)
-                  a (new Class/1 (count ptags))]
-              (dotimes [i (alength a)]
-                (let [sym (nth ptags i)]
-                  (aset a i (if (= sym '_)
-                              type/polymorphic
-                              (parse-type-symbol resolver sym)))))
-              a)))
-        (resolve ^MemberHandle [^Class owner ^String nm ^Class/1 ptags]
-          (if (.startsWith nm ".")
-            (class-member-match false owner (.substring nm 1) ptags)
-            (class-member-match true owner nm ptags)))
-        (lookup ^Object [^Resolver rsv ^ExprFactory xf ^EntityFactory etf
-                         ^symbol sym]
-          (let [nm (name sym)]
-            (if-some [nmsp (namespace sym)]
-              (when-some [cl (.lookup-class rsv nmsp)]
-                (if-some [tp (lookup-type rsv cl nm)]
-                  (.emitter (.expr-constant etf tp Class)) ;array type
-                  (let [ptags (-> (get-param-tags (.meta sym))
-                                  (parse-param-tags rsv)) m (resolve cl nm ptags)
-                        ent (.entity-class-member etf m)]
-                    (if (and (nil? ptags) (member/static-field? m))
-                      (.invoke* ent context/fctx-none nil nil 0
-                                (.new-exprs xf 0))
-                      ent))))
-              (when-some [cl (.lookup-class rsv nm)]
-                (.emitter (.expr-constant etf cl Class))))))]
-  
-  (defn lookup-class-entity ^Entity [^Parser parser ^symbol sym]
-    (let [x (lookup (.resolver parser) (.expr-factory parser)
-                    (.entity-factory parser) sym)]
-      (when (instance? Entity x)        ;filter out getstatic
-        x)))
-  (defn lookup-class-expr ^Expr [^Parser parser ^symbol sym]
-    (let [etf (.entity-factory parser)
-          x (lookup (.resolver parser) (.expr-factory parser) etf sym)]
-      (if (instance? Entity x)
-        (.value-of etf x sym)
-        x))))                           ;pass through getstatic
+(defn lookup-class-entity
+  (^Entity [^Parser parser ^symbol sym]
+   (lookup-class-entity (.resolver parser) (.entity-factory parser) sym))
+  (^Entity [^Resolver rsv ^EntityFactory etf ^symbol sym]
+   (letfn [(parse-param-tags ^Class/1 [^Object ptags]
+             (when (some? ptags)
+               (let [ptags (syntax/vector ptags)
+                     a (new Class/1 (count ptags))]
+                 (dotimes [i (alength a)]
+                   (let [sym (nth ptags i)]
+                     (aset a i (if (= sym '_)
+                                 type/polymorphic
+                                 (parse-type-symbol rsv sym)))))
+                 a)))
+           (class-constant ^Entity [^Class tp]
+             (.emitter (.expr-constant etf tp Class)))]
+     (let [nm (name sym)]
+       (if-some [nmsp (namespace sym)]
+         (when-some [cl (.lookup-class rsv nmsp)]
+           (if-some [tp (lookup-type rsv cl nm)]
+             (class-constant tp)        ;array type
+             (let [ptags (-> (.meta sym) (get-param-tags) (parse-param-tags))
+                   m (if (.startsWith nm ".")
+                       (class-member-match false cl (.substring nm 1) ptags)
+                       (class-member-match true cl nm ptags))]
+               (if (and (nil? ptags) (member/static-field? m))
+                 (.entity-getstatic etf m)
+                 (.entity-class-member etf m)))))
+         (when-some [cl (.lookup-class rsv nm)]
+           (class-constant cl)))))))
 
 ;;; ------------------------------------------------------------------------
 

@@ -55,12 +55,6 @@
 
 ;;; ------------------------------------------------------------------------
 
-;;; Anything outside of a function or a class definition (that is
-;;; definterface, deftype, reify, etc.) happens in the namespace
-;;; context.
-;; (defn namespace? ^boolean [^Resolver rsv]
-;;   (instance? tcljx.model.NamespaceResolver rsv))
-
 ;;; Returns nil if `form` does not resolve to a binding.
 (defn lookup ^Entity [^Parser parser ^symbol form]
   (let [nm (name form)]

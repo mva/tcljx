@@ -7,7 +7,7 @@
     [util :as util] [constgen :as constgen] segment [envgraph :as envgraph]
     [insn :as insn] [fngen :as fngen] [typegen :as typegen]))
   (:import
-   (tcljx.data.ir CodeEmitter Entity MethodSpec EntityFactory)
+   (tcljx.data.ir CodeEmitter Entity MethodSpec EntityFactory CopyOnRead)
    (tcljx.classgen.envgraph Display)
    (tcljx.classgen.insn Insn Insns)
    (tcljx.classgen.fngen FnPromise)
@@ -49,6 +49,25 @@
     (insn/constant-insn value type))
   (entity-class-member [this m]
     (fngen/class-member-fn m))
+  (entity-getstatic [this m]
+    (reify
+      CodeEmitter
+      (emit-insn* [_ xb consumed-type _]
+        (util/with-void-empty-if-requested consumed-type
+          (.getstatic xb (reflect/describe-class (.owner m))
+                      (.getName (.member m))
+                      (reflect/describe-class (.return-type m)))
+          (.return-type m)))
+      Entity
+      (value-type [_]
+        (.return-type m))
+      (entity-id [_]
+        ir/entity-id-def)
+      (invoke-methods [_]
+        ir/invoke-methods-dynamic)
+      CopyOnRead
+      (alias-when-let-value? [_]
+        false)))
   (new-loadable [_ value expr-type]
     (-> value (constgen/collection expr-type false) (insn/mk-insn expr-type)))
   (new-collection [this coll-type args]

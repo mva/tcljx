@@ -433,6 +433,7 @@
   ;; keyword, vector, and so on).
   (expr-constant ^Expr [^Object value ^Class type]) ;ConstantDesc or Class
   (entity-class-member ^Entity [^MemberHandle m])
+  (entity-getstatic ^Entity [^MemberHandle m])
 
   ;; Create a symbol, a keyword, a collection, or a regex Pattern.
   ;; `value` usually is the compile time data structure as provided by

@@ -272,11 +272,10 @@
                 (parse-invocation-other op fctx form)))
             
             (parse-symbol ^Expr [^symbol sym]
-              (if-some [ent (parse/lookup this sym)]
+              (if-some [ent (or (parse/lookup this sym)
+                                (interop/lookup-class-entity this sym))]
                 (.value-of entity-factory ent sym)
-                (if-some [x (interop/lookup-class-expr this sym)]
-                  x
-                  (throw (wrong/info-unresolved sym)))))]
+                (throw (wrong/info-unresolved sym))))]
 
       (if (instance? IMeta form)
         (let [form-meta (.meta ^IMeta form)
