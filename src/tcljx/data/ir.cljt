@@ -256,6 +256,16 @@
   (instance? ImmediateEntity ce))
 
 
+;;; Counts the number of times a function definition or one of its
+;;; names is used in the source code, minus the number of times it
+;;; appears in an aliasing let binding or as target of a function
+;;; invocation.
+(definterface FnUsage
+  (get-emit-entity ^Entity [])          ;for code generation of `def`
+  (value-use? ^boolean [])
+  (count-value-use! ^void [^int delta]))
+
+
 ;;; A binding marks the place in the code sequence where entity
 ;;; `bound-to` is associated with a name.
 (deftype Binding [^Entity bound-to ^String name ^boolean alias?]

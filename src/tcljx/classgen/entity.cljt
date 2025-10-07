@@ -97,7 +97,7 @@
                              (-> o2 .at .parameter-count)))
            (java.util.Arrays/sort method-specs))
       (FnPromise. (.next-entity-id this) method-specs unique-nm !fn-parts
-                  nil false)))
+                  nil 1)))              ;definition is first use
   (expr-fn [this fn-entity arity-methods]
     (let [fn-p ^FnPromise fn-entity
           method-specs (.method-specs fn-p)]

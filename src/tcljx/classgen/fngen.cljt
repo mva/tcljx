@@ -7,8 +7,9 @@
                    [emit :as emit] [segment :as segment] [constgen :as constgen]
                    [insn :as insn] [condgen :as condgen] [envgraph :as envgraph]))
   (:import
-   (tcljx.data.ir CodeEmitter Entity Constant ArityType AritySpec MethodSpec
-                  FieldSpec NmspClass Parser ExprFactory EntityFactory)
+   (tcljx.data.ir CodeEmitter Entity Constant FnUsage
+                  ArityType AritySpec MethodSpec FieldSpec NmspClass
+                  Parser ExprFactory EntityFactory)
    (tcljx.data.member MemberHandle)
    (tcljx.classgen.segment CodePromise SegmentAcc)
    (tcljx.classgen.envgraph Display EnvDisplayPairs)
@@ -52,58 +53,6 @@
   (computational-value [_] ;never nil, but may require owner to be known
     (DynamicConstantDesc/ofNamed rt/bsm-static-fn ConstantDescs/DEFAULT_NAME
                                  rt/StaticFn mhds)))
-
-(letfn [(arity-parameter-types ^Class/1 [^MemberHandle m]
-          (let [ptypes (.parameter-types m)]
-            (if (reflect/takes-receiver? (.member m))
-              (let [a (new Class/1 (inc (alength ptypes)))]
-                (aset a 0 (.owner m))
-                (System/arraycopy ptypes 0 a 1 (alength ptypes))
-                a)
-              ptypes)))
-        (method-spec-of-match ^MethodSpec [^MemberHandle m]
-          (let [varargs? (when (instance? Executable (.member m))
-                           (.isVarArgs ^Executable (.member m)))
-                ptypes (arity-parameter-types m)]
-            (-> (ArityType. (.return-type m) ptypes nil varargs?)
-                (MethodSpec. nil nil nil 0 nil nil))))]
-  
-  (defn class-member-fn ^FnStatic [^MemberHandle m]
-    (FnStatic. ir/entity-id-constant
-               (doto (new MethodSpec/1 1)
-                 (aset 0 (method-spec-of-match m)))
-               (doto (new DirectMethodHandleDesc/1 1)
-                 (aset 0 (reflect/mhd-of-member (.owner m) (.member m)))))))
-
-;;; ------------------------------------------------------------------------
-
-(deftype FnVirtual [^int entity-id ^MethodSpec/1 method-specs
-                    ^DirectMethodHandleDesc/1 mhds
-                    ^ClassDesc this-class ^Entity/1 aorigin]
-  CodeEmitter
-  (emit-insn* [this xb consumed-type then-leave?]
-    (-> (util/load-origin-values xb aorigin)
-        (.invokestatic this-class rt/name-factory-method
-                       (util/mtd-factory this-class aorigin)))
-    tinyclj.lang.AFnMh)
-  
-  Entity
-  (value-type [_]
-    tinyclj.lang.AFnMh)
-  (value-type-exact [_]
-    this-class)
-  (entity-id [_]
-    entity-id)
-  (invoke-methods [_]
-    method-specs)
-  (invoke* [this fctx form f m-idx xs]
-    (let [at (.at (aget method-specs m-idx))]
-      (-> (^CodeEmitter fn [xb _ _]
-           (when (emit/insn? xb fctx tinyclj.lang.AFnMh f)
-             (insn/emit-invoke-arity (aget mhds m-idx) at xs fctx xb)))
-          (insn/mk-insn (.return-type at))))))
-
-;;; -----------------------------------------------------------------------
 
 (defn- source-order-idxs ^int/1 [^MethodSpec/1 mspecs]
   (let [source-order (new int/1 (alength mspecs))]
@@ -177,7 +126,91 @@
          (segment/add-elements acc))
     (FnStatic. (.entity-id fn-p) method-specs mhds)))
 
+(letfn [(arity-parameter-types ^Class/1 [^MemberHandle m]
+          (let [ptypes (.parameter-types m)]
+            (if (reflect/takes-receiver? (.member m))
+              (let [a (new Class/1 (inc (alength ptypes)))]
+                (aset a 0 (.owner m))
+                (System/arraycopy ptypes 0 a 1 (alength ptypes))
+                a)
+              ptypes)))
+        (method-spec-of-match ^MethodSpec [^MemberHandle m]
+          (let [varargs? (when (instance? Executable (.member m))
+                           (.isVarArgs ^Executable (.member m)))
+                ptypes (arity-parameter-types m)]
+            (-> (ArityType. (.return-type m) ptypes nil varargs?)
+                (MethodSpec. nil nil nil 0 nil nil))))]
+  
+  (defn class-member-fn ^FnStatic [^MemberHandle m]
+    (FnStatic. ir/entity-id-constant
+               (doto (new MethodSpec/1 1)
+                 (aset 0 (method-spec-of-match m)))
+               (doto (new DirectMethodHandleDesc/1 1)
+                 (aset 0 (reflect/mhd-of-member (.owner m) (.member m)))))))
+
 ;;; ------------------------------------------------------------------------
+
+(deftype FnFlyweight [^int entity-id ^MethodSpec/1 method-specs
+                      ^DirectMethodHandleDesc/1 mhds]
+  CodeEmitter
+  (emit-insn* [this xb consumed-type then-leave?]
+    (throw (IllegalStateException.)))
+  
+  Entity
+  (value-type [_]
+    tinyclj.lang.StaticFn)
+  (value-type-exact [_]
+    (throw (IllegalStateException.)))
+  (entity-id [_]
+    entity-id)
+  (invoke-methods [_]
+    method-specs)
+  (invoke* [this fctx form _ m-idx xs]
+    (let [at (.at (aget method-specs m-idx))]
+      (-> (^CodeEmitter fn [xb _ _]
+           (insn/emit-invoke-arity (aget mhds m-idx) at xs fctx xb))
+          (insn/mk-insn (.return-type at))))))
+
+(defn- as-fn-flyweight ^Entity [^SegmentAcc acc ^Entity fn-p
+                                ^String name-prefix]
+  (let [segment-class (.segment-class acc)
+        method-specs (.invoke-methods fn-p)
+        mhds (new DirectMethodHandleDesc/1 (alength method-specs))]
+    ;; FIXME... this only works if env is empty
+    (set-static-mhd! mhds segment-class name-prefix method-specs)
+    
+    (->> (^Consumer fn ^void [^ClassBuilder cb]
+          (class-elements-static cb method-specs mhds segment-class nil))
+         (segment/add-elements acc))
+    (FnFlyweight. (.entity-id fn-p) method-specs mhds)))
+
+;;; ------------------------------------------------------------------------
+
+(deftype FnVirtual [^int entity-id ^MethodSpec/1 method-specs
+                    ^DirectMethodHandleDesc/1 mhds
+                    ^ClassDesc this-class ^Entity/1 aorigin]
+  CodeEmitter
+  (emit-insn* [this xb consumed-type then-leave?]
+    (-> (util/load-origin-values xb aorigin)
+        (.invokestatic this-class rt/name-factory-method
+                       (util/mtd-factory this-class aorigin)))
+    tinyclj.lang.AFnMh)
+  
+  Entity
+  (value-type [_]
+    tinyclj.lang.AFnMh)
+  (value-type-exact [_]
+    this-class)
+  (entity-id [_]
+    entity-id)
+  (invoke-methods [_]
+    method-specs)
+  (invoke* [this fctx form f m-idx xs]
+    (let [at (.at (aget method-specs m-idx))]
+      (-> (^CodeEmitter fn [xb _ _]
+           (when (emit/insn? xb fctx tinyclj.lang.AFnMh f)
+             (insn/emit-invoke-arity (aget mhds m-idx) at xs fctx xb)))
+          (insn/mk-insn (.return-type at))))))
 
 (defn- entity-this ^Entity [^ClassDesc owner]
   (reify Entity
@@ -344,7 +377,7 @@
 (deftype FnPromise [^int entity-id ^MethodSpec/1 method-specs
                     ^String unique-nm ^ArrayList !nested-parts
                     ^:unsynchronized-mutable ^Entity __emit
-                    ^:volatile-mutable ^boolean __materialized?]
+                    ^:unsynchronized-mutable ^int __materialized]
   CodeEmitter
   (emit-insn* [this xb consumed-type then-leave?]
     (.emit-insn* __emit xb consumed-type then-leave?))
@@ -367,10 +400,15 @@
                (.emit-insn* xb consumed-type then-leave?)))
           (insn/mk-insn (.return-type at)))))
   
-  tcljx.classgen.envgraph.IFnPromise
-  (get-emit-entity [_] __emit)
-  (materialized-as-value? [_] __materialized?)
-  (mark-as-materialized! [_] (set! __materialized? true))
+  FnUsage
+  (get-emit-entity [_]
+    __emit)
+  (value-use? [_]
+    (pos? __materialized))
+  (count-value-use! [this delta]
+    (locking this
+      (set! __materialized (+ __materialized delta))
+      (assert (>= __materialized 0))))
   
   CodePromise
   (expr-of [this]
@@ -380,9 +418,12 @@
   (!nested-parts [_]
     !nested-parts)
   (generate-and-deliver [this acc]
-    (set! __emit (if (envgraph/fn-closes-over-env? (.method-specs this))
-                   (as-fn-virtual acc this unique-nm)
-                   (as-fn-static acc this unique-nm)))
+    (set! __emit
+          (if (.value-use? this)
+            (if (envgraph/fn-closes-over-env? this (.method-specs this))
+              (as-fn-virtual acc this unique-nm)
+              (as-fn-static acc this unique-nm))
+            (as-fn-flyweight acc this unique-nm)))
     acc))
 
 ;;; ------------------------------------------------------------------------

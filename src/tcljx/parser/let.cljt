@@ -3,16 +3,16 @@
    (tcljx.data [wrong :as wrong] [ir :as ir])
    (tcljx.parser [syntax :as syntax] [parse :as parse] [interop :as interop]))
   (:import
-   (tcljx.data.ir Expr ExprFactory EntityFactory Binding Entity Parser)))
+   (tcljx.data.ir Expr Entity Binding FnUsage ExprFactory EntityFactory Parser)))
 
-(defn binding-for-entity ^Binding [^EntityFactory entity-factory ^long fctx
-                                   ^String name ^Entity ent ^Object ent-form]
-  (if (ir/alias-when-let-value? ent)
-    (.binding-alias entity-factory fctx name ent)
-    (let [x (.value-of entity-factory ent ent-form)]
-      (.binding-fresh entity-factory fctx nil name x))))
-
-(letfn [(binding-for-init ^Binding [^EntityFactory entity-factory ^long fctx
+(letfn [(binding-for-entity ^Binding [^EntityFactory entity-factory ^long fctx
+                                      ^String name ^Entity ent ^Object ent-form]
+          (if (ir/alias-when-let-value? ent)
+            (.binding-alias entity-factory fctx name ent)
+            (let [x (.value-of entity-factory ent ent-form)]
+              (assert (not (instance? FnUsage ent)))
+              (.binding-fresh entity-factory fctx nil name x))))
+        (binding-for-init ^Binding [^EntityFactory entity-factory ^long fctx
                                     ^Class opt-type ^String name ^Expr init]
           (if (and (nil? opt-type) (ir/alias-when-let-value? (.emitter init)))
             (.binding-alias entity-factory fctx name (.emitter init))

@@ -8,8 +8,8 @@
     [constant :as constant] [let :as let] [loop :as loop] [new :as new]
     [trycatch :as trycatch] [fn :as fn] [deftype :as deftype]))
   (:import
-   (tcljx.data.ir Resolver Expr Exprs ExprFactory Entity Binding Parser
-                  MethodSpec EntityFactory)
+   (tcljx.data.ir Resolver Expr Exprs ExprFactory Entity Binding FnUsage
+                  Parser MethodSpec EntityFactory)
    (clojure.lang IMeta)
    (java.util ArrayList)))
 
@@ -203,7 +203,9 @@
                     ce (.emitter op)
                     args (parse/args this fctx (rest form))]
                 (if (ir/entity? ce)
-                  (invoke-entity fctx form ce args)
+                  (do (when (instance? FnUsage ce)
+                        (FnUsage/.count-value-use! ce -1))
+                      (invoke-entity fctx form ce args))
                   (.invoke-value expr-factory fctx op args))))
             (parse-try-or-extract ^Expr [^long fctx ^seq form]
               (if (context/can-inline-tcf? fctx)
@@ -272,10 +274,13 @@
                 (parse-invocation-other op fctx form)))
             
             (parse-symbol ^Expr [^symbol sym]
-              (if-some [ent (or (parse/lookup this sym)
-                                (interop/lookup-class-entity this sym))]
-                (.value-of entity-factory ent sym)
-                (throw (wrong/info-unresolved sym))))]
+              (if-some [ent (parse/lookup this sym)]
+                (do (when (instance? FnUsage ent)
+                      (FnUsage/.count-value-use! ent +1))
+                    (.value-of entity-factory ent sym))
+                (if-some [ent (interop/lookup-class-entity this sym)]
+                  (.value-of entity-factory ent sym)
+                  (throw (wrong/info-unresolved sym)))))]
 
       (if (instance? IMeta form)
         (let [form-meta (.meta ^IMeta form)

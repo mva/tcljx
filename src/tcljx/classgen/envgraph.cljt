@@ -1,13 +1,9 @@
 (ns tcljx.classgen.envgraph
   (:require (tcljx.data [config :as cfg] [ir :as ir] [code :as code]))
-  (:import (tcljx.data.ir CodeEmitter Entity EntityFactory MethodSpec FieldSpec)
+  (:import (tcljx.data.ir CodeEmitter Entity FnUsage EntityFactory
+                          MethodSpec FieldSpec)
            (java.lang.constant ClassDesc)
            (java.util HashMap Map$Entry)))
-
-(definterface IFnPromise
-  (get-emit-entity ^Entity [])          ;for code generation of `def`
-  (materialized-as-value? ^boolean [])
-  (mark-as-materialized! ^void []))
 
 (definterface IDisplay
   (set-emit-entity! ^void [^Entity ent]))
@@ -83,16 +79,18 @@
     (.display-of! etf inv (name ^symbol (first form)))
     inv))
 
-(letfn [(some-materialized-display? ^boolean [^MethodSpec spec]
-          (let [it (-> spec .env-to-display .keySet .iterator)]
-            (loop []
-              (when (.hasNext it)
-                (let [origin (.next it)]
-                  (if (instance? IFnPromise origin)
-                    (or (.materialized-as-value? ^IFnPromise origin)
-                        (recur))
-                    true))))))]
-  (defn fn-closes-over-env? ^boolean [^MethodSpec/1 method-specs]
+(defn fn-closes-over-env? ^boolean [^Entity fn-p ^MethodSpec/1 method-specs]
+  (letfn [(some-materialized-display? ^boolean [^MethodSpec spec]
+            (let [it (-> spec .env-to-display .keySet .iterator)]
+              (loop []
+                (when (.hasNext it)
+                  (let [origin (.next it)]
+                    (cond
+                      (identical? origin fn-p) ;fn refers to itself?
+                      (recur)
+                      (instance? FnUsage origin)
+                      (or (FnUsage/.value-use? origin) (recur))
+                      :else true))))))]
     (loop [i (dec (alength method-specs))]
       (cond (neg? i) false
             (some-materialized-display? (aget method-specs i)) true

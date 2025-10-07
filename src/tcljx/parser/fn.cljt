@@ -5,8 +5,8 @@
    (tcljx.parser [parse :as parse] [syntax :as syntax] [interop :as interop]
                  [let :as let]))
   (:import
-   (tcljx.data.ir Expr Exprs Entity Binding ArityType AritySpec MethodSpec
-                  Parser ExprFactory EntityFactory Resolver)
+   (tcljx.data.ir Expr Exprs Entity Binding FnUsage ArityType AritySpec
+                  MethodSpec Parser ExprFactory EntityFactory Resolver)
    (java.lang.constant MethodHandleDesc DirectMethodHandleDesc ConstantDescs)
    (java.lang.reflect Method)
    (java.util Arrays Comparator ArrayList HashMap)))
@@ -108,7 +108,7 @@
   (FnBundle. (.entity-factory parser) (new String/1 n) (new ArrayList/1 n)
              (new Entity/1 n)))
 (defn- add-fn ^Entity [^FnBundle fnb ^int fn-idx ^String fn-nm
-                     ^AritySpec/1 arity-specs]
+                       ^AritySpec/1 arity-specs]
   (let [etf (.parent fnb)
         unique-nm (.unique-name! etf (or fn-nm "fn"))
         fn-parts (ArrayList.)
@@ -231,8 +231,8 @@
                                     more)
               ent-fn (add-fn fnb i (name fn-nm) specs)]
           (aset aspecs i specs)
-          (aset bnds i (let/binding-for-entity etf fctx (name fn-nm) ent-fn
-                                               (aget afn i))))))
+          (FnUsage/.count-value-use! ent-fn -1) ;back to zero
+          (aset bnds i (.binding-alias etf fctx (name fn-nm) ent-fn)))))
     (let [parser* (ir/with-local-bindings parser bnds)]
       (dotimes [i n]
         (context/with-line-from-list [fctx (nth fnv i)]

@@ -100,7 +100,8 @@
                                     ^Entity init-ce]
   (DefMethod. owner (cfg/munge-name nm) tp init-ce)  )
 
-(deftype DefOfPromise [^ClassDesc owner ^String nm ^Class tp ^FnPromise init-ce
+(deftype DefOfPromise [^ClassDesc owner ^String nm ^Class tp
+                       ^FnPromise init-ce
                        ^:unsynchronized-mutable ^LoadFromCopyWhenBound __entity]
   CodeEmitter
   (emit-insn* [_ xb consumed-type then-leave?]
