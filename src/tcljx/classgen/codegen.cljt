@@ -5,7 +5,7 @@
     [type :as type] [ir :as ir] [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen
     [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
-    [emit :as emit] [insn :as insn] [segment :as segment]
+    [emit :as emit] [insn :as insn]
     [primitive :as primitive] [condgen :as condgen] [switchgen :as switchgen]
     [trygen :as trygen] [fngen :as fngen]))
   (:import
@@ -82,9 +82,9 @@
       insn/empty-insns
       (Insns. (new CodeEmitter/1 n) (new Class/1 n))))
   
-  (invoke-arity [this fctx form inv inv* args]
+  (invoke-arity [this fctx form inv f args]
     (let [m-idx (select-method-for-arity inv args)]
-      (.invoke* inv fctx form inv* m-idx args)))
+      (.invoke* inv fctx form f m-idx args)))
 
   (attach-meta-to [this meta arg]
     (if (and (insn/const? arg) (insn/const? meta))
@@ -191,8 +191,7 @@
                 (when (emit/then-leave? xb fctx consumed-type (.emitter body)
                                         then-leave?)
                   consumed-type))]
-      (MethodSpec. at code body pvars (.source-idx mspec) (.name mspec)
-                   (.env-to-display mspec))))
+      (MethodSpec. at code body pvars (.source-idx mspec) (.name mspec))))
 
   (set-recur-target! [this target]
     (assert (nil? __recur-target)) ;wrong if single `finally` is emitted twice

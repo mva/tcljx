@@ -72,56 +72,55 @@
                  (definterface* IInterface
                    (foo [& ^Object/1 a]))]))))
 
-;; (deftest function-itf-test
-;;   (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/FnBinaryInt")
-;;             [(METHOD [PUBLIC ABSTRACT] "fn2" "(II)I")]]
+(deftest function-itf-test
+  (is (= '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/FnBinaryInt")
+            [(METHOD [PUBLIC ABSTRACT] "fn2" "(II)I")]]
 
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(FIELD [PUBLIC STATIC FINAL TRANSIENT] "add-int"
-;;                     "Lpkg/ns0/FnBinaryInt;")]
-;;             [(FIELD [PUBLIC STATIC FINAL TRANSIENT] "two" "I")]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC FINAL] "add-int" "Lpkg/ns0/FnBinaryInt;")]
+            [(FIELD [PUBLIC STATIC FINAL] "two" "I")]
 
-;;             [(METHOD [PUBLIC STATIC FINAL] "FnBinaryInt~2" "(II)I")
-;;              ["LOCAL 0: int a"]
-;;              ["LOCAL 1: int b"]
-;;              (ILOAD_0)
-;;              (ILOAD_1)
-;;              (IADD)
-;;              (IRETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "apply-binary-int" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[INTERFACE_VIRTUAL FnBinaryInt "fn2" "(II)I"]]])
-;;              (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "FnBinaryInt~2" "(II)I")
+             ["LOCAL 0: int a"]
+             ["LOCAL 1: int b"]
+             (ILOAD_0)
+             (ILOAD_1)
+             (IADD)
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "apply-binary-int" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[INTERFACE_VIRTUAL FnBinaryInt "fn2" "(II)I"]]])
+             (ARETURN)]
             
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
 
-;;              (INVOKEDYNAMIC "fn2" "()Lpkg/ns0/FnBinaryInt;" :bsm-metafactory
-;;                             ["MethodTypeDesc[(int,int)int]"
-;;                              [STATIC . "FnBinaryInt~2" "(II)I"]
-;;                              "MethodTypeDesc[(int,int)int]"])
-;;              (PUTSTATIC . "add-int" "Lpkg/ns0/FnBinaryInt;")
-;;              (GETSTATIC . "add-int" "Lpkg/ns0/FnBinaryInt;")
-;;              (ICONST_1)
-;;              (ICONST_1)
-;;              (INVOKEINTERFACE FnBinaryInt "fn2" "(II)I" :itf)
-;;              (PUTSTATIC . "two" "I")
+             (INVOKEDYNAMIC "fn2" "()Lpkg/ns0/FnBinaryInt;" :bsm-metafactory
+                            ["MethodTypeDesc[(int,int)int]"
+                             [STATIC . "FnBinaryInt~2" "(II)I"]
+                             "MethodTypeDesc[(int,int)int]"])
+             (PUTSTATIC . "add-int" "Lpkg/ns0/FnBinaryInt;")
+             (GETSTATIC . "add-int" "Lpkg/ns0/FnBinaryInt;")
+             (ICONST_1)
+             (ICONST_1)
+             (INVOKEINTERFACE FnBinaryInt "fn2" "(II)I" :itf)
+             (PUTSTATIC . "two" "I")
              
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (definterface* FnBinaryInt
-;;                    (fn2 ^int [^int a ^int b]))
-;;                  (import* pkg.ns0.FnBinaryInt)
-;;                  (def add-int (^FnBinaryInt fn* [a b] (+ a b)))
-;;                  (def apply-binary-int
-;;                    (fn* apply-binary-int ^int [^FnBinaryInt f ^int a ^int b]
-;;                         (.fn2 f a b)))
-;;                  (def two (apply-binary-int add-int 1 1))]))))
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (definterface* FnBinaryInt
+                   (fn2 ^int [^int a ^int b]))
+                 (import* pkg.ns0.FnBinaryInt)
+                 (def add-int (^FnBinaryInt fn* [a b] (+ a b)))
+                 (def apply-binary-int
+                   (fn* apply-binary-int ^int [^FnBinaryInt f ^int a ^int b]
+                        (.fn2 f a b)))
+                 (def two (apply-binary-int add-int 1 1))]))))
 
 (def exp-self-ref
   '[[(CLASS Vx [PUBLIC INTERFACE ABSTRACT] "pkg/ns0/ISucc")

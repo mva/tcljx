@@ -8,7 +8,7 @@
     [constant :as constant] [let :as let] [loop :as loop] [new :as new]
     [trycatch :as trycatch] [fn :as fn] [deftype :as deftype]))
   (:import
-   (tcljx.data.ir Resolver Expr Exprs ExprFactory Entity Binding FnUsage
+   (tcljx.data.ir Resolver Expr Exprs ExprFactory Entity Binding FnPromise
                   Parser MethodSpec EntityFactory)
    (clojure.lang IMeta)
    (java.util ArrayList)))
@@ -169,8 +169,8 @@
                   ir/invoke-methods-dynamic
                   (.invoke-value expr-factory fctx (.value-of entity-factory inv (first form)) args)
                   #_else
-                  (let [inv* (.invocation-of entity-factory inv form)]
-                    (.invoke-arity expr-factory fctx form inv inv* args)))))
+                  (let [f (.invocation-of entity-factory inv form)]
+                    (.invoke-arity expr-factory fctx form inv f args)))))
             (parse-invocation-qname ^Expr [^symbol op ^long fctx ^seq form
                                            ^String nmsp ^String nm]
               ;; `op` is qualified symbol: either a reference to
@@ -203,8 +203,8 @@
                     ce (.emitter op)
                     args (parse/args this fctx (rest form))]
                 (if (ir/entity? ce)
-                  (do (when (instance? FnUsage ce)
-                        (FnUsage/.count-value-use! ce -1))
+                  (do (when (instance? FnPromise ce)
+                        (FnPromise/.count-value-use! ce -1))
                       (invoke-entity fctx form ce args))
                   (.invoke-value expr-factory fctx op args))))
             (parse-try-or-extract ^Expr [^long fctx ^seq form]
@@ -275,8 +275,8 @@
             
             (parse-symbol ^Expr [^symbol sym]
               (if-some [ent (parse/lookup this sym)]
-                (do (when (instance? FnUsage ent)
-                      (FnUsage/.count-value-use! ent +1))
+                (do (when (instance? FnPromise ent)
+                      (FnPromise/.count-value-use! ent +1))
                     (.value-of entity-factory ent sym))
                 (if-some [ent (interop/lookup-class-entity this sym)]
                   (.value-of entity-factory ent sym)

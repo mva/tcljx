@@ -173,8 +173,7 @@
 ;;; Source code order can be reconstructed via `source-idx`.
 (deftype MethodSpec [^ArityType at ^CodeEmitter code ^Expr x-body
                      ^Entity/1 parameters ^int source-idx
-                     ^String name     ;fn name or deftype* method name
-                     ^HashMap env-to-display]) ;closed over entities
+                     ^String name])   ;fn name or deftype* method name
 
 (deftype FieldSpec [^ClassDesc owner ^String field-name ^symbol type-tag
                     ^int flags ^ClassDesc type-desc ^Class type])
@@ -222,8 +221,16 @@
   (= closure-level-def (closure-level ent)))
 
 
-(definterface LoadFromCopyWhenBound
+(def bound-by-copy-to-local 0) ;create local, store value, read local
+(def bound-as-alias 1)         ;adds another name for this entity
+(def bound-with-emit-setup 2)  ;this entity handles setup and reads
+
+(definterface BindableEntity
   :extends [Entity]
+  ;; How to handle a let binding of this entity.  Default for Entity
+  ;; is `bound-as-alias`, otherwise `bound-by-copy-to-local`.
+  (binding-mode-let ^int [])
+  
   ;; Called from non-alias Binding with a `param-no` of -2, or from a
   ;; method code's prologue with a non-negative `param-no` or -1 for
   ;; the receiver.  A let binding usually allocates a local variable
@@ -233,18 +240,12 @@
   ;; Returns false if control then leaves the method.
   (emit-setup-code? ^boolean [^CodeBuilder xb ^int param-no ^String name]))
 
-
-(definterface CopyOnRead
-  ;; True whens to create an alias for this entity when it appears as
-  ;; value of a let binding.  Returns false if a binding *must* create
-  ;; a copy of the entity's value.
-  (alias-when-let-value? ^boolean []))
-
-(defn alias-when-let-value? ^boolean [^CodeEmitter ce]
-  (when (instance? Entity ce)
-    (if (instance? CopyOnRead ce)
-      (.alias-when-let-value? ^CopyOnRead ce)
-      true)))                ;all other entities: reads are repeatable
+(defn binding-mode-let ^int [^CodeEmitter ce]
+  (if (instance? Entity ce)
+    (if (instance? BindableEntity ce)
+      (BindableEntity/.binding-mode-let ce)
+      bound-as-alias)
+    bound-by-copy-to-local))
 
 
 ;;; An "immediate" entity can be referenced by a fixed nominal
@@ -260,7 +261,8 @@
 ;;; names is used in the source code, minus the number of times it
 ;;; appears in an aliasing let binding or as target of a function
 ;;; invocation.
-(definterface FnUsage
+(definterface FnPromise
+  :extends [Entity]
   (get-emit-entity ^Entity [])          ;for code generation of `def`
   (value-use? ^boolean [])
   (count-value-use! ^void [^int delta]))
@@ -272,8 +274,7 @@
   java.lang.Record
   CodeEmitter
   (emit-insn* [this xb _ _]
-    (when (or alias?
-              (LoadFromCopyWhenBound/.emit-setup-code? bound-to xb -2 name))
+    (when (or alias? (BindableEntity/.emit-setup-code? bound-to xb -2 name))
       Void/TYPE)))
 (def mk-binding Binding/new)
 
@@ -426,9 +427,9 @@
   (scope-name ^String [])
   (closure-level ^int [])               ;of this class/entity
   (closes-over? ^boolean [^Entity ent])
-  (display-of! ^Entity [^Entity origin ^String local-name])
+  (display-of! ^CodeEmitter [^Entity origin ^String local-name])
   (value-of ^Expr [^Entity ent ^symbol form]) ;throw if (nil? (.value-type ent))
-  (invocation-of ^Entity [^Entity inv ^seq form])
+  (invocation-of ^CodeEmitter [^Entity inv ^seq form])
   
   ;; Create an entity denoting the constant `value` of type `type`.
   ;; For the most part, there is a one-to-one correspondence between
@@ -457,29 +458,30 @@
   (next-entity-id ^int [])
   (local-variable ^Entity [^Class type ^CodeEmitter init])
   (parameter ^Entity [^Class type])
-  (entity-fn ^Entity [^AritySpec/1 arity-specs ^String unique-nm
-                      ^ArrayList !fn-parts])
+  (entity-fn ^Entity [^AritySpec/1 arity-specs ^HashMap fn-e2d
+                      ^String unique-nm ^ArrayList !fn-parts])
   (expr-fn ^Expr [^Entity fn-entity ^MethodSpec/1 arity-methods])
-  (expr-itf-fn ^Expr [^MethodSpec/1 method-specs ^String unique-nm
-                      ^Class itf-class ^Method method ^ArrayList !itf-parts])
+  (expr-itf-fn ^Expr [^MethodSpec/1 method-specs ^HashMap itf-e2d
+                      ^String unique-nm ^Class itf-class ^Method method
+                      ^ArrayList !itf-parts])
   (deftype-field ^Entity [^int entity-id ^FieldSpec spec])
 
   (expr-deftype ^Expr [^NmspClass eph-ncl ^FieldSpec/1 field-specs
                        ^boolean java-record? ^boolean defrecord?
                        ^ArrayList !dt-parts ^MethodSpec/1 method-specs])
   (expr-reify ^Expr [^NmspClass eph-ncl ^ClassDesc/1 interfaces
-                     ^CodeEmitter meta
-                     ^ArrayList !reify-parts ^MethodSpec/1 method-specs])
+                     ^CodeEmitter meta ^MethodSpec/1 method-specs
+                     ^HashMap reify-e2d ^ArrayList !reify-parts])
   (expr-definterface ^Object [^NmspClass ncl])
   (class-name-for-reify ^ClassDesc [])
   
-  (binding-alias ^Binding [^long fctx ^String name ^Entity ent])
+  (binding-entity ^Binding [^long fctx ^String name ^Entity ent ^boolean alias?])
   (binding-fresh ^Binding [^long fctx ^Class opt-type ^String name ^Expr init])
   (binding-catching-local ^Binding [^long fctx ^Class type ^String name])
   
   (unique-name! ^String [^String name-suffix])
-  (mk-nested ^EntityFactory [^String unique-nm ^int used-entity-ids
-                             ^HashMap env-to-display ^ArrayList nested-tasks])
+  (method-etf ^EntityFactory [^String unique-nm ^int used-entity-ids
+                              ^HashMap owner-e2d ^ArrayList nested-parts])
   (stage-part! ^Expr [part]))
 
 ;;; An ExprFactory provides an API to the parser to generate a
@@ -493,7 +495,7 @@
   (empty-expr ^Expr [])
   (new-exprs ^Exprs [^int length])
   
-  (invoke-arity ^Expr [^long fctx ^seq form ^Entity inv ^Entity inv* ^Exprs args])
+  (invoke-arity ^Expr [^long fctx ^seq form ^Entity inv ^CodeEmitter f ^Exprs args])
   
   ;; These methods return a constant expression when possible:
   (attach-meta-to ^Expr [^Expr meta ^Expr arg])

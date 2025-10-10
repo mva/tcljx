@@ -7,18 +7,19 @@
     [form :as form] [parse :as parse] [namespace :as namespace])
    (tcljx.classgen
     [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
-    [segment :as segment][envgraph :as envgraph] [emit :as emit] [insn :as insn]
-    [build :as build] [codegen :as codegen] [entity :as entity]
-    [defgen :as defgen] [primitive :as primitive]))
+    [segment :as segment] [emit :as emit] [insn :as insn]
+    [codegen :as codegen] [entity :as entity] [defgen :as defgen] [primitive :as primitive]
+    [build :as build] [fnenv :as fnenv]))
   (:import
-   (tcljx.data.ir Resolver NamespaceProvider ProvidedNamespace
+   (tcljx.data.ir Resolver NamespaceProvider ProvidedNamespace NmspClass
                   NamespaceBuilder Expr ExprFactory EntityFactory Parser)
    (tcljx.classgen.classfile Loader PackageBuilder)
-   (tcljx.classgen.segment Segment)
+   (tcljx.classgen.segment Segment SegmentBuilder)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassFile ClassBuilder CodeBuilder)
    (java.lang.invoke MethodType MethodHandle MethodHandles)
-   (java.nio.file Path)))
+   (java.nio.file Path)
+   (java.util ArrayList)))
 
 (deftype ImplementationUnavailableException []
   Exception)
@@ -83,6 +84,7 @@
         (throw (wrong/info-class-not-found nm))))
     this)
   (new-def-immutable [_ nm init]
+    #_(prn :new-def-immutable nm)
     (let [p (defgen/promise-def-immutable (.segment-class segment) nm init)
           bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)
           init-ce (.emitter init)]
@@ -92,12 +94,14 @@
                                         (.bound-to bnd))))
       (insn/mk-insn bnd (insn/expr-type init))))
   (new-def-mutable [_ nm init]
+    #_(prn :new-def-mutable nm)
     (let [p (defgen/promise-def-mutable (.segment-class segment) nm init)
           bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)]
       (segment/stage-segment-task! segment p)
       (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/mk-insn bnd (insn/expr-type init))))
   (new-def-alias [_ nm other-ent other-qname]
+    #_(prn :new-def-alias nm)
     (let [p (defgen/promise-def-alias nm other-ent other-qname)]
       (segment/stage-segment-task! segment p)
       (set! globals (assoc globals nm other-ent))
@@ -127,11 +131,29 @@
 
   (finish [this]
     (.commit-segment-and-revert this (segment/size-segment-tasks segment) globals imports)
-    (build/capstone pkg-build segment)
+    (->> (build/capstone pkg-build segment)
+         (ir/mk-nmsp-class (segment/capstone-class segment) (.super-class segment))
+         (classfile/bwdi pkg-build))
     (ProvidedNamespace. ns-str))
   (commit-segment-and-revert [this end-of-segment then-globals then-imports]
-    (let [segm-acc (build/prepare-segment segment end-of-segment)]
-      (build/segment pkg-build current-source-file segment segm-acc this))
+    (let [tasks (-> (.subList (.tasks segment) 0 end-of-segment)
+                    (fnenv/transitive-closure!))
+          clinit-statms (segment/clinit-statements tasks)
+          acp (segment/code-promises tasks)
+          class-elements (ArrayList.), other-classes (ArrayList.)
+          sb (SegmentBuilder. class-elements other-classes
+                              (.segment-class segment))
+          env-factory (fnenv/mk-env-factory (build/env-carrying-fns acp))]
+      (dotimes [i (alength acp)]
+        (.generate-and-deliver (aget acp i) sb env-factory))
+      (doseq [ncl other-classes]
+        (classfile/declare-class pkg-build ncl))
+      (doseq [^NmspClass ncl other-classes]
+        (classfile/bwdi pkg-build ncl))
+      (->> (build/segment current-source-file segment
+                          class-elements clinit-statms)
+           (ir/mk-nmsp-class (.segment-class segment) (.super-class segment))
+           (classfile/bwdi pkg-build)))
     
     ;; revert back to requested state & move to next segment
     (set! segment (segment/next-segment segment))

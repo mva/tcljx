@@ -5,7 +5,7 @@
    (tcljx.classgen util))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.ir CodeEmitter Entity LoadFromCopyWhenBound MethodSpec)
+   (tcljx.data.ir CodeEmitter Entity MethodSpec)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
    (java.lang.constant MethodTypeDesc ConstantDesc ClassDesc ConstantDescs)))
 

@@ -227,65 +227,74 @@
          (asm-expr [^boolean x ^Object y]
                    (if x x y)))))
                  
-;; (deftest if-let-independent-locals
-;;   (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/FooClass"
-;;                    nil "java/lang/Object" [IType])
-;;             [(METHOD [PUBLIC] "<init>" "()V")
-;;              #_["LOCAL 0: uninitialized_this_type __this"]
-;;              (ALOAD_0)
-;;              (INVOKESPECIAL Object "<init>" "()V")
-;;              (RETURN)]]
+(deftest if-let-independent-locals
+  (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/FooClass"
+                   nil "java/lang/Object" [IType])
+            [(METHOD [PUBLIC SYNTHETIC] "<init>" "()V")
+             #_["LOCAL 0: uninitialized_this_type __this"]
+             (ALOAD_0)
+             (INVOKESPECIAL Object "<init>" "()V")
+             (RETURN)]]
            
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "if-let" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[STATIC . "if-let~1" "(Z)V"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "if-let~1" "(Z)V")
-;;              ["LOCAL 0: boolean x"]
-;;              (ILOAD_0)
-;;              (IFEQ L:0)
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "fn~1" "(Z)Ljava/lang/Object;")
+             ["LOCAL 0: boolean x"]
+             [L:0]
+             (ILOAD_0)
+             (IFEQ L:1)
              
-;;              (NEW FooClass) (DUP)
-;;              (INVOKESPECIAL FooClass "<init>" "()V")
-;;              (ASTORE_1)
-;;              ["LOCAL 1: FooClass a"]
-;;              (RETURN)
+             (NEW FooClass) (DUP)
+             (INVOKESPECIAL FooClass "<init>" "()V")
+             (ASTORE_1)
+             ["LOCAL 1: FooClass a"]
+             (GOTO L:2)
              
-;;              [L:0]
-;;              (GETSTATIC Boolean "TRUE" "Ljava/lang/Boolean;")
-;;              (ASTORE_1)
-;;              ["LOCAL 1: Boolean b"]
-;;              (RETURN)]
+             [L:1]
+             (GETSTATIC Boolean "TRUE" "Ljava/lang/Boolean;")
+             (ASTORE_1)
+             ["LOCAL 1: Boolean b"]
+             [L:2]
+             (GOTO L:4)
 
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  ;; Expansion of (deftype FooClass []) minus the
-;;                  ;; factory function and the class reference.
-;;                  (deftype*
-;;                    pkg.ns0/FooClass
-;;                    pkg.ns0.FooClass
-;;                    []
-;;                    :implements
-;;                    [clojure.lang.IType])
-;;                  (import* pkg.ns0.FooClass)
-;;                  (def if-let
-;;                    (fn* ^__auto-return-type__ [^boolean x]
-;;                         (try
-;;                           (if x
-;;                             (let* [a (FooClass.)]
-;;                               )
-;;                             (let* [b Boolean/TRUE]
-;;                               ))
-;;                           (finally
-;;                             nil))))]))))
+             (EXCEPTION_CATCH L:0 L:3 L:3 any)
+             [L:3]
+             (ATHROW)
+             [L:4]
+             (ACONST_NULL)
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "if-let" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "fn~1" "(Z)Ljava/lang/Object;"]]])
+             (ARETURN)]
+
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 ;; Expansion of (deftype FooClass []) minus the
+                 ;; factory function and the class reference.
+                 (deftype*
+                   pkg.ns0/FooClass
+                   pkg.ns0.FooClass
+                   []
+                   :implements
+                   [clojure.lang.IType])
+                 (import* pkg.ns0.FooClass)
+                 (def if-let
+                   (fn* ^__auto-return-type__ [^boolean x]
+                        (try
+                          (if x
+                            (let* [a (FooClass.)]
+                              )
+                            (let* [b Boolean/TRUE]
+                              ))
+                          (finally
+                            nil))))]))))
 
 (deftest statm-position-when
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")

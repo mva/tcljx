@@ -145,104 +145,107 @@
                      (finally
                        (.println System/out "Finally 2...")))))))
 
-;; (deftest try-expression-opnd
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "asm-expr~2"
-;;                      "(DI)Ljava/lang/String;")
-;;              ["LOCAL 0: double a"]
-;;              ["LOCAL 2: int b"]
-;;              (DLOAD_0)
-;;              (ILOAD_2)
-;;              (ILOAD_2)
-;;              (INVOKESTATIC . "asm-expr$try~0" "(I)I")
-;;              (INVOKEDYNAMIC "_" "(DII)Ljava/lang/String;"
-;;                             :bsm-concat ["\u0001\u0001\u0001"])
-;;              (ARETURN)]
+(deftest try-expression-opnd
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "asm-expr$fn~0" "(I)I")
+             ["LOCAL 0: int b"]
+             [L:0]
+             (ILOAD_0)
+             (ICONST_1)
+             (IADD)
+             (GOTO L:2)
+             
+             #_catch-any (EXCEPTION_CATCH L:0 L:1 L:1 any) [L:1]
+             (GETSTATIC System "out" "Ljava/io/PrintStream;")
+             (LDC "Finally...")
+             (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
+             (ATHROW)
+             
+             #_finally [L:2]
+             (GETSTATIC System "out" "Ljava/io/PrintStream;")
+             (LDC "Finally...")
+             (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
+             (IRETURN)]
 
-;;             [(METHOD [PUBLIC STATIC FINAL] "asm-expr$try~0" "(I)I")
-;;              ["LOCAL 0: int b"]
-;;              [L:0]
-;;              (ILOAD_0)
-;;              (ICONST_1)
-;;              (IADD)
-;;              (GOTO L:2)
-             
-;;              #_catch-any (EXCEPTION_CATCH L:0 L:1 L:1 any) [L:1]
-;;              (GETSTATIC System "out" "Ljava/io/PrintStream;")
-;;              (LDC "Finally...")
-;;              (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
-;;              (ATHROW)
-             
-;;              #_finally [L:2]
-;;              (GETSTATIC System "out" "Ljava/io/PrintStream;")
-;;              (LDC "Finally...")
-;;              (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
-;;              (IRETURN)]
-            
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (fn* asm-expr ^String [^double a ^int b]
-;;                       (str a b (try
-;;                                  (+ b 1)
-;;                                  (finally
-;;                                    (.println System/out "Finally...")))))]))))
+            [(METHOD [PUBLIC STATIC FINAL] "asm-expr~2"
+                     "(DI)Ljava/lang/String;")
+             ["LOCAL 0: double a"]
+             ["LOCAL 2: int b"]
+             (DLOAD_0)
+             (ILOAD_2)
+             (ILOAD_2)
+             (INVOKESTATIC . "asm-expr$fn~0" "(I)I")
+             (INVOKEDYNAMIC "_" "(DII)Ljava/lang/String;"
+                            :bsm-concat ["\u0001\u0001\u0001"])
+             (ARETURN)]
 
-;; (deftest try-expression-statm
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "asm-expr~2"
-;;                      "(DI)Ljava/lang/String;")
-;;              ["LOCAL 0: double a"]
-;;              ["LOCAL 2: int b"]
-;;              (DLOAD_0)
-;;              (ILOAD_2)
-;;              (ILOAD_2)
-;;              (INVOKESTATIC . "asm-expr$try~0" "(I)F")
-;;              (POP)
-;;              (ICONST_3)
-;;              (INVOKEDYNAMIC "_" "(DII)Ljava/lang/String;" :bsm-concat ["\u0001\u0001\u0001"])
-;;              (ARETURN)]
-            
-;;             [(METHOD [PUBLIC STATIC FINAL] "asm-expr$try~0" "(I)F")
-;;              ["LOCAL 0: int b"]
-;;              [L:0]
-;;              (ILOAD_0)
-;;              (I2F)
-;;              (GOTO L:2)
+
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (fn* asm-expr ^String [^double a ^int b]
+                      (str a b (try
+                                 (+ b 1)
+                                 (finally
+                                   (.println System/out "Finally...")))))]))))
+
+(deftest try-expression-statm
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "asm-expr$fn~0" "(I)F")
+             ["LOCAL 0: int b"]
+             [L:0]
+             (ILOAD_0)
+             (I2F)
+             (FCONST_1)
+             (FDIV)
+             (GOTO L:2)
              
-;;              #_catch-any (EXCEPTION_CATCH L:0 L:1 L:1 any) [L:1]
-;;              (GETSTATIC System "out" "Ljava/io/PrintStream;")
-;;              (LDC "Finally...")
-;;              (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
-;;              (ATHROW)
+             #_catch-any (EXCEPTION_CATCH L:0 L:1 L:1 any) [L:1]
+             (GETSTATIC System "out" "Ljava/io/PrintStream;")
+             (LDC "Finally...")
+             (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
+             (ATHROW)
              
-;;              #_finally [L:2]
-;;              (GETSTATIC System "out" "Ljava/io/PrintStream;")
-;;              (LDC "Finally...")
-;;              (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
-;;              (FRETURN)]
+             #_finally [L:2]
+             (GETSTATIC System "out" "Ljava/io/PrintStream;")
+             (LDC "Finally...")
+             (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
+             (FRETURN)]
             
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (fn* asm-expr ^String [^double a ^int b]
-;;                       (str a b (do (try
-;;                                      (/ b 1)
-;;                                      (finally
-;;                                        (.println System/out "Finally...")))
-;;                                    3)))]))))
+            [(METHOD [PUBLIC STATIC FINAL] "asm-expr~2"
+                     "(DI)Ljava/lang/String;")
+             ["LOCAL 0: double a"]
+             ["LOCAL 2: int b"]
+             (DLOAD_0)
+             (ILOAD_2)
+             (ILOAD_2)
+             (INVOKESTATIC . "asm-expr$fn~0" "(I)F")
+             (POP)
+             (ICONST_3)
+             (INVOKEDYNAMIC "_" "(DII)Ljava/lang/String;" :bsm-concat ["\u0001\u0001\u0001"])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (fn* asm-expr ^String [^double a ^int b]
+                      (str a b (do (try
+                                     (/ b 1)
+                                     (finally
+                                       (.println System/out "Finally...")))
+                                   3)))]))))
 
 ;; Note: The current setup guarantees that the try block's region is
 ;; never empty (it holds at least a ATHROW, xRETURN, or a GOTO), which

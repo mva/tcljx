@@ -375,101 +375,101 @@
                    [clojure.lang.IType]
                    (toString [_] x))]))))
 
-;; (deftest object-closure
-;;   (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"
-;;                    nil "java/lang/Object" [IType])
-;;             [(FIELD [PUBLIC FINAL] "x" "Ljava/lang/String;")]
+(deftest object-closure
+  (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"
+                   nil "java/lang/Object" [IType])
+            [(FIELD [PUBLIC FINAL] "x" "Ljava/lang/String;")]
             
-;;             [(METHOD [PUBLIC SYNTHETIC] "<init>" "(Ljava/lang/String;)V")
-;;              #_["LOCAL 0: uninitialized_this_type __this"]
-;;              #_["LOCAL 1: String x"]
-;;              (ALOAD_0)
-;;              (ALOAD_1)
-;;              (PUTFIELD . "x" "Ljava/lang/String;")
-;;              (ALOAD_0)
-;;              (INVOKESPECIAL Object "<init>" "()V")
-;;              (RETURN)]
+            [(METHOD [PUBLIC SYNTHETIC] "<init>" "(Ljava/lang/String;)V")
+             #_["LOCAL 0: uninitialized_this_type __this"]
+             #_["LOCAL 1: String x"]
+             (ALOAD_0)
+             (ALOAD_1)
+             (PUTFIELD . "x" "Ljava/lang/String;")
+             (ALOAD_0)
+             (INVOKESPECIAL Object "<init>" "()V")
+             (RETURN)]
             
-;;             [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
-;;              ["LOCAL 0: T _"]
-;;              (ALOAD_0)
-;;              (GETFIELD . "x" "Ljava/lang/String;")
-;;              (INVOKESTATIC _10 "fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
-;;              (ARETURN)]]
+            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+             ["LOCAL 0: T _"]
+             (ALOAD_0)
+             (GETFIELD . "x" "Ljava/lang/String;")
+             (INVOKESTATIC _10 "T$fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
+             (ARETURN)]]
            
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
-;;              ["LOCAL 0: String x"]
-;;              (ALOAD_0)
-;;              (ARETURN)]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "T$fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
+             ["LOCAL 0: String x"]
+             (ALOAD_0)
+             (ARETURN)]
 
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  ;; Expansion of (deftype T ...) minus the class
-;;                  ;; import, the factory function, and the class
-;;                  ;; reference.
-;;                  (deftype*
-;;                    pkg.ns0/T
-;;                    pkg.ns0.T
-;;                    [^String x]
-;;                    :implements
-;;                    [clojure.lang.IType]
-;;                    (toString [_] (let* [f (fn* ^String [] x)] (f))))]))))
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 ;; Expansion of (deftype T ...) minus the class
+                 ;; import, the factory function, and the class
+                 ;; reference.
+                 (deftype*
+                   pkg.ns0/T
+                   pkg.ns0.T
+                   [^String x]
+                   :implements
+                   [clojure.lang.IType]
+                   (toString [_] (let* [f (fn* ^String [] x)] (f))))]))))
 
-;; (deftest object-closure-direct
-;;   (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"
-;;                    nil "java/lang/Object" [IType])
-;;             [(FIELD [PUBLIC FINAL] "x" "Ljava/lang/String;")]
+(deftest object-closure-direct
+  (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"
+                   nil "java/lang/Object" [IType])
+            [(FIELD [PUBLIC FINAL] "x" "Ljava/lang/String;")]
             
-;;             [(METHOD [PUBLIC SYNTHETIC] "<init>" "(Ljava/lang/String;)V")
-;;              #_["LOCAL 0: uninitialized_this_type __this"]
-;;              #_["LOCAL 1: String x"]
-;;              (ALOAD_0)
-;;              (ALOAD_1)
-;;              (PUTFIELD . "x" "Ljava/lang/String;")
-;;              (ALOAD_0)
-;;              (INVOKESPECIAL Object "<init>" "()V")
-;;              (RETURN)]
+            [(METHOD [PUBLIC SYNTHETIC] "<init>" "(Ljava/lang/String;)V")
+             #_["LOCAL 0: uninitialized_this_type __this"]
+             #_["LOCAL 1: String x"]
+             (ALOAD_0)
+             (ALOAD_1)
+             (PUTFIELD . "x" "Ljava/lang/String;")
+             (ALOAD_0)
+             (INVOKESPECIAL Object "<init>" "()V")
+             (RETURN)]
                         
-;;             [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
-;;              ["LOCAL 0: T _"]
-;;              (ALOAD_0)
-;;              (GETFIELD . "x" "Ljava/lang/String;")
-;;              (INVOKESTATIC _10 "fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
-;;              (ARETURN)]]
+            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+             ["LOCAL 0: T _"]
+             (ALOAD_0)
+             (GETFIELD . "x" "Ljava/lang/String;")
+             (INVOKESTATIC _10 "T$fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
+             (ARETURN)]]
            
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
-;;              ["LOCAL 0: String x"]
-;;              (ALOAD_0)
-;;              (ARETURN)]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "T$fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
+             ["LOCAL 0: String x"]
+             (ALOAD_0)
+             (ARETURN)]
 
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  ;; Expansion of (deftype T ...) minus the class
-;;                  ;; import, the factory function, and the class
-;;                  ;; reference.
-;;                  (deftype*
-;;                    pkg.ns0/T
-;;                    pkg.ns0.T
-;;                    [^String x]
-;;                    :implements
-;;                    [clojure.lang.IType]
-;;                    (toString [_] ((fn* ^String [] x))))]))))
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 ;; Expansion of (deftype T ...) minus the class
+                 ;; import, the factory function, and the class
+                 ;; reference.
+                 (deftype*
+                   pkg.ns0/T
+                   pkg.ns0.T
+                   [^String x]
+                   :implements
+                   [clojure.lang.IType]
+                   (toString [_] ((fn* ^String [] x))))]))))
 
 (deftest constructor
   (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"

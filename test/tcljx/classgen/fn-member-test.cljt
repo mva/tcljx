@@ -286,129 +286,127 @@
            (ARETURN)]
          (asm-expr [^String s] (String/.toString ^Object s)))))
 
-;; (deftest invoke-virtual-field-test
-;;   (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/R"
-;;                    nil "java/lang/Record" [IType])
-;;             [(FIELD [PRIVATE FINAL] "field" "I")]
+(deftest invoke-virtual-field-test
+  (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/R"
+                   nil "java/lang/Record" [IType])
+            [(FIELD [PRIVATE FINAL] "field" "I")]
             
-;;             [(METHOD [PUBLIC] "<init>" "(I)V")
-;;              (ALOAD_0)
-;;              (ILOAD_1)
-;;              (PUTFIELD . "field" "I")
-;;              (ALOAD_0)
-;;              (INVOKESPECIAL Record "<init>" "()V")
-;;              (RETURN)]
-;;             [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
-;;              (ALOAD_0)
-;;              (INVOKEDYNAMIC "toString" "(Lpkg/ns0/R;)Ljava/lang/String;"
-;;                             :bsm-object-method
-;;                             [. "field" [GETTER . "field" "I"]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC FINAL] "hashCode" "()I")
-;;              (ALOAD_0)
-;;              (INVOKEDYNAMIC "hashCode" "(Lpkg/ns0/R;)I"
-;;                             :bsm-object-method
-;;                             [. "field" [GETTER . "field" "I"]])
-;;              (IRETURN)]
-;;             [(METHOD [PUBLIC FINAL] "equals" "(Ljava/lang/Object;)Z")
-;;              (ALOAD_0)
-;;              (ALOAD_1)
-;;              (INVOKEDYNAMIC "equals" "(Lpkg/ns0/R;Ljava/lang/Object;)Z"
-;;                             :bsm-object-method
-;;                             [. "field" [GETTER . "field" "I"]])
-;;              (IRETURN)]
+            [(METHOD [PUBLIC SYNTHETIC] "<init>" "(I)V")
+             (ALOAD_0)
+             (ILOAD_1)
+             (PUTFIELD . "field" "I")
+             (ALOAD_0)
+             (INVOKESPECIAL Record "<init>" "()V")
+             (RETURN)]
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "toString" "()Ljava/lang/String;")
+             (ALOAD_0)
+             (INVOKEDYNAMIC "toString" "(Lpkg/ns0/R;)Ljava/lang/String;"
+                            :bsm-object-method
+                            [. "field" [GETTER . "field" "I"]])
+             (ARETURN)]
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "hashCode" "()I")
+             (ALOAD_0)
+             (INVOKEDYNAMIC "hashCode" "(Lpkg/ns0/R;)I"
+                            :bsm-object-method
+                            [. "field" [GETTER . "field" "I"]])
+             (IRETURN)]
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
+             (ALOAD_0)
+             (ALOAD_1)
+             (INVOKEDYNAMIC "equals" "(Lpkg/ns0/R;Ljava/lang/Object;)Z"
+                            :bsm-object-method
+                            [. "field" [GETTER . "field" "I"]])
+             (IRETURN)]
             
-;;             [(METHOD [PUBLIC] "field" "()I")
-;;              (ALOAD_0)
-;;              (GETFIELD . "field" "I")
-;;              (IRETURN)]
+            [(METHOD [PUBLIC SYNTHETIC] "field" "()I")
+             (ALOAD_0)
+             (GETFIELD . "field" "I")
+             (IRETURN)]
             
-;;             [:RecordAttribute [field "I"]]]
+            [:RecordAttribute [field "I"]]]
            
-;;            [(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"
-;;                    nil "java/lang/Object" [IType])
-;;             [(FIELD [PUBLIC FINAL] "field" "I")]
+           [(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"
+                   nil "java/lang/Object" [IType])
+            [(FIELD [PUBLIC FINAL] "field" "I")]
             
-;;             [(METHOD [PUBLIC] "<init>" "(I)V")
-;;              (ALOAD_0)
-;;              (ILOAD_1)
-;;              (PUTFIELD . "field" "I")
-;;              (ALOAD_0)
-;;              (INVOKESPECIAL Object "<init>" "()V")
-;;              (RETURN)]]
+            [(METHOD [PUBLIC SYNTHETIC] "<init>" "(I)V")
+             (ALOAD_0)
+             (ILOAD_1)
+             (PUTFIELD . "field" "I")
+             (ALOAD_0)
+             (INVOKESPECIAL Object "<init>" "()V")
+             (RETURN)]]
            
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "value-instance-field"
-;;                      "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[GETTER T "field" "I"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "value-accessor-method"
-;;                      "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[VIRTUAL R "field" "()I"]]])
-;;              (ARETURN)]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "value-instance-field"
+                     "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[GETTER T "field" "I"]]])
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "value-accessor-method"
+                     "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[VIRTUAL R "field" "()I"]]])
+             (ARETURN)]
 
-;;             ;; fn method elided and replaced with invoked method handle:
-;;             ;; 
-;;             ;; [(METHOD [PUBLIC STATIC FINAL] "invoke-instance-field~1"
-;;             ;;          "(Lpkg/ns0/T;)I")
-;;             ;;  ["LOCAL 0: T x"]
-;;             ;;  (ALOAD_0)
-;;             ;;  (GETFIELD T "field" "I")
-;;             ;;  (IRETURN)]
-;;             ;; [(METHOD [PUBLIC STATIC FINAL] "invoke-accessor-method~1"
-;;             ;;          "(Lpkg/ns0/R;)I")
-;;             ;;  ["LOCAL 0: R x"]
-;;             ;;  (ALOAD_0)
-;;             ;;  (INVOKEVIRTUAL R "field" "()I")
-;;             ;;  (IRETURN)]
+            ;; fn method elided and replaced with invoked method handle:
+            ;; 
+            ;; [(METHOD [PUBLIC STATIC FINAL] "invoke-instance-field~1"
+            ;;          "(Lpkg/ns0/T;)I")
+            ;;  ["LOCAL 0: T x"]
+            ;;  (ALOAD_0)
+            ;;  (GETFIELD T "field" "I")
+            ;;  (IRETURN)]
+            ;; [(METHOD [PUBLIC STATIC FINAL] "invoke-accessor-method~1"
+            ;;          "(Lpkg/ns0/R;)I")
+            ;;  ["LOCAL 0: R x"]
+            ;;  (ALOAD_0)
+            ;;  (INVOKEVIRTUAL R "field" "()I")
+            ;;  (IRETURN)]
 
-;;             [(METHOD [PUBLIC STATIC FINAL] "cast-and-invoke-instance-field~1"
-;;                      "(Ljava/lang/Object;)I")
-;;              ["LOCAL 0: Object x"]
-;;              (ALOAD_0)
-;;              (CHECKCAST T)
-;;              (GETFIELD T "field" "I")
-;;              (IRETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "cast-and-invoke-accessor-method~1"
-;;                      "(Ljava/lang/Object;)I")
-;;              ["LOCAL 0: Object x"]
-;;              (ALOAD_0)
-;;              (CHECKCAST R)
-;;              (INVOKEVIRTUAL R "field" "()I")
-;;              (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "cast-and-invoke-instance-field~1"
+                     "(Ljava/lang/Object;)I")
+             ["LOCAL 0: Object x"]
+             (ALOAD_0)
+             (CHECKCAST T)
+             (GETFIELD T "field" "I")
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "cast-and-invoke-accessor-method~1"
+                     "(Ljava/lang/Object;)I")
+             ["LOCAL 0: Object x"]
+             (ALOAD_0)
+             (CHECKCAST R)
+             (INVOKEVIRTUAL R "field" "()I")
+             (IRETURN)]
             
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
            
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
                  
-;;                  (deftype* pkg.ns0/T pkg.ns0.T
-;;                    [^int field]
-;;                    :implements [clojure.lang.IType])
-;;                  (import* pkg.ns0.T)
+                 (deftype* pkg.ns0/T pkg.ns0.T
+                   [^int field]
+                   :implements [clojure.lang.IType])
                  
-;;                  (deftype* pkg.ns0/R pkg.ns0.R
-;;                    [^int field]
-;;                    :implements [java.lang.Record clojure.lang.IType])
-;;                  (import* pkg.ns0.R)
+                 (deftype* pkg.ns0/R pkg.ns0.R
+                   [^int field]
+                   :implements [java.lang.Record clojure.lang.IType])
 
-;;                  (def value-instance-field T/.field)
-;;                  (def value-accessor-method R/.field)
+                 (def value-instance-field T/.field)
+                 (def value-accessor-method R/.field)
 
-;;                  (fn* invoke-instance-field ^int [^T x]
-;;                       (T/.field x))
-;;                  (fn* invoke-accessor-method ^int [^R x]
-;;                       (R/.field x))
+                 (fn* invoke-instance-field ^int [^T x]
+                      (T/.field x))
+                 (fn* invoke-accessor-method ^int [^R x]
+                      (R/.field x))
                  
-;;                  (fn* cast-and-invoke-instance-field ^int [^Object x]
-;;                       (T/.field x))
-;;                  (fn* cast-and-invoke-accessor-method ^int [^Object x]
-;;                       (R/.field x))]))))
+                 (fn* cast-and-invoke-instance-field ^int [^Object x]
+                      (T/.field x))
+                 (fn* cast-and-invoke-accessor-method ^int [^Object x]
+                      (R/.field x))]))))

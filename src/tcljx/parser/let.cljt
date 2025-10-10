@@ -3,20 +3,29 @@
    (tcljx.data [wrong :as wrong] [ir :as ir])
    (tcljx.parser [syntax :as syntax] [parse :as parse] [interop :as interop]))
   (:import
-   (tcljx.data.ir Expr Entity Binding FnUsage ExprFactory EntityFactory Parser)))
+   (tcljx.data.ir Expr Entity Binding FnPromise ExprFactory EntityFactory Parser)))
 
-(letfn [(binding-for-entity ^Binding [^EntityFactory entity-factory ^long fctx
+(letfn [(binding-for-entity ^Binding [^EntityFactory etf ^long fctx
                                       ^String name ^Entity ent ^Object ent-form]
-          (if (ir/alias-when-let-value? ent)
-            (.binding-alias entity-factory fctx name ent)
-            (let [x (.value-of entity-factory ent ent-form)]
-              (assert (not (instance? FnUsage ent)))
-              (.binding-fresh entity-factory fctx nil name x))))
-        (binding-for-init ^Binding [^EntityFactory entity-factory ^long fctx
+          (condp = (ir/binding-mode-let ent)
+            ir/bound-as-alias
+            (.binding-entity etf fctx name ent true)
+            ir/bound-with-emit-setup
+            (let [alias? (not= (ir/closure-level ent) (.closure-level etf))]
+              (.binding-entity etf fctx name ent alias?))
+            #_else
+            (let [x (.value-of etf ent ent-form)]
+              (assert (not (instance? FnPromise ent)))
+              (.binding-fresh etf fctx nil name x))))
+        (binding-for-init ^Binding [^EntityFactory etf ^long fctx
                                     ^Class opt-type ^String name ^Expr init]
-          (if (and (nil? opt-type) (ir/alias-when-let-value? (.emitter init)))
-            (.binding-alias entity-factory fctx name (.emitter init))
-            (.binding-fresh entity-factory fctx opt-type name init)))]
+          (let [ce (.emitter init)]
+            (if (and (nil? opt-type)
+                     (not= (ir/binding-mode-let ce) ir/bound-by-copy-to-local))
+              (do (when (instance? FnPromise ce)
+                    (FnPromise/.count-value-use! ce -1))
+                  (binding-for-entity etf fctx name ce nil))
+              (.binding-fresh etf fctx opt-type name init))))]
 
   (defn parse-let* ^Expr [^Parser parser ^long fctx [_ bindings & body :as form]]
     (let [bindings (syntax/vector bindings true)

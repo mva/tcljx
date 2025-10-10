@@ -3,18 +3,17 @@
    (tcljx.data [config :as cfg] [files :as files] [type :as type]
                [context :as context] [ir :as ir] [resolve :as resolve])
    (tcljx.classgen [classfile :as classfile] [runtime :as rt]
-                   [envgraph :as envgraph] [emit :as emit] [insn :as insn]
-                   [segment :as segment] [fngen :as fngen])
+                   segment [emit :as emit] [fngen :as fngen])
    [tinyclj.string :as str])
   (:import
-   (tcljx.data.ir CodeEmitter Resolver NmspClass)
+   (tcljx.data.ir CodeEmitter MethodSpec NmspClass)
    (tcljx.classgen.classfile PackageBuilder)
-   (tcljx.classgen.segment Segment CodePromise SegmentAcc)
-   (tcljx.classgen.insn Insn)
+   (tcljx.classgen.segment Segment CodePromise SegmentBuilder)
+   (tcljx.classgen.fngen FnPromiseImpl)
    (java.lang.classfile ClassBuilder CodeBuilder)
    (java.lang.constant ClassDesc ConstantDescs MethodTypeDesc)
-   (java.util ArrayList)
-   (java.util.function Consumer)))
+   (java.util List ArrayList HashSet)
+   (java.util.function Consumer Predicate)))
 
 (def ^:private segment-class-flags (ir/acc* public abstract))
 
@@ -26,13 +25,8 @@
 
 (def ^:private mtd-void-String
   (MethodTypeDesc/of ConstantDescs/CD_void ConstantDescs/CD_String))
-(defn segment ^NmspClass [^PackageBuilder pkg-build ^String source-file
-                          ^Segment segm ^SegmentAcc segm-acc ^Resolver rsv]
-  (doseq [ncl (.other-classes segm-acc)]
-    (classfile/declare-class pkg-build ncl))
-  (doseq [^NmspClass ncl (.other-classes segm-acc)]
-    (classfile/bwdi pkg-build ncl))
-
+(defn- clinit-body ^void [^CodeBuilder xb ^Segment segm
+                          ^CodeEmitter/1 clinit-statms]
   (letfn [(invoke-create-nmsp ^void [^CodeBuilder xb]
             (-> xb
                 (.ldc (.pkg-name segm))
@@ -43,70 +37,86 @@
                            (-> segm .segment-class .displayName)))
                 (.invokestatic rt/RT "markCoreInitialization"
                                mtd-void-String)))]
-    (->> (^Consumer fn ^void [^ClassBuilder cb]
-          (-> (cfg/with-class-version cb)
-              (classfile/with-source-file source-file)
-              (.withFlags segment-class-flags))
-          (let [al (.class-elements segm-acc)]
-            (dotimes [i (.size al)]
-              (.accept ^Consumer (.get al i) cb)))
-      
-          (.withMethodBody
-           cb ConstantDescs/CLASS_INIT_NAME ConstantDescs/MTD_void
-           (ir/acc* public static)
-           (^Consumer fn ^void [^CodeBuilder xb]
-            (when (identical? ConstantDescs/CD_Object (.super-class segm))
-              (invoke-create-nmsp xb))
-            (let [al (.clinit-statms segm-acc)]
-              (loop [i 0]
-                (if (< i (.size al))
-                  (when (emit/statm? xb (insn/emitter (.get al i)))
-                    (recur (inc i)))
-                  (do (when (cfg/core-lib? (.pkg-name segm))
-                        (invoke-mark-core-init xb))
-                      (.return_ xb))))))))
-         (ir/mk-nmsp-class (.segment-class segm) (.super-class segm))
-         (classfile/bwdi pkg-build))))
+    (when (identical? ConstantDescs/CD_Object (.super-class segm))
+      (invoke-create-nmsp xb))
+    (emit/statms? xb clinit-statms)
+    (when (cfg/core-lib? (.pkg-name segm))
+      (invoke-mark-core-init xb))
+    (.return_ xb)))
 
-;;; ------------------------------------------------------------------------
+(defn segment ^Consumer [^String source-file ^Segment segm
+                         ^ArrayList class-elements ^CodeEmitter/1 clinit-statms]
+  (^Consumer fn ^void [^ClassBuilder cb]
+   (-> (cfg/with-class-version cb)
+       (classfile/with-source-file source-file)
+       (.withFlags segment-class-flags))
+   (let [al class-elements]
+     (dotimes [i (.size al)]
+       (.accept ^Consumer (.get al i) cb)))
+   (.withMethodBody
+    cb ConstantDescs/CLASS_INIT_NAME ConstantDescs/MTD_void
+    (ir/acc* public static)
+    (^Consumer fn ^void [^CodeBuilder xb]
+     (clinit-body xb segm clinit-statms)))))
 
-(defn capstone ^NmspClass [^PackageBuilder pkg-build ^Segment segm]
+(defn capstone ^Consumer [^PackageBuilder pkg-build ^Segment segm]
   (let [req-str (if (cfg/core-lib? (.pkg-name segm))
                   ""            ;suppress internal details of core lib
                   ;; FIXME... use real requires
                   (str/join "," (sort (list "tinyclj.core"))))]
-    (->> (^Consumer fn ^void [^ClassBuilder cb]
-                     (-> (cfg/with-class-version cb)
-                         (.withFlags segment-class-flags)
-                         (.withSuperclass (.super-class segm))
-                         (with-requires req-str)))
-         (ir/mk-nmsp-class (segment/capstone-class segm) (.super-class segm))
-         (classfile/bwdi pkg-build))))
+    (^Consumer fn ^void [^ClassBuilder cb]
+     (-> (cfg/with-class-version cb)
+         (.withFlags segment-class-flags)
+         (.withSuperclass (.super-class segm))
+         (with-requires req-str)))))
 
-;;; ------------------------------------------------------------------------
+(def ^:private not-function (byte -2))  ;deftype, reify, itf fn
+(def ^:private fn-without-runtime-value (byte -1)) ;to FnFlyweight
+(def ^:private fn-optimistically-empty (byte 0)) ;undecided, then to FnStatic
+(def ^:private fn-with-empty-env (byte 1)) ;to FnStatic
+(def ^:private fn-carrying-env (byte 2)) ;to FnVirtual
+(defn env-carrying-fns ^HashSet [^CodePromise/1 acp]
+  (let [marks (new byte/1 (alength acp))
+        carries-env-set (HashSet.)] ;set of `fn-carrying-env` functions
+    (dotimes [i (alength marks)]
+      (aset marks i (let [cp (aget acp i)]
+                      (if (instance? FnPromiseImpl cp)
+                        (let [fn-p ^FnPromiseImpl cp]
+                          (if (.value-use? fn-p)
+                            (if (.isEmpty (.env-to-display fn-p))
+                              fn-with-empty-env
+                              fn-optimistically-empty)
+                            fn-without-runtime-value))
+                        not-function))))
 
-(defn prepare-segment ^SegmentAcc [^Segment segm ^int tasks-end]
-  (let [tasks (.tasks segm)
-        sps (segment/flatten (.tasks segm) tasks-end)]
-    (letfn [(index-of-promise ^int [^CodePromise promise ^int start]
-              (loop [i start]
-                (if (identical? promise (aget sps i))
-                  i
-                  (recur (inc i)))))
-            (deliver-promises ^SegmentAcc [^SegmentAcc acc ^int start ^int end]
-              (loop [acc acc, i start]
-                (if (< i end)
-                  (recur (.generate-and-deliver (aget sps i) acc) (inc i))
-                  acc)))
-            (mk-segment-acc ^SegmentAcc []
-              (SegmentAcc. (ArrayList.) (ArrayList.) (ArrayList.)
-                           (.segment-class segm)))]
-      
-      (loop [acc (mk-segment-acc), i-clinit 0, i-eg 0]
-        (if (< i-clinit tasks-end)
-          (let [task (.get tasks i-clinit)]
-            (if (instance? CodePromise task)
-              (let [end-eg (inc (index-of-promise task i-eg))]
-                (recur (deliver-promises acc i-eg end-eg) (inc i-clinit) end-eg))
-              (recur (segment/add-clinit-statm acc task) (inc i-clinit) i-eg)))
-          acc)))))
+    (letfn [(non-empty-env? ^boolean [^FnPromiseImpl fn-p]
+              (let [it (-> fn-p .env-to-display .keySet .iterator)]
+                (loop []
+                  (when (.hasNext it)
+                    (let [origin (.next it)]
+                      (cond
+                        (identical? origin fn-p) ;fn refers to itself?
+                        (recur)
+                        (instance? FnPromiseImpl origin)
+                        (or (and (FnPromiseImpl/.value-use? origin)
+                                 (.contains carries-env-set origin))
+                            (recur))
+                        :else true))))))
+            (pass-grows-set? ^boolean []
+              (loop [added? false, i (dec (alength marks))]
+                (if (neg? i)
+                  added?
+                  (recur (if (= (aget marks i) fn-optimistically-empty)
+                           (let [fn-p ^FnPromiseImpl (aget acp i)]
+                             (if (non-empty-env? fn-p)
+                               (do #_(prn :set-marks i fn-carrying-env)
+                                   (.add carries-env-set fn-p)
+                                   (aset marks i fn-carrying-env)
+                                   true)
+                               added?))
+                           added?)
+                         (dec i)))))]
+      ;; (prn :acp (map (comp Class/.getSimpleName class) acp))
+      ;; (prn :marks-0 (seq marks))
+      (loop [] (when (pass-grows-set?) (recur)))
+      carries-env-set)))

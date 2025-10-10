@@ -10,7 +10,7 @@
    (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
    (java.lang.classfile ClassFile ClassBuilder MethodBuilder CodeBuilder)
    (java.lang.classfile.attribute RecordAttribute RecordComponentInfo)
-   (java.util List ArrayList)
+   (java.util List ArrayList HashMap)
    (java.util.function Consumer)))
 
 (defn- with-abstract-method ^ClassBuilder [^ClassBuilder cb ^String name
@@ -228,13 +228,13 @@
 (defn- complete-methods ^MethodSpec/1 [^Parser parser ^Class eph-cl
                                        ^String unique-nm ^long fctx
                                        ^int n-fields ^seq/1 methods
-                                       ^ArrayList parts]
+                                       ^HashMap owner-e2d ^ArrayList parts]
   (let [arity-methods (new MethodSpec/1 (alength methods))]
     (dotimes [i (alength arity-methods)]
       (let [aspec (arity-spec-of (.resolver parser) fctx eph-cl (aget methods i))
             mspec* (parse/method-spec-template aspec i (method-name aspec))
-            etf' (.mk-nested (.entity-factory parser) unique-nm n-fields
-                             (.env-to-display mspec*) parts)
+            etf' (.method-etf (.entity-factory parser) unique-nm n-fields
+                              owner-e2d parts)
             parser' (.with-entity-factory parser etf')
             mspec (parse/body-into mspec* true parser' fctx aspec)]
         (aset arity-methods i mspec)))
@@ -289,12 +289,14 @@
                           (ir/mk-binding (.field-name fspec) false)))))
     
     (let [eph-ncl (NmspClass. this-class (.super-class supers) cbh-0 nil eph-cl)
+          dt-e2d (HashMap.)     ;should remain empty!
           deftype-parts (ArrayList.)]
           ;; note: can call Resolver.globals() only on namespace thread
       (->> (complete-methods (-> (.with-bindings* parser (.globals rsv))
                                  (ir/with-local-bindings fbnds)) eph-cl
                              (.unique-name! etf (.displayName this-class))
-                             fctx (alength fields) methods deftype-parts)
+                             fctx (alength fields) methods dt-e2d
+                             deftype-parts)
            (.expr-deftype etf eph-ncl fields (.java-record? supers)
                           defrecord? deftype-parts)))))
 
@@ -318,8 +320,9 @@
         eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)
         
         eph-ncl (NmspClass. this-class (.super-class supers) cbh nil eph-cl)
-        reify-parts (ArrayList.)]
-    (->> (complete-methods parser eph-cl (.displayName this-class) fctx 0
-                           methods reify-parts)
-         (.expr-reify etf eph-ncl (.interfaces supers) (.emitter meta)
-                      reify-parts))))
+        reify-e2d (HashMap.)
+        reify-parts (ArrayList.)
+        ms (complete-methods parser eph-cl (.displayName this-class) fctx 0
+                             methods reify-e2d reify-parts)]
+    (.expr-reify etf eph-ncl (.interfaces supers) (.emitter meta)
+                 ms reify-e2d reify-parts)))

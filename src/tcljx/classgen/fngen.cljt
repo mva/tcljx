@@ -3,16 +3,15 @@
    (tcljx.data [config :as cfg] [context :as context] member [type :as type]
                [reflect :as reflect] [resolve :as resolve] [ir :as ir]
                [code :as code])
-   (tcljx.classgen [classfile :as classfile] [runtime :as rt] [util :as util]
-                   [emit :as emit] [segment :as segment] [constgen :as constgen]
-                   [insn :as insn] [condgen :as condgen] [envgraph :as envgraph]))
+   (tcljx.classgen [classfile :as classfile] [runtime :as rt] segment
+                   [util :as util] [emit :as emit] [constgen :as constgen]
+                   [insn :as insn] [condgen :as condgen] [fnenv :as fnenv]))
   (:import
-   (tcljx.data.ir CodeEmitter Entity Constant FnUsage
+   (tcljx.data.ir CodeEmitter Entity Constant BindableEntity FnPromise
                   ArityType AritySpec MethodSpec FieldSpec NmspClass
                   Parser ExprFactory EntityFactory)
    (tcljx.data.member MemberHandle)
-   (tcljx.classgen.segment CodePromise SegmentAcc)
-   (tcljx.classgen.envgraph Display EnvDisplayPairs)
+   (tcljx.classgen.segment CodePromise Display StoredEnv SegmentBuilder)
    (tcljx.classgen.insn Insn Insns PlainInvokeTest)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind Opcode Label
                         BootstrapMethodEntry)
@@ -48,6 +47,12 @@
       (-> (^CodeEmitter fn [xb _ _]
            (insn/emit-invoke-arity (aget mhds m-idx) at xs fctx xb))
           (insn/mk-insn (.return-type at)))))
+
+  BindableEntity
+  (binding-mode-let [_]
+    ir/bound-as-alias)
+  (emit-setup-code? [_ xb param-no name]
+    true)
   
   Constant
   (computational-value [_] ;never nil, but may require owner to be known
@@ -60,71 +65,45 @@
       (aset source-order (.source-idx (aget mspecs i)) i))
     source-order))
 
-(defn- set-static-mhd!
-  (^void [^DirectMethodHandleDesc/1 mhds ^ClassDesc owner ^String name-prefix
-          ^MethodSpec/1 specs]
-   (dotimes [i (alength mhds)]
-     (let [spec (aget specs i), at (.at spec)
-           nm (str name-prefix "~" (.parameter-count at))
-           mhd (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
-                                          owner nm (util/mtd-of-arity-type at))
-           body (-> spec .x-body .emitter)
-           redir (when (instance? PlainInvokeTest body)
-                   (.redirecting-to ^PlainInvokeTest body (.return-type at)
-                                    (ir/translates-to-varargs? at)
-                                    (.parameters spec)))]
-       (aset mhds i (or redir mhd)))))
-  (^void [^DirectMethodHandleDesc/1 mhds ^ClassDesc owner ^String name-prefix
-          ^EnvDisplayPairs/1 aenv ^MethodSpec/1 specs]
-   (dotimes [i (alength mhds)]
-     (let [at (.at (aget specs i))
-           nm (str name-prefix "~" (.parameter-count at))
-           aorigin (.aorigin (aget aenv i))
-           mtd (-> (util/mtd-of-arity-type at)
-                   (.insertParameterTypes 0 (util/entity-type-exact* aorigin)))
-           mhd (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
-                                          owner nm mtd)]
-       (aset mhds i mhd)))))
+(defn- static-mhds ^DirectMethodHandleDesc/1 [^ClassDesc owner ^String name-prefix
+                                              ^MethodSpec/1 specs]
+  (let [mhds (new DirectMethodHandleDesc/1 (alength specs))]
+    (dotimes [i (alength mhds)]
+      (let [spec (aget specs i), at (.at spec)
+            nm (str name-prefix "~" (.parameter-count at))
+            mhd (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
+                                           owner nm (util/mtd-of-arity-type at))
+            body (-> spec .x-body .emitter)
+            redir (when (instance? PlainInvokeTest body)
+                    (.redirecting-to ^PlainInvokeTest body (.return-type at)
+                                     (ir/translates-to-varargs? at)
+                                     (.parameters spec)))]
+        (aset mhds i (or redir mhd))))
+    mhds))
 
-(letfn [(provide-env-as-parameters ^CodeBuilder [^CodeBuilder xb
-                                                 ^EnvDisplayPairs env]
-          (dotimes [i (alength (.aorigin env))]
-            (let [origin (aget (.aorigin env) i)
-                  display (aget (.adisplay env) i)
-                  ent (util/parameter* xb (.local-name display)
-                                       (.value-type origin) i)]
-              (.set-emit-entity! display ent)))
-          xb)]
-  (defn- class-elements-static ^void [^ClassBuilder cb ^MethodSpec/1 specs
-                                      ^DirectMethodHandleDesc/1 mhds
-                                      ^ClassDesc segment-class
-                                      ^EnvDisplayPairs/1 aenv]
-    (let [source-order (source-order-idxs specs)]
-      (dotimes [j (alength specs)]
-        (let [i (aget source-order j)
-              spec (aget specs i)
-              mhd (aget mhds i)
-              mtd (MethodTypeDesc/ofDescriptor (.lookupDescriptor mhd))
-              first-param-no (if (some? aenv)
-                               (alength (.aorigin (aget aenv i)))
-                               0)]
-          (when (or (some? aenv) (identical? segment-class (.owner mhd)))
-            (classfile/with-method-body-> cb
-              [(.methodName mhd) mtd classfile/acc-method-static]
-              (cond-> #_xb
-                (some? aenv) (provide-env-as-parameters (aget aenv i))
-                true (emit/body spec first-param-no)))))))))
+(defn- class-elements-static ^void [^ClassBuilder cb ^CodePromise fn-p
+                                    ^DirectMethodHandleDesc/1 mhds
+                                    ^ClassDesc segment-class]
+  (let [specs (.child-methods fn-p)
+        source-order (source-order-idxs specs)]
+    (fnenv/as-constants (.env-to-display fn-p))
+    (dotimes [j (alength specs)]
+      (let [i (aget source-order j), spec (aget specs i), mhd (aget mhds i)]
+        (when (identical? segment-class (.owner mhd))
+          (->> (^Consumer fn ^void [^CodeBuilder xb]
+                (emit/body xb spec 0))
+               (.withMethodBody cb (.methodName mhd) (.invocationType mhd)
+                                classfile/acc-method-static)))))))
 
-(defn- as-fn-static ^Entity [^SegmentAcc acc ^Entity fn-p ^String name-prefix]
-  (let [segment-class (.segment-class acc)
-        method-specs (.invoke-methods fn-p)
-        mhds (new DirectMethodHandleDesc/1 (alength method-specs))]
-    (set-static-mhd! mhds segment-class name-prefix method-specs)
-    
+(defn- as-fn-static ^Entity [^SegmentBuilder sb ^CodePromise fn-p
+                             ^String name-prefix]
+  (let [segment-class (.segment-class sb)
+        specs (.child-methods fn-p)
+        mhds (static-mhds segment-class name-prefix specs)]
     (->> (^Consumer fn ^void [^ClassBuilder cb]
-          (class-elements-static cb method-specs mhds segment-class nil))
-         (segment/add-elements acc))
-    (FnStatic. (.entity-id fn-p) method-specs mhds)))
+          (class-elements-static cb fn-p mhds segment-class))
+         (.add-elements sb))
+    (FnStatic. -1 specs mhds)))
 
 (letfn [(arity-parameter-types ^Class/1 [^MemberHandle m]
           (let [ptypes (.parameter-types m)]
@@ -139,7 +118,7 @@
                            (.isVarArgs ^Executable (.member m)))
                 ptypes (arity-parameter-types m)]
             (-> (ArityType. (.return-type m) ptypes nil varargs?)
-                (MethodSpec. nil nil nil 0 nil nil))))]
+                (MethodSpec. nil nil nil 0 nil))))]
   
   (defn class-member-fn ^FnStatic [^MemberHandle m]
     (FnStatic. ir/entity-id-constant
@@ -151,10 +130,12 @@
 ;;; ------------------------------------------------------------------------
 
 (deftype FnFlyweight [^int entity-id ^MethodSpec/1 method-specs
-                      ^DirectMethodHandleDesc/1 mhds]
+                      ^DirectMethodHandleDesc/1 mhds ^Entity/1 aorigin
+                      ^HashMap parent-e2d]
   CodeEmitter
-  (emit-insn* [this xb consumed-type then-leave?]
-    (throw (IllegalStateException.)))
+  (emit-insn* [_ xb consumed-type _] ;flyweight environment's prefix tuple
+    (fnenv/load-env xb parent-e2d aorigin)
+    consumed-type)
   
   Entity
   (value-type [_]
@@ -165,35 +146,70 @@
     entity-id)
   (invoke-methods [_]
     method-specs)
-  (invoke* [this fctx form _ m-idx xs]
+  (invoke* [this fctx form f m-idx xs]
     (let [at (.at (aget method-specs m-idx))]
       (-> (^CodeEmitter fn [xb _ _]
+           (.emit-insn* f xb nil false) ;call into display
            (insn/emit-invoke-arity (aget mhds m-idx) at xs fctx xb))
-          (insn/mk-insn (.return-type at))))))
+          (insn/mk-insn (.return-type at)))))
 
-(defn- as-fn-flyweight ^Entity [^SegmentAcc acc ^Entity fn-p
-                                ^String name-prefix]
-  (let [segment-class (.segment-class acc)
-        method-specs (.invoke-methods fn-p)
-        mhds (new DirectMethodHandleDesc/1 (alength method-specs))]
-    ;; FIXME... this only works if env is empty
-    (set-static-mhd! mhds segment-class name-prefix method-specs)
-    
+  BindableEntity
+  (binding-mode-let [_]
+    ir/bound-as-alias)
+  (emit-setup-code? [_ xb param-no name]
+    true))
+
+(defn- flyweight-mhds
+  ^DirectMethodHandleDesc/1 [^ClassDesc owner ^String name-prefix
+                             ^StoredEnv env ^MethodSpec/1 specs]
+  (let [mhds (new DirectMethodHandleDesc/1 (alength specs))]
+    (dotimes [i (alength mhds)]
+      (let [at (.at (aget specs i))
+            nm (str name-prefix "~" (.parameter-count at))
+            aorigin (.aorigin env)
+            mtd (-> (util/mtd-of-arity-type at)
+                    (.insertParameterTypes 0 (util/entity-type-exact* aorigin)))
+            mhd (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
+                                           owner nm mtd)]
+        (aset mhds i mhd)))
+    mhds))
+
+(defn- class-elements-flyweight ^void [^ClassBuilder cb ^StoredEnv env
+                                       ^MethodSpec/1 specs
+                                       ^DirectMethodHandleDesc/1 mhds]
+  (let [source-order (source-order-idxs specs)]
+    (dotimes [j (alength specs)]
+      (let [i (aget source-order j), spec (aget specs i), mhd (aget mhds i)]
+        (->> (^Consumer fn ^void [^CodeBuilder xb]
+              (let [first-param-no (fnenv/as-parameters xb env)]
+                (emit/body xb spec first-param-no)))
+             (.withMethodBody cb (.methodName mhd) (.invocationType mhd)
+                              classfile/acc-method-static))))))
+
+(defn- as-fn-flyweight ^Entity [^SegmentBuilder sb ^CodePromise fn-p
+                                ^String name-prefix ^StoredEnv env
+                                ^HashMap parent-e2d]
+  (let [segment-class (.segment-class sb)
+        specs (.child-methods fn-p)
+        mhds (flyweight-mhds segment-class name-prefix env specs)]
     (->> (^Consumer fn ^void [^ClassBuilder cb]
-          (class-elements-static cb method-specs mhds segment-class nil))
-         (segment/add-elements acc))
-    (FnFlyweight. (.entity-id fn-p) method-specs mhds)))
+          (class-elements-flyweight cb env specs mhds))
+         (.add-elements sb))
+    (FnFlyweight. -1 specs mhds (.aorigin env) parent-e2d)))
 
 ;;; ------------------------------------------------------------------------
 
 (deftype FnVirtual [^int entity-id ^MethodSpec/1 method-specs
-                    ^DirectMethodHandleDesc/1 mhds
-                    ^ClassDesc this-class ^Entity/1 aorigin]
+                    ^DirectMethodHandleDesc/1 mhds ^ClassDesc this-class
+                    ^Entity/1 aorigin ^HashMap parent-e2d
+                    ^:unsynchronized-mutable ^int slot]
   CodeEmitter
   (emit-insn* [this xb consumed-type then-leave?]
-    (-> (util/load-origin-values xb aorigin)
-        (.invokestatic this-class rt/name-factory-method
-                       (util/mtd-factory this-class aorigin)))
+    (if (neg? slot)
+      (-> (fnenv/load-env xb parent-e2d aorigin)
+          (.invokestatic this-class rt/name-factory-method
+                         (util/mtd-factory this-class aorigin)))
+      (.aload xb slot))
     tinyclj.lang.AFnMh)
   
   Entity
@@ -210,7 +226,20 @@
       (-> (^CodeEmitter fn [xb _ _]
            (when (emit/insn? xb fctx tinyclj.lang.AFnMh f)
              (insn/emit-invoke-arity (aget mhds m-idx) at xs fctx xb)))
-          (insn/mk-insn (.return-type at))))))
+          (insn/mk-insn (.return-type at)))))
+  
+  BindableEntity
+  (binding-mode-let [_]
+    ir/bound-with-emit-setup)
+  (emit-setup-code? [this xb param-no name]
+    (let [label (.newLabel xb)]
+      (set! slot -1)                   ;force emit of factory invocation
+      (.emit-insn* this xb tinyclj.lang.AFnMh false)
+      (set! slot (.allocateLocal xb TypeKind/REFERENCE))
+      (-> (.storeLocal xb TypeKind/REFERENCE slot)
+          (.labelBinding label)
+          (.localVariable slot name this-class label (.endLabel xb)))
+      true)))
 
 (defn- entity-this ^Entity [^ClassDesc owner]
   (reify Entity
@@ -219,35 +248,23 @@
     (value-type-exact [_] owner)
     (entity-id [_] -1)))
 
-(defn- set-virtual-mhd! ^void [^DirectMethodHandleDesc/1 mhds
-                               ^ClassDesc owner ^MethodSpec/1 specs]
-  (dotimes [i (alength mhds)]
-    (let [at (.at (aget specs i))
-          mnm (str "fn" (.parameter-count at))]
-      (->> (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/VIRTUAL
-                                      owner mnm (util/mtd-of-arity-type at))
-           (aset mhds i)))))
+(defn- virtual-mhds ^DirectMethodHandleDesc/1 [^ClassDesc owner ^MethodSpec/1 specs]
+  (let [mhds (new DirectMethodHandleDesc/1 (alength specs))]
+    (dotimes [i (alength mhds)]
+      (let [at (.at (aget specs i))
+            mnm (str "fn" (.parameter-count at))]
+        (->> (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/VIRTUAL
+                                        owner mnm (util/mtd-of-arity-type at))
+             (aset mhds i))))
+    mhds))
 
-(letfn [(provide-display! ^void [^HashMap origin-to-load ^MethodSpec mspec]
-          (doseq [[origin ^Display display]
-                  (-> mspec .env-to-display (.entrySet))]
-            (.set-emit-entity! display (.get origin-to-load origin))))
-        (fn-method-virtual ^void [^ClassBuilder cb ^MethodSpec spec
-                                  ^ClassDesc this-class ^String method-name]
-          (->> (^Consumer fn ^void [^CodeBuilder xb]
-                (-> (.localVariable xb (.receiverSlot xb) (.name spec)
-                                    this-class (.startLabel xb) (.endLabel xb))
-                    (emit/body spec 0)))
-               (.withMethodBody cb method-name
-                                (util/mtd-of-arity-type (.at spec))
-                                (ir/acc* public final))))
-
-        (arity-parameter-count ^int [^DirectMethodHandleDesc mhd]
+(letfn [(arity-parameter-count ^int [^DirectMethodHandleDesc mhd]
           (dec (.parameterCount (.invocationType mhd))))
         (arity-fixed-1 ^void [^CodeBuilder xb ^DirectMethodHandleDesc mhd]
           (let [n (arity-parameter-count mhd)
                 test-args (doto (new CodeEmitter/1 2)
-                            (aset 0 (util/parameter* xb nil Integer/TYPE 0))
+                            (aset 0 (util/parameter* xb nil Integer/TYPE
+                                                     ConstantDescs/CD_int 0))
                             (aset 1 (constgen/constant n Integer/TYPE)))]
             (-> (condgen/mk-cmp-pred Opcode/IF_ICMPEQ condgen/cmp-eq
                                      Integer/TYPE test-args context/fctx-none)
@@ -271,13 +288,13 @@
                 (.aconst_null)
                 (.areturn))))]
   
-  (defn- class-elements-virtual ^void [^ClassBuilder cb ^MethodSpec/1 specs
+  (defn- class-elements-virtual ^void [^ClassBuilder cb ^CodePromise fn-p
                                        ^DirectMethodHandleDesc/1 mhds
                                        ^ClassDesc this-class
                                        ^MethodTypeDesc factory-mtd
-                                       ^FieldSpec/1 fields
-                                       ^HashMap env-to-load]
-    (let [constr-mtd (-> factory-mtd
+                                       ^FieldSpec/1 fields]
+    (let [specs (.child-methods fn-p)
+          constr-mtd (-> factory-mtd
                          (.insertParameterTypes 0 rt/map)
                          (.changeReturnType ConstantDescs/CD_void))]
       ;; virtual fields holding the closed over environment
@@ -285,10 +302,15 @@
       ;; virtual methods implementing the function arities
       (let [source-order (source-order-idxs specs)]
         (dotimes [j (alength specs)]
-          (let [i (aget source-order j)]
-            (provide-display! env-to-load (aget specs i))
-            (fn-method-virtual cb (aget specs i) this-class
-                               (.methodName (aget mhds i))))))
+          (let [i (aget source-order j), spec (aget specs i)]
+            (->> (^Consumer fn ^void [^CodeBuilder xb]
+                  (-> (.localVariable xb (.receiverSlot xb) (.name spec)
+                                      this-class (.startLabel xb)
+                                      (.endLabel xb))
+                      (emit/body spec 0)))
+                 (.withMethodBody cb (.methodName (aget mhds i))
+                                  (util/mtd-of-arity-type (.at spec))
+                                  (ir/acc* public final))))))
       ;; virtual method __arityOrNull
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (let [at-last (.at (aget specs (dec (alength specs))))]
@@ -304,10 +326,7 @@
             (-> (.loadConstant xb (alength mhds))
                 (.anewarray rt/MethodHandle))
             (dotimes [i (alength mhds)]
-              (-> (.dup xb)
-                  (.loadConstant i)
-                  (.ldc (aget mhds i))
-                  (.aastore)))
+              (-> (.dup xb) (.loadConstant i) (.ldc (aget mhds i)) (.aastore)))
             (.areturn xb))
            (.withMethodBody cb rt/name-dmh-method
                             rt/mtd-dmh-method
@@ -317,10 +336,7 @@
                         (doto (new ClassDesc/1 1) (aset 0 rt/map)))
       ;; public static factory method __create
       (->> (^Consumer fn ^void [^CodeBuilder xb]
-            (-> xb
-                (.new_ this-class)
-                (.dup)
-                (.aconst_null))
+            (-> xb (.new_ this-class) (.dup) (.aconst_null))
             (dotimes [i (.parameterCount factory-mtd)]
               (.loadLocal xb (TypeKind/from (.parameterType factory-mtd i))
                           (.parameterSlot xb i)))
@@ -331,9 +347,7 @@
                             (ir/acc* public static final synthetic)))
       ;; protected virtual method __withMetaImpl
       (->> (^Consumer fn ^void [^CodeBuilder xb]
-            (-> (.new_ xb this-class)
-                (.dup)
-                (.aload (.parameterSlot xb 0)))
+            (-> (.new_ xb this-class) (.dup) (.aload (.parameterSlot xb 0)))
             (dotimes [i (alength fields)]
               (code/get-field xb (aget fields i)))
             (-> (.invokespecial xb this-class ConstantDescs/INIT_NAME
@@ -343,41 +357,34 @@
                             (MethodTypeDesc/of this-class rt/map)
                             (ir/acc* protected final synthetic))))))
 
-(defn- as-fn-virtual ^Entity [^SegmentAcc acc ^Entity fn-p ^String unique-nm]
-  (let [this-class (segment/namespace-class acc unique-nm)
-        super-class rt/AFn
-        method-specs (.invoke-methods fn-p)
-        construction-ops (-> (envgraph/merged-env-to-display method-specs)
-                             (doto (.remove fn-p))
-                             (envgraph/sorted-eds))
-        mhds (new DirectMethodHandleDesc/1 (alength method-specs))]
-    (set-virtual-mhd! mhds this-class method-specs)
+(defn- as-fn-virtual ^Entity [^SegmentBuilder sb ^CodePromise fn-p
+                              ^ClassDesc this-class ^StoredEnv env
+                              ^HashMap parent-e2d]
+  (let [super-class rt/AFn
+        method-specs (.child-methods fn-p)
+        mhds (virtual-mhds this-class method-specs)]
     
     (->> (^Consumer fn ^void [^ClassBuilder cb]
-          (let [factory-mtd (util/mtd-factory this-class
-                                              (.aorigin construction-ops))
+          (let [factory-mtd (util/mtd-factory this-class (.aorigin env))
                 constr-mtd (-> (.insertParameterTypes factory-mtd 0 rt/map)
                                (.changeReturnType ConstantDescs/CD_void))
-                fields (envgraph/fields-exact 0 this-class construction-ops)
-                env-to-load (-> (.aorigin construction-ops)
-                                (envgraph/field-entity-map fields 0)
-                                (doto (.put fn-p (entity-this this-class))))]
+                fields (fnenv/fields-exact 0 this-class env)]
+            (fnenv/as-fields 0 fields env) ;picked up by all virtual arity methods below
             (-> (cfg/with-class-version cb)
                 (.withFlags (ir/acc* public final))
                 (.withSuperclass super-class)
-                (class-elements-virtual method-specs mhds this-class
-                                        factory-mtd fields env-to-load))))
+                (class-elements-virtual fn-p mhds this-class factory-mtd fields))))
          (ir/mk-nmsp-class this-class super-class)
-         (segment/add-class-file acc))
-    (FnVirtual. (.entity-id fn-p) method-specs mhds
-                this-class (.aorigin construction-ops))))
+         (.add-class-file sb))
+    (FnVirtual. -1 method-specs mhds this-class (.aorigin env) parent-e2d -1)))
 
 ;;; ------------------------------------------------------------------------
 
-(deftype FnPromise [^int entity-id ^MethodSpec/1 method-specs
-                    ^String unique-nm ^ArrayList !nested-parts
-                    ^:unsynchronized-mutable ^Entity __emit
-                    ^:unsynchronized-mutable ^int __materialized]
+(deftype FnPromiseImpl [^int entity-id ^MethodSpec/1 method-specs
+                        ^HashMap env-to-display ^HashMap parent-e2d
+                        ^String unique-nm ^ArrayList !nested-parts
+                        ^:unsynchronized-mutable ^BindableEntity __emit
+                        ^:unsynchronized-mutable ^int __materialized]
   CodeEmitter
   (emit-insn* [this xb consumed-type then-leave?]
     (.emit-insn* __emit xb consumed-type then-leave?))
@@ -399,14 +406,21 @@
                (insn/emitter)
                (.emit-insn* xb consumed-type then-leave?)))
           (insn/mk-insn (.return-type at)))))
+
+  BindableEntity
+  (binding-mode-let [_]
+    ir/bound-with-emit-setup)
+  (emit-setup-code? [_ xb param-no name]
+    (.emit-setup-code? __emit xb param-no name))
   
-  FnUsage
+  FnPromise
   (get-emit-entity [_]
     __emit)
   (value-use? [_]
     (pos? __materialized))
   (count-value-use! [this delta]
     (locking this
+      #_(prn :count-value-use __materialized '-> (+ __materialized delta))
       (set! __materialized (+ __materialized delta))
       (assert (>= __materialized 0))))
   
@@ -415,21 +429,30 @@
     (insn/value-of* this))
   (child-methods [_]
     method-specs)
+  (env-to-display [_]
+    env-to-display)
   (!nested-parts [_]
     !nested-parts)
-  (generate-and-deliver [this acc]
+  (generate-and-deliver [this sb env-factory]
     (set! __emit
           (if (.value-use? this)
-            (if (envgraph/fn-closes-over-env? this (.method-specs this))
-              (as-fn-virtual acc this unique-nm)
-              (as-fn-static acc this unique-nm))
-            (as-fn-flyweight acc this unique-nm)))
-    acc))
+            (if (.fn-carries-env? env-factory this)
+              (let [this-class (.namespace-class sb unique-nm)
+                    this-emit (entity-this this-class)
+                    env (.stored-environment! env-factory this this-emit)]
+                #_(prn :as-fn-virtual unique-nm)
+                (as-fn-virtual sb this this-class env parent-e2d))
+              (do #_(prn :as-fn-static unique-nm)
+                  (as-fn-static sb this unique-nm)))
+            (let [env (.stored-environment! env-factory this nil)]
+              #_(prn :as-fn-flyweight unique-nm)
+              (as-fn-flyweight sb this unique-nm env parent-e2d))))))
 
 ;;; ------------------------------------------------------------------------
 
 (deftype ItfFn [^MethodSpec/1 method-specs ^String unique-nm ^Class itf-class
-                ^Method method ^ArrayList !nested-parts
+                ^Method method ^HashMap env-to-display ^HashMap parent-e2d
+                ^ArrayList !nested-parts
                 ^:unsynchronized-mutable ^Consumer __emit]
   CodeEmitter
   (emit-insn* [this xb consumed-type then-leave?]
@@ -441,17 +464,16 @@
     (insn/mk-insn this itf-class))
   (child-methods [_]
     method-specs)
+  (env-to-display [_]
+    env-to-display)
   (!nested-parts [_]
     !nested-parts)
-  (generate-and-deliver [_ acc]
+  (generate-and-deliver [this sb env-factory]
     (let [mspec (aget method-specs 0)
-          constr-ops (envgraph/sorted-eds (.env-to-display mspec))
-          aenv (doto (new EnvDisplayPairs/1 1) (aset 0 constr-ops))
+          env (.stored-environment! env-factory this nil)
           mhd-itf (reflect/mhd-of-method itf-class method)
-          mhds (new DirectMethodHandleDesc/1 1)
-          aorigin (.aorigin constr-ops)]
-      (set-static-mhd! mhds (.segment-class acc) unique-nm aenv
-                       method-specs)
+          aorigin (.aorigin env)
+          mhds (flyweight-mhds (.segment-class sb) unique-nm env method-specs)]
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (let [inv-type (MethodTypeDesc/of (reflect/describe-class itf-class)
                                               (util/entity-type-exact* aorigin))
@@ -461,9 +483,9 @@
                   dcd (DynamicCallSiteDesc/of
                        rt/bsm-metafactory (.methodName mhd-itf) inv-type
                        mtd-lookup (aget mhds 0) d-mtd)]
-              (-> xb (util/load-origin-values aorigin) (.invokedynamic dcd))))
+              (-> xb (fnenv/load-env parent-e2d aorigin) (.invokedynamic dcd))))
            (set! __emit))
       (->> (^Consumer fn ^void [^ClassBuilder cb]
-            (class-elements-static cb method-specs mhds nil aenv))
-           (segment/add-elements acc)))))
+            (class-elements-flyweight cb env method-specs mhds))
+           (.add-elements sb)))))
 (def promise-itf-fn ItfFn/new)

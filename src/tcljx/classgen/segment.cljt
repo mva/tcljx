@@ -1,30 +1,85 @@
 (ns tcljx.classgen.segment
   (:require (tcljx.data [ir :as ir]))
-  (:import (tcljx.data.ir Expr MethodSpec NmspClass)
+  (:import (tcljx.data.ir CodeEmitter Entity Expr MethodSpec NmspClass)
            (java.lang.constant ClassDesc ConstantDescs)
-           (java.util ArrayList)
-           (java.util.function Consumer)))
+           (java.util List ArrayList HashMap)
+           (java.util.function Consumer BiFunction Predicate)))
 
-(deftype SegmentAcc [^ArrayList class-elements ;of Consumer
-                     ^ArrayList clinit-statms  ;of Expr
-                     ^ArrayList other-classes ;of NmspClass
-                     ^ClassDesc segment-class]
-  java.lang.Record)
+(definterface IDisplay
+  (local-name ^String [])
+  (merge-name! ^Object [^String other-name])
+  (set-emitter! ^void [^CodeEmitter ce]))
 
-(defn add-elements ^SegmentAcc [^SegmentAcc acc ^Consumer class-handler]
-  (.add (.class-elements acc) class-handler)
-  acc)
-(defn add-clinit-statm ^SegmentAcc [^SegmentAcc acc ^Expr expr]
-  (.add (.clinit-statms acc) expr)
-  acc)
-(defn add-class-file ^SegmentAcc [^SegmentAcc acc ^NmspClass ncl]
-  (.add (.other-classes acc) ncl)
-  acc)
+;;; Local copy of a value taken from the entity `origin`, where
+;;; `origin` is defined by a parent of the current function (or reify,
+;;; or interface function).
+(deftype Display [^Entity origin ^int local-entity-id
+                  ^:unsynchronized-mutable ^String local-name
+                  ^:unsynchronized-mutable ^CodeEmitter __emit]
+  CodeEmitter
+  (emit-insn* [_ xb consumed-type then-leave?]
+    (.emit-insn* __emit xb consumed-type then-leave?))
+  IDisplay
+  (local-name [_]
+    local-name)
+  (merge-name! [this other-name]
+    (when (< (.compareTo other-name local-name) 0)
+      (set! local-name other-name))
+    this)
+  (set-emitter! [_ ce]
+    (set! __emit ce)))
 
-;;; FIXME... drop this? the pkg-name is availabe by other means
-(defn namespace-class ^ClassDesc [^SegmentAcc acc ^String class-name]
-  (ClassDesc/of (-> acc .segment-class .packageName) class-name))
+;;; Note: If there are multiple candidates for origin's `local-name`
+;;; in this scope, then keep the one that sorts as smallest.
+(defn display-of! ^Display [^HashMap env-to-display ^Entity origin
+                            ^String local-name]
+  (->> (^BiFunction fn [^Entity o ^Display d]
+        (if (some? d)
+          (.merge-name! d local-name)
+          (Display. o 0 local-name nil)))
+       (.compute env-to-display origin)))
 
+(definterface ISegmentBuilder
+  (segment-class ^ClassDesc [])
+  (namespace-class ^ClassDesc [^String class-name])
+  (add-elements ^void [^Consumer class-handler])
+  (add-class-file ^void [^NmspClass ncl]))
+
+(deftype SegmentBuilder [^ArrayList class-elements ;of Consumer
+                         ^ArrayList other-classes  ;of NmspClass
+                         ^ClassDesc segment-class]
+  ISegmentBuilder
+  (segment-class [_]
+    segment-class)
+  (namespace-class [_ class-name]
+    ;; FIXME... drop this? the pkg-name is availabe by other means
+    (ClassDesc/of (.packageName segment-class) class-name))
+  (add-elements [_ class-handler]
+    (.add class-elements class-handler))
+  (add-class-file [_ ncl]
+    (.add other-classes ncl)))
+
+(deftype StoredEnv [^Entity/1 aorigin, ^Display/1 adisplay])
+
+(definterface EnvFactory
+  (fn-carries-env? ^boolean [^Entity fn-p]) ;pre: `fn-p` is FnPromise
+  (stored-in-env? ^boolean [^Entity origin])
+  (stored-environment! ^StoredEnv [^CodePromise cp ^CodeEmitter this-emit])
+  (stored-origin ^Entity/1 [^CodePromise cp]))
+
+;;; Created during the parsing phase.  `generate-and-deliver` is
+;;; called before the emit phase, to add elements to the segment class
+;;; under construction, or whole classes accompanying it.  Note:
+;;; `!nested-parts` may be filled in by a thread other than the one
+;;; that created this object.
+(definterface CodePromise
+  (expr-of ^Expr [])
+  (child-methods ^MethodSpec/1 [])  ;nil if lacking methods
+  (env-to-display ^HashMap [])      ;entities that methods closed over
+  (!nested-parts ^ArrayList []) ;of CodePromises, nil if lacking methods
+  (generate-and-deliver ^void [^SegmentBuilder sb ^EnvFactory env-factory]))
+
+;;; ------------------------------------------------------------------------
 
 (deftype Segment [^ClassDesc segment-class
                   ^ArrayList tasks
@@ -51,28 +106,25 @@
 (defn capstone-class ^ClassDesc [^Segment segm]
   (ClassDesc/of (.pkg-name segm) "___"))
 
-
-;;; Created during the parsing phase.  `generate-and-deliver` is
-;;; called before the emit phase, to add elements to the segment class
-;;; under construction, or whole classes accompanying it.  Note:
-;;; `!nested-parts` may be filled in by a thread other than the one
-;;; that created this object.
-(definterface CodePromise
-  (expr-of ^Expr [])
-  (child-methods ^MethodSpec/1 [])       ;nil if lacking methods
-  (!nested-parts ^ArrayList []) ;SegmentParts, nil if lacking own EntityFactory
-  (generate-and-deliver ^SegmentAcc [^SegmentAcc acc]))
-
-(defn flatten ^CodePromise/1 [^ArrayList parts ^int parts-end]
-  (let [acc-parts (ArrayList.)]
+(defn code-promises ^CodePromise/1 [^List tasks]
+  (let [acc-cps (ArrayList.), it (.iterator tasks)]
     (letfn [(add-part! ^void [^CodePromise part]
               (when-some [nested (.!nested-parts part)]
-                (let [it (.iterator nested)]
-                  (loop [] (when (.hasNext it) (add-part! (.next it))
+                (let [it* (.iterator nested)]
+                  (loop [] (when (.hasNext it*) (add-part! (.next it*))
                                  (recur)))))
-              (.add acc-parts part))]
-      (dotimes [i parts-end]
-        (let [part (.get parts i)]
-          (when (instance? CodePromise part)
-            (add-part! part))))
-      (.toArray acc-parts (new CodePromise/1 0)))))
+              (.add acc-cps part))]
+      (loop [] (when (.hasNext it)
+                 (let [task (.next it)]
+                   (when (instance? CodePromise task) (add-part! task)))
+                 (recur)))
+      (.toArray acc-cps (new CodePromise/1 0)))))
+
+(defn clinit-statements ^CodeEmitter/1 [^List tasks]
+  (let [al (ArrayList.), it (.iterator tasks)]
+    (loop [] (when (.hasNext it)
+               (let [task (.next it)]
+                 (when-not (instance? CodePromise task)
+                   (.add al (.emitter ^Expr task)))
+                 (recur))))
+    (.toArray al (new CodeEmitter/1 0))))

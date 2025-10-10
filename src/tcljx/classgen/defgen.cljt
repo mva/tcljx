@@ -4,15 +4,13 @@
     [config :as cfg] [reflect :as reflect] [context :as context]
     [ir :as ir])
    (tcljx.classgen
-    [classfile :as classfile] [util :as util] [runtime :as runtime]
-    [constgen :as constgen] [insn :as insn] [segment :as segment]
-    [emit :as emit] fngen))
+    [classfile :as classfile] [util :as util] segment [runtime :as runtime]
+    [constgen :as constgen] [insn :as insn] [emit :as emit]))
   (:import
-   (tcljx.data.ir CodeEmitter Entity LoadFromCopyWhenBound ImmediateEntity
+   (tcljx.data.ir CodeEmitter Entity FnPromise BindableEntity ImmediateEntity
                   Binding)
    (tcljx.classgen.segment CodePromise)
    (tcljx.classgen.insn Insn)
-   (tcljx.classgen.fngen FnPromise)
    (java.lang.classfile ClassBuilder FieldBuilder AnnotationElement
                         Annotation)
    (java.lang.classfile.attribute RuntimeVisibleAnnotationsAttribute)   
@@ -37,7 +35,11 @@
       ir/invoke-methods-dynamic))
   (invoke* [this fctx form _ m-idx xs]
     (.invoke* ^Entity init-ce fctx form this m-idx xs))
-  LoadFromCopyWhenBound
+  BindableEntity
+  (binding-mode-let [_]
+    (if (= or-flags (ir/acc* final))
+      ir/bound-as-alias
+      ir/bound-by-copy-to-local))
   (emit-setup-code? [_ xb _ _]
     (or (constgen/emitter-empty? init-ce)
         (when (emit/insn? xb context/fctx-none tp init-ce)
@@ -50,13 +52,13 @@
     nil)
   (!nested-parts [_]
     nil)
-  (generate-and-deliver [_ acc]
+  (generate-and-deliver [_ sb _]
     (->> (^Consumer fn ^void [^ClassBuilder cb]
           (.withField cb mnm (ir/value-type-exact init-ce tp)
                       (bit-or (ir/acc* public static)
                               ;;... unless namespace private?
                               or-flags)))
-         (segment/add-elements acc))))
+         (.add-elements sb))))
 (defn- promise-field ^CodePromise [^int or-flags ^ClassDesc owner ^String nm
                                    ^Class tp ^CodeEmitter init-ce]
   (DefField. or-flags owner (cfg/munge-name nm) tp init-ce))
@@ -79,7 +81,9 @@
     (.invoke-methods init-ce))
   (invoke* [this fctx form _ m-idx xs]
     (.invoke* init-ce fctx form this m-idx xs))
-  LoadFromCopyWhenBound
+  BindableEntity
+  (binding-mode-let [_]
+    ir/bound-as-alias)
   (emit-setup-code? [_ xb _ _]
     true)
   CodePromise
@@ -89,20 +93,20 @@
     nil)
   (!nested-parts [_]
     nil)
-  (generate-and-deliver [_ acc]
+  (generate-and-deliver [_ sb _]
     (->> (^Consumer fn ^void [^ClassBuilder cb]
           (let [tpd (ir/value-type-exact init-ce tp)]
             (classfile/with-method-body-> cb
               [mnm (MethodTypeDesc/of tpd) classfile/acc-method-static]
               (emit/then-leave? context/fctx-none tp init-ce true))))
-         (segment/add-elements acc))))
+         (.add-elements sb))))
 (defn- promise-method ^CodePromise [^ClassDesc owner ^String nm ^Class tp
                                     ^Entity init-ce]
   (DefMethod. owner (cfg/munge-name nm) tp init-ce)  )
 
 (deftype DefOfPromise [^ClassDesc owner ^String nm ^Class tp
                        ^FnPromise init-ce
-                       ^:unsynchronized-mutable ^LoadFromCopyWhenBound __entity]
+                       ^:unsynchronized-mutable ^BindableEntity __entity]
   CodeEmitter
   (emit-insn* [_ xb consumed-type then-leave?]
     (.emit-insn* __entity xb consumed-type then-leave?))
@@ -117,7 +121,9 @@
     (.invoke-methods init-ce))
   (invoke* [this fctx form opt-f m-idx xs]
     (.invoke* init-ce fctx form this m-idx xs))
-  LoadFromCopyWhenBound
+  BindableEntity
+  (binding-mode-let [_]
+    ir/bound-as-alias)
   (emit-setup-code? [_ xb param-no name]
     (.emit-setup-code? __entity xb param-no name))
   CodePromise
@@ -127,13 +133,13 @@
     nil)
   (!nested-parts [_]
     nil)
-  (generate-and-deliver [_ acc]
+  (generate-and-deliver [_ sb env-factory]
     (let [ce* (.get-emit-entity init-ce)
           p (if (constgen/const? ce*)
               (promise-method owner nm tp ce*)
               (promise-field (ir/acc* final) owner nm tp ce*))]
       (set! __entity (-> p .expr-of .emitter))
-      (.generate-and-deliver p acc))))
+      (.generate-and-deliver p sb env-factory))))
 
 (defn promise-def-immutable ^CodePromise [^ClassDesc owner ^String nm ^Insn init]
   (let [tp (insn/logical-type init), init-ce (insn/emitter init)]
@@ -159,7 +165,7 @@
         nil)
       (!nested-parts [_]
         nil)
-      (generate-and-deliver [_ acc]
+      (generate-and-deliver [_ sb _]
         (->> (^Consumer fn ^void [^ClassBuilder cb]
               (->> (^Consumer fn ^void [^FieldBuilder fb]
                     (let [ae (AnnotationElement/ofString "of" other-qname)]
@@ -167,4 +173,4 @@
                           (.with (RuntimeVisibleAnnotationsAttribute/of
                                   (Annotation/of runtime/Alias ae))))))
                    (.withField cb mnm ConstantDescs/CD_Object)))
-             (segment/add-elements acc))))))
+             (.add-elements sb))))))

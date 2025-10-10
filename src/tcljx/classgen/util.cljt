@@ -2,7 +2,9 @@
   (:require (tcljx.data [reflect :as reflect] [ir :as ir]))
   (:import (tcljx.data.ir CodeEmitter Entity ArityType)
            (java.lang.classfile CodeBuilder TypeKind)
-           (java.lang.constant ClassDesc MethodTypeDesc)))
+           (java.lang.constant ClassDesc MethodTypeDesc)
+           (java.util Map)
+           (java.util.function BiFunction)))
 
 (defmacro with-void-empty-if-requested [consumed-type & body]
   (assert (symbol? consumed-type))
@@ -10,6 +12,12 @@
      Void/TYPE
      (do ~@body)))
 
+(def ^:private ZERO (object 0))
+(defn distinct-name ^String [^Map seen ^String nm]
+  (let [n ^int (.compute seen nm
+                         (^BiFunction fn ^Integer [_ ^Integer v]
+                          (if (nil? v) ZERO (object (inc ^int v)))))]
+    (cond-> nm (pos? n) (str "^" n))))
 
 (defn mtd-of-arity-type ^MethodTypeDesc [^ArityType at]
   (MethodTypeDesc/of (reflect/describe-class (.return-type at))
@@ -22,13 +30,6 @@
     a))
 (defn mtd-factory ^MethodTypeDesc [^ClassDesc this-class ^Entity/1 ents]
   (MethodTypeDesc/of this-class (entity-type-exact* ents)))
-
-(defn load-origin-values ^CodeBuilder [^CodeBuilder xb ^Entity/1 aorigin]
-  ;; FIXME... origin does not work when not provided by the parent method
-  (dotimes [i (alength aorigin)]
-    (let [ent (aget aorigin i)]
-      (.emit-insn* ent xb (.value-type ent) false)))
-  xb)
 
 ;;; ------------------------------------------------------------------------
 
@@ -56,7 +57,9 @@
   (emit-iinc [_ xb const]
     (.iinc xb slot const))
   
-  tcljx.data.ir.LoadFromCopyWhenBound
+  tcljx.data.ir.BindableEntity
+  (binding-mode-let [_]
+    ir/bound-as-alias)
   (emit-setup-code? [_ xb param-no name]
     (if (= param-no -2) ;let binding if no param-no given, otherwise parameter
       (let [tk (TypeKind/from type), label (.newLabel xb)]
@@ -78,9 +81,9 @@
   (LocalVariable. type entity-id init -1))
 
 (defn parameter* ^Entity [^CodeBuilder xb ^String opt-name
-                          ^Class type ^int param-no]
+                          ^Class type ^ClassDesc type-desc ^int param-no]
   (let [slot (.parameterSlot xb param-no)]
     (when (some? opt-name)
-      (.localVariable xb slot opt-name (reflect/describe-class type)
+      (.localVariable xb slot opt-name type-desc
                       (.startLabel xb) (.endLabel xb)))
     (LocalVariable. type 0 nil slot)))

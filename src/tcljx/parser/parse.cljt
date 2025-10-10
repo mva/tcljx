@@ -91,7 +91,7 @@
 
 (defn method-spec-template ^MethodSpec [^AritySpec aspec ^int source-idx
                                         ^String name]
-  (MethodSpec. (.at aspec) nil nil nil source-idx name (java.util.HashMap.)))
+  (MethodSpec. (.at aspec) nil nil nil source-idx name))
 
 (defn body-into ^MethodSpec [^MethodSpec mspec ^boolean inst-method?
                              ^Parser parser ^long fctx ^AritySpec aspec]

@@ -5,7 +5,7 @@
    (tcljx.parser [parse :as parse] [syntax :as syntax] [interop :as interop]
                  [let :as let]))
   (:import
-   (tcljx.data.ir Expr Exprs Entity Binding FnUsage ArityType AritySpec
+   (tcljx.data.ir Expr Exprs Entity Binding FnPromise ArityType AritySpec
                   MethodSpec Parser ExprFactory EntityFactory Resolver)
    (java.lang.constant MethodHandleDesc DirectMethodHandleDesc ConstantDescs)
    (java.lang.reflect Method)
@@ -108,26 +108,27 @@
   (FnBundle. (.entity-factory parser) (new String/1 n) (new ArrayList/1 n)
              (new Entity/1 n)))
 (defn- add-fn ^Entity [^FnBundle fnb ^int fn-idx ^String fn-nm
-                       ^AritySpec/1 arity-specs]
+                       ^AritySpec/1 arity-specs ^HashMap env-to-display]
   (let [etf (.parent fnb)
         unique-nm (.unique-name! etf (or fn-nm "fn"))
         fn-parts (ArrayList.)
-        ent (.entity-fn etf arity-specs unique-nm fn-parts)]
+        ent (.entity-fn etf arity-specs env-to-display unique-nm fn-parts)]
     (aset (.aunique-nm fnb) fn-idx unique-nm)
     (aset (.afn-parts fnb) fn-idx fn-parts)
     (aset (.afn-entity fnb) fn-idx ent)
     ent))
-(defn- arity-entity-factory [^FnBundle fnb ^int fn-idx ^HashMap env-to-display]
-  (.mk-nested (.parent fnb) (aget (.aunique-nm fnb) fn-idx) 0 env-to-display
-              (aget (.afn-parts fnb) fn-idx)))
+(defn- arity-entity-factory [^FnBundle fnb ^int fn-idx ^HashMap fn-e2d]
+  (.method-etf (.parent fnb) (aget (.aunique-nm fnb) fn-idx) 0 fn-e2d
+               (aget (.afn-parts fnb) fn-idx)))
 (defn- parse-arity-bodies ^MethodSpec/1 [^FnBundle fnb ^Parser parser 
                                          ^long fctx ^String name 
-                                         ^int fn-idx ^AritySpec/1 specs]
+                                         ^int fn-idx ^AritySpec/1 specs
+                                         ^HashMap env-to-display]
   (let [arity-methods (new MethodSpec/1 (alength specs))]
     (dotimes [i (alength arity-methods)]
       (let [aspec (aget specs i)
             mspec* (parse/method-spec-template aspec i name)
-            etf' (arity-entity-factory fnb fn-idx (.env-to-display mspec*))
+            etf' (arity-entity-factory fnb fn-idx env-to-display)
             parser' (.with-entity-factory parser etf')
             mspec (parse/body-into mspec* false parser' fctx aspec)]
         (aset arity-methods i mspec)))
@@ -139,11 +140,12 @@
                             (arity-specs-of fctx form Object (nil? fn-nm) more))
                   fnb (mk-fn-bundle parser 1)
                   nm (if (some? fn-nm) (name fn-nm) "fn")
-                  ent-fn (add-fn fnb 0 nm specs)
+                  env-to-display (HashMap.)
+                  ent-fn (add-fn fnb 0 nm specs env-to-display)
                   parser* (cond-> parser
                             (some? fn-nm)
                             (ir/with-local-binding nm ent-fn))]
-              (->> (parse-arity-bodies fnb parser* fctx nm 0 specs)
+              (->> (parse-arity-bodies fnb parser* fctx nm 0 specs env-to-display)
                    (.expr-fn (.entity-factory parser) ent-fn))))
           (new-itf-fn ^Expr [^Class itf-class ^seq more]
             (let [rsv (.resolver parser)
@@ -157,12 +159,13 @@
                   arity-methods (new MethodSpec/1 (alength specs))
                   aspec (aget specs 0)
                   mspec* (parse/method-spec-template aspec 0 "fn")
-                  etf' (.mk-nested etf unique-nm 0 (.env-to-display mspec*)
-                                   fn-parts)
+                  fn-e2d (HashMap.)
+                  etf' (.method-etf etf unique-nm 0 fn-e2d fn-parts)
                   parser' (.with-entity-factory parser etf')]
               (->> (parse/body-into mspec* false parser' fctx aspec)
                    (aset arity-methods 0))
-              (.expr-itf-fn etf arity-methods unique-nm itf-class m fn-parts)))]
+              (.expr-itf-fn etf arity-methods fn-e2d unique-nm itf-class m
+                            fn-parts)))]
     (let [itf-tag (interop/tag-of (first form))
           fn-nm (second form)]
       (if (symbol? fn-nm)
@@ -223,22 +226,26 @@
         etf (.entity-factory parser)
         fnb (mk-fn-bundle parser n)
         aspecs (new AritySpec/2 n)
+        aenv-to-display (new HashMap/1 n)
         bnds (new Binding/1 n)]
     (dotimes [i n]
       (context/with-line-from-list [fctx (nth fnv i)]
         (let [[_ fn-nm & more] (aget afn i)
               specs (arity-specs-of (.resolver parser) fctx form Object false
                                     more)
-              ent-fn (add-fn fnb i (name fn-nm) specs)]
+              env-to-display (HashMap.)
+              ent-fn (add-fn fnb i (name fn-nm) specs env-to-display)]
           (aset aspecs i specs)
-          (FnUsage/.count-value-use! ent-fn -1) ;back to zero
-          (aset bnds i (.binding-alias etf fctx (name fn-nm) ent-fn)))))
+          (aset aenv-to-display i env-to-display)
+          (FnPromise/.count-value-use! ent-fn -1) ;back to zero
+          (aset bnds i (.binding-entity etf fctx (name fn-nm) ent-fn false)))))
     (let [parser* (ir/with-local-bindings parser bnds)]
       (dotimes [i n]
         (context/with-line-from-list [fctx (nth fnv i)]
           (let [fn-nm (second (aget afn i))
                 arity-methods (parse-arity-bodies fnb parser* fctx (name fn-nm)
-                                                  i (aget aspecs i))
+                                                  i (aget aspecs i)
+                                                  (aget aenv-to-display i))
                 ent-fn (aget (.afn-entity fnb) i)]
             (.expr-fn etf ent-fn arity-methods)))))
     (.block-bindings (.expr-factory parser) fctx bnds false

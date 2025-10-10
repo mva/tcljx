@@ -18,7 +18,7 @@
     
     (letfn [(of-immutable-def? ^boolean [^Entity ent] ;pre: `init` is symbol
               (and (ir/immediate-entity? ent)
-                   (ir/alias-when-let-value? ent)
+                   (= (ir/binding-mode-let ent) ir/bound-as-alias)
                    (nil? (.meta ^symbol init))
                    (nil? (meta/get-tag nm-meta))
                    (identical? ent (.lookup-def (.resolver parser)

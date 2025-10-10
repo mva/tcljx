@@ -326,7 +326,7 @@
 
         PlainInvokeTest
         (redirecting-to [inv return-type varargs? params]
-          (letfn [(direct-to-args? [^Class/1 inv-atypes ^int inv-start]
+          (letfn [(direct-to-args? ^boolean [^Class/1 inv-atypes ^int inv-start]
                     (when (= (alength params) (+ (.length args) inv-start))
                       (loop [i (dec (alength params))]
                         (cond
@@ -336,15 +336,18 @@
                                  (type/same? (.value-type ^Entity ce-arg)
                                              (aget inv-atypes (- i inv-start)))))
                           (recur (dec i))
-                          :else false))))]
+                          :else false))))
+                  (direct-to-receiver? ^boolean [] ;no cast on receiver value?
+                    (let [rec (aget params 0)]
+                      (and (identical? rec (.emitter receiver))
+                           (type/same? (.value-type rec) (.owner m)))))]
             
             (when (and (not= member/invoke-polymorphic (.invocation-mode m))
                        (or (type/auto-return-marker? return-type)
                            (type/same? return-type (.return-type m)))
                        (= varargs? (member/varargs? m))
                        (direct-to-args? (.parameter-types m) (int (some? receiver)))
-                       (or (nil? receiver)
-                           (identical? (aget params 0) (.emitter receiver))))
+                       (or (nil? receiver) (direct-to-receiver?)))
               (reflect/mhd-of-member (.owner m) (.member m))))))
       (mk-insn (.return-type m))))
 

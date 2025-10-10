@@ -26,21 +26,21 @@
              (INVOKESPECIAL Record "<init>" "()V")
              (RETURN)]
 
-            [(METHOD [PUBLIC SYNTHETIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "toString" "()Ljava/lang/String;")
              (ALOAD_0)
              (INVOKEDYNAMIC "toString" "(Lpkg/ns0/Rec;)Ljava/lang/String;"
                             :bsm-object-method [. "a;b"
                                                 [GETTER . "a" "I"]
                                                 [GETTER . "b" "I"]])
              (ARETURN)]
-            [(METHOD [PUBLIC SYNTHETIC] "hashCode" "()I")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "hashCode" "()I")
              (ALOAD_0)
              (INVOKEDYNAMIC "hashCode" "(Lpkg/ns0/Rec;)I"
                             :bsm-object-method [. "a;b"
                                                 [GETTER . "a" "I"]
                                                 [GETTER . "b" "I"]])
              (IRETURN)]
-            [(METHOD [PUBLIC SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
              (ALOAD_0)
              (ALOAD_1)
              (INVOKEDYNAMIC "equals" "(Lpkg/ns0/Rec;Ljava/lang/Object;)Z"
@@ -80,17 +80,17 @@
              (INVOKESPECIAL Record "<init>" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC SYNTHETIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "toString" "()Ljava/lang/String;")
              (ALOAD_0)
              (INVOKEDYNAMIC "toString" "(Lpkg/ns0/Rec;)Ljava/lang/String;"
                             :bsm-object-method [. ""])
              (ARETURN)]
-            [(METHOD [PUBLIC SYNTHETIC] "hashCode" "()I")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "hashCode" "()I")
              (ALOAD_0)
              (INVOKEDYNAMIC "hashCode" "(Lpkg/ns0/Rec;)I"
                             :bsm-object-method [. ""])
              (IRETURN)]
-            [(METHOD [PUBLIC SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
              (ALOAD_0)
              (ALOAD_1)
              (INVOKEDYNAMIC "equals" "(Lpkg/ns0/Rec;Ljava/lang/Object;)Z"
@@ -177,17 +177,17 @@
              (ICONST_M1)
              (IRETURN)]
             
-            [(METHOD [PUBLIC SYNTHETIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "toString" "()Ljava/lang/String;")
              (ALOAD_0)
              (INVOKEDYNAMIC "toString" "(Lpkg/ns0/Rec;)Ljava/lang/String;"
                             :bsm-object-method [. "a" [GETTER . "a" "I"]])
              (ARETURN)]
-            [(METHOD [PUBLIC SYNTHETIC] "hashCode" "()I")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "hashCode" "()I")
              (ALOAD_0)
              (INVOKEDYNAMIC "hashCode" "(Lpkg/ns0/Rec;)I"
                             :bsm-object-method [. "a" [GETTER . "a" "I"]])
              (IRETURN)]
-            [(METHOD [PUBLIC SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
              (ALOAD_0)
              (ALOAD_1)
              (INVOKEDYNAMIC "equals" "(Lpkg/ns0/Rec;Ljava/lang/Object;)Z"
@@ -231,12 +231,12 @@
              (ALOAD_0)
              (INVOKEVIRTUAL . "x" "()Ljava/lang/String;")
              (ARETURN)]
-            [(METHOD [PUBLIC SYNTHETIC] "hashCode" "()I")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "hashCode" "()I")
              (ALOAD_0)
              (INVOKEDYNAMIC "hashCode" "(Lpkg/ns0/Rec;)I" :bsm-object-method
                             [. "x" [GETTER . "x" "Ljava/lang/String;"]])
              (IRETURN)]
-            [(METHOD [PUBLIC SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
              (ALOAD_0)
              (ALOAD_1)
              (INVOKEDYNAMIC "equals" "(Lpkg/ns0/Rec;Ljava/lang/Object;)Z"
@@ -285,12 +285,12 @@
              (ALOAD_0)
              (INVOKEVIRTUAL . "x" "()Ljava/lang/String;")
              (ARETURN)]
-            [(METHOD [PUBLIC SYNTHETIC] "hashCode" "()I")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "hashCode" "()I")
              (ALOAD_0)
              (INVOKEDYNAMIC "hashCode" "(Lpkg/ns0/Rec;)I" :bsm-object-method
                             [. "x" [GETTER . "x" "Ljava/lang/String;"]])
              (IRETURN)]
-            [(METHOD [PUBLIC SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
              (ALOAD_0)
              (ALOAD_1)
              (INVOKEDYNAMIC "equals" "(Lpkg/ns0/Rec;Ljava/lang/Object;)Z"

@@ -4,22 +4,20 @@
     [config :as cfg] [wrong :as wrong] [type :as type] [ir :as ir]
     [resolve :as resolve] [reflect :as reflect])
    (tcljx.classgen
-    [util :as util] [constgen :as constgen] segment [envgraph :as envgraph]
+    [util :as util] [constgen :as constgen] [segment :as segment]
     [insn :as insn] [fngen :as fngen] [typegen :as typegen]))
   (:import
-   (tcljx.data.ir CodeEmitter Entity MethodSpec EntityFactory CopyOnRead)
-   (tcljx.classgen.envgraph Display)
+   (tcljx.data.ir CodeEmitter Entity MethodSpec EntityFactory BindableEntity)
+   (tcljx.classgen.segment Display)
    (tcljx.classgen.insn Insn Insns)
-   (tcljx.classgen.fngen FnPromise)
+   (tcljx.classgen.fngen FnPromiseImpl)
    (java.lang.classfile CodeBuilder TypeKind)
    (java.lang.constant ClassDesc)
    (java.util ArrayList HashMap)
-   (java.util.concurrent ConcurrentHashMap)
-   (java.util.function Function BiFunction)))
+   (java.util.concurrent ConcurrentHashMap)))
 
-(def ^:private ZERO (object 0))
 (deftype EntityFactoryImpl [^:unsynchronized-mutable ^int curr-entity-id
-                            ^HashMap env-to-display
+                            ^HashMap env-to-display ^HashMap parent-e2d
                             ^ConcurrentHashMap private-name-map
                             ^String pkg-name
                             ^String scope-name
@@ -34,16 +32,20 @@
       (and (>= origin ir/closure-level-clinit)
            (not= origin (.closure-level this)))))
   (display-of! [_ origin local-name]
-    (->> (^Function fn [origin] (Display. origin 0 local-name nil))
-         (.computeIfAbsent env-to-display origin)))
+    (segment/display-of! env-to-display origin local-name))
   (value-of [this ent form]
     (assert (some? form))
     (if-some [tp (.value-type ent)]
-      (insn/mk-insn (envgraph/value-of this ent form) tp)
+      (-> (if (.closes-over? this ent)
+            (.display-of! this ent (name form))
+            ent)
+          (insn/mk-insn tp))
       (throw (wrong/wr-info (str "entity " (wrong/q form)
                                  " has no runtime value")))))
   (invocation-of [this inv form]
-    (envgraph/invocation-of this inv form))
+    (if (.closes-over? this inv)
+      (.display-of! this inv (name ^symbol (first form)))
+      inv))
   
   (expr-constant [_ value type]
     (insn/constant-insn value type))
@@ -65,9 +67,9 @@
         ir/entity-id-def)
       (invoke-methods [_]
         ir/invoke-methods-dynamic)
-      CopyOnRead
-      (alias-when-let-value? [_]
-        false)))
+      BindableEntity
+      (binding-mode-let [_]
+        ir/bound-by-copy-to-local)))
   (new-loadable [_ value expr-type]
     (-> value (constgen/collection expr-type false) (insn/mk-insn expr-type)))
   (new-collection [this coll-type args]
@@ -87,27 +89,28 @@
     (util/entity-local type (.next-entity-id this) init))
   (parameter [this type]                ;`param-no` provided late
     (util/entity-local type (.next-entity-id this) constgen/emitter-empty))
-  (entity-fn [this arity-specs unique-nm !fn-parts]
+  (entity-fn [this arity-specs fn-e2d unique-nm !fn-parts]
     (let [method-specs (new MethodSpec/1 (alength arity-specs))]
       (dotimes [i (alength method-specs)]
         (aset method-specs i (-> (.at (aget arity-specs i))
-                                 (MethodSpec. nil nil nil i nil nil))))
+                                 (MethodSpec. nil nil nil i nil))))
       (->> (^java.util.Comparator fn ^int [^MethodSpec o1 ^MethodSpec o2]
             (Integer/compare (-> o1 .at .parameter-count)
                              (-> o2 .at .parameter-count)))
            (java.util.Arrays/sort method-specs))
-      (FnPromise. (.next-entity-id this) method-specs unique-nm !fn-parts
-                  nil 1)))              ;definition is first use
+      (FnPromiseImpl. (.next-entity-id this) method-specs fn-e2d
+                      env-to-display unique-nm !fn-parts nil 1)))
   (expr-fn [this fn-entity arity-methods]
-    (let [fn-p ^FnPromise fn-entity
+    (let [fn-p ^FnPromiseImpl fn-entity
           method-specs (.method-specs fn-p)]
       (dotimes [i (alength method-specs)]
         (let [j (.source-idx (aget method-specs i))]
           (aset method-specs i (aget arity-methods j))))
       (.stage-part! this fn-p)))
-  (expr-itf-fn [_ method-specs unique-nm itf-class method !itf-parts]
+  (expr-itf-fn [_ method-specs itf-e2d unique-nm itf-class method
+                !itf-parts]
     (let [p (fngen/promise-itf-fn method-specs unique-nm itf-class method
-                                  !itf-parts nil)]
+                                  itf-e2d env-to-display !itf-parts nil)]
       (.add !nested-parts p)
       (.expr-of p)))
   (deftype-field [_ entity-id spec]
@@ -129,8 +132,9 @@
     (->> (typegen/promise-deftype eph-ncl field-specs method-specs
                                   java-record? defrecord? !dt-parts)
          (.stage-part! this)))
-  (expr-reify [this eph-ncl interfaces meta !reify-parts method-specs]
-    (->> (typegen/promise-reify eph-ncl interfaces meta method-specs
+  (expr-reify [this eph-ncl interfaces meta method-specs reify-e2d !reify-parts]
+    (->> (typegen/promise-reify (.next-entity-id this) eph-ncl interfaces meta
+                                method-specs reify-e2d env-to-display
                                 !reify-parts nil)
          (.stage-part! this)))
   (expr-definterface [this eph-ncl]
@@ -142,8 +146,8 @@
   (class-name-for-reify [this]
     (ClassDesc/of pkg-name (.unique-name! this "reify")))
   
-  (binding-alias [_ fctx name ent]
-    (ir/mk-binding ent name true))
+  (binding-entity [_ fctx name ent alias?]
+    (ir/mk-binding ent name alias?))
   (binding-fresh [this fctx opt-type name init]
     (when opt-type
       (insn/ensure-assignable opt-type init))
@@ -155,20 +159,17 @@
       (.binding-fresh this fctx type name ex-provider)))
 
   (unique-name! [_ name-suffix]
-    (let [nm (cond->> (cfg/munge-name name-suffix)
-               (some? scope-name) (str scope-name "$"))
-          n ^int (.compute private-name-map nm
-                           (^BiFunction fn ^Integer [_ ^Integer v]
-                            (if (nil? v) ZERO (object (inc ^int v)))))]
-      (cond-> nm (pos? n) (str "^" n))))
-  (mk-nested [this unique-nm used-entity-ids env-to-display nested-parts]
+    (util/distinct-name private-name-map
+                        (cond->> (cfg/munge-name name-suffix)
+                          (some? scope-name) (str scope-name "$"))))
+  (method-etf [this unique-nm used-entity-ids owner-e2d nested-parts]
     (-> (ir/entity-id-of (inc (.closure-level this)) used-entity-ids)
-        (EntityFactoryImpl. env-to-display private-name-map pkg-name unique-nm
-                            nested-parts)))
+        (EntityFactoryImpl. owner-e2d env-to-display
+                            private-name-map pkg-name unique-nm nested-parts)))
   (stage-part! [_ part]
     (.add !nested-parts part)
     (.expr-of ^tcljx.classgen.segment.CodePromise part)))
 
 (defn mk-clinit-etf ^EntityFactory [^String pkg-name ^ArrayList segment-tasks]
-  (EntityFactoryImpl. (ir/entity-id-of ir/closure-level-clinit) nil
+  (EntityFactoryImpl. (ir/entity-id-of ir/closure-level-clinit) (HashMap.) nil
                       (ConcurrentHashMap.) pkg-name nil segment-tasks))

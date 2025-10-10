@@ -454,39 +454,39 @@
                                (catch Exception _
                                  "foo"))))]))))
 
-;; ;;; (int <boolean>) is a non-Clojure/non-Java extension that helps
-;; ;;; with certain patterns of branchless code.  The alternative is to
-;; ;;; use something like "(defn bool2int ^int [^boolean x] (if x 1 0))".
-;; ;;; For a simple micro benchmark the "no instruction" version is as
-;; ;;; fast as the function call when using OpenJDK 17.0.1.  But for an
-;; ;;; early access version of OpenJDK 18 it is significantly faster
-;; ;;; (speedup ~1.5).  Emitting no method call means smaller bytecode,
-;; ;;; which should help with inlining decisions in any case.
-;; (deftest boolean-to-int-conversion-test
-;;   ;; test conversion opcode
-;;   (is (= '[["LOCAL 0: boolean x"]
-;;            (ILOAD_0)
-;;            #_(INVOKESTATIC RT "booleanToZeroOne" "(Z)I")
-;;            (IRETURN)]
-;;          (asm-expr [^boolean x] (int x))))
-;;   ;; test result type of expression
-;;   (is (java.util.Objects/equals (Integer/valueOf 1)
-;;                                 (call-expr [^boolean x] (int x) [true])))
-;;   (is (java.util.Objects/equals (Integer/valueOf 0)
-;;                                 (call-expr [^boolean x] (int x) [false])))
-;;   ;; test constant folding
-;;   (is-asm (int true) [(ICONST_1) (IRETURN)])
-;;   (is-asm (int false) [(ICONST_0) (IRETURN)]))
+;;; (int <boolean>) is a non-Clojure/non-Java extension that helps
+;;; with certain patterns of branchless code.  The alternative is to
+;;; use something like "(defn bool2int ^int [^boolean x] (if x 1 0))".
+;;; For a simple micro benchmark the "no instruction" version is as
+;;; fast as the function call when using OpenJDK 17.0.1.  But for an
+;;; early access version of OpenJDK 18 it is significantly faster
+;;; (speedup ~1.5).  Emitting no method call means smaller bytecode,
+;;; which should help with inlining decisions in any case.
+(deftest boolean-to-int-conversion-test
+  ;; test conversion opcode
+  (is (= '[["LOCAL 0: boolean x"]
+           (ILOAD_0)
+           #_(INVOKESTATIC RT "booleanToZeroOne" "(Z)I")
+           (IRETURN)]
+         (asm-expr [^boolean x] (int x))))
+  ;; test result type of expression
+  (is (java.util.Objects/equals (Integer/valueOf 1)
+                                (call-expr [^boolean x] (int x) [true])))
+  (is (java.util.Objects/equals (Integer/valueOf 0)
+                                (call-expr [^boolean x] (int x) [false])))
+  ;; test constant folding
+  (is-asm (int true) [(ICONST_1) (IRETURN)])
+  (is-asm (int false) [(ICONST_0) (IRETURN)]))
 
-;; (deftest boolean-to-byte-conversion-test
-;;   (is (= '[["LOCAL 0: boolean x"]
-;;            (ILOAD_0)
-;;            #_(INVOKESTATIC RT "booleanToZeroOne" "(Z)I")
-;;            (I2B)
-;;            (IRETURN)]
-;;          (asm-expr [^boolean x] (byte x))))
-;;   (is-asm (byte true) [(ICONST_1) (IRETURN)])
-;;   (is-asm (byte false) [(ICONST_0) (IRETURN)]))
+(deftest boolean-to-byte-conversion-test
+  (is (= '[["LOCAL 0: boolean x"]
+           (ILOAD_0)
+           #_(INVOKESTATIC RT "booleanToZeroOne" "(Z)I")
+           #_(I2B)
+           (IRETURN)]
+         (asm-expr [^boolean x] (byte x))))
+  (is-asm (byte true) [(ICONST_1) (IRETURN)])
+  (is-asm (byte false) [(ICONST_0) (IRETURN)]))
 
 (deftest boolean-to-double-conversion-test
   (is (= '[["LOCAL 0: boolean x"]
