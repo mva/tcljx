@@ -248,6 +248,6 @@
                                                   (aget aenv-to-display i))
                 ent-fn (aget (.afn-entity fnb) i)]
             (.expr-fn etf ent-fn arity-methods)))))
-    (.block-bindings (.expr-factory parser) fctx bnds false
+    (.block-bindings (.expr-factory parser) fctx bnds true false
                      (-> (ir/with-local-bindings parser bnds)
                          (parse/progn fctx body)))))

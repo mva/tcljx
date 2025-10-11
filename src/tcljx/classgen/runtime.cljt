@@ -41,6 +41,7 @@
 (def name-dmh-method "__directMethodHandles")
 (def mtd-dmh-method (MethodTypeDesc/of MethodHandleArray))
 (def name-factory-method "__create")
+(def name-patch-method "__patch")
 (def name-with-meta-impl "__withMetaImpl")
 (def name-meta-method "meta")
 

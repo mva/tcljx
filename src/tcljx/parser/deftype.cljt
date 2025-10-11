@@ -264,7 +264,7 @@
                                  (bit-xor (ir/acc* final abstract)))))
                (when (.java-record? supers)
                  (record-attribute cb fields))
-               (code/with-field* cb fields)
+               (code/with-fields cb fields)
                (code/constructor cb fields (.super-class supers)
                                  (ir/acc* public synthetic))
                (when defrecord?

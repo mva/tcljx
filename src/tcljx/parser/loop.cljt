@@ -22,7 +22,7 @@
         (let [fctx' (context/with-recur fctx)
               bnd-vs (parse/binding-variables bnds)
               xf' (.with-recur-variables (.expr-factory parser) bnd-vs)]
-          (.block-bindings xf' fctx' bnds true
+          (.block-bindings xf' fctx' bnds false true
                            (-> (.with-expr-factory parser xf')
                                (parse/progn fctx' body))))))))
 

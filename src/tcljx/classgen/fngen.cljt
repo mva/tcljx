@@ -47,6 +47,8 @@
       (-> (^CodeEmitter fn [xb _ _]
            (insn/emit-invoke-arity (aget mhds m-idx) at xs fctx xb))
           (insn/mk-insn (.return-type at)))))
+  (emit-store [_ xb]                    ;empty letfn patch
+    xb)
 
   BindableEntity
   (binding-mode-let [_]
@@ -152,6 +154,8 @@
            (.emit-insn* f xb nil false) ;call into display
            (insn/emit-invoke-arity (aget mhds m-idx) at xs fctx xb))
           (insn/mk-insn (.return-type at)))))
+  (emit-store [_ xb]                    ;empty letfn patch
+    xb)
 
   BindableEntity
   (binding-mode-let [_]
@@ -174,12 +178,12 @@
         (aset mhds i mhd)))
     mhds))
 
-(defn- class-elements-flyweight ^void [^ClassBuilder cb ^StoredEnv env
-                                       ^MethodSpec/1 specs
-                                       ^DirectMethodHandleDesc/1 mhds]
-  (let [source-order (source-order-idxs specs)]
-    (dotimes [j (alength specs)]
-      (let [i (aget source-order j), spec (aget specs i), mhd (aget mhds i)]
+(defn- class-elements-flyweight ^void [^ClassBuilder cb ^MethodSpec/1 mspecs
+                                       ^DirectMethodHandleDesc/1 mhds
+                                       ^StoredEnv env]
+  (let [source-order (source-order-idxs mspecs)]
+    (dotimes [j (alength mspecs)]
+      (let [i (aget source-order j), spec (aget mspecs i), mhd (aget mhds i)]
         (->> (^Consumer fn ^void [^CodeBuilder xb]
               (let [first-param-no (fnenv/as-parameters xb env)]
                 (emit/body xb spec first-param-no)))
@@ -193,20 +197,34 @@
         specs (.child-methods fn-p)
         mhds (flyweight-mhds segment-class name-prefix env specs)]
     (->> (^Consumer fn ^void [^ClassBuilder cb]
-          (class-elements-flyweight cb env specs mhds))
+          (class-elements-flyweight cb specs mhds env))
          (.add-elements sb))
     (FnFlyweight. -1 specs mhds (.aorigin env) parent-e2d)))
 
 ;;; ------------------------------------------------------------------------
 
+(letfn [(entity-before? ^boolean [^int fn-id ^int o-id]
+          (or (< o-id fn-id)
+              (not= (ir/closure-level* o-id) (ir/closure-level* fn-id))))]
+  (defn- feed-forward ^Entity/1 [^int fn-id ^Entity/1 aorigin]
+    (loop [acc aorigin, i (dec (alength aorigin))]
+      (if (neg? i)
+        acc
+        (let [o-id (.entity-id (aget aorigin i))]
+          (if (entity-before? fn-id o-id)
+            (recur acc (dec i))
+            (let [acc (if (identical? acc aorigin) (aclone aorigin) acc)]
+              (aset acc i constgen/entity-null)
+              (recur acc (dec i)))))))))
+
 (deftype FnVirtual [^int entity-id ^MethodSpec/1 method-specs
                     ^DirectMethodHandleDesc/1 mhds ^ClassDesc this-class
-                    ^Entity/1 aorigin ^HashMap parent-e2d
+                    ^Entity/1 aorigin ^Entity/1 aforward ^HashMap parent-e2d
                     ^:unsynchronized-mutable ^int slot]
   CodeEmitter
   (emit-insn* [this xb consumed-type then-leave?]
     (if (neg? slot)
-      (-> (fnenv/load-env xb parent-e2d aorigin)
+      (-> (fnenv/load-env xb parent-e2d (feed-forward entity-id aorigin))
           (.invokestatic this-class rt/name-factory-method
                          (util/mtd-factory this-class aorigin)))
       (.aload xb slot))
@@ -227,13 +245,25 @@
            (when (emit/insn? xb fctx tinyclj.lang.AFnMh f)
              (insn/emit-invoke-arity (aget mhds m-idx) at xs fctx xb)))
           (insn/mk-insn (.return-type at)))))
+  (emit-store [this xb]
+    (when-not (identical? aorigin aforward)
+      (let [tps (ArrayList.)]
+        (.aload xb slot)           ;receiver is this function instance
+        (dotimes [i (alength aorigin)]
+          (let [o (aget aorigin i)]
+            (when-not (identical? o (aget aforward i))
+              (.emit-insn* o xb (.value-type o) false)
+              (.add tps (.value-type-exact o)))))
+        (.invokevirtual xb this-class rt/name-patch-method
+                        (MethodTypeDesc/of ConstantDescs/CD_void tps))))
+    xb)
   
   BindableEntity
   (binding-mode-let [_]
     ir/bound-with-emit-setup)
   (emit-setup-code? [this xb param-no name]
     (let [label (.newLabel xb)]
-      (set! slot -1)                   ;force emit of factory invocation
+      (set! slot -1)                 ;force emit of factory invocation
       (.emit-insn* this xb tinyclj.lang.AFnMh false)
       (set! slot (.allocateLocal xb TypeKind/REFERENCE))
       (-> (.storeLocal xb TypeKind/REFERENCE slot)
@@ -288,21 +318,20 @@
                 (.aconst_null)
                 (.areturn))))]
   
-  (defn- class-elements-virtual ^void [^ClassBuilder cb ^CodePromise fn-p
+  (defn- class-elements-virtual ^void [^ClassBuilder cb ^MethodSpec/1 mspecs
                                        ^DirectMethodHandleDesc/1 mhds
                                        ^ClassDesc this-class
                                        ^MethodTypeDesc factory-mtd
                                        ^FieldSpec/1 fields]
-    (let [specs (.child-methods fn-p)
-          constr-mtd (-> factory-mtd
+    (let [constr-mtd (-> factory-mtd
                          (.insertParameterTypes 0 rt/map)
                          (.changeReturnType ConstantDescs/CD_void))]
       ;; virtual fields holding the closed over environment
-      (code/with-field* cb fields)
+      (code/with-fields cb fields)
       ;; virtual methods implementing the function arities
-      (let [source-order (source-order-idxs specs)]
-        (dotimes [j (alength specs)]
-          (let [i (aget source-order j), spec (aget specs i)]
+      (let [source-order (source-order-idxs mspecs)]
+        (dotimes [j (alength mspecs)]
+          (let [i (aget source-order j), spec (aget mspecs i)]
             (->> (^Consumer fn ^void [^CodeBuilder xb]
                   (-> (.localVariable xb (.receiverSlot xb) (.name spec)
                                       this-class (.startLabel xb)
@@ -313,7 +342,7 @@
                                   (ir/acc* public final))))))
       ;; virtual method __arityOrNull
       (->> (^Consumer fn ^void [^CodeBuilder xb]
-            (let [at-last (.at (aget specs (dec (alength specs))))]
+            (let [at-last (.at (aget mspecs (dec (alength mspecs))))]
               (assert (not (ir/translates-to-varargs? at-last)))
               (if (= (alength mhds) 1)
                 (arity-fixed-1 xb (aget mhds 0))
@@ -345,6 +374,20 @@
                 (.areturn)))
            (.withMethodBody cb rt/name-factory-method factory-mtd
                             (ir/acc* public static final synthetic)))
+      ;; package-private virtual method __patch
+      (when-some [patch-mtd (fnenv/mtd-of-patch fields)]
+        (->> (^Consumer fn ^void [^CodeBuilder xb]
+              (loop [param-no 0, i 0]
+                (when (< i (alength fields))
+                  (let [fs (aget fields i)]
+                    (recur (if (code/final-field? fs)
+                             param-no
+                             (do (code/put-field xb fs param-no)
+                                 (inc param-no)))
+                           (inc i)))))
+              (.return_ xb))
+             (.withMethodBody cb rt/name-patch-method patch-mtd
+                              (ir/acc* final synthetic))))
       ;; protected virtual method __withMetaImpl
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (-> (.new_ xb this-class) (.dup) (.aload (.parameterSlot xb 0)))
@@ -357,26 +400,29 @@
                             (MethodTypeDesc/of this-class rt/map)
                             (ir/acc* protected final synthetic))))))
 
-(defn- as-fn-virtual ^Entity [^SegmentBuilder sb ^CodePromise fn-p
-                              ^ClassDesc this-class ^StoredEnv env
-                              ^HashMap parent-e2d]
+(defn- as-fn-virtual ^Entity [^SegmentBuilder sb ^int entity-id
+                              ^MethodSpec/1 mspecs ^ClassDesc this-class
+                              ^StoredEnv env ^HashMap parent-e2d]
   (let [super-class rt/AFn
-        method-specs (.child-methods fn-p)
-        mhds (virtual-mhds this-class method-specs)]
+        mhds (virtual-mhds this-class mspecs)
+        aforward (feed-forward entity-id (.aorigin env))]
     
     (->> (^Consumer fn ^void [^ClassBuilder cb]
           (let [factory-mtd (util/mtd-factory this-class (.aorigin env))
                 constr-mtd (-> (.insertParameterTypes factory-mtd 0 rt/map)
                                (.changeReturnType ConstantDescs/CD_void))
-                fields (fnenv/fields-exact 0 this-class env)]
+                
+                fields (fnenv/fields-exact 0 this-class env aforward)]
             (fnenv/as-fields 0 fields env) ;picked up by all virtual arity methods below
             (-> (cfg/with-class-version cb)
                 (.withFlags (ir/acc* public final))
                 (.withSuperclass super-class)
-                (class-elements-virtual fn-p mhds this-class factory-mtd fields))))
+                (class-elements-virtual mspecs mhds this-class factory-mtd
+                                        fields))))
          (ir/mk-nmsp-class this-class super-class)
          (.add-class-file sb))
-    (FnVirtual. -1 method-specs mhds this-class (.aorigin env) parent-e2d -1)))
+    (FnVirtual. entity-id mspecs mhds this-class (.aorigin env) aforward
+                parent-e2d -1)))
 
 ;;; ------------------------------------------------------------------------
 
@@ -406,6 +452,8 @@
                (insn/emitter)
                (.emit-insn* xb consumed-type then-leave?)))
           (insn/mk-insn (.return-type at)))))
+  (emit-store [_ xb]                ;delegate letfn patching to __emit
+    (.emit-store __emit xb))
 
   BindableEntity
   (binding-mode-let [_]
@@ -441,7 +489,7 @@
                     this-emit (entity-this this-class)
                     env (.stored-environment! env-factory this this-emit)]
                 #_(prn :as-fn-virtual unique-nm)
-                (as-fn-virtual sb this this-class env parent-e2d))
+                (as-fn-virtual sb entity-id method-specs this-class env parent-e2d))
               (do #_(prn :as-fn-static unique-nm)
                   (as-fn-static sb this unique-nm)))
             (let [env (.stored-environment! env-factory this nil)]
@@ -486,6 +534,6 @@
               (-> xb (fnenv/load-env parent-e2d aorigin) (.invokedynamic dcd))))
            (set! __emit))
       (->> (^Consumer fn ^void [^ClassBuilder cb]
-            (class-elements-flyweight cb env method-specs mhds))
+            (class-elements-flyweight cb method-specs mhds env))
            (.add-elements sb)))))
 (def promise-itf-fn ItfFn/new)

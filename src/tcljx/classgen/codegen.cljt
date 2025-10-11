@@ -166,10 +166,13 @@
         (throw (insn/wr-type "called function's type does not implement `IFn`"
                              f)))))
   
-  (block-bindings [this fctx bindings recur-to-body? body]
+  (block-bindings [this fctx bindings patch-letfn? recur-to-body? body]
     (-> (^CodeEmitter fn [xb consumed-type then-leave?]
          (.block xb (^Consumer fn ^void [^CodeBuilder xb]
                      (when (emit/statms? xb bindings)
+                       (when patch-letfn?
+                         (dotimes [i (alength bindings)]
+                           (.emit-store (.bound-to (aget bindings i)) xb)))
                        (when recur-to-body?
                          (let [start-of-body (.newLabel xb)]
                            (.labelBinding xb start-of-body)

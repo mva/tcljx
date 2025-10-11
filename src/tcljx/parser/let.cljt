@@ -48,4 +48,5 @@
                                         (parse/arg parser fctx init)))]
             (aset bnds i bnd)
             (recur (ir/with-local-binding parser bnd) (inc i)))
-          (.block-bindings xf fctx bnds false (parse/progn parser fctx body)))))))
+          (.block-bindings xf fctx bnds false false
+                           (parse/progn parser fctx body)))))))

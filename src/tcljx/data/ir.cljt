@@ -207,8 +207,10 @@
    (bit-shift-left closure-level 16))
   (^int [^int closure-level ^int index]
    (bit-or (entity-id-of closure-level) (inc index))))
+(defn closure-level* ^int [^int entity-id]
+  (unsigned-bit-shift-right entity-id 16))
 (defn closure-level ^int [^Entity ent]
-  (unsigned-bit-shift-right (.entity-id ent) 16))
+  (closure-level* (.entity-id ent)))
 (defn sequence-number ^int [^Entity ent]
   (bit-and 0xffff (.entity-id ent)))
 
@@ -520,8 +522,8 @@
 
   (assignment ^Expr [^Entity ent ^Expr value])
 
-  (block-bindings ^Expr [^long fctx ^Binding/1 bindings ^boolean recur-to-body?
-                         ^Expr body])
+  (block-bindings ^Expr [^long fctx ^Binding/1 bindings ^boolean patch-letfn?
+                         ^boolean recur-to-body? ^Expr body])
   
   (complete-method ^MethodSpec [^MethodSpec mspec ^Entity/1 pvars
                                 ^long fctx ^Expr body])

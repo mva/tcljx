@@ -1194,3 +1194,168 @@
                       ;; only one instance of `f` should be __create()-ed
                       (letfn* [(f ^void [] (.println System/out n))]
                               (f) (f) f))]))))
+
+(deftest create-then-patch-test
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC FINAL] "x" "Lpkg/ns0/f;")]
+            [(FIELD [PUBLIC STATIC FINAL] "y" "Lpkg/ns0/g;")]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (INVOKESTATIC System "currentTimeMillis" "()J")
+             (LSTORE_0)
+             ["LOCAL 0: long n"]
+             (LLOAD_0)
+             (ACONST_NULL)              ;updated by call to __patch below
+             (INVOKESTATIC f "__create" "(JLpkg/ns0/g;)Lpkg/ns0/f;")
+             (ASTORE_2)
+             ["LOCAL 2: f f"]
+             (LLOAD_0)
+             (ALOAD_2)
+             (INVOKESTATIC g "__create" "(JLpkg/ns0/f;)Lpkg/ns0/g;")
+             (ASTORE_3)
+             ["LOCAL 3: g g"]
+             
+             (ALOAD_2)                  ;load f for receiver
+             (ALOAD_3)                  ;load g as argument
+             (INVOKEVIRTUAL f "__patch" "(Lpkg/ns0/g;)V")
+             
+             (ALOAD_2)
+             (PUTSTATIC . "x" "Lpkg/ns0/f;")
+             (ALOAD_3)
+             (PUTSTATIC . "y" "Lpkg/ns0/g;")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]
+           
+           [(CLASS Vx [PUBLIC FINAL] "pkg/ns0/f" nil "tinyclj/lang/AFnMh")
+            [(FIELD [PRIVATE FINAL] "n" "J")]
+            [(FIELD [PRIVATE] "g" "Lpkg/ns0/g;")]
+            
+            [(METHOD [PUBLIC FINAL] "fn0" "()Ljava/lang/Object;")
+             ["LOCAL 0: f f"]
+             (ALOAD_0)
+             (GETFIELD . "n" "J")
+             (POP2)
+             (ALOAD_0)
+             (GETFIELD . "g" "Lpkg/ns0/g;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__arityOrNull" "(I)Ljava/lang/invoke/MethodHandle;")
+             (ILOAD_1)
+             (IFNE L:0)
+             (LDC [VIRTUAL . "fn0" "()Ljava/lang/Object;"])
+             (ARETURN)
+             [L:0]
+             (ACONST_NULL)
+             (ARETURN)]
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__directMethodHandles" "()[Ljava/lang/invoke/MethodHandle;")
+             (ICONST_1)
+             (ANEWARRAY "MethodHandle[]")
+             (DUP)
+             (ICONST_0)
+             (LDC [VIRTUAL . "fn0" "()Ljava/lang/Object;"])
+             (AASTORE)
+             (ARETURN)]
+            [(METHOD [PRIVATE SYNTHETIC] "<init>" "(Lclojure/lang/IPersistentMap;JLpkg/ns0/g;)V")
+             (ALOAD_0)
+             (LLOAD_2)
+             (PUTFIELD . "n" "J")
+             (ALOAD_0)
+             (ALOAD 4)
+             (PUTFIELD . "g" "Lpkg/ns0/g;")
+             (ALOAD_0)
+             (ALOAD_1)
+             (INVOKESPECIAL AFnMh "<init>" "(Lclojure/lang/IPersistentMap;)V")
+             (RETURN)]
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "__create" "(JLpkg/ns0/g;)Lpkg/ns0/f;")
+             (NEW f)
+             (DUP)
+             (ACONST_NULL)
+             (LLOAD_0)
+             (ALOAD_2)
+             (INVOKESPECIAL . "<init>" "(Lclojure/lang/IPersistentMap;JLpkg/ns0/g;)V")
+             (ARETURN)]
+            [(METHOD [FINAL SYNTHETIC] "__patch" "(Lpkg/ns0/g;)V")
+             (ALOAD_0)
+             (ALOAD_1)
+             (PUTFIELD . "g" "Lpkg/ns0/g;")
+             (RETURN)]
+            [(METHOD [PROTECTED FINAL SYNTHETIC] "__withMetaImpl" "(Lclojure/lang/IPersistentMap;)Lpkg/ns0/f;")
+             (NEW f)
+             (DUP)
+             (ALOAD_1)
+             (ALOAD_0)
+             (GETFIELD . "n" "J")
+             (ALOAD_0)
+             (GETFIELD . "g" "Lpkg/ns0/g;")
+             (INVOKESPECIAL . "<init>" "(Lclojure/lang/IPersistentMap;JLpkg/ns0/g;)V")
+             (ARETURN)]]
+           
+           [(CLASS Vx [PUBLIC FINAL] "pkg/ns0/g" nil "tinyclj/lang/AFnMh")
+            [(FIELD [PRIVATE FINAL] "n" "J")]
+            [(FIELD [PRIVATE FINAL] "f" "Lpkg/ns0/f;")]
+            
+            [(METHOD [PUBLIC FINAL] "fn0" "()Ljava/lang/Object;")
+             ["LOCAL 0: g g"]
+             (ALOAD_0)
+             (GETFIELD . "n" "J")
+             (POP2)
+             (ALOAD_0)
+             (GETFIELD . "f" "Lpkg/ns0/f;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__arityOrNull" "(I)Ljava/lang/invoke/MethodHandle;")
+             (ILOAD_1)
+             (IFNE L:0)
+             (LDC [VIRTUAL . "fn0" "()Ljava/lang/Object;"])
+             (ARETURN)
+             [L:0]
+             (ACONST_NULL)
+             (ARETURN)]
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__directMethodHandles" "()[Ljava/lang/invoke/MethodHandle;")
+             (ICONST_1)
+             (ANEWARRAY "MethodHandle[]")
+             (DUP)
+             (ICONST_0)
+             (LDC [VIRTUAL . "fn0" "()Ljava/lang/Object;"])
+             (AASTORE)
+             (ARETURN)]
+            [(METHOD [PRIVATE SYNTHETIC] "<init>" "(Lclojure/lang/IPersistentMap;JLpkg/ns0/f;)V")
+             (ALOAD_0)
+             (LLOAD_2)
+             (PUTFIELD . "n" "J")
+             (ALOAD_0)
+             (ALOAD 4)
+             (PUTFIELD . "f" "Lpkg/ns0/f;")
+             (ALOAD_0)
+             (ALOAD_1)
+             (INVOKESPECIAL AFnMh "<init>" "(Lclojure/lang/IPersistentMap;)V")
+             (RETURN)]
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "__create" "(JLpkg/ns0/f;)Lpkg/ns0/g;")
+             (NEW g)
+             (DUP)
+             (ACONST_NULL)
+             (LLOAD_0)
+             (ALOAD_2)
+             (INVOKESPECIAL . "<init>" "(Lclojure/lang/IPersistentMap;JLpkg/ns0/f;)V")
+             (ARETURN)]
+            [(METHOD [PROTECTED FINAL SYNTHETIC] "__withMetaImpl" "(Lclojure/lang/IPersistentMap;)Lpkg/ns0/g;")
+             (NEW g)
+             (DUP)
+             (ALOAD_1)
+             (ALOAD_0)
+             (GETFIELD . "n" "J")
+             (ALOAD_0)
+             (GETFIELD . "f" "Lpkg/ns0/f;")
+             (INVOKESPECIAL . "<init>" "(Lclojure/lang/IPersistentMap;JLpkg/ns0/f;)V")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (let* [n (System/currentTimeMillis)]
+                   (letfn* [(f [] n g)  ;forward reference to `g`
+                            (g [] n f)]
+                           (def x f)
+                           (def y g)))]))))

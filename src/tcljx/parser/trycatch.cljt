@@ -38,7 +38,7 @@
           ;; during code generation whether `body` throws
           (let [bnds (new Binding/1 1)]
             (aset bnds 0 bnd)
-            (.block-bindings (.expr-factory parser) fctx bnds false
+            (.block-bindings (.expr-factory parser) fctx bnds false false
                              (-> (ir/with-local-binding parser bnd)
                                  (parse/progn fctx body)))))
         (parse-try-catch ^Expr [^Parser parser ^long fctx ^seq formr

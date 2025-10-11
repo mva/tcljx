@@ -157,7 +157,7 @@
   (let [specs (.child-methods reify-p)
         constr-mtd (code/mtd-of-fields fields)]
     ;; virtual fields holding the closed over environment
-    (code/with-field* cb fields)
+    (code/with-fields cb fields)
     ;; virtual methods provided by the reify* form
     (dotimes [i (alength specs)]
       (let [spec (aget specs i)]
@@ -242,7 +242,7 @@
                   field-meta (FieldSpec. this-class "__meta" nil
                                          (ir/acc* private final)
                                          rt/map clojure.lang.IPersistentMap)
-                  fields (doto (fnenv/fields-exact 1 this-class env)
+                  fields (doto (fnenv/fields-exact 1 this-class env (.aorigin env))
                            (aset 0 field-meta))]
               (fnenv/as-fields 1 fields env) ;picked up by all virtual methods below
               (-> (cfg/with-class-version cb)
