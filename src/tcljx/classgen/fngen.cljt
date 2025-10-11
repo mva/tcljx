@@ -188,7 +188,7 @@
               (let [first-param-no (fnenv/as-parameters xb env)]
                 (emit/body xb spec first-param-no)))
              (.withMethodBody cb (.methodName mhd) (.invocationType mhd)
-                              classfile/acc-method-static))))))
+                              (ir/acc* static final)))))))
 
 (defn- as-fn-flyweight ^Entity [^SegmentBuilder sb ^CodePromise fn-p
                                 ^String name-prefix ^StoredEnv env

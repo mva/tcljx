@@ -27,7 +27,7 @@
             [(FIELD [PUBLIC STATIC FINAL] "add2" "Lpkg/ns0/FnInt2;")]
             [(FIELD [PUBLIC STATIC FINAL] "two" "I")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "FnInt2~2" "(II)I")
+            [(METHOD [STATIC FINAL] "FnInt2~2" "(II)I")
              ["LOCAL 0: int a"]
              ["LOCAL 1: int b"]
              (ILOAD_0)
@@ -66,7 +66,7 @@
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(FIELD [PUBLIC STATIC FINAL] "f" "Ljava/lang/Runnable;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "Runnable~0" "()V")
+            [(METHOD [STATIC FINAL] "Runnable~0" "()V")
              (RETURN)]
             
             [(METHOD [PUBLIC STATIC FINAL] "g~0" "()Ljava/lang/Object;")
@@ -103,7 +103,7 @@
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(FIELD [PUBLIC STATIC FINAL] "f" "Ljava/util/Comparator;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "Comparator~2"
+            [(METHOD [STATIC FINAL] "Comparator~2"
                      "(Ljava/lang/Object;Ljava/lang/Object;)I")
              ["LOCAL 0: Object o1"]
              ["LOCAL 1: Object o2"]
@@ -154,10 +154,10 @@
             [(FIELD [PUBLIC STATIC FINAL] "fn-1" "Lpkg/ns0/FnMyFn;")]
             [(FIELD [PUBLIC STATIC FINAL] "fn-2" "Lpkg/ns0/FnMyFn;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "FnMyFn~0" "()I")
+            [(METHOD [STATIC FINAL] "FnMyFn~0" "()I")
              (ICONST_1)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "FnMyFn^1~0" "()I")
+            [(METHOD [STATIC FINAL] "FnMyFn^1~0" "()I")
              (ICONST_2)
              (IRETURN)]
             
@@ -209,10 +209,10 @@
 
 (deftest default-vs-provided-sig
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "Consumer~1" "(Ljava/lang/Object;)V")
+            [(METHOD [STATIC FINAL] "Consumer~1" "(Ljava/lang/Object;)V")
              ["LOCAL 0: Object x"]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "Consumer^1~1" "(Ljava/lang/String;)V")
+            [(METHOD [STATIC FINAL] "Consumer^1~1" "(Ljava/lang/String;)V")
              ["LOCAL 0: String s"]
              (RETURN)]
             
@@ -269,7 +269,7 @@
 ;;; interface BiFunction.
 (deftest binary-operator-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "BinaryOperator~2"
+            [(METHOD [STATIC FINAL] "BinaryOperator~2"
                      "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object x"]
              ["LOCAL 1: Object y"]
@@ -292,7 +292,7 @@
 (deftest supplier-closure-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             
-            [(METHOD [PUBLIC STATIC FINAL] "fn$Supplier~0"
+            [(METHOD [STATIC FINAL] "fn$Supplier~0"
                      "(Ljava/lang/String;)Ljava/lang/Object;")
              ["LOCAL 0: String x"]
              (ALOAD_0)
@@ -327,7 +327,7 @@
 (deftest function-closure-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT]
                    "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "fn$Function~1"
+            [(METHOD [STATIC FINAL] "fn$Function~1"
                      "(ILjava/lang/String;)Ljava/lang/Object;")
              ["LOCAL 0: int n"]
              ["LOCAL 1: String x"]

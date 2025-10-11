@@ -147,7 +147,7 @@
 
 (deftest try-expression-opnd
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "asm-expr$fn~0" "(I)I")
+            [(METHOD [STATIC FINAL] "asm-expr$fn~0" "(I)I")
              ["LOCAL 0: int b"]
              [L:0]
              (ILOAD_0)
@@ -197,7 +197,7 @@
 
 (deftest try-expression-statm
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "asm-expr$fn~0" "(I)F")
+            [(METHOD [STATIC FINAL] "asm-expr$fn~0" "(I)F")
              ["LOCAL 0: int b"]
              [L:0]
              (ILOAD_0)
@@ -431,14 +431,14 @@
 
 (deftest finally-duplicates-function
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(I)Ljava/lang/Object;")
+            [(METHOD [STATIC FINAL] "f~1" "(I)Ljava/lang/Object;")
              ["LOCAL 0: int b"]
              (INVOKESTATIC OutputStream "nullOutputStream" "()Ljava/io/OutputStream;")
              (ILOAD_0)
              (INVOKEVIRTUAL OutputStream "write" "(I)V")
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f^1~1" "(I)Ljava/lang/Object;")
+            [(METHOD [STATIC FINAL] "f^1~1" "(I)Ljava/lang/Object;")
              ["LOCAL 0: int b"]
              (INVOKESTATIC OutputStream "nullOutputStream" "()Ljava/io/OutputStream;")
              (ILOAD_0)

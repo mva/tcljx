@@ -398,7 +398,7 @@
              (ARETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "T$fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
+            [(METHOD [STATIC FINAL] "T$fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
              ["LOCAL 0: String x"]
              (ALOAD_0)
              (ARETURN)]
@@ -446,7 +446,7 @@
              (ARETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "T$fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
+            [(METHOD [STATIC FINAL] "T$fn~0" "(Ljava/lang/String;)Ljava/lang/String;")
              ["LOCAL 0: String x"]
              (ALOAD_0)
              (ARETURN)]

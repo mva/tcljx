@@ -473,7 +473,7 @@
 
 (deftest over-rename
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "g~0" "()Ljava/lang/Object;")
+            [(METHOD [STATIC FINAL] "g~0" "()Ljava/lang/Object;")
              (ACONST_NULL)
              (ARETURN)]
             [(METHOD [PUBLIC STATIC FINAL] "f~0" "()Ljava/lang/Object;")

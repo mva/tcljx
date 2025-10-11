@@ -80,7 +80,7 @@
             [(FIELD [PUBLIC STATIC FINAL] "add-int" "Lpkg/ns0/FnBinaryInt;")]
             [(FIELD [PUBLIC STATIC FINAL] "two" "I")]
 
-            [(METHOD [PUBLIC STATIC FINAL] "FnBinaryInt~2" "(II)I")
+            [(METHOD [STATIC FINAL] "FnBinaryInt~2" "(II)I")
              ["LOCAL 0: int a"]
              ["LOCAL 1: int b"]
              (ILOAD_0)

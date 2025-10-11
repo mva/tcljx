@@ -69,7 +69,7 @@
             [(FIELD [PUBLIC STATIC FINAL] "oddfalse" "Z")]
             [(FIELD [PUBLIC STATIC FINAL] "oddtrue" "Z")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "incomplete-even~1" "(I)Z")
+            [(METHOD [STATIC FINAL] "incomplete-even~1" "(I)Z")
              ["LOCAL 0: int n"]
              (ILOAD_0)
              (IFNE L:0)
@@ -140,7 +140,7 @@
              (ISUB)
              (INVOKESTATIC . "incomplete-even~1" "(I)Z")
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "incomplete-even~1" "(I)Z")
+            [(METHOD [STATIC FINAL] "incomplete-even~1" "(I)Z")
              ["LOCAL 0: int n"]
              (ILOAD_0)
              (IFNE L:0)
@@ -187,7 +187,7 @@
             [(FIELD [PUBLIC STATIC FINAL] "oddfalse" "Z")]
             [(FIELD [PUBLIC STATIC FINAL] "oddtrue" "Z")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "rec-even~1" "(I)Z")
+            [(METHOD [STATIC FINAL] "rec-even~1" "(I)Z")
              ["LOCAL 0: int n"]
              (ILOAD_0)
              (IFNE L:0)
@@ -247,7 +247,7 @@
             [(FIELD [PUBLIC STATIC FINAL] "oddfalse" "Z")]
             [(FIELD [PUBLIC STATIC FINAL] "oddtrue" "Z")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "is-odd$rec-even~1" "(II)Z")
+            [(METHOD [STATIC FINAL] "is-odd$rec-even~1" "(II)Z")
              ["LOCAL 0: int cutoff"]
              ["LOCAL 1: int n"]
              (ILOAD_1)
@@ -263,7 +263,7 @@
              (ISUB)
              (INVOKESTATIC . "is-odd$rec-odd~1" "(II)Z")
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "is-odd$rec-odd~1" "(II)Z")
+            [(METHOD [STATIC FINAL] "is-odd$rec-odd~1" "(II)Z")
              ["LOCAL 0: int cutoff"]
              ["LOCAL 1: int n"]
              (ILOAD_1)
@@ -441,7 +441,7 @@
 
 (deftest other-ref-statics
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "other-ref~0" "()Ljava/lang/Object;")
+            [(METHOD [STATIC FINAL] "other-ref~0" "()Ljava/lang/Object;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "some-fn~0" "()Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -471,7 +471,7 @@
 
 (deftest flyweight
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f$flyweight~0" "([I)I")
+            [(METHOD [STATIC FINAL] "f$flyweight~0" "([I)I")
              ["LOCAL 0: int[] a"]
              (ALOAD_0)
              (ICONST_0)
@@ -503,7 +503,7 @@
 
 (deftest flyweight-stateless
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f$flyweight~1" "([I)I")
+            [(METHOD [STATIC FINAL] "f$flyweight~1" "([I)I")
              ["LOCAL 0: int[] a"]
              (ALOAD_0)
              (ICONST_0)
@@ -535,13 +535,13 @@
 
 (deftest flyweight-indirect
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f$fw1~0" "([I)I")
+            [(METHOD [STATIC FINAL] "f$fw1~0" "([I)I")
              ["LOCAL 0: int[] a"]
              (ALOAD_0)
              (ICONST_0)
              (IALOAD)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f$fw2~0" "([I)I")
+            [(METHOD [STATIC FINAL] "f$fw2~0" "([I)I")
              ["LOCAL 0: int[] a"]
              (ALOAD_0)
              (INVOKESTATIC . "f$fw1~0" "([I)I")
@@ -574,12 +574,12 @@
 
 (deftest flyweight-forward
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f$fw2~0" "([I)I")
+            [(METHOD [STATIC FINAL] "f$fw2~0" "([I)I")
              ["LOCAL 0: int[] a"]
              (ALOAD_0)
              (INVOKESTATIC . "f$fw1~0" "([I)I")
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f$fw1~0" "([I)I")
+            [(METHOD [STATIC FINAL] "f$fw1~0" "([I)I")
              ["LOCAL 0: int[] a"]
              (ALOAD_0)
              (ICONST_0)
@@ -613,11 +613,11 @@
 
 (deftest flyweight-name-conflict
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f$fw1-fn~0" "(I)I")
+            [(METHOD [STATIC FINAL] "f$fw1-fn~0" "(I)I")
              ["LOCAL 0: int n"]
              (ILOAD_0)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f$fw2-fn~0" "(II)I")
+            [(METHOD [STATIC FINAL] "f$fw2-fn~0" "(II)I")
              ["LOCAL 0: int n"]
              ["LOCAL 1: int n"]
              (ILOAD_1)
@@ -772,8 +772,7 @@
   ;; closed over value `param` from heavyweight `nested` to flyweight
   ;; `hint-fn` to heavyweight `anon`.
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "top$hint-fn~0"
-                     "(I)Ljava/lang/Object;")
+            [(METHOD [STATIC FINAL] "top$hint-fn~0" "(I)Ljava/lang/Object;")
              ["LOCAL 0: int param"]
              (ILOAD_0)
              (INVOKESTATIC top$hint-fn$nested "__create"
@@ -935,12 +934,12 @@
 
 (deftest virtuals-passed-into-flyweight
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "top$g~0" "(Lpkg/ns0/top$f;)I")
+            [(METHOD [STATIC FINAL] "top$g~0" "(Lpkg/ns0/top$f;)I")
              ["LOCAL 0: top$f f"]
              (ALOAD_0)
              (INVOKEVIRTUAL top$f "fn0" "()I")
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "top$h~1" "(Lpkg/ns0/top$f;Ljava/lang/Object;)I")
+            [(METHOD [STATIC FINAL] "top$h~1" "(Lpkg/ns0/top$f;Ljava/lang/Object;)I")
              ["LOCAL 0: top$f f"]
              ["LOCAL 1: Object x"]
              (ALOAD_0)
@@ -1048,7 +1047,7 @@
 
 (deftest indirect-env-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "align$step-at~2"
+            [(METHOD [STATIC FINAL] "align$step-at~2"
                      "([[Ljava/lang/Object;II)Ljava/lang/Object;")
              ["LOCAL 0: Object[][] grid"]
              ["LOCAL 1: int i"]
@@ -1059,7 +1058,7 @@
              (ILOAD_2)
              (AALOAD)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "align$extend*~2"
+            [(METHOD [STATIC FINAL] "align$extend*~2"
                      "([[Ljava/lang/Object;II)Ljava/lang/Object;")
              ["LOCAL 0: Object[][] grid"]
              ["LOCAL 1: int i"]
@@ -1070,7 +1069,7 @@
              (INVOKESTATIC . "align$step-at~2"
                            "([[Ljava/lang/Object;II)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "align$align-a-and-b~2"
+            [(METHOD [STATIC FINAL] "align$align-a-and-b~2"
                      "([[Ljava/lang/Object;II)Ljava/lang/Object;")
              ["LOCAL 0: Object[][] grid"]
              ["LOCAL 1: int i"]
