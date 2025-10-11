@@ -307,7 +307,7 @@
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: T _"]
              (LDC "foo")
              (ARETURN)]]
@@ -348,7 +348,7 @@
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: T _"]
              (ALOAD_0)
              (GETFIELD . "x" "Ljava/lang/String;")
@@ -390,7 +390,7 @@
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: T _"]
              (ALOAD_0)
              (GETFIELD . "x" "Ljava/lang/String;")
@@ -438,7 +438,7 @@
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
                         
-            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: T _"]
              (ALOAD_0)
              (GETFIELD . "x" "Ljava/lang/String;")
@@ -486,7 +486,7 @@
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC] "get" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC FINAL] "get" "()Ljava/lang/Object;")
              ["LOCAL 0: T _"]
              (NEW T) (DUP)
              (LDC "foo")
@@ -529,7 +529,7 @@
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: T _"]
              (NEW T) (DUP)
              (LDC "foo")
@@ -638,7 +638,7 @@
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC] "get" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC FINAL] "get" "()Ljava/lang/Object;")
              ["LOCAL 0: T _"]
              (ALOAD_0)
              (GETFIELD . "x" "Ljava/lang/String;")
@@ -883,7 +883,7 @@
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC] "apply" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC FINAL] "apply" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: T _"]
              ["LOCAL 1: Object x"]
              [L:0]
@@ -925,7 +925,7 @@
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC] "apply" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC FINAL] "apply" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: T this"]
              ["LOCAL 1: Object x"]
              (ALOAD_0)
@@ -952,7 +952,7 @@
 ;; (deftest deftype-macro-test
 ;;   (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"
 ;;                    nil "java/lang/Object" [IType])
-;;             [(METHOD [PUBLIC] "<init>" "()V")
+;;             [(METHOD [PUBLIC SYNTHETIC] "<init>" "()V")
 ;;              #_["LOCAL 0: uninitialized_this_type __this"]
 ;;              (ALOAD_0)
 ;;              (INVOKESPECIAL Object "<init>" "()V")
@@ -1014,7 +1014,7 @@
              (ALOAD_0)
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: T _"]
              (LDC "foo")
              (ARETURN)]]
@@ -1052,7 +1052,7 @@
              (ALOAD_0)
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: T _"]
              (LDC "foo")
              (ARETURN)]]
@@ -1101,7 +1101,7 @@
       (INVOKESPECIAL Object "<init>" "()V")
       (RETURN)]
 
-     [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+     [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
       ["LOCAL 0: Node _"]
       (ALOAD_0)
       (GETFIELD . "left" "Lpkg/ns0/Node;")
@@ -1168,7 +1168,7 @@
              (ALOAD_0)
              (INVOKESPECIAL Object "<init>" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: Node _"]
              (ALOAD_0)
              (GETFIELD . "nds" "[Lpkg/ns0/Node;")

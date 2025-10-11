@@ -123,16 +123,16 @@
              (INVOKESPECIAL Record "<init>" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC] "hashCode" "()I")
+            [(METHOD [PUBLIC FINAL] "hashCode" "()I")
              ["LOCAL 0: Rec _"]
              (ICONST_M1)
              (IRETURN)]
-            [(METHOD [PUBLIC] "equals" "(Ljava/lang/Object;)Z")
+            [(METHOD [PUBLIC FINAL] "equals" "(Ljava/lang/Object;)Z")
              ["LOCAL 0: Rec _"]
              ["LOCAL 1: Object o"]
              (ICONST_1)
              (IRETURN)]
-            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: Rec _"]
              (LDC "foo")
              (ARETURN)]
@@ -172,7 +172,7 @@
              (INVOKESPECIAL Record "<init>" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC] "a" "()I")
+            [(METHOD [PUBLIC FINAL] "a" "()I")
              ["LOCAL 0: Rec _"]
              (ICONST_M1)
              (IRETURN)]
@@ -226,7 +226,7 @@
              (ALOAD_0)
              (INVOKESPECIAL Record "<init>" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: Rec this"]
              (ALOAD_0)
              (INVOKEVIRTUAL . "x" "()Ljava/lang/String;")
@@ -280,7 +280,7 @@
              (ALOAD_0)
              (INVOKESPECIAL Record "<init>" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC] "toString" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: Rec this"]
              (ALOAD_0)
              (INVOKEVIRTUAL . "x" "()Ljava/lang/String;")

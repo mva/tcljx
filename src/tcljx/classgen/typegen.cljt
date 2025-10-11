@@ -71,7 +71,7 @@
            (.withMethodBody cb (.name spec)
                             (-> (util/mtd-of-arity-type (.at spec))
                                 (.dropParameterTypes 0 1))
-                            (ir/acc* public))))))
+                            (ir/acc* public final))))))
 
 (defn- missing-record-methods ^map [^FieldSpec/1 field-specs
                                     ^MethodSpec/1 method-specs]
