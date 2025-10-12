@@ -25,13 +25,14 @@
 (def ^:private ObjectMethods (ClassDesc/of "java.lang.runtime.ObjectMethods"))
 
 (def ^:private Object ConstantDescs/CD_Object)
-(def ^:private ObjectArray (.arrayType Object))
+(def ObjectArray (.arrayType Object))
 (def ^:private Class ConstantDescs/CD_Class)
 (def ^:private String ConstantDescs/CD_String)
 
 (def ^:private BootstrapMethod (ClassDesc/of "tinyclj.lang.BootstrapMethod"))
 (def AFn (ClassDesc/of (name clnm-abstract-fn)))
 (def StaticFn (ClassDesc/of (name clnm-static-fn)))
+(def ArraySeq (ClassDesc/of "clojure.lang.ArraySeq"))
 
 (def name-requires "requires~1")
 
@@ -110,3 +111,4 @@
 (def mtd-void-map (MethodTypeDesc/of ConstantDescs/CD_void map))
 (def mtd-boolean-Object (MethodTypeDesc/of ConstantDescs/CD_boolean
                                            ConstantDescs/CD_Object))
+(def mtd-ArraySeq-objects (MethodTypeDesc/of ArraySeq ObjectArray))

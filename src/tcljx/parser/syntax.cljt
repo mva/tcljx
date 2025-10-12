@@ -22,6 +22,10 @@
   (if (simple-symbol? form)
     form
     (throw (info "expect unqualified symbol" form))))
+(defn parameter-symbol ^symbol [form]
+  (if (= form '&)
+    (throw (info "invalid parameter name" form))
+    (simple-symbol form)))
 
 (defn simple-symbol-str ^String [form]
   (name (simple-symbol form)))

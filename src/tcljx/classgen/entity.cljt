@@ -2,7 +2,7 @@
   (:require
    (tcljx.data
     [config :as cfg] [wrong :as wrong] [type :as type] [ir :as ir]
-    [resolve :as resolve] [reflect :as reflect])
+    [resolve :as resolve] [reflect :as reflect] [code :as code])
    (tcljx.classgen
     [util :as util] [constgen :as constgen] [segment :as segment]
     [insn :as insn] [fngen :as fngen] [typegen :as typegen]))
@@ -116,7 +116,7 @@
   (deftype-field [_ entity-id spec]
     (reify Entity
       (emit-insn* [_ xb _ _]
-        (-> (.aload xb (.receiverSlot xb))
+        (-> (code/load-receiver xb)
             (.getfield (.owner spec) (.field-name spec) (.type-desc spec)))
         (.type spec))
       (value-type [_]

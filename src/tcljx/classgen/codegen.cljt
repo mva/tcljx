@@ -43,7 +43,10 @@
 (defn- method-index ^int [^MethodSpec/1 method-specs ^int arg-count]
   (loop [i (dec (alength method-specs))]
     (cond
-      (neg? i) (assert false)
+      (neg? i) (let [n-m1 (dec (alength method-specs))
+                     at* (-> method-specs (aget n-m1) .at)
+                     va? (ir/translates-to-varargs? at*)]
+                 (assert (and va? (>= arg-count (dec (.parameter-count at*))))))
       (= (-> method-specs (aget i) .at .parameter-count) arg-count) i
       :else (recur (dec i)))))
 
@@ -52,12 +55,21 @@
         m-idx (method-index specs (.length xs))
         at (.at (aget specs m-idx))
         ptypes (.parameter-types at)
-        fixed (ir/fixed-parameter-count at)]
+        vararg-tp (ir/vararg-type at)
+        fixed (- (.parameter-count at) (int (some? vararg-tp)))]
     (insn/ensure-assignables ptypes xs fixed)
     (when (< fixed (alength ptypes)) ;any arguments passed as varargs?
-      (insn/ensure-assignable* (.getComponentType (aget ptypes fixed))
-                               xs fixed))
+      (insn/ensure-assignable* vararg-tp xs fixed))
     m-idx))
+
+;;; Bridge gap between Clojure variadic function and JVM vararg method
+;;; by casting the argument that can unintentionally match the
+;;; varargs' array parameter to type Object.
+(defn- fix-vararg-array! ^Class/1 [^Class/1 atypes]
+  (let [i (dec (alength atypes))]
+    (when (and (>= i 0) (.isArray (aget atypes i)))
+      (aset atypes i Object))
+    atypes))
 
 (definterface InsnFactory
   :extends [ExprFactory]
@@ -152,7 +164,7 @@
               (.isAssignableFrom clojure.lang.IFn f-tp))
         (-> (^CodeEmitter fn [xb consumed-type _]
              (let [cpb (.constantPool xb)
-                   atypes (insn/logical-types args)
+                   atypes (fix-vararg-array! (insn/logical-types args))
                    mhe (.methodHandleEntry cpb rt/bsm-invoke-fn)
                    bsm (.bsmEntry cpb mhe (java.util.List/of))
                    mtd (insn/mtd-of-fn-poly consumed-type f-tp atypes)

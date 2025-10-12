@@ -375,20 +375,17 @@
 
 (defn emit-invoke-arity ^Class [^DirectMethodHandleDesc mhd ^ArityType at
                                 ^Insns args ^long fctx ^CodeBuilder xb]
-  (let [fixed (ir/fixed-parameter-count at)
-        parameter-types (.parameter-types at)
-        varargs-tp (when (< fixed (alength parameter-types))
-                     (aget parameter-types fixed))]
+  (let [vararg-tp (ir/vararg-type at)
+        fixed (- (.parameter-count at) (int (some? vararg-tp)))]
     ;; new-dup-dance when creating a new instance of `owner`
     (when (identical? DirectMethodHandleDesc$Kind/CONSTRUCTOR (.kind mhd))
       (-> xb (.new_ (.owner mhd)) (.dup)))
     ;; all fixed (i.e. non-vararg) arguments
-    (when (emit/typed-insns? xb fctx parameter-types (.emitters args)
+    (when (emit/typed-insns? xb fctx (.parameter-types at) (.emitters args)
                              0 fixed)
       ;; optionally: all vararg arguments
-      (when (or (nil? varargs-tp)
-                (emit-array-of? xb (.getComponentType varargs-tp)
-                                (.emitters args) fixed))
+      (when (or (nil? vararg-tp)
+                (emit-array-of? xb vararg-tp (.emitters args) fixed))
         ;; the actual invoke instruction
         (-> (emit/with-line-number xb fctx)
             (invoke-mhd* mhd))

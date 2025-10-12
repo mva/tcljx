@@ -53,12 +53,13 @@
   (type-desc-of rsv (interop/tag-of form) void? no-hint))
 
 (defn- method-lookup-type ^MethodTypeDesc [^Resolver rsv msig]
-  (loop [acc []
+  ;; FIXME... port to approach used by parse-parameters?
+  (loop [acc (transient [])
          [p :as params] (seq msig)]
     (cond
       (nil? params)
       (-> (tag-desc-of rsv msig true ConstantDescs/CD_Object)
-          (MethodTypeDesc/of ^List acc))
+          (MethodTypeDesc/of ^List (persistent! acc)))
                 
       (= p '&)
       (let [p (syntax/varargs-parameter params)
@@ -71,11 +72,11 @@
                  :else tp)]
         (if (nnext params)
           (throw (syntax/info "junk after vararg parameter"))
-          (recur (conj acc tp) nil)))   ;VARARGS flag is set by caller
+          (recur (conj! acc tp) nil)))  ;VARARGS flag is set by caller
 
       :else
       (let [tp (tag-desc-of rsv p false ConstantDescs/CD_Object)]
-        (recur (conj acc tp) (next params))))))
+        (recur (conj! acc tp) (next params))))))
 
 (defn parse-definterface* ^Expr [^Resolver rsv ^EntityFactory etf ^long fctx
                                  [_ itf-nm & opts+sigs]]
@@ -151,7 +152,7 @@
                                     ^FieldSpec/1 fields ^int n]
   (let [mtd-0 (code/mtd-of-fields fields)]
     (->> (^Consumer fn ^void [^CodeBuilder xb]
-          (.aload xb (.receiverSlot xb))
+          (code/load-receiver xb)
           (dotimes [i (- (alength fields) n)]
             (code/load-parameter xb (aget fields i) i))
           (cond-> xb

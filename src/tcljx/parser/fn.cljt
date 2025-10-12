@@ -89,10 +89,11 @@
                       (recur (conj seen-ns n) va (inc i) arity-r))
                     (throw (syntax/info "expect function arity ([...] ...)"
                                         arity)))
-                  
-                  (when (and (>= seen-va 0)
-                             (not= (max-parameter-count specs) seen-va))
-                    (wrong/other "only maximum arity can be variadic"))))
+
+                  (when (>= seen-va 0)
+                    (when (not= (max-parameter-count specs)
+                                (-> specs (aget seen-va) .at .parameter-count))
+                      (wrong/other "only maximum arity can be variadic")))))
               specs))]
     
     (let [[h & t] more]

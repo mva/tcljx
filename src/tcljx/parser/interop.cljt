@@ -134,6 +134,33 @@
                  (some? (aget a i)) false
                  :else (recur (dec i)))))))
 
+(defn- parse-parameters ^ArityType [^Class return-type ^Resolver rsv
+                                    ^vector paramv ^Class or-else-type]
+  (let [n-paramv (count paramv)
+        tail? (= '& (nth paramv (- n-paramv 2) nil))
+        n-params (- n-paramv (int tail?)) ;drop '& marker
+        n-fixed (- n-params (int tail?)) ;butlast if '& marker is present
+        ptypes (new Class/1 n-params)
+        pnames (new String/1 n-params)]
+    (dotimes [i n-fixed]
+      (let [param (nth paramv i)
+            psym (syntax/parameter-symbol param)]
+        (aset ptypes i (resolve-tag rsv psym or-else-type))
+        (aset pnames i (name psym))))
+    (if tail?
+      (let [param (peek paramv)
+            psym (syntax/parameter-symbol param)
+            tp (resolve-tag rsv psym nil)
+            variadic? (nil? tp)]
+        (aset ptypes n-fixed
+              (cond
+                (nil? tp) (when (some? or-else-type) clojure.lang.ISeq)
+                (.isArray tp) tp
+                :else (wrong/other "type of rest parameter must be array" tp)))
+        (aset pnames n-fixed (name psym))
+        (ArityType. return-type ptypes pnames (not variadic?) variadic?))
+      (ArityType. return-type ptypes pnames false false))))
+
 (letfn [(parse-return ^Class [^Resolver rsv ^vector paramv
                               ^Class or-else-type ^boolean accept-art?]
           (let [return-tag (tag-of paramv)]
@@ -142,20 +169,7 @@
                 type/auto-return-marker
                 (throw (syntax/info (str (wrong/q meta/auto-return-type)
                                          " not applicable in this context"))))
-              (resolve-class rsv return-tag or-else-type))))
-        (parse-parameters ^ArityType [^Class return-type ^Resolver rsv
-                                      ^vector paramv ^Class or-else-type]
-          (let [n (count paramv)
-                ptypes (new Class/1 n)
-                pnames (new String/1 n)
-                varargs? false]         ;FIXME...
-            (assert (not= '& (nth paramv (- n 2) nil)))
-            (dotimes [i (alength ptypes)]
-              (let [param (nth paramv i)
-                    psym (syntax/simple-symbol param)]
-                (aset ptypes i (resolve-tag rsv psym or-else-type))
-                (aset pnames i (name psym))))
-            (ArityType. return-type ptypes pnames varargs?)))]
+              (resolve-class rsv return-tag or-else-type))))]
   
   (defn parse-arity-type ^ArityType [^Resolver rsv paramv ^Class or-else-type
                                      ^boolean unnamed-fn?]
@@ -193,6 +207,9 @@
         (when-not (untagged? (first paramv))
           (throw (syntax/info "no type tag allowed for receiver parameter")))
         (aset (.parameter-types at) 0 owner) ;type of receiver
-        (ir/with-method-type at (if (unhinted-arity-type? at 1)
-                                     (select-method-by-arity at)
-                                     (select-matching-method at)))))))
+        (let [m (if (unhinted-arity-type? at 1)
+                  (select-method-by-arity at)
+                  (select-matching-method at))]
+          (when (not= (ir/translates-to-varargs? at) (.isVarArgs m))
+            (wrong/other "varargs mismatch for method " method-name))
+          (ir/with-method-type at m))))))

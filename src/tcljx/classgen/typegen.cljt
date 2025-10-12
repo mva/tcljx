@@ -65,13 +65,13 @@
 
 (defn- dt-virtual-methods ^void [^ClassBuilder cb ^MethodSpec/1 method-specs]
   (dotimes [i (alength method-specs)]
-    (let [spec (aget method-specs i)]
+    (let [spec (aget method-specs i)
+          flags (util/acc-varargs (ir/acc* public final) spec)]
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (emit/body xb spec -1))
            (.withMethodBody cb (.name spec)
                             (-> (util/mtd-of-arity-type (.at spec))
-                                (.dropParameterTypes 0 1))
-                            (ir/acc* public final))))))
+                                (.dropParameterTypes 0 1)) flags)))))
 
 (defn- missing-record-methods ^map [^FieldSpec/1 field-specs
                                     ^MethodSpec/1 method-specs]
@@ -94,14 +94,12 @@
                             ^ClassDesc this-class ^String nm
                             ^MethodTypeDesc mtd]
   (->> (^Consumer fn ^void [^CodeBuilder xb]
-        (.aload xb (.receiverSlot xb))
-        (dotimes [i (.parameterCount mtd)]
-          (.loadLocal xb (TypeKind/from (.parameterType mtd i))
-                      (.parameterSlot xb i)))
-        (-> (.invokedynamic xb (let [cp (.constantPool xb)]
-                                 (->> (.insertParameterTypes mtd 0 this-class)
-                                      (.nameAndTypeEntry cp nm)
-                                      (.invokeDynamicEntry cp bsm-entry))))
+        (-> (code/load-receiver xb)
+            (code/load-all-parameters mtd)
+            (.invokedynamic (let [cp (.constantPool xb)]
+                              (->> (.insertParameterTypes mtd 0 this-class)
+                                   (.nameAndTypeEntry cp nm)
+                                   (.invokeDynamicEntry cp bsm-entry))))
             (.return_ (TypeKind/from (.returnType mtd)))))
        (.withMethodBody cb nm mtd (ir/acc* public final synthetic))))
 
@@ -160,13 +158,13 @@
     (code/with-fields cb fields)
     ;; virtual methods provided by the reify* form
     (dotimes [i (alength specs)]
-      (let [spec (aget specs i)]
+      (let [spec (aget specs i)
+            flags (util/acc-varargs (ir/acc* public final) spec)]
         (->> (^Consumer fn ^void [^CodeBuilder xb]
               (emit/body xb spec -1))
              (.withMethodBody cb (.name spec)
                               (-> (util/mtd-of-arity-type (.at spec))
-                                  (.dropParameterTypes 0 1))
-                              (ir/acc* public final)))))
+                                  (.dropParameterTypes 0 1)) flags))))
     ;; private constructor <init>
     (code/constructor cb fields super-class
                       (ir/acc* private synthetic))

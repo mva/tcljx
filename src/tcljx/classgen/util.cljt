@@ -1,6 +1,6 @@
 (ns tcljx.classgen.util
   (:require (tcljx.data [reflect :as reflect] [ir :as ir]))
-  (:import (tcljx.data.ir CodeEmitter Entity ArityType)
+  (:import (tcljx.data.ir CodeEmitter Entity ArityType MethodSpec)
            (java.lang.classfile CodeBuilder TypeKind)
            (java.lang.constant ClassDesc MethodTypeDesc)
            (java.util Map)
@@ -11,6 +11,10 @@
   `(if (identical? Void/TYPE ~consumed-type)
      Void/TYPE
      (do ~@body)))
+
+(defn acc-varargs ^int [^int flags ^MethodSpec mspec]
+  (cond-> flags
+    (-> mspec .at .varargs?) (bit-or (ir/acc* varargs))))
 
 (def ^:private ZERO (object 0))
 (defn distinct-name ^String [^Map seen ^String nm]

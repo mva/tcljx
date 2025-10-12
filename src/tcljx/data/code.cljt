@@ -8,16 +8,22 @@
                        ConstantDescs)
    (java.util.function Consumer)))
 
+(defn load-receiver ^CodeBuilder [^CodeBuilder xb]
+  (.aload xb (.receiverSlot xb)))
+(defn load-all-parameters ^CodeBuilder [^CodeBuilder xb ^MethodTypeDesc mtd]
+  (dotimes [i (.parameterCount mtd)]
+    (.loadLocal xb (TypeKind/from (.parameterType mtd i)) (.parameterSlot xb i)))
+  xb)
+
 (defn load-parameter ^CodeBuilder [^CodeBuilder xb ^FieldSpec fs ^int param-no]
   (.loadLocal xb (TypeKind/from (.type-desc fs)) (.parameterSlot xb param-no)))
 (defn final-field? ^boolean [^FieldSpec fs]
   (not (zero? (bit-and (ir/acc* final) (.flags fs)))))
 (defn put-field ^CodeBuilder [^CodeBuilder xb ^FieldSpec fs ^int param-no]
-  (-> (.aload xb (.receiverSlot xb))
-      (load-parameter fs param-no)
+  (-> xb (load-receiver) (load-parameter fs param-no)
       (.putfield (.owner fs) (.field-name fs) (.type-desc fs))))
 (defn get-field ^CodeBuilder [^CodeBuilder xb ^FieldSpec fs]
-  (-> (.aload xb (.receiverSlot xb))
+  (-> xb (load-receiver)
       (.getfield (.owner fs) (.field-name fs) (.type-desc fs))))
 
 (defn with-field ^ClassBuilder [^ClassBuilder cb ^FieldSpec fs]
@@ -51,7 +57,7 @@
                  mtd-super (MethodTypeDesc/of ConstantDescs/CD_void super-params)]
              (dotimes [i (alength fields)]
                (put-field xb (aget fields i) (+ i n)))
-             (.aload xb (.receiverSlot xb))
+             (load-receiver xb)
              (dotimes [i n]
                (.loadLocal xb (TypeKind/from (aget super-params i))
                            (.parameterSlot xb i)))
