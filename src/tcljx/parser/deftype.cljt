@@ -52,31 +52,24 @@
                                 ^ClassDesc no-hint]
   (type-desc-of rsv (interop/tag-of form) void? no-hint))
 
-(defn- method-lookup-type ^MethodTypeDesc [^Resolver rsv msig]
-  ;; FIXME... port to approach used by parse-parameters?
-  (loop [acc (transient [])
-         [p :as params] (seq msig)]
-    (cond
-      (nil? params)
-      (-> (tag-desc-of rsv msig true ConstantDescs/CD_Object)
-          (MethodTypeDesc/of ^List (persistent! acc)))
-                
-      (= p '&)
-      (let [p (syntax/varargs-parameter params)
-            tp (tag-desc-of rsv p false nil)
-            tp (cond
-                 (nil? tp)
-                 (throw (syntax/info "method cannot have rest parameter"))
-                 (not (.isArray tp))
-                 (throw (wrong/wr-info "type of vararg parameter must be array"))
-                 :else tp)]
-        (if (nnext params)
-          (throw (syntax/info "junk after vararg parameter"))
-          (recur (conj! acc tp) nil)))  ;VARARGS flag is set by caller
-
-      :else
-      (let [tp (tag-desc-of rsv p false ConstantDescs/CD_Object)]
-        (recur (conj! acc tp) (next params))))))
+(defn- method-lookup-type ^MethodTypeDesc [^Resolver rsv ^vector paramv]
+  (let [n-paramv (count paramv)
+        tail? (= '& (nth paramv (- n-paramv 2) nil))
+        n-params (- n-paramv (int tail?)) ;drop '& marker
+        n-fixed (- n-params (int tail?)) ;butlast if '& marker is present
+        ptypes (new ClassDesc/1 n-params)
+        rtype (tag-desc-of rsv paramv true ConstantDescs/CD_Object)]
+    (dotimes [i n-fixed]
+      (let [psym (syntax/parameter-symbol (nth paramv i))]
+        (aset ptypes i (tag-desc-of rsv psym false ConstantDescs/CD_Object))))
+    (when tail?
+      (let [psym (syntax/parameter-symbol (peek paramv))]
+        (if-some [tp (tag-desc-of rsv psym false nil)]
+          (if (.isArray tp)
+            (aset ptypes n-fixed tp)
+            (wrong/other "type of vararg parameter must be array" tp))
+          (throw (syntax/info "method cannot have rest parameter")))))
+    (MethodTypeDesc/of rtype ptypes)))
 
 (defn parse-definterface* ^Expr [^Resolver rsv ^EntityFactory etf ^long fctx
                                  [_ itf-nm & opts+sigs]]

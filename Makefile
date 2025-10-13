@@ -33,12 +33,17 @@ run-main:
 	$(JAVA) $(JAVA_OPTS) -cp $(DEST_DIR) $(MAIN_NS).___ $(ARGS)
 
 # see https://egahlin.github.io/2023/05/30/views.html
+JFR=$(JAVA_BIN)jfr
 JFR_RECORDING=/tmp/recording.jfr
 run-jfr: compile
-	$(JAVA) -XX:StartFlightRecording:filename=$(JFR_RECORDING),settings=profile $(JAVA_OPTS) -cp $(DEST_DIR) $(MAIN_NS).___ $(ARGS)
-#	jfr summary $(JFR_RECORDING)
-	@jfr view allocation-by-site $(JFR_RECORDING)
-	@jfr view hot-methods $(JFR_RECORDING)
+	$(JAVA) -XX:StartFlightRecording:filename=$(JFR_RECORDING),method-timing="tcljx.classgen.util.LocalVariable" -cp ../bootstrap-tcljc/tcljc.rt:../bootstrap-tcljc/tcljc.core:$(DEST_DIR) $(RUN_TESTS_NS).___
+#	$(JAVA) -XX:StartFlightRecording:filename=$(JFR_RECORDING),settings=profile $(JAVA_OPTS) -cp $(DEST_DIR) $(MAIN_NS).___ $(ARGS)
+#	$(JFR) summary $(JFR_RECORDING)
+#	$(JFR) print --events jdk.MethodTrace --stack-depth 20 $(JFR_RECORDING)
+#	$(JFR) print --events jdk.MethodTiming --stack-depth 20 $(JFR_RECORDING)
+#	@$(JFR) view allocation-by-site $(JFR_RECORDING)
+#	@$(JFR) view hot-methods $(JFR_RECORDING)
+	@$(JFR) view method-timing $(JFR_RECORDING)
 
 # Call with "make test TEST=<scope>" (with <scope> being "ns-name" or
 # "ns-name/var-name") to only run tests from the given namespace or

@@ -110,9 +110,6 @@
    (Loader. dest-dir dyn-ld (get-rt-lookup app-ld) class-sink
             (ClassHierarchyResolver/ofResourceParsing dyn-ld))))
 
-(defn resolve-rt-class ^Class [^Loader loader ^ClassDesc cld]
-  (.resolveConstantDesc cld (.rt-lookup loader)))
-
 (deftype PackageBuilder [^Path pkg-dir
                          ^MethodHandles$Lookup lookup-in-pkg
                          ^Consumer class-sink
