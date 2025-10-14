@@ -7,6 +7,7 @@
 ;;; ------------------------------------------------------------------------
 
 (def Alias (ClassDesc/of "tinyclj.lang.Alias"))
+(def Macro (ClassDesc/of "tinyclj.lang.Macro"))
 (def RT (ClassDesc/of "tinyclj.lang.RT"))
 
 #_(def ClojureRT (ClassDesc/of "clojure.lang.RT"))

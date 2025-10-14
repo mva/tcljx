@@ -101,12 +101,12 @@
 ;;             (wr-info "unhandled exception" {} t)))
 ;;       (update-wr-data assoc :emitter/namespaces dep-map)))
 
-;; ;;; If `t` has a compiler error as one of its causes, then return the
-;; ;;; WrongInfo instance.  Otherwise, return nil.
-;; (defn first-wrong-info ^WrongInfo [^Throwable t]
-;;   (cond (nil? t) nil
-;;         (instance? tcljx.data.wrong.WrongInfo t) ^WrongInfo t
-;;         :else (recur (.getCause t))))
+;;; If `t` has a compiler error as one of its causes, then return the
+;;; WrongInfo instance.  Otherwise, return nil.
+(defn first-wrong-info ^WrongInfo [^Throwable t]
+  (cond (nil? t) nil
+        (instance? tcljx.data.wrong.WrongInfo t) ^WrongInfo t
+        :else (recur (.getCause t))))
 
 ;;; ------------------------------------------------------------------------
 

@@ -8,8 +8,8 @@
    (tcljx.classgen
     [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
     [segment :as segment] [emit :as emit] [insn :as insn]
-    [codegen :as codegen] [entity :as entity] [defgen :as defgen] [primitive :as primitive]
-    [build :as build] [fnenv :as fnenv]))
+    [codegen :as codegen] [entity :as entity] [fnenv :as fnenv]
+    [defgen :as defgen] [primitive :as primitive] [build :as build]))
   (:import
    (tcljx.data.ir Resolver NamespaceProvider ProvidedNamespace NmspClass
                   NamespaceBuilder Expr ExprFactory EntityFactory Parser)
@@ -20,9 +20,6 @@
    (java.lang.invoke MethodType MethodHandle MethodHandles)
    (java.nio.file Path)
    (java.util ArrayList)))
-
-(deftype ImplementationUnavailableException []
-  Exception)
 
 (def ^:private mt-Class-bytes (MethodType/methodType Class byte/1))
 (defn- get-ephemeral-factory ^MethodHandle [^PackageBuilder pkg-build]
@@ -35,7 +32,7 @@
 (deftype NmspBuilderImpl [^NamespaceProvider universe
                           ^String ns-str
                           ^ExprFactory code-gen
-                          ^EntityFactory entity-gen
+                          ^:unsynchronized-mutable ^EntityFactory entity-gen
                           ^:unsynchronized-mutable ^Segment segment
                           ^PackageBuilder pkg-build
                           ^:unsynchronized-mutable ^map globals
@@ -64,6 +61,19 @@
       (.valAt globals nm nil)
       (when-some [nmsp* (.lookup-namespace this nmsp)]
         (-> known-ns ^map (.valAt nmsp* nil) (.valAt nm nil)))))
+  (load-def-value [_ owner mangled-name value-type-exact]
+    (-> (try
+          (let [l (.lookup-in-pkg pkg-build)
+                owner* (.resolveConstantDesc owner l)
+                type* (.resolveConstantDesc value-type-exact l)]
+            (try
+              (.findStatic l owner* mangled-name (MethodType/methodType type*))
+              (catch NoSuchMethodException _
+                (.findStaticGetter l owner* mangled-name type*))))
+          (catch java.lang.ReflectiveOperationException _
+            (throw (tcljx.data.ir.ImplementationUnavailableException.))))
+        (.invoke))) ;unknown return type prevents use of `invokeExact`
+  
   (import-class [_ class]
     (set! imports (-> imports
                       (assoc (resolve/imported-short-name class) class)
@@ -83,9 +93,11 @@
         (.import-class this cl)
         (throw (wrong/info-class-not-found nm))))
     this)
-  (new-def-immutable [_ nm init]
+  (new-def-immutable [_ macro? nm init]
     #_(prn :new-def-immutable nm)
-    (let [p (defgen/promise-def-immutable (.segment-class segment) nm init)
+    (let [entity-id (if macro? ir/entity-id-def-macro ir/entity-id-def)
+          p (defgen/promise-def-immutable entity-id (.segment-class segment)
+              nm init)
           bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)
           init-ce (.emitter init)]
       (segment/stage-segment-task! segment p)
@@ -95,7 +107,8 @@
       (insn/mk-insn bnd (insn/expr-type init))))
   (new-def-mutable [_ nm init]
     #_(prn :new-def-mutable nm)
-    (let [p (defgen/promise-def-mutable (.segment-class segment) nm init)
+    (let [p (defgen/promise-def-mutable ir/entity-id-def
+              (.segment-class segment) nm init)
           bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)]
       (segment/stage-segment-task! segment p)
       (set! globals (assoc globals nm (.bound-to bnd)))
@@ -113,19 +126,24 @@
     ;; This method is only called for expression forms that do not
     ;; manipulate `known-ns` or `ns-alias`.  The `globals` at start is
     ;; stored as part of of `scope`.
-    (let [parser (form/mk-parser code-gen entity-gen this globals)
+    (let [globals-at-start globals
           imports-at-start imports
           segm-size-at-start (segment/size-segment-tasks segment)
           expr (try
-                 (parse/form parser fctx form)
-                 (catch ImplementationUnavailableException _
+                 (-> (form/mk-parser code-gen entity-gen this globals-at-start)
+                     (parse/form fctx form))
+                 (catch tcljx.data.ir.ImplementationUnavailableException _
                    ;; flush current segment into a class file, revert
                    ;; state, and try again to parse `form`
                    (.commit-segment-and-revert
-                    this segm-size-at-start (.bindings* parser)
-                    imports-at-start)
+                    this segm-size-at-start globals-at-start imports-at-start)
                    (set! ephemeral-of nil) ;may contain stale classes
-                   (parse/form parser fctx form)))] ;try again *once*
+                   (try
+                     (-> (form/mk-parser code-gen entity-gen this globals-at-start)
+                         (parse/form fctx form)) ;try again *once*
+                     (catch tcljx.data.ir.ImplementationUnavailableException _
+                       (wrong/other (str "cannot define and expand macro "
+                                         "in same top-level form"))))))]
       (segment/stage-segment-task! segment expr)
       this))
 
@@ -157,6 +175,7 @@
     
     ;; revert back to requested state & move to next segment
     (set! segment (segment/next-segment segment))
+    (set! entity-gen (entity/mk-clinit-etf ns-str (.tasks segment)))
     (set! globals then-globals)
     (set! imports then-imports)))
 

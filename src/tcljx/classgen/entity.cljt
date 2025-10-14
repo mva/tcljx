@@ -107,12 +107,11 @@
         (let [j (.source-idx (aget method-specs i))]
           (aset method-specs i (aget arity-methods j))))
       (.stage-part! this fn-p)))
-  (expr-itf-fn [_ method-specs itf-e2d unique-nm itf-class method
+  (expr-itf-fn [this method-specs itf-e2d unique-nm itf-class method
                 !itf-parts]
     (let [p (fngen/promise-itf-fn method-specs unique-nm itf-class method
                                   itf-e2d env-to-display !itf-parts nil)]
-      (.add !nested-parts p)
-      (.expr-of p)))
+      (.stage-part! this p)))
   (deftype-field [_ entity-id spec]
     (reify Entity
       (emit-insn* [_ xb _ _]
@@ -141,8 +140,7 @@
     (when (not= (.closure-level this) ir/closure-level-clinit)
       (throw (wrong/wr-info "cannot define class in this position")))
     (let [p (typegen/promise-definterface* eph-ncl)]
-      (.add !nested-parts p)
-      (.expr-of p)))
+      (.stage-part! this p)))
   (class-name-for-reify [this]
     (ClassDesc/of pkg-name (.unique-name! this "reify")))
   

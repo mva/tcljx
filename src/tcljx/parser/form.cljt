@@ -13,6 +13,55 @@
    (clojure.lang IMeta)
    (java.util ArrayList)))
 
+(letfn [(wrong-arity [^Throwable cause form]
+          (throw (wrong/wr-info (str "wrong number of args (" (dec (count form))
+                                     ") passed to macro") {} cause)))
+        (wrong-expand [^Throwable cause form]
+          (if-some [ex (wrong/first-wrong-info cause)]
+            (throw ex)                  ;discard any parent exceptions
+            (throw (wrong/wr-info (str "error while expanding macro "
+                                       (wrong/q (first form)))
+                                  {} cause))))
+
+        ;; True if `x`'s class has the same name as `cl`.  Use this
+        ;; if `x` may come from a different classloader, where class
+        ;; identity checks or `instance?` may fail.  `x` may be nil.
+        (classname? ^boolean [^Class cl ^Object x]
+          (= (.getName cl) (some-> x (.getClass) (.getName))))]
+
+  ;; Application and compiler share their runtime classes.  In this
+  ;; case, the macro function's `applyTo` can be invoked directly.
+  (defn apply-macro-direct [f form env]
+    (try
+      (let [form ^clojure.lang.ISeq form]
+        ;; mirrors steps in tinyclj.lang.RT/applyMacroMapped:
+        (->> (.more form)
+             (clojure.lang.Cons. env)
+             (clojure.lang.Cons. form)
+             (.applyTo ^tinyclj.lang.AFnMh f)))
+      (catch clojure.lang.ArityException e
+        (wrong-arity e form))
+      (catch Throwable t
+        (wrong-expand t form))))
+  
+  ;; Distinct runtime classes: go the long way via the handle for
+  ;; `rt/mhd-applyMacroMapped`.
+  #_(defn apply-macro-mapped [^MethodHandle apply-mh f form env]
+      (try
+        ;; Mapped macro invocation: translate the data
+        ;; representation along the chain of Compiler -> JVM ->
+        ;; Application/macro-expand -> JVM -> Compiler.
+        (.invoke apply-mh cpl-to-itf array-to-cpl f form env)
+        (catch Throwable t
+          (if (classname? clojure.lang.ArityException t)
+            (wrong-arity t form)
+            (wrong-expand t form)))))
+
+  (defn expand-macro [^Resolver rsv ^Entity macro ^seq form]
+    ;; FIXME... does not work in bootstrap scenario (see
+    ;; apply-macro-mapped vs apply-macro-direct)
+    (apply-macro-direct (.runtime-value macro rsv) form nil)))
+
 (deftype ParserImpl [^ExprFactory expr-factory
                      ^EntityFactory entity-factory
                      ^Resolver resolver
@@ -223,8 +272,8 @@
                 (let [nm (name op), nmsp (namespace op)]
                   (if (nil? nmsp)
                     (case nm
-                      ;; FIXME... implement these as proper primitive
-                      ;; functions
+                      ;; FIXME... implement this as proper primitive
+                      ;; function
                       "identity" (parse/arg this fctx (syntax/second form))
                       
                       "def" (def/parse-def this fctx form)
@@ -267,8 +316,11 @@
                                (parse-class-dot nm fctx form)
                                :else
                                (if-some [inv (parse/lookup this op)]
-                                 (invoke-entity fctx form inv
-                                                (parse/args this fctx (rest form)))
+                                 (if (ir/def-macro? inv)
+                                   (->> (expand-macro resolver inv form)
+                                        (.parse-form this fctx))
+                                   (->> (parse/args this fctx (rest form))
+                                        (invoke-entity fctx form inv)))
                                  (throw (wrong/info-unresolved op)))))
                     (parse-invocation-qname op fctx form nmsp nm)))
                 (parse-invocation-other op fctx form)))

@@ -2,33 +2,43 @@
   (:require
    (tcljx.data
     [config :as cfg] [reflect :as reflect] [context :as context]
-    [ir :as ir])
+    [wrong :as wrong] [ir :as ir])
    (tcljx.classgen
-    [classfile :as classfile] [util :as util] segment [runtime :as runtime]
+    [classfile :as classfile] [util :as util] segment [runtime :as rt]
     [constgen :as constgen] [insn :as insn] [emit :as emit]))
   (:import
    (tcljx.data.ir CodeEmitter Entity FnPromise BindableEntity ImmediateEntity
                   Binding)
    (tcljx.classgen.segment CodePromise)
    (tcljx.classgen.insn Insn)
-   (java.lang.classfile ClassBuilder FieldBuilder AnnotationElement
-                        Annotation)
+   (java.lang.classfile ClassBuilder ClassFileBuilder FieldBuilder MethodBuilder
+                        CodeBuilder AnnotationElement Annotation)
    (java.lang.classfile.attribute RuntimeVisibleAnnotationsAttribute)   
    (java.lang.constant MethodTypeDesc ClassDesc ConstantDescs)
    (java.util.function Consumer)))
 
-(deftype DefField [^int or-flags ^ClassDesc owner ^String mnm ^Class tp
-                   ^CodeEmitter init-ce]
+(defn- with-annotation-macro ^ClassFileBuilder [^ClassFileBuilder b]
+  (let [ae (new AnnotationElement/1 0)
+        ann (doto (new Annotation/1 1)
+              (aset 0 (Annotation/of rt/Macro ae)))]
+    (.with b (RuntimeVisibleAnnotationsAttribute/of ann))))
+
+(deftype DefField [^int entity-id ^int or-flags ^ClassDesc owner ^String mnm
+                   ^Class tp ^CodeEmitter init-ce
+                   ^:volatile-mutable ^Object __runtime-value]
   CodeEmitter
-  (emit-insn* [_ xb consumed-type _]
+  (emit-insn* [this xb consumed-type _]
     (util/with-void-empty-if-requested consumed-type
-      (.getstatic xb owner mnm (ir/value-type-exact init-ce tp))
+      (.getstatic xb owner mnm (.value-type-exact this))
       tp))
   ImmediateEntity
-  (value-type [_]
-    tp)
+  (value-type [this]
+    (when-not (ir/def-macro? this)
+      tp))
+  (value-type-exact [_]
+    (ir/value-type-exact init-ce tp))
   (entity-id [_]
-    ir/entity-id-def)
+    entity-id)
   (invoke-methods [_]
     (if (= or-flags (ir/acc* final))
       (ir/invoke-methods-of init-ce)
@@ -40,10 +50,10 @@
     (if (= or-flags (ir/acc* final))
       ir/bound-as-alias
       ir/bound-by-copy-to-local))
-  (emit-setup-code? [_ xb _ _]
+  (emit-setup-code? [this xb _ _]
     (or (constgen/emitter-empty? init-ce)
         (when (emit/insn? xb context/fctx-none tp init-ce)
-          (.putstatic xb owner mnm (ir/value-type-exact init-ce tp))
+          (.putstatic xb owner mnm (.value-type-exact this))
           true)))
   CodePromise
   (expr-of [this]
@@ -52,31 +62,42 @@
     nil)
   (!nested-parts [_]
     nil)
-  (generate-and-deliver [_ sb _]
+  (generate-and-deliver [this sb _]
     (->> (^Consumer fn ^void [^ClassBuilder cb]
-          (.withField cb mnm (ir/value-type-exact init-ce tp)
-                      (bit-or (ir/acc* public static)
-                              ;;... unless namespace private?
-                              or-flags)))
-         (.add-elements sb))))
-(defn- promise-field ^CodePromise [^int or-flags ^ClassDesc owner ^String nm
-                                   ^Class tp ^CodeEmitter init-ce]
-  (DefField. or-flags owner (cfg/munge-name nm) tp init-ce))
+          (->> (^Consumer fn ^void [^FieldBuilder fb]
+                (.withFlags fb (bit-or (ir/acc* public static)
+                                       ;;... unless namespace private?
+                                       or-flags))
+                (cond-> fb (ir/def-macro? this) (with-annotation-macro)))
+               (.withField cb mnm (.value-type-exact this))))
+         (.add-elements sb)))
+  (runtime-value [this rsv]
+    (if (some? __runtime-value)                  ;only caches non-nil values
+      __runtime-value
+      (->> (.load-def-value rsv owner mnm (.value-type-exact this))
+           (set! __runtime-value)))))
+(defn- promise-field ^CodePromise [^int entity-id ^int or-flags ^ClassDesc owner
+                                   ^String nm ^Class tp ^CodeEmitter init-ce]
+  (assert (some? init-ce))
+  (DefField. entity-id or-flags owner (cfg/munge-name nm) tp init-ce nil))
 
-(deftype DefMethod [^ClassDesc owner ^String mnm ^Class tp ^Entity init-ce]
+(deftype DefMethod [^int entity-id ^ClassDesc owner ^String mnm ^Class tp
+                    ^Entity init-ce
+                    ^:volatile-mutable ^Object __runtime-value]
   CodeEmitter
-  (emit-insn* [_ xb consumed-type _]
+  (emit-insn* [this xb consumed-type _]
     (util/with-void-empty-if-requested consumed-type
-      (let [tpd (ir/value-type-exact init-ce tp)]
+      (let [tpd (.value-type-exact this)]
         (.invokestatic xb owner mnm (MethodTypeDesc/of tpd))
         tp)))
   ImmediateEntity
-  (value-type [_]
-    tp)
+  (value-type [this]
+    (when-not (ir/def-macro? this)
+      tp))
   (value-type-exact [_]
-    (.value-type-exact init-ce))
+    (ir/value-type-exact init-ce tp))
   (entity-id [_]
-    ir/entity-id-def)
+    entity-id)
   (invoke-methods [_]
     (.invoke-methods init-ce))
   (invoke* [this fctx form _ m-idx xs]
@@ -93,30 +114,39 @@
     nil)
   (!nested-parts [_]
     nil)
-  (generate-and-deliver [_ sb _]
+  (generate-and-deliver [this sb _]
     (->> (^Consumer fn ^void [^ClassBuilder cb]
-          (let [tpd (ir/value-type-exact init-ce tp)]
-            (classfile/with-method-body-> cb
-              [mnm (MethodTypeDesc/of tpd) classfile/acc-method-static]
-              (emit/then-leave? context/fctx-none tp init-ce true))))
-         (.add-elements sb))))
-(defn- promise-method ^CodePromise [^ClassDesc owner ^String nm ^Class tp
-                                    ^Entity init-ce]
-  (DefMethod. owner (cfg/munge-name nm) tp init-ce)  )
+          (->> (^Consumer fn ^void [^MethodBuilder mb]
+                (cond-> mb (ir/def-macro? this) (with-annotation-macro))
+                (->> (^Consumer fn ^void [^CodeBuilder xb]
+                      (emit/then-leave? xb context/fctx-none tp init-ce true))
+                     (.withCode mb)))
+               (.withMethod cb mnm (MethodTypeDesc/of (.value-type-exact this))
+                            classfile/acc-method-static)))
+         (.add-elements sb)))
+  (runtime-value [this rsv]
+    (if (some? __runtime-value)         ;only caches non-nil values
+      __runtime-value
+      (->> (.load-def-value rsv owner mnm (.value-type-exact this))
+           (set! __runtime-value)))))
+(defn- promise-method ^CodePromise [^int entity-id ^ClassDesc owner ^String nm
+                                    ^Class tp ^Entity init-ce]
+  (DefMethod. entity-id owner (cfg/munge-name nm) tp init-ce nil))
 
-(deftype DefOfPromise [^ClassDesc owner ^String nm ^Class tp
+(deftype DefOfPromise [^int entity-id ^ClassDesc owner ^String nm ^Class tp
                        ^FnPromise init-ce
                        ^:unsynchronized-mutable ^BindableEntity __entity]
   CodeEmitter
   (emit-insn* [_ xb consumed-type then-leave?]
     (.emit-insn* __entity xb consumed-type then-leave?))
   ImmediateEntity
-  (value-type [_]
-    tp)
+  (value-type [this]
+    (when-not (ir/def-macro? this)
+      tp))
   (value-type-exact [_]
     (.value-type-exact __entity))
   (entity-id [_]
-    ir/entity-id-def)
+    entity-id)
   (invoke-methods [_]
     (.invoke-methods init-ce))
   (invoke* [this fctx form opt-f m-idx xs]
@@ -136,24 +166,30 @@
   (generate-and-deliver [_ sb env-factory]
     (let [ce* (.get-emit-entity init-ce)
           p (if (constgen/const? ce*)
-              (promise-method owner nm tp ce*)
-              (promise-field (ir/acc* final) owner nm tp ce*))]
+              (promise-method entity-id owner nm tp ce*)
+              (promise-field entity-id (ir/acc* final) owner nm tp ce*))]
       (set! __entity (-> p .expr-of .emitter))
-      (.generate-and-deliver p sb env-factory))))
+      (.generate-and-deliver p sb env-factory)))
+  (runtime-value [_ rsv]
+    (if (some? __entity)
+      (.runtime-value __entity rsv)
+      (throw (tcljx.data.ir.ImplementationUnavailableException.)))))
 
-(defn promise-def-immutable ^CodePromise [^ClassDesc owner ^String nm ^Insn init]
+(defn promise-def-immutable ^CodePromise [^int entity-id ^ClassDesc owner
+                                          ^String nm ^Insn init]
   (let [tp (insn/logical-type init), init-ce (insn/emitter init)]
     (cond
       (constgen/const? init-ce)
-      (promise-method owner nm tp init-ce)
+      (promise-method entity-id owner nm tp init-ce)
       (instance? FnPromise init-ce)
-      (DefOfPromise. owner nm tp init-ce nil)
+      (DefOfPromise. entity-id owner nm tp init-ce nil)
       :else
-      (promise-field (ir/acc* final) owner nm tp init-ce))))
+      (promise-field entity-id (ir/acc* final) owner nm tp init-ce))))
 
-(defn promise-def-mutable ^CodePromise [^ClassDesc owner ^String nm ^Insn init]
+(defn promise-def-mutable ^CodePromise [^int entity-id ^ClassDesc owner
+                                        ^String nm ^Insn init]
   (let [tp (insn/logical-type init), init-ce (insn/emitter init)]
-    (promise-field (ir/acc* volatile) owner nm tp init-ce)))
+    (promise-field entity-id (ir/acc* volatile) owner nm tp init-ce)))
 
 (defn promise-def-alias ^CodePromise [^String nm ^Entity other-ent
                                       ^String other-qname]
@@ -171,6 +207,6 @@
                     (let [ae (AnnotationElement/ofString "of" other-qname)]
                       (-> (.withFlags fb (ir/acc* public static final))
                           (.with (RuntimeVisibleAnnotationsAttribute/of
-                                  (Annotation/of runtime/Alias ae))))))
+                                  (Annotation/of rt/Alias ae))))))
                    (.withField cb mnm ConstantDescs/CD_Object)))
              (.add-elements sb))))))

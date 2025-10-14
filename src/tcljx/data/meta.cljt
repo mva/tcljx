@@ -10,10 +10,10 @@
   (when (instance? IMeta form)
     (get-line (.meta ^IMeta form))))
 
+;; Note: using `valAt` is slightly more direct than IFn.invoke() or
+;; RT.get().
 (defn get-tag [^map form-meta]
   (when (some? form-meta)
-    ;; Note: using `valAt` is slightly more direct than IFn.invoke()
-    ;; or RT.get().
     (.valAt form-meta :tag nil)))
 
 ;;; Return the source code meta information of `x`.  For non-empty

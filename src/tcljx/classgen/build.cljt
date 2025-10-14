@@ -48,6 +48,7 @@
                          ^ArrayList class-elements ^CodeEmitter/1 clinit-statms]
   (^Consumer fn ^void [^ClassBuilder cb]
    (-> (cfg/with-class-version cb)
+       (.withSuperclass (.super-class segm))
        (classfile/with-source-file source-file)
        (.withFlags segment-class-flags))
    (let [al class-elements]

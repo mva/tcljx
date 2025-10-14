@@ -9,6 +9,7 @@
 (defn parse-def ^Expr [^Parser parser ^long fctx [_ nm-sym & [init :as args]]]
   (let [nm (syntax/simple-symbol-str nm-sym)
         nm-meta (meta nm-sym)
+        macro? (boolean (:macro nm-meta))
         nm-tag (meta/get-tag nm-meta)
         x-init (cond-> (if (some? args)
                          (parse/form parser (context/of-progn-prefix fctx) init)
@@ -29,14 +30,16 @@
         (let [nmsp (parse/namespace-builder parser)]
           (cond
             (:redef nm-meta)
-            (.new-def-mutable nmsp nm x-init)
+            (do (when macro?
+                  (wrong/other ":macro and :redef are mutually exclusive"))
+                (.new-def-mutable nmsp nm x-init))
 
             (symbol? init)
             (let [ent ^Entity (.emitter x-init)]
               (if (of-immutable-def? ent)
                 (let [ns (.lookup-namespace (.resolver parser) (namespace init))]
                   (.new-def-alias nmsp nm ent (str ns "/" (name init))))
-                (.new-def-immutable nmsp nm x-init)))
+                (.new-def-immutable nmsp macro? nm x-init)))
 
             :else
-            (.new-def-immutable nmsp nm x-init)))))))
+            (.new-def-immutable nmsp macro? nm x-init)))))))

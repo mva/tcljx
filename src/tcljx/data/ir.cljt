@@ -118,6 +118,43 @@
 
 ;;; ------------------------------------------------------------------------
 
+;;; Raised if `expand-macro` is called on a def that has not been
+;;; defined into some segment class yet.
+(deftype ImplementationUnavailableException []
+  Exception)
+
+;;; Represents the current state of globals and namespace aliases at
+;;; this point, and the set of classes defined in the JVM classloader
+;;; at this time.  All sets of entities include the declarations done
+;;; before this point.  `lookup-global-qname` and `lookup-namespace`
+;;; never return entities declared after this point.  Because of
+;;; concurrency, `lookup-class` may return class instances defined in
+;;; parallel or at a later point.
+(definterface Resolver
+  (ns-str ^String [])                ;the name of this namespace
+  (globals ^map [])                  ;only call from namespace thread!
+  (lookup-namespace ^String [^String alias]) ;nil -> ns-str, not found -> nil
+
+  ;; Called by the reader to replace a syntax quoted simple name with
+  ;; its namespace qualified equivalent.  Returns nil if there is no
+  ;; such global name at this point in the namespace.
+  (lookup-global-qname ^symbol [^String nm])
+
+  ;; Look up class by alias or by name.  May cache resolved class
+  ;; names for the scope of the namespace.  Returns nil if not found.
+  (lookup-class ^Class [^String nm])
+  
+  ;; Returns the entity representing the def form for `nm` in
+  ;; namespace `nmsp`, or nil if no such binding exists.  Use nil as
+  ;; `nmsp` to refer to the current namespace.
+  (lookup-def ^Entity [^String nmsp ^String nm])
+  (load-def-value ^Object [^ClassDesc owner ^String name
+                           ^ClassDesc value-type-exact])
+  
+  ;; pre: Called from namespace thread.
+  (import-class ^void [^Class class])
+  (ephemeral-factory ^MethodHandle []))
+
 ;;; A named entity on the level of the code generator that exists at
 ;;; runtime, usually appearing as the "provide the value of the given
 ;;; name" operation of a bound name.  Exposes additional operations
@@ -160,8 +197,9 @@
 
   ;; Emits code taking one operand from the stack and overwriting the
   ;; entity's current value with it.
-  (emit-store ^CodeBuilder [^CodeBuilder xb])            ;optional
-  (emit-iinc ^CodeBuilder [^CodeBuilder xb ^int const])) ;optional
+  (emit-store ^CodeBuilder [^CodeBuilder xb])           ;optional
+  (emit-iinc ^CodeBuilder [^CodeBuilder xb ^int const]) ;optional
+  (runtime-value ^Object [^Resolver rsv])) ;only defined for defs
 
 ;;; Note: A function's AritySpec array is in source code order.
 (deftype AritySpec [^ArityType at ^seq body ^seq error-context])
@@ -212,12 +250,14 @@
   (bit-and 0xffff (.entity-id ent)))
 
 (def entity-id-constant (entity-id-of closure-level-constant))
-(def entity-id-def (entity-id-of closure-level-def))
-
+(def entity-id-def (entity-id-of closure-level-def 0))
+(def entity-id-def-macro (entity-id-of closure-level-def 1))
 
 ;;; An entity representing a `def` form of a namespace.
 (defn def-entity? ^boolean [^Entity ent]
   (= closure-level-def (closure-level ent)))
+(defn def-macro? ^boolean [^Entity ent]
+  (= entity-id-def-macro (.entity-id ent)))
 
 
 (def bound-by-copy-to-local 0) ;create local, store value, read local
@@ -313,35 +353,6 @@
 
 ;;; ------------------------------------------------------------------------
 
-;;; Represents the current state of globals and namespace aliases at
-;;; this point, and the set of classes defined in the JVM classloader
-;;; at this time.  All sets of entities include the declarations done
-;;; before this point.  `lookup-global-qname` and `lookup-namespace`
-;;; never return entities declared after this point.  Because of
-;;; concurrency, `lookup-class` may return class instances defined in
-;;; parallel or at a later point.
-(definterface Resolver
-  (ns-str ^String [])                ;the name of this namespace
-  (globals ^map [])                  ;only call from namespace thread!
-  (lookup-namespace ^String [^String alias]) ;nil -> ns-str, not found -> nil
-
-  ;; Called by the reader to replace a syntax quoted simple name with
-  ;; its namespace qualified equivalent.  Returns nil if there is no
-  ;; such global name at this point in the namespace.
-  (lookup-global-qname ^symbol [^String nm])
-
-  ;; Look up class by alias or by name.  May cache resolved class
-  ;; names for the scope of the namespace.  Returns nil if not found.
-  (lookup-class ^Class [^String nm])
-  
-  ;; Returns the entity representing the def form for `nm` in
-  ;; namespace `nmsp`, or nil if no such binding exists.  Use nil as
-  ;; `nmsp` to refer to the current namespace.
-  (lookup-def ^Entity [^String nmsp ^String nm])
-  
-  ;; pre: Called from namespace thread.
-  (import-class ^void [^Class class])
-  (ephemeral-factory ^MethodHandle []))
 
 ;;; ------------------------------------------------------------------------
 
@@ -389,7 +400,7 @@
   ;; Adds the new binding to the namespace.  Returns an expression
   ;; that initializes the binding with its value (if any).  Pass empty
   ;; expression as `init` if no intial value is provided.
-  (new-def-immutable ^Expr [^String nm ^Expr init])
+  (new-def-immutable ^Expr [^boolean macro? ^String nm ^Expr init])
   (new-def-mutable ^Expr [^String nm ^Expr init])
   (new-def-alias ^Expr [^String nm ^Entity other-ent ^String other-qname])
 
