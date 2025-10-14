@@ -1,0 +1,302 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.classgen.main-test
+  (:require [tcljx.classgen.bootstrap :refer [nmsp]]
+            [tcljx.alpha.ptest :refer :all]))
+
+(deftest main-void-no-arguments
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "-main~0" "()V")
+             (RETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "-main~0" "()V"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "main" "([Ljava/lang/String;)V")
+             (INVOKESTATIC _10 "-main" "()Ltinyclj/lang/StaticFn;")
+             (ALOAD_0)
+             (INVOKESTATIC RT "apply" "(Lclojure/lang/IFn;Ljava/lang/Object;)Ljava/lang/Object;")
+             (POP)
+             (RETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def -main (fn* -main ^void [] nil))]))))
+
+(deftest main-void-strings
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL VARARGS] "-main~1"
+                     "([Ljava/lang/String;)V")
+             ["LOCAL 0: String[] args"]
+             (RETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "-main~1" "([Ljava/lang/String;)V"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "main" "([Ljava/lang/String;)V")
+             (ALOAD_0)
+             (INVOKESTATIC _10 "-main~1" "([Ljava/lang/String;)V")
+             (RETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def -main (fn* -main ^void [& ^String/1 args] nil))]))))
+
+(deftest main-int-strings
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL VARARGS] "-main~1"
+                     "([Ljava/lang/String;)I")
+             ["LOCAL 0: String[] args"]
+             (ICONST_0)
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "-main~1" "([Ljava/lang/String;)I"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "main" "([Ljava/lang/String;)V")
+             (ALOAD_0)
+             (INVOKESTATIC _10 "-main~1" "([Ljava/lang/String;)I")
+             (POP)
+             (RETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def -main (fn* -main ^int [& ^String/1 args] 0))]))))
+
+(deftest main-long-strings
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL VARARGS] "-main~1"
+                     "([Ljava/lang/String;)J")
+             ["LOCAL 0: String[] args"]
+             (LCONST_0)
+             (LRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "-main~1" "([Ljava/lang/String;)J"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "main" "([Ljava/lang/String;)V")
+             (ALOAD_0)
+             (INVOKESTATIC _10 "-main~1" "([Ljava/lang/String;)J")
+             (POP2)
+             (RETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def -main (fn* -main ^long [& ^String/1 args] 0))]))))
+
+(deftest main-void-objects
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL VARARGS] "-main~1"
+                     "([Ljava/lang/Object;)V")
+             ["LOCAL 0: Object[] args"]
+             (RETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "-main~1" "([Ljava/lang/Object;)V"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "main" "([Ljava/lang/String;)V")
+             (ALOAD_0)
+             (INVOKESTATIC _10 "-main~1" "([Ljava/lang/Object;)V")
+             (RETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def -main (fn* -main ^void [& ^Object/1 args] nil))]))))
+
+(deftest main-void-vararg-objects
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL VARARGS] "-main~1"
+                     "([Ljava/lang/Object;)V")
+             ["LOCAL 0: Object[] args"]
+             (RETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "-main~1" "([Ljava/lang/Object;)V"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "main" "([Ljava/lang/String;)V")
+             (ALOAD_0)
+             (INVOKESTATIC _10 "-main~1" "([Ljava/lang/Object;)V")
+             (RETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def -main (fn* -main ^void [& ^Object/1 args] nil))]))))
+
+(deftest main-void-variadic
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "-main~1"
+                     "([Ljava/lang/Object;)V")
+             (ALOAD_0)
+             (INVOKESTATIC ArraySeq "create"
+                           "([Ljava/lang/Object;)Lclojure/lang/ArraySeq;")
+             (INVOKESTATIC . "-main~1" "(Lclojure/lang/ISeq;)V")
+             (RETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "-main~1" "(Lclojure/lang/ISeq;)V")
+             ["LOCAL 0: ISeq args"]
+             (RETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "-main~1" "([Ljava/lang/Object;)V"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "main" "([Ljava/lang/String;)V")
+             (ALOAD_0)
+             (INVOKESTATIC _10 "-main~1" "([Ljava/lang/Object;)V")
+             (RETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def -main (fn* -main ^void [& args] nil))]))))
+
+(deftest main-is-closure
+  (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/-main" nil "tinyclj/lang/AFnMh")
+            [(FIELD [PRIVATE FINAL] "n" "J")]
+            
+            [(METHOD [PUBLIC FINAL VARARGS] "fn1" "([Ljava/lang/String;)V")
+             ["LOCAL 0: -main -main"]
+             ["LOCAL 1: String[] args"]
+             (NEW Exception)
+             (DUP)
+             (ALOAD_0)
+             (GETFIELD . "n" "J")
+             (INVOKEDYNAMIC "_" "(J)Ljava/lang/String;" :bsm-concat ["\u0001"])
+             (INVOKESPECIAL Exception "<init>" "(Ljava/lang/String;)V")
+             (ATHROW)]
+            
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__arityOrNull"
+                     "(I)Ljava/lang/invoke/MethodHandle;")
+             (LDC [VIRTUAL . "fn1" "([Ljava/lang/String;)V"])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__directMethodHandles"
+                     "()[Ljava/lang/invoke/MethodHandle;")
+             (ICONST_1)
+             (ANEWARRAY "MethodHandle[]")
+             (DUP)
+             (ICONST_0)
+             (LDC [VIRTUAL . "fn1" "([Ljava/lang/String;)V"])
+             (AASTORE)
+             (ARETURN)]
+            
+            [(METHOD [PRIVATE SYNTHETIC] "<init>" "(Lclojure/lang/IPersistentMap;J)V")
+             (ALOAD_0)
+             (LLOAD_2)
+             (PUTFIELD . "n" "J")
+             (ALOAD_0)
+             (ALOAD_1)
+             (INVOKESPECIAL AFnMh "<init>" "(Lclojure/lang/IPersistentMap;)V")
+             (RETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "__create" "(J)Lpkg/ns0/-main;")
+             (NEW -main)
+             (DUP)
+             (ACONST_NULL)
+             (LLOAD_0)
+             (INVOKESPECIAL . "<init>" "(Lclojure/lang/IPersistentMap;J)V")
+             (ARETURN)]
+            
+            [(METHOD [PROTECTED FINAL SYNTHETIC] "__withMetaImpl"
+                     "(Lclojure/lang/IPersistentMap;)Lpkg/ns0/-main;")
+             (NEW -main)
+             (DUP)
+             (ALOAD_1)
+             (ALOAD_0)
+             (GETFIELD . "n" "J")
+             (INVOKESPECIAL . "<init>" "(Lclojure/lang/IPersistentMap;J)V")
+             (ARETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC FINAL] "-main" "Lpkg/ns0/-main;")]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (INVOKESTATIC System "nanoTime" "()J")
+             (LSTORE_0)
+             ["LOCAL 0: long n"]
+             (LLOAD_0)
+             (INVOKESTATIC -main "__create" "(J)Lpkg/ns0/-main;")
+             (PUTSTATIC . "-main" "Lpkg/ns0/-main;")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "main" "([Ljava/lang/String;)V")
+             (GETSTATIC _10 "-main" "Lpkg/ns0/-main;")
+             (ALOAD_0)
+             (INVOKEVIRTUAL -main "fn1" "([Ljava/lang/String;)V")
+             (RETURN)]]]       
+         (nmsp '[(ns pkg.ns0)
+                 (let* [n (System/nanoTime)]
+                   (def -main (fn* -main ^void [& ^String/1 args]
+                                (throw (Exception. (str n))))))]))))

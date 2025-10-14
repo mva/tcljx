@@ -28,6 +28,7 @@
 (def ObjectArray (.arrayType Object))
 (def ^:private Class ConstantDescs/CD_Class)
 (def ^:private String ConstantDescs/CD_String)
+(def StringArray (.arrayType String))
 
 (def ^:private BootstrapMethod (ClassDesc/of "tinyclj.lang.BootstrapMethod"))
 (def AFn (ClassDesc/of (name clnm-abstract-fn)))
@@ -95,6 +96,7 @@
 (def ^:private seq (ClassDesc/of (name clnm-seq)))
 (def pattern (ClassDesc/of "java.util.regex.Pattern"))
 (def ^:private iobj (ClassDesc/of (name clnm-iobj)))
+(def ^:private ifn (ClassDesc/of (name clnm-ifn)))
 
 ;;; used for coll-literal implementation (e.g. as part of compile-quote):
 (def ^:private Literal (ClassDesc/of "tinyclj.lang.Literal"))
@@ -112,3 +114,5 @@
 (def mtd-boolean-Object (MethodTypeDesc/of ConstantDescs/CD_boolean
                                            ConstantDescs/CD_Object))
 (def mtd-ArraySeq-objects (MethodTypeDesc/of ArraySeq ObjectArray))
+(def mtd-apply (MethodTypeDesc/of ConstantDescs/CD_Object
+                                  ifn ConstantDescs/CD_Object))

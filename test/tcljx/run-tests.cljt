@@ -16,12 +16,10 @@
                    xcmp-test try-test loop-test unboxing-test boxing-test
                    fn-member-test fn-test definterface-test itf-fn-test
                    deftype-test record-test reify-test letfn-test closure-test
-                   variadic-test)
+                   variadic-test main-test)
    
-   (tcljx #_namespace-test #_macro-test #_set-test
-          #_line-test #_require-test #_main-test
-
-          #_rtiow-nocore-test)
+   (tcljx  #_macro-test #_namespace-test #_set-test #_line-test #_require-test
+           #_rtiow-nocore-test)
    
    tcljx.main                      ;at least compile unused namespaces
    
@@ -67,13 +65,13 @@
     tcljx.classgen.letfn-test
     tcljx.classgen.closure-test
     tcljx.classgen.variadic-test
+    tcljx.classgen.main-test
     
-    #_tcljx.classgen.namespace-test
     #_tcljx.classgen.macro-test
+    #_tcljx.classgen.namespace-test
     #_tcljx.classgen.set-test
     #_tcljx.classgen.line-test
-    #_tcljx.classgen.require-test
-    #_tcljx.main-test]
+    #_tcljx.classgen.require-test]
 
   #_tcljx.rtiow-nocore-test)
 

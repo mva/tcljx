@@ -2,11 +2,11 @@
   (:require
    (tcljx.data [config :as cfg] [files :as files] [type :as type]
                [context :as context] [ir :as ir] [resolve :as resolve])
-   (tcljx.classgen [classfile :as classfile] [runtime :as rt]
-                   segment [emit :as emit] [fngen :as fngen])
+   (tcljx.classgen [classfile :as classfile] [runtime :as rt] [util :as util]
+                   segment [emit :as emit] [insn :as insn] [fngen :as fngen])
    [tinyclj.string :as str])
   (:import
-   (tcljx.data.ir CodeEmitter MethodSpec NmspClass)
+   (tcljx.data.ir CodeEmitter Entity MethodSpec NmspClass)
    (tcljx.classgen.classfile PackageBuilder)
    (tcljx.classgen.segment Segment CodePromise SegmentBuilder)
    (tcljx.classgen.fngen FnPromiseImpl)
@@ -59,7 +59,34 @@
     (^Consumer fn ^void [^CodeBuilder xb]
      (clinit-body xb segm clinit-statms)))))
 
-(defn capstone ^Consumer [^PackageBuilder pkg-build ^Segment segm]
+(defn- invoke-main? ^boolean [^Entity entry-main]
+  (when-some [mspecs (.invoke-methods entry-main)]
+    (let [at (-> mspecs (aget 0) .at)]
+      (and (= (alength mspecs) 1) (= (.parameter-count at) 1)
+           (ir/translates-to-varargs? at)
+           (or (.variadic? at)    ;String/1 converted to seq of String
+               (.isAssignableFrom (.parameter-type at 0) String/1))))))
+
+(def ^:private acc-main (ir/acc* public static final synthetic))
+(def ^:private mtd-main
+  (MethodTypeDesc/of ConstantDescs/CD_void rt/StringArray))
+(defn- with-main-invoke ^ClassBuilder [^ClassBuilder cb ^Entity entry-main]
+  (->> (^Consumer fn ^void [^CodeBuilder xb]
+        (let [x (.invoke* entry-main context/fctx-none nil entry-main 0
+                          insn/insns-main-args)] ;magical arguments instance
+          (emit/then-leave? xb context/fctx-none Void/TYPE (.emitter x) true)))
+       (.withMethodBody cb "main" mtd-main acc-main)))
+(defn- with-main-apply ^ClassBuilder [^ClassBuilder cb ^Entity entry-main]
+  (->> (^Consumer fn ^void [^CodeBuilder xb]
+        (emit/insn? xb context/fctx-none clojure.lang.IFn entry-main)
+        (-> (.aload xb (.parameterSlot xb 0))
+            (.invokestatic rt/RT "apply" rt/mtd-apply)
+            (.pop)
+            (.return_)))
+       (.withMethodBody cb "main" mtd-main acc-main)))
+
+(defn capstone ^Consumer [^PackageBuilder pkg-build ^Segment segm
+                          ^Entity entry-main]
   (let [req-str (if (cfg/core-lib? (.pkg-name segm))
                   ""            ;suppress internal details of core lib
                   ;; FIXME... use real requires
@@ -68,7 +95,11 @@
      (-> (cfg/with-class-version cb)
          (.withFlags segment-class-flags)
          (.withSuperclass (.super-class segm))
-         (with-requires req-str)))))
+         (with-requires req-str))
+     (when entry-main
+       (if (invoke-main? entry-main)
+         (with-main-invoke cb entry-main)
+         (with-main-apply cb entry-main))))))
 
 (def ^:private not-function (byte -2))  ;deftype, reify, itf fn
 (def ^:private fn-without-runtime-value (byte -1)) ;to FnFlyweight

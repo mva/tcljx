@@ -3,7 +3,7 @@
    (tcljx.data
     [config :as cfg] [wrong :as wrong] [context :as context] [member :as member]
     [type :as type] [ir :as ir] [reflect :as reflect])
-   (tcljx.classgen [emit :as emit] [constgen :as constgen]))
+   (tcljx.classgen util [emit :as emit] [constgen :as constgen]))
   (:import
    (tcljx.data.ir Expr Exprs CodeEmitter Entity Binding ArityType)
    (tcljx.data.member MemberHandle)
@@ -373,6 +373,9 @@
                         (.interfaceMethodRefEntry cp owner nat)
                         (.methodRefEntry cp owner nat))))))
 
+(def insns-main-args    ;hack to pass main's args[] directly to callee
+  (-> (mk-insn (tcljx.classgen.util.LocalVariable. String/1 0 nil 0) String/1)
+      (insns-of)))
 (defn emit-invoke-arity ^Class [^DirectMethodHandleDesc mhd ^ArityType at
                                 ^Insns args ^long fctx ^CodeBuilder xb]
   (let [vararg-tp (ir/vararg-type at)
@@ -385,10 +388,11 @@
                              0 fixed)
       ;; optionally: all vararg arguments
       (when (or (nil? vararg-tp)
-                (emit-array-of? xb vararg-tp (.emitters args) fixed))
+                (if (identical? insns-main-args args)
+                  (emit/insn? xb fctx String/1 (.emitter args 0))
+                  (emit-array-of? xb vararg-tp (.emitters args) fixed)))
         ;; the actual invoke instruction
-        (-> (emit/with-line-number xb fctx)
-            (invoke-mhd* mhd))
+        (-> xb (emit/with-line-number fctx) (invoke-mhd* mhd))
         (.return-type at)))))
 
 ;;; Invoke static runtime method without line number information.

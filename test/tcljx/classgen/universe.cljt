@@ -131,7 +131,7 @@
 
   (finish [this]
     (.commit-segment-and-revert this (segment/size-segment-tasks segment) globals imports)
-    (->> (build/capstone pkg-build segment)
+    (->> (build/capstone pkg-build segment (.lookup-def this nil "-main"))
          (ir/mk-nmsp-class (segment/capstone-class segment) (.super-class segment))
          (classfile/bwdi pkg-build))
     (ProvidedNamespace. ns-str))
