@@ -252,6 +252,7 @@
 (def entity-id-constant (entity-id-of closure-level-constant))
 (def entity-id-def (entity-id-of closure-level-def 0))
 (def entity-id-def-macro (entity-id-of closure-level-def 1))
+(def entity-id-def-primitive (entity-id-of closure-level-def 2))
 
 ;;; An entity representing a `def` form of a namespace.
 (defn def-entity? ^boolean [^Entity ent]
@@ -291,10 +292,11 @@
 ;;; description known at compilation time.  Applies to constants,
 ;;; namespace-level defs, and functions with an empty environment.  An
 ;;; immediate entity does not contribute to a closure's environment.
-(definterface ImmediateEntity :extends [Entity])
+(definterface ImmediateEntity
+  :extends [Entity]
+  (namespace-if-def ^String []))     ;nil if not a namespace-level def
 (defn immediate-entity? ^boolean [^CodeEmitter ce]
   (instance? ImmediateEntity ce))
-
 
 ;;; Counts the number of times a function definition or one of its
 ;;; names is used in the source code, minus the number of times it
@@ -584,6 +586,10 @@
   (with-bindings* ^Parser [^map bindings])
   (with-expr-factory ^Parser [^ExprFactory xf])
   (with-entity-factory ^Parser [^EntityFactory etf]))
+
+(defn def-from-this-namespace? ^boolean [^Entity ent ^Parser parser]
+  (when (instance? ImmediateEntity ent)
+    (= (.namespace-if-def ^ImmediateEntity ent) (-> parser .resolver .ns-str))))
 
 (defn exprs-of ^Exprs [^ExprFactory xf & ^Expr/1 xs*]
   (let [xs (.new-exprs xf (alength xs*))]

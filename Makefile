@@ -25,9 +25,11 @@ watch-and-run:
 	$(JAVA) $(TCLJC_OPTS) --watch $(MAIN_NS)/run
 
 
-# $(DEST_DIR) matches the compiler's default destination directory
+# $(DEST_DIR) matches the bootstrap(!) compiler's default destination
+# directory
 PROJECT_DIR ?= $(notdir $(PWD))
 DEST_DIR=/tmp/$(USER)/tcljc/$(PROJECT_DIR)
+TEST_OUT=/tmp/$(USER)/tcljx/$(PROJECT_DIR).test
 
 run-main:
 	$(JAVA) $(JAVA_OPTS) -cp $(DEST_DIR) $(MAIN_NS).___ $(ARGS)
@@ -54,14 +56,19 @@ test:
 # shared tcljc.rt/tinyclj.lang.RT whose markCoreInitialization() is
 # first called from tcljc.core/tinyclj.core._10.<clinit> and then
 # again in the running tests from tclj-dyn//tinyclj.core._10.<clinit>
-	$(JAVA) -cp ../bootstrap-tcljc/tcljc.rt:../bootstrap-tcljc/tcljc.core:$(DEST_DIR) $(RUN_TESTS_NS).___
+	$(JAVA) -p ../bootstrap-tcljc --add-modules tcljc.core -cp $(DEST_DIR) $(RUN_TESTS_NS).___
 # This variant works for regular applications:
 #	$(JAVA) $(JAVA_OPTS) -cp $(DEST_DIR) $(RUN_TESTS_NS).___
 watch-and-test:
 	$(JAVA) $(TCLJC_OPTS) --watch $(RUN_TESTS_NS)/run
 
+$(TEST_OUT)/ray.ppm:
+	$(JAVA) $(JAVA_OPTS) -cp $(TEST_OUT)/tcljx.classgen.rtiow-nocore-test/compile-rtiow-nocore-test tcljx.classgen.rtiow-nocore-ref.___ >"$@"
+	@echo "3cf6c9b9f93edb0de2bc24015c610d78  $@" | md5sum -c -
+run-rtiow-nocore-test: $(TEST_OUT)/ray.ppm
+
 clean:
-	rm -rf "$(DEST_DIR)"/* "$(DEST_DIR)"*.* *.class textflow__termios.out hs_err_pid*.log replay_pid*.log
+	rm -rf "$(DEST_DIR)"/* "$(TEST_OUT)"/* *.class textflow__termios.out hs_err_pid*.log replay_pid*.log
 
 print-line-count:
 	find src/tcljx -name "*.cljt" | grep -v src/tcljx/alpha/ | xargs wc -l | sort -n

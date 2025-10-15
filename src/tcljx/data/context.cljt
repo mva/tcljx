@@ -13,7 +13,7 @@
 (def ^:private flag-can-recur (bit-shift-left 1l 32))
 (defn can-recur? ^boolean [^long fctx]
   (not (zero? (bit-and flag-can-recur fctx))))
-(defn with-recur [^long fctx]
+(defn with-recur ^long [^long fctx]
   (bit-or fctx flag-can-recur))
 
 ;;; If set in a form context, then this form is in strict statement
@@ -38,15 +38,13 @@
 (def fctx-initial flag-statm-position)
 (def fctx-none 0l)           ;used as placeholder for "no line number"
 
-
+(def ^:private mask-line (dec (bit-shift-left 1l 32)))
+(def ^:private mask-flags (bit-not mask-line))
 (defn fctx-line ^int [^long fctx]
   (int fctx))
 
-(defn- mk-fctx ^long [^int line]
-  line)
-
 (defn update-line [^long fctx ^int line]
-  (mk-fctx line))
+  (bit-or (bit-and mask-flags fctx) (bit-and mask-line line)))
 (defn update-line-from-meta ^long [^long fctx form-meta]
   (if (some? form-meta)
     (if-some [line (.valAt ^map form-meta :line nil)]

@@ -58,10 +58,6 @@
 
 ;;; ------------------------------------------------------------------------
 
-;; (defn nmsp-rpath ^Path [^String ns-str]
-;;   (path-of (str (str/replace ns-str "." "/") source-suffix)))
-
-
 ;; (defn- path-seq [^Path p ^int max-depth ^Predicate pred]
 ;;   (try
 ;;     (-> p (Files/walk max-depth) (.filter pred) (.toArray) (seq))

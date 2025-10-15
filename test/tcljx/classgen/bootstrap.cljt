@@ -28,7 +28,7 @@
 ;;; this application has been started with.  Change this to the
 ;;; locally build module later, once some detail of tinyclj.rt changes
 ;;; for tcljx, then class initialization should fail.
-(def ^:private app-ld
+(def app-ld
   (let [
         ;; project-name (or (System/getenv "PROJECT_DIR")
         ;;                  (files/default-project-name))
@@ -41,7 +41,7 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- dest-dir-for-this-test ^Path []
+(defn dest-dir-for-this-test ^Path []
   (let [nm (ptest__impl/get-test-context-name)]
     (files/tmp-dest-dir (str "tcljx.test" "/" (namespace nm) "/" (name nm)))))
 

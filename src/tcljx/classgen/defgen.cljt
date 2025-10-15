@@ -45,6 +45,8 @@
       ir/invoke-methods-dynamic))
   (invoke* [this fctx form _ m-idx xs]
     (.invoke* ^Entity init-ce fctx form this m-idx xs))
+  (namespace-if-def [_]
+    (.packageName owner))
   BindableEntity
   (binding-mode-let [_]
     (if (= or-flags (ir/acc* final))
@@ -102,6 +104,8 @@
     (.invoke-methods init-ce))
   (invoke* [this fctx form _ m-idx xs]
     (.invoke* init-ce fctx form this m-idx xs))
+  (namespace-if-def [_]
+    (.packageName owner))
   BindableEntity
   (binding-mode-let [_]
     ir/bound-as-alias)
@@ -151,6 +155,8 @@
     (.invoke-methods init-ce))
   (invoke* [this fctx form opt-f m-idx xs]
     (.invoke* init-ce fctx form this m-idx xs))
+  (namespace-if-def [_]
+    (.packageName owner))
   BindableEntity
   (binding-mode-let [_]
     ir/bound-as-alias)

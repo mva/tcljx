@@ -220,6 +220,14 @@
                   #_else
                   (let [f (.invocation-of entity-factory inv form)]
                     (.invoke-arity expr-factory fctx form inv f args)))))
+            (parse-expand-or-invoke ^Expr [^symbol op ^long fctx ^seq form]
+              (if-some [inv (parse/lookup this op)]
+                (if (ir/def-macro? inv)
+                  (->> (expand-macro resolver inv form)
+                       (.parse-form this fctx))
+                  (->> (parse/args this fctx (rest form))
+                       (invoke-entity fctx form inv)))
+                (throw (wrong/info-unresolved op))))
             (parse-invocation-qname ^Expr [^symbol op ^long fctx ^seq form
                                            ^String nmsp ^String nm]
               ;; `op` is qualified symbol: either a reference to
@@ -239,13 +247,7 @@
                     (.invoke-static-member
                      expr-factory fctx true cl nm
                      (parse/args this fctx (rest form)))))
-                (condp = op
-                  'tinyclj.lang.primitive/list
-                  ;; FIXME... drop this later
-                  (parse-collection-literal fctx (rest form) nil)
-                  
-                  #_else
-                  (throw (wr-info-unresolved-qualified-sym op)))))
+                (parse-expand-or-invoke op fctx form)))
             (parse-invocation-other ^Expr [op ^long fctx ^seq form]
               ;; any non-symbol `op`
               (let [op (parse/arg this fctx (first form))
@@ -315,13 +317,7 @@
                                (= (.charAt nm (dec (.length nm))) \.)
                                (parse-class-dot nm fctx form)
                                :else
-                               (if-some [inv (parse/lookup this op)]
-                                 (if (ir/def-macro? inv)
-                                   (->> (expand-macro resolver inv form)
-                                        (.parse-form this fctx))
-                                   (->> (parse/args this fctx (rest form))
-                                        (invoke-entity fctx form inv)))
-                                 (throw (wrong/info-unresolved op)))))
+                               (parse-expand-or-invoke op fctx form)))
                     (parse-invocation-qname op fctx form nmsp nm)))
                 (parse-invocation-other op fctx form)))
             

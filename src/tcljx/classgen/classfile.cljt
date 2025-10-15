@@ -201,8 +201,8 @@
               (.findClass l (.replace (internal-name this-class) "/" ".")))))
 
       (when-some [sink (.class-sink pkg-build)]
-        (.accept sink ncl)
-        ncl))))
+        (.accept sink ncl))
+      ncl)))
 
 (defn- initialize ^NmspClass [^NmspClass ncl]
   ;; FIXME... disable this eventually? for development it is a

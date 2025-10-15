@@ -4,7 +4,8 @@
     [config :as cfg] [files :as files] [resolve :as resolve] [meta :as meta]
     [wrong :as wrong] [context :as context] [ir :as ir])
    (tcljx.parser
-    [form :as form] [parse :as parse] [namespace :as namespace])
+    [reader :as reader] [form :as form] [parse :as parse]
+    [namespace :as namespace])
    (tcljx.classgen
     [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
     [segment :as segment] [emit :as emit] [insn :as insn]
@@ -60,7 +61,8 @@
     (if (or (nil? nmsp) (= nmsp ns-str))
       (.valAt globals nm nil)
       (when-some [nmsp* (.lookup-namespace this nmsp)]
-        (-> known-ns ^map (.valAt nmsp* nil) (.valAt nm nil)))))
+        (when-some [globals ^map (.valAt known-ns nmsp* nil)]
+          (.valAt globals nm nil)))))
   (load-def-value [_ owner mangled-name value-type-exact]
     (-> (try
           (let [l (.lookup-in-pkg pkg-build)
@@ -118,7 +120,7 @@
     (let [p (defgen/promise-def-alias nm other-ent other-qname)]
       (segment/stage-segment-task! segment p)
       (set! globals (assoc globals nm other-ent))
-      (.expr-of p)))
+      insn/insn-empty)) ;alias can refer to macro or primitive function
   (load-file [this path-str]
     (assert false))
   
@@ -205,7 +207,20 @@
                   (.finish acc)
                   (recur (namespace/parse-top-level-form acc context/fctx-initial
                                                          (first forms))
-                         (next forms)))))]
+                         (next forms)))))
+
+            (build-namespace-reading ^ProvidedNamespace [^String ns-str]
+              (let [fb (-> (-> (Path/of "test")
+                               (.resolve (files/nmsp-rpath ns-str))
+                               (files/path-url)
+                               (slurp)
+                               (reader/mk-form-builder nil)))]
+                (loop [acc (mk-nmsp-builder ns-str), pos 0]
+                  (let [pos' (reader/push-1 pos fb acc)]
+                    (if (neg? pos')
+                      (.finish acc)
+                      (-> (namespace/parse-top-level-form acc context/fctx-initial (.pop fb))
+                          (recur pos')))))))]
       
       (let [a (new ProvidedNamespace/1 (alength ns-strs))]
         (dotimes [i (alength a)]
@@ -214,14 +229,18 @@
                      (when-some [ns-forms (ns-form-map ns-str)]
                        (let [pr-nmsp (build-namespace ns-str ns-forms)]
                          (set! known-ns (assoc known-ns ns-str pr-nmsp))
-                         pr-nmsp)))
+                         pr-nmsp))
+                     (build-namespace-reading ns-str))
                  (aset a i))))
         a))))
 
 ;;; No class files are written to disk if `dest-dir` is nil.
-(defn mk-universe ^NamespaceProvider [^map ns-form-map ^Loader loader]
-  (let [provided-ns (reduce dissoc
-                            {cfg/core-lib (ProvidedNamespace. cfg/core-lib)}
-                            (keys ns-form-map))
-        ns-alias {}]
-    (UniverseBuilder. loader ns-form-map provided-ns ns-alias)))
+(defn mk-universe
+  (^NamespaceProvider [^map ns-form-map ^Loader loader]
+   (let [provided-ns {cfg/primitive-ns-str primitive/primitive-nmsp-globals
+                      cfg/core-lib (ProvidedNamespace. cfg/core-lib)}]
+     (mk-universe ns-form-map loader
+                  (reduce dissoc provided-ns (keys ns-form-map)))))
+  (^NamespaceProvider [^map ns-form-map ^Loader loader ^map provided-ns]
+   (let [ns-alias {cfg/primitive-ns-str cfg/primitive-ns-str}]
+     (UniverseBuilder. loader ns-form-map provided-ns ns-alias))))

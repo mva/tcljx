@@ -1,4 +1,5 @@
 (ns tcljx.data.files
+  (:require [tinyclj.string :as str])
   (:import
    (java.net URL)
    (java.nio.file Path Files)
@@ -25,6 +26,9 @@
 (defn tmp-dest-dir ^Path [^String dir-name]
   (path-of (System/getProperty "java.io.tmpdir")
            (System/getProperty "user.name") "tcljx" dir-name))
+
+(defn nmsp-rpath ^Path [^String ns-str]
+  (path-of (str (str/replace ns-str "." "/") source-suffix)))
 
 ;;; ------------------------------------------------------------------------
 

@@ -169,7 +169,7 @@
            (INSTANCEOF IPersistentList)
            (IRETURN)]
          (asm-expr ^boolean [^Object x]
-                   (instanceof* list x))))
+                   (instanceof* clojure.lang.IPersistentList x))))
   
   (is (= '[["LOCAL 0: Object x"]
            (ALOAD_0)

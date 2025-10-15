@@ -8,7 +8,7 @@
    (tinyclj [string :as str]))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.ir CodeEmitter Entity Constant)
+   (tcljx.data.ir CodeEmitter Entity ImmediateEntity Constant)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile Opcode CodeBuilder TypeKind)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
@@ -16,15 +16,17 @@
 
 (deftype PrimitiveFnEntity []
   :abstract true
-  Entity
+  ImmediateEntity
   (emit-insn* [_ _ _ _]
     (throw (IllegalStateException.)))
   (value-type [_]
     nil)
   (entity-id [_]
-    ir/entity-id-def)
+    ir/entity-id-def-primitive)
   (invoke-methods [ _]
-    ir/invoke-methods-primitive-fn))
+    ir/invoke-methods-primitive-fn)
+  (namespace-if-def [_]
+    nil))
 
 (defmacro with-primitive-invoke [^vector paramv & body]
   `(reify PrimitiveFnEntity (~'invoke* ~paramv ~@body)))
@@ -567,6 +569,14 @@
                 (recur (cons dyn-mark rparts) (cons x dyn-args)
                        const-args (inc i))))))))))
 
+  (def list-primitive   ;matches InsnFactory.new-collection() for list
+    (with-primitive-invoke [_ fctx form _ _ args]
+      (let [args ^Insns args]
+        (if (insn/loadables? args)
+          (-> (constgen/collection (.emitters args) type/list false)
+              (insn/mk-insn type/list))
+          (insn/invoke-runtime resolve/literal-list args)))))
+
 ;;; ------------------------------------------------------------------------
 
 (def primitive-nmsp-globals
@@ -649,4 +659,5 @@
         ;; different code paths in total.
         (primitive "not" unary-not)
         (primitive "identical?" binary-identical)
+        (primitive "list" list-primitive)
         (primitive "str" string-concat))))
