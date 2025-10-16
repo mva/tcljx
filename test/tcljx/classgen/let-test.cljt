@@ -230,38 +230,72 @@
                                       (+ a b))))
                  (def three (three-fn))]))))
 
-;; (deftest macro-binding-test
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[STATIC . "f~1" "(I)I"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "f~1" "(I)I")
-;;              ["LOCAL 0: int n"]
-;;              (ILOAD_0)
-;;              (ICONST_1)
-;;              (INVOKESTATIC . "f$fn~1" "(II)I")
-;;              (IRETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "f$fn~1" "(II)I")
-;;              ["LOCAL 0: int n"]
-;;              ["LOCAL 1: int a"]
-;;              (ILOAD_0)
-;;              (ILOAD_1)
-;;              (IADD)
-;;              (IRETURN)]
-
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (def f (fn* f ^int [^int n]
-;;                              (let* [alias-fn fn]
-;;                                ((alias-fn ^int [^int a] (+ n a)) 1))))]))))
+(deftest macro-binding-test
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "fn~3"
+                     "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
+             (ALOAD_0)
+             (ALOAD_1)
+             (ALOAD_2)
+             (INVOKESTATIC ArraySeq "create"
+                           "([Ljava/lang/Object;)Lclojure/lang/ArraySeq;")
+             (INVOKESTATIC . "fn~3"
+                           "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "fn~3"
+                     "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
+             ["LOCAL 0: Object &form"]
+             ["LOCAL 1: Object &env"]
+             ["LOCAL 2: ISeq more"]
+             (LDC [:bsm-quote "symbol" "Lclojure/lang/Symbol;" ["fn*"]])
+             (ALOAD_2)
+             (INVOKESTATIC RT "cons"
+                           "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "fn" "()Ltinyclj/lang/StaticFn;")
+             (RuntimeVisibleAnnotations (Macro))
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "fn~3"
+                     "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_11" nil "pkg/ns0/_10")
+            [(METHOD [STATIC FINAL] "f$fn~1" "(II)I")
+             ["LOCAL 0: int n"]
+             ["LOCAL 1: int a"]
+             (ILOAD_0)
+             (ILOAD_1)
+             (IADD)
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(I)I")
+             ["LOCAL 0: int n"]
+             (ILOAD_0)
+             (ICONST_1)
+             (INVOKESTATIC . "f$fn~1" "(II)I")
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~1" "(I)I"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V") (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_11")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
+                     "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def ^:macro fn (fn* [&form &env & more]
+                                      (clojure.lang.RT/cons 'fn* more)))
+                 (def f (fn* f ^int [^int n]
+                             (let* [alias-fn fn]
+                               ((alias-fn ^int [^int a] (+ n a)) 1))))]))))
 
 (deftest global-var-alias-constant
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")

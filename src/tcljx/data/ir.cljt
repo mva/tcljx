@@ -253,6 +253,7 @@
 (def entity-id-def (entity-id-of closure-level-def 0))
 (def entity-id-def-macro (entity-id-of closure-level-def 1))
 (def entity-id-def-primitive (entity-id-of closure-level-def 2))
+(def entity-id-def-var (entity-id-of closure-level-def 3))
 
 ;;; An entity representing a `def` form of a namespace.
 (defn def-entity? ^boolean [^Entity ent]
@@ -355,9 +356,6 @@
 
 ;;; ------------------------------------------------------------------------
 
-
-;;; ------------------------------------------------------------------------
-
 (deftype ProvidedNamespace [^String ns-str]
   java.lang.Record)
 
@@ -404,8 +402,9 @@
   ;; expression as `init` if no intial value is provided.
   (new-def-immutable ^Expr [^boolean macro? ^String nm ^Expr init])
   (new-def-mutable ^Expr [^String nm ^Expr init])
+  (new-def-var ^Expr [^String nm ^Expr init ^Class tp-var ^boolean dynamic? ^Expr meta])
   (new-def-alias ^Expr [^String nm ^Entity other-ent ^String other-qname])
-
+  
   ;; FIXME... see tcljc/emitter/namespace.cljt
   ;; hack for dependency chain core_print.cljt
   ;; -> MultiFn.java -> tinyclj.core fns
@@ -509,10 +508,12 @@
   
   (invoke-arity ^Expr [^long fctx ^seq form ^Entity inv ^CodeEmitter f ^Exprs args])
   
-  ;; These methods return a constant expression when possible:
+  ;; This method returns a constant expression when possible:
   (attach-meta-to ^Expr [^Expr meta ^Expr arg])
+  
   (new-array ^Expr [^long fctx ^Class array-type ^Exprs dims])
-
+  (var-expr ^Expr [^Expr arg])
+  
   ;; ### basics
   
   (progn-expr ^Expr [^Exprs xs ^Expr x])
@@ -530,8 +531,6 @@
   
   ;; ### bindings
 
-  (assignment ^Expr [^Entity ent ^Expr value])
-
   (block-bindings ^Expr [^long fctx ^Binding/1 bindings ^boolean patch-letfn?
                          ^boolean recur-to-body? ^Expr body])
   
@@ -543,7 +542,6 @@
   (try-catch-finally ^Expr [^long fctx ^Exprs body+catches ^Class/1 catch-types
                             ^Exprs finally])
 
-  
   ;; ### interop
 
   (type-cast ^Expr [^long fctx ^Class target-type ^Expr arg])
@@ -564,6 +562,12 @@
   
   (instanceof-expr ^Expr [^long fctx ^Class type ^Expr arg])
   (throw-expr ^Expr [^long fctx ^Expr arg]))
+
+;;; Note: Factory methods return nil if operation is not supported.
+(definterface Assignable
+  :extends [CodeEmitter]
+  (set-expr* ^Expr [^long fctx ^Expr value]) ;implementing `set!`
+  (redef-expr* ^Expr [^long fctx ^Expr value])) ;implementint `def` assignment
 
 (definterface Parser
   (parse-form ^Expr [^long fctx form])

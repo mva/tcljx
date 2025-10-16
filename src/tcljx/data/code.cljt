@@ -17,8 +17,6 @@
 
 (defn load-parameter ^CodeBuilder [^CodeBuilder xb ^FieldSpec fs ^int param-no]
   (.loadLocal xb (TypeKind/from (.type-desc fs)) (.parameterSlot xb param-no)))
-(defn final-field? ^boolean [^FieldSpec fs]
-  (not (zero? (bit-and (ir/acc* final) (.flags fs)))))
 (defn put-field ^CodeBuilder [^CodeBuilder xb ^FieldSpec fs ^int param-no]
   (-> xb (load-receiver) (load-parameter fs param-no)
       (.putfield (.owner fs) (.field-name fs) (.type-desc fs))))

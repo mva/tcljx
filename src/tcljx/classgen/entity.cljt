@@ -1,13 +1,14 @@
 (ns tcljx.classgen.entity
   (:require
    (tcljx.data
-    [config :as cfg] [wrong :as wrong] [type :as type] [ir :as ir]
-    [resolve :as resolve] [reflect :as reflect] [code :as code])
+    [config :as cfg] [wrong :as wrong] [type :as type] [member :as member]
+    [ir :as ir] [resolve :as resolve] [reflect :as reflect] [code :as code])
    (tcljx.classgen
     [util :as util] [constgen :as constgen] [segment :as segment]
-    [insn :as insn] [fngen :as fngen] [typegen :as typegen]))
+    [emit :as emit] [insn :as insn] [fngen :as fngen] [typegen :as typegen]))
   (:import
-   (tcljx.data.ir CodeEmitter Entity MethodSpec EntityFactory BindableEntity)
+   (tcljx.data.ir CodeEmitter Entity Assignable MethodSpec
+                  EntityFactory BindableEntity)
    (tcljx.classgen.segment Display)
    (tcljx.classgen.insn Insn Insns)
    (tcljx.classgen.fngen FnPromiseImpl)
@@ -113,7 +114,8 @@
                                   itf-e2d env-to-display !itf-parts nil)]
       (.stage-part! this p)))
   (deftype-field [_ entity-id spec]
-    (reify Entity
+    (reify
+      BindableEntity
       (emit-insn* [_ xb _ _]
         (-> (code/load-receiver xb)
             (.getfield (.owner spec) (.field-name spec) (.type-desc spec)))
@@ -123,7 +125,24 @@
       (value-type-exact [_]
         (.type-desc spec))
       (entity-id [_]
-        entity-id)))
+        entity-id)
+      (binding-mode-let [_]
+        ir/bound-by-copy-to-local)      ;required unless final
+      
+      Assignable
+      (set-expr* [_ fctx value]
+        (let [nm (.field-name spec), tp (.type spec)]
+          (insn/ensure-assignable tp value)
+          (when (member/acc-final? (.flags spec))
+            (wrong/other (str "field " (wrong/q-as-symbol nm) " is final")))
+          (-> (^CodeEmitter fn [xb consumed-type _]
+               (code/load-receiver xb)
+               (when (emit/insn? xb fctx tp (.emitter value))
+                 (util/with-dup-x1-unless-void-> xb consumed-type tp
+                   (.putfield (.owner spec) nm (.type-desc spec)))))
+              (insn/mk-insn tp))))
+      (redef-expr* [_ fctx value]
+        nil)))
   (expr-deftype [this eph-ncl field-specs java-record? defrecord?
                  !dt-parts method-specs]
     (when (not= (.closure-level this) ir/closure-level-clinit)

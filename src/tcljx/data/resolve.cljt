@@ -145,8 +145,8 @@
 
 (defn method-exact ^seq [^seq acc ^boolean static? ^Class owner ^String nm
                          ^Class/1 atypes]
-  (letfn [(method-or-throw ^seq [^Class owner] ;throws NoSuchMethodException
-            (let [m (.getMethod owner nm atypes)] ;works for class and array
+  (letfn [(method-or-throw ^seq [^Class lookup] ;throws NoSuchMethodException
+            (let [m (.getMethod lookup nm atypes)] ;works for class and array
               (cond->> acc
                 (static-member? static? m)
                 (cons-executable-exact owner m))))]
@@ -154,7 +154,7 @@
       (method-or-throw owner)
       (catch NoSuchMethodException _
         (try     ;if owner is an interface, then try again with Object
-          (if (.isInterface owner)
+          (if (.isInterface owner)      ;FIXME... what about array?
             (method-or-throw Object)
             acc)
           (catch NoSuchMethodException _
@@ -346,14 +346,21 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn runtime-method ^MemberHandle [^Class owner ^String method-name ^Class/1 ptypes]
+(defn- runtime-method* ^MemberHandle [^boolean static? ^Class owner
+                                      ^String method-name ^Class/1 ptypes]
   ;; match excatly on varargs array type, and then adjust invocation
   ;; mode of the returned match
-  (let [ms (method-exact nil true owner method-name ptypes)
+  (let [ms (method-exact nil static? owner method-name ptypes)
         m ^MemberHandle (first ms)]
     (cond-> m
       (.isVarArgs ^Method (.member m))
       (member/with-invocation-mode member/invoke-tail-into-array))))
+(defn static-method ^MemberHandle [^Class owner ^String method-name
+                                   & ^Class/1 ptypes]
+  (runtime-method* true owner method-name ptypes))
+(defn virtual-method ^MemberHandle [^Class owner ^String method-name
+                                   & ^Class/1 ptypes]
+  (runtime-method* false owner method-name ptypes))
 
 ;;; ------------------------------------------------------------------------
 
@@ -442,20 +449,19 @@
                 (type/same? (.return-type m) return-type))
         (.member m)))))
 
-(defn virtual-method ^MemberHandle [^Class owner ^String nm & ^Class/1 ptypes]
-  (first (method-exact nil false owner nm ptypes)))
-
 ;;; ------------------------------------------------------------------------
 
 (letfn [(find-factory ^MemberHandle [^String method-name]
-          (runtime-method tinyclj.lang.Literal method-name
-                          (doto (new Class/1 1) (aset 0 Object/1))))]
+          (static-method tinyclj.lang.Literal method-name Object/1))]
   (def literal-vector (find-factory "vector")) ;type/vector
   (def literal-map (find-factory "map"))       ;type/map
   (def literal-set (find-factory "set"))       ;type/set
   (def literal-list (find-factory "list"))     ;type/list
   (def literal-with-meta
-    (runtime-method tinyclj.lang.Literal "with_meta"
-                    (doto (new Class/1 2)
-                      (aset 0 clojure.lang.IObj)
-                      (aset 1 clojure.lang.IPersistentMap)))))
+    (static-method tinyclj.lang.Literal "with_meta"
+                   clojure.lang.IObj clojure.lang.IPersistentMap))
+
+  (def create-var-2 (static-method clojure.lang.RT "var" String String))
+  (def create-var-3 (static-method clojure.lang.RT "var" String String Object))
+  (def set-meta (virtual-method clojure.lang.Var "setMeta" clojure.lang.IPersistentMap))
+  (def set-dynamic (virtual-method clojure.lang.Var "setDynamic")))

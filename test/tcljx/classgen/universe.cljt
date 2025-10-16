@@ -100,27 +100,38 @@
     (let [entity-id (if macro? ir/entity-id-def-macro ir/entity-id-def)
           p (defgen/promise-def-immutable entity-id (.segment-class segment)
               nm init)
-          bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)
+          ent (-> p .expr-of .emitter)
+          bnd (ir/mk-binding ent nm false)
           init-ce (.emitter init)]
       (segment/stage-segment-task! segment p)
       (set! globals (assoc globals nm (if (constgen/jvm-const? init-ce)
                                         init-ce
                                         (.bound-to bnd))))
-      (insn/mk-insn bnd (insn/expr-type init))))
+      (insn/bind-then-value bnd ent)))
   (new-def-mutable [_ nm init]
     #_(prn :new-def-mutable nm)
     (let [p (defgen/promise-def-mutable ir/entity-id-def
               (.segment-class segment) nm init)
+          ent (-> p .expr-of .emitter)
+          bnd (ir/mk-binding ent nm false)]
+      (segment/stage-segment-task! segment p)
+      (set! globals (assoc globals nm (.bound-to bnd)))
+      (insn/bind-then-value bnd ent)))
+  (new-def-var [_ nm init tp-var dynamic? meta]
+    #_(prn :new-def-var nm)
+    (let [p (defgen/promise-def-var (.segment-class segment) nm init
+              tp-var dynamic? meta)
           bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)]
       (segment/stage-segment-task! segment p)
       (set! globals (assoc globals nm (.bound-to bnd)))
-      (insn/mk-insn bnd (insn/expr-type init))))
+      (insn/bind-then-value bnd (.df p))))
   (new-def-alias [_ nm other-ent other-qname]
     #_(prn :new-def-alias nm)
     (let [p (defgen/promise-def-alias nm other-ent other-qname)]
       (segment/stage-segment-task! segment p)
       (set! globals (assoc globals nm other-ent))
       insn/insn-empty)) ;alias can refer to macro or primitive function
+  
   (load-file [this path-str]
     (assert false))
   

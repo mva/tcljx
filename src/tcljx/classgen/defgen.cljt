@@ -1,19 +1,20 @@
 (ns tcljx.classgen.defgen
   (:require
    (tcljx.data
-    [config :as cfg] [reflect :as reflect] [context :as context]
-    [wrong :as wrong] [ir :as ir])
+    [config :as cfg] [reflect :as reflect] [resolve :as resolve] [type :as type]
+    [member :as member] [context :as context] [wrong :as wrong] [ir :as ir])
    (tcljx.classgen
     [classfile :as classfile] [util :as util] segment [runtime :as rt]
     [constgen :as constgen] [insn :as insn] [emit :as emit]))
   (:import
    (tcljx.data.ir CodeEmitter Entity FnPromise BindableEntity ImmediateEntity
-                  Binding)
+                  Assignable Binding)
    (tcljx.classgen.segment CodePromise)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassBuilder ClassFileBuilder FieldBuilder MethodBuilder
-                        CodeBuilder AnnotationElement Annotation)
-   (java.lang.classfile.attribute RuntimeVisibleAnnotationsAttribute)   
+                        CodeBuilder AnnotationElement Annotation Signature)
+   (java.lang.classfile.attribute RuntimeVisibleAnnotationsAttribute
+                                  SignatureAttribute)   
    (java.lang.constant MethodTypeDesc ClassDesc ConstantDescs)
    (java.util.function Consumer)))
 
@@ -24,7 +25,7 @@
     (.with b (RuntimeVisibleAnnotationsAttribute/of ann))))
 
 (deftype DefField [^int entity-id ^int or-flags ^ClassDesc owner ^String mnm
-                   ^Class tp ^CodeEmitter init-ce
+                   ^Class tp ^CodeEmitter init-ce ^SignatureAttribute signature
                    ^:volatile-mutable ^Object __runtime-value]
   CodeEmitter
   (emit-insn* [this xb consumed-type _]
@@ -57,6 +58,18 @@
         (when (emit/insn? xb context/fctx-none tp init-ce)
           (.putstatic xb owner mnm (.value-type-exact this))
           true)))
+  Assignable
+  (set-expr* [_ fctx value]
+    nil)
+  (redef-expr* [this fctx value]
+    (when-not (member/acc-final? or-flags)
+      (insn/ensure-assignable (.value-type this) value)
+      (-> (^CodeEmitter fn [xb consumed-type _]
+           (when (emit/insn? xb fctx tp (.emitter value))
+             (util/with-dup-unless-void-> xb consumed-type tp
+               (.putstatic owner mnm (.value-type-exact this)))))
+          (insn/mk-insn tp))))
+  
   CodePromise
   (expr-of [this]
     (insn/mk-insn this (.value-type this)))
@@ -70,18 +83,22 @@
                 (.withFlags fb (bit-or (ir/acc* public static)
                                        ;;... unless namespace private?
                                        or-flags))
-                (cond-> fb (ir/def-macro? this) (with-annotation-macro)))
+                (cond-> fb
+                  (some? signature) (.with signature)
+                  (ir/def-macro? this) (with-annotation-macro)))
                (.withField cb mnm (.value-type-exact this))))
          (.add-elements sb)))
   (runtime-value [this rsv]
-    (if (some? __runtime-value)                  ;only caches non-nil values
+    (if (some? __runtime-value)         ;only caches non-nil values
       __runtime-value
       (->> (.load-def-value rsv owner mnm (.value-type-exact this))
            (set! __runtime-value)))))
 (defn- promise-field ^CodePromise [^int entity-id ^int or-flags ^ClassDesc owner
-                                   ^String nm ^Class tp ^CodeEmitter init-ce]
+                                   ^String nm ^Class tp ^CodeEmitter init-ce
+                                   ^SignatureAttribute signature]
   (assert (some? init-ce))
-  (DefField. entity-id or-flags owner (cfg/munge-name nm) tp init-ce nil))
+  (DefField. entity-id or-flags owner (cfg/munge-name nm) tp init-ce
+    signature nil))
 
 (deftype DefMethod [^int entity-id ^ClassDesc owner ^String mnm ^Class tp
                     ^Entity init-ce
@@ -173,7 +190,7 @@
     (let [ce* (.get-emit-entity init-ce)
           p (if (constgen/const? ce*)
               (promise-method entity-id owner nm tp ce*)
-              (promise-field entity-id (ir/acc* final) owner nm tp ce*))]
+              (promise-field entity-id (ir/acc* final) owner nm tp ce* nil))]
       (set! __entity (-> p .expr-of .emitter))
       (.generate-and-deliver p sb env-factory)))
   (runtime-value [_ rsv]
@@ -190,12 +207,12 @@
       (instance? FnPromise init-ce)
       (DefOfPromise. entity-id owner nm tp init-ce nil)
       :else
-      (promise-field entity-id (ir/acc* final) owner nm tp init-ce))))
+      (promise-field entity-id (ir/acc* final) owner nm tp init-ce nil))))
 
 (defn promise-def-mutable ^CodePromise [^int entity-id ^ClassDesc owner
                                         ^String nm ^Insn init]
   (let [tp (insn/logical-type init), init-ce (insn/emitter init)]
-    (promise-field entity-id (ir/acc* volatile) owner nm tp init-ce)))
+    (promise-field entity-id (ir/acc* volatile) owner nm tp init-ce nil)))
 
 (defn promise-def-alias ^CodePromise [^String nm ^Entity other-ent
                                       ^String other-qname]
@@ -216,3 +233,82 @@
                                   (Annotation/of rt/Alias ae))))))
                    (.withField cb mnm ConstantDescs/CD_Object)))
              (.add-elements sb))))))
+
+;;; ------------------------------------------------------------------------
+
+(deftype DefVarDeref [^DefField df ^Class deref-tp]
+  CodeEmitter
+  (emit-insn* [this xb consumed-type then-leave?]
+    (when (.emit-insn* df xb clojure.lang.Var then-leave?)
+      (.invokevirtual xb rt/Var "deref" rt/mtd-Object-void)
+      Object))
+  ImmediateEntity
+  (value-type [this]
+    deref-tp)
+  (value-type-exact [_]
+    (reflect/describe-class deref-tp))
+  (entity-id [_]
+    ir/entity-id-def-var)
+  (invoke-methods [_]
+    ir/invoke-methods-dynamic)
+  (namespace-if-def [_]
+    (.namespace-if-def df))
+  BindableEntity
+  (binding-mode-let [_]
+    ir/bound-by-copy-to-local)
+  (emit-setup-code? [this xb param-no name]
+    (.emit-setup-code? df xb param-no name))
+  Assignable
+  (set-expr* [_ fctx value]
+    (-> (^CodeEmitter fn [xb consumed-type _]
+         (.emit-insn* df xb clojure.lang.Var false)
+         (when (emit/insn? xb fctx deref-tp (.emitter value))
+           (.invokevirtual xb rt/Var "set" rt/mtd-Object-Object)
+           Object))
+        (insn/mk-insn deref-tp)))
+  (redef-expr* [_ fctx value]
+    (insn/ensure-assignable deref-tp value)
+    (-> (^CodeEmitter fn [xb consumed-type _]
+         (when (emit/insn? xb fctx clojure.lang.Var df)
+           (when (emit/insn? xb fctx Object (.emitter value))
+             (util/with-dup-unless-void-> xb consumed-type Object
+               (.invokevirtual rt/Var "bindRoot" rt/mtd-void-Object)))))
+        (insn/mk-insn deref-tp)))
+         
+  CodePromise
+  (expr-of [this]
+    (insn/mk-insn this (.value-type this)))
+  (child-methods [_]
+    nil)
+  (!nested-parts [_]
+    nil)
+  (generate-and-deliver [this sb env-factory]
+    (.generate-and-deliver df sb env-factory))
+  (runtime-value [this rsv]
+    (throw (IllegalStateException.))))
+
+(defn promise-def-var ^DefVarDeref [^ClassDesc owner ^String nm ^Insn init-var
+                                    ^Class tp-var ^boolean dynamic?
+                                    ^Insn x-meta]
+  (letfn [(create-var ^Insn []
+            (let [x-nmsp (insn/constant-insn (.packageName owner) String)
+                  x-nm (insn/constant-insn nm String)]
+              (if (constgen/emitter-empty? (.emitter init-var))
+                (insn/invoke-member resolve/create-var-2 nil
+                                    (insn/insns-of x-nmsp x-nm))
+                (insn/invoke-member resolve/create-var-3 nil
+                                    (insn/insns-of x-nmsp x-nm init-var)))))
+          (set-meta ^Insn [^Insn x]
+            (insn/invoke-member resolve/set-meta x (insn/insns-of x-meta)))
+          (set-dynamic ^Insn [^Insn x]
+            (insn/invoke-member resolve/set-dynamic x (insn/insns-of)))]
+    (let [init (cond-> (create-var)
+                 (some? x-meta) (set-meta)
+                 dynamic? (set-dynamic))
+          signature (-> (str "Lclojure/lang/Var<"
+                             (.descriptorString tp-var) ">;")
+                        (Signature/parseFrom)
+                        (SignatureAttribute/of))]
+      (-> (promise-field ir/entity-id-def (ir/acc* final) owner nm
+                         (.expr-type init) (.emitter init) signature)
+          (DefVarDeref. tp-var)))))

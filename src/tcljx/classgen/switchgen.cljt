@@ -53,8 +53,7 @@
 
 
 (def ^:private no-matching-clause
-  (resolve/runtime-method tinyclj.lang.RT "noMatchingClause"
-                          (doto (new Class/1 1) (aset 0 Object))))
+  (resolve/static-method tinyclj.lang.RT "noMatchingClause" Object))
 (defn invoke-no-matching-clause ^Insn [^Insn select ^long fctx]
   (insn/invoke-member no-matching-clause nil (insn/insns-of select) fctx))
 

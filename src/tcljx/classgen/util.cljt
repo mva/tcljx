@@ -1,16 +1,40 @@
 (ns tcljx.classgen.util
-  (:require (tcljx.data [reflect :as reflect] [ir :as ir]))
+  (:require (tcljx.data [type :as type] [reflect :as reflect] [ir :as ir]))
   (:import (tcljx.data.ir CodeEmitter Entity ArityType MethodSpec)
            (java.lang.classfile CodeBuilder TypeKind)
            (java.lang.constant ClassDesc MethodTypeDesc)
            (java.util Map)
            (java.util.function BiFunction)))
 
+(letfn [(two-slots? ^boolean [^Class tp] ;aka "is of category 2?"
+          (or (identical? Long/TYPE tp) (identical? Double/TYPE tp)))]
+  (defn pop ^CodeBuilder [^CodeBuilder xb ^Class on-stack-type]
+    ;; pre: `on-stack-type` is not Void/TYPE
+    (if (two-slots? on-stack-type) (-> xb .pop2) (-> xb .pop)))
+  (defn dup ^CodeBuilder [^CodeBuilder xb ^Class on-stack-type]
+    ;; pre: `on-stack-type` is not Void/TYPE
+    (if (two-slots? on-stack-type) (-> xb .dup2) (-> xb .dup)))
+  (defn dup-x1 ^CodeBuilder [^CodeBuilder xb ^Class on-stack-type]
+    ;; pre: `on-stack-type` is not Void/TYPE, value2 is of category 1
+    (if (two-slots? on-stack-type) (-> xb .dup2_x1) (-> xb .dup_x1))))
+
 (defmacro with-void-empty-if-requested [consumed-type & body]
   (assert (symbol? consumed-type))
-  `(if (identical? Void/TYPE ~consumed-type)
+  `(if (type/void? ~consumed-type)
      Void/TYPE
      (do ~@body)))
+
+(defmacro with-dup-unless-void-> [xb consumed-type on-stack-type body-expr]
+  `(let [xb# ~xb, on-stack-type# ~on-stack-type]
+     (if (type/void? ~consumed-type)
+       (do (-> xb# ~body-expr) Void/TYPE)
+       (do (-> xb# (dup on-stack-type#) ~body-expr) on-stack-type#))))
+
+(defmacro with-dup-x1-unless-void-> [xb consumed-type on-stack-type body-expr]
+  `(let [xb# ~xb, on-stack-type# ~on-stack-type]
+     (if (type/void? ~consumed-type)
+       (do (-> xb# ~body-expr) Void/TYPE)
+       (do (-> xb# (dup-x1 on-stack-type#) ~body-expr) on-stack-type#))))
 
 (defn acc-varargs ^int [^int flags ^MethodSpec mspec]
   (cond-> flags

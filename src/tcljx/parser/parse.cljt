@@ -1,5 +1,5 @@
 (ns tcljx.parser.parse
-  (:require (tcljx.data [meta :as meta] [wrong :as wrong] [ir :as ir]
+  (:require (tcljx.data [config :as cfg] [wrong :as wrong] [ir :as ir]
                         [context :as context]))
   (:import (tcljx.data.ir Resolver NamespaceBuilder Entity Binding
                           Expr Exprs ExprFactory Parser AritySpec MethodSpec)
@@ -31,6 +31,20 @@
         (.set xs i (form parser fctx' (first forms)))
         (recur (inc i) (next forms))))
     xs))
+
+(defn meta ^Expr [^Parser parser ^long parent-fctx ^map m ^Expr or-else]
+  (letfn [(quote-value-of ^map [^map m ^keyword k]
+            (if-some [e (find m k)]
+              (assoc m k (list cfg/sym-quote (val e)))
+              m))]
+    (if (some? m)
+      ;; Problem: Cannot evaluate the `foo` in a meta map like {:tag
+      ;; foo}.  E.g. `int` would refer to a primitive function and
+      ;; does not have a value.  Solution: Quote the values of :tag
+      ;; and :param-tags map entries to retain any symbol values.
+      (->> (-> m (quote-value-of :tag) (quote-value-of :param-tags))
+           (arg parser parent-fctx))
+      or-else)))
 
 ;; Takes a seq of forms, where only the last form pushes a value to
 ;; the operand stack.  Delegates to `form`, clearing

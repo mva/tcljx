@@ -36,7 +36,7 @@
     (4 5) (- cmp-opcd 2)))              ;gt -> lt, le -> ge
 
 (defn- some-code? ^boolean [^CodeEmitter ce ^Class consumed-type]
-  (not (and (type/same? Void/TYPE consumed-type)
+  (not (and (type/void? consumed-type)
             (or (constgen/emitter-empty? ce) (constgen/const? ce)))))
 
 ;;; Turn a branching instruction IFXXX into a complete conditional
@@ -426,8 +426,7 @@
 ;;; ------------------------------------------------------------------------
 
 (def rt-boolean-cast
-  (resolve/runtime-method clojure.lang.RT "booleanCast"
-                          (doto (new Class/1 1) (aset 0 Object))))
+  (resolve/static-method clojure.lang.RT "booleanCast" Object))
 
 ;; Implements Clojure's idea of a "logically true" expression.
 (defn logical-truth ^Insn [^Insn arg ^long fctx]
@@ -438,7 +437,7 @@
       
       (.isPrimitive arg-tp)
       ;; void is false, other non-boolean primitive types are true
-      (insn/prog2 arg (insn/insn-boolean (not (type/same? Void/TYPE arg-tp))))
+      (insn/prog2 arg (insn/insn-boolean (not (type/void? arg-tp))))
 
       ;; arg is reference; important: any nil value is logically false
       (constgen/entity-null? (.emitter arg)) ;argument is literal nil

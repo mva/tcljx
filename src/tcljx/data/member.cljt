@@ -1,6 +1,9 @@
 (ns tcljx.data.member
   (:import (java.lang.reflect Executable Field Member Modifier)))
 
+(def acc-static? Modifier/isStatic)
+(def acc-final? Modifier/isFinal)
+
 (def invoke-polymorphic -1) ;tail arguments & return type are polymorphic
 (def invoke-standard 0)     ;regular invocation
 (def invoke-tail-into-array 1)         ;pack tail arguments into array
@@ -13,9 +16,9 @@
   java.lang.Record)
 
 (defn mk-match ^MemberHandle [^Class owner ^Member member ^Class/1 parameter-types
-                        ^Class return-type ^int invocation-mode]
+                              ^Class return-type ^int invocation-mode]
   (MemberHandle. (if (.isArray owner) Object owner)
-          member parameter-types return-type invocation-mode))
+                 member parameter-types return-type invocation-mode))
 
 (defn with-invocation-mode ^MemberHandle [^MemberHandle m ^int invocation-mode]
   (MemberHandle. (.owner m) (.member m) (.parameter-types m) (.return-type m)
@@ -23,9 +26,10 @@
 
 (defn field? ^boolean [^MemberHandle m]
   (instance? Field (.member m)))
-(defn static-field? ^boolean [^MemberHandle m]
-  (let [member (.member m)] (and (instance? Field member)
-                                 (Modifier/isStatic (.getModifiers member)))))
+(defn static? ^boolean [^MemberHandle m]
+  (acc-static? (.getModifiers (.member m))))
+(defn final? ^boolean [^MemberHandle m]
+  (acc-final? (.getModifiers (.member m))))
 (defn varargs? ^boolean [^MemberHandle m]
   (and (instance? Executable (.member m)) (.isVarArgs ^Executable (.member m))))
 

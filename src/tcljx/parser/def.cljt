@@ -4,20 +4,24 @@
                [ir :as ir] [type :as type])
    (tcljx.parser [syntax :as syntax] [interop :as interop] [parse :as parse]))
   (:import
-   (tcljx.data.ir Expr Entity ImmediateEntity Parser)))
+   (tcljx.data.ir Expr Entity ImmediateEntity Assignable Parser)))
 
 (defn parse-def ^Expr [^Parser parser ^long fctx [_ nm-sym & [init :as args]]]
   (let [nm (syntax/simple-symbol-str nm-sym)
         nm-meta (meta nm-sym)
         macro? (boolean (:macro nm-meta))
-        nm-tag (meta/get-tag nm-meta)]
+        redef? (boolean (:redef nm-meta))
+        nm-tag (meta/get-tag nm-meta)
+        nm-tp (when (some? nm-tag)
+                (interop/parse-type-symbol (.resolver parser) nm-tag))
+        nmsp (parse/namespace-builder parser)]
     (syntax/empty-tail (next args))
     
     (letfn [(x-init ^Expr []
               (cond-> (if (some? args)
                         (parse/form parser (context/of-progn-prefix fctx) init)
                         (.empty-expr (.expr-factory parser)))
-                (some? nm-tag) (interop/cast-to-tag parser fctx nm-tag)))
+                (some? nm-tag) (interop/cast-to-type parser fctx nm-tp)))
             (of-immutable-def? ^boolean [^Entity ent] ;pre: `init` is symbol
               (and (ir/immediate-entity? ent)
                    (= (ir/binding-mode-let ent) ir/bound-as-alias)
@@ -30,11 +34,25 @@
                 (when (ir/def-from-this-namespace? ent parser)
                   ent)))]
       (if-some [prior-def (prior-definition nm)]
-        (.assignment (.expr-factory parser) prior-def (x-init))
-
-        (let [nmsp (parse/namespace-builder parser)]
+        (or (when (instance? Assignable prior-def)
+              (.redef-expr* ^Assignable prior-def fctx (x-init)))
+            (wrong/other "target of redef must be unbound or :redef"))
+        
+        (do
+          (when-not (= (-> parser .entity-factory .closure-level)
+                       ir/closure-level-clinit)
+            (wrong/other (str "cannot " (wrong/q 'def) " in this position")))
           (cond
-            (:redef nm-meta)
+            (:var nm-meta)
+            (let [x-meta (parse/meta parser fctx nm-meta nil)]
+              (when macro?
+                (wrong/other ":var and :macro are mutually exclusive"))
+              (when redef?
+                (wrong/other ":var and :redef are mutually exclusive"))
+              (.new-def-var nmsp  nm (x-init) (or nm-tp Object)
+                            (boolean (:dynamic nm-meta)) x-meta))
+            
+            (or redef? (nil? args))
             (do (when macro?
                   (wrong/other ":macro and :redef are mutually exclusive"))
                 (.new-def-mutable nmsp nm (x-init)))

@@ -8,14 +8,8 @@
   (identical? a b))
 (defn same-name? ^boolean [^Class a ^Class b] ;if from different loaders
   (identical? (.getName a) (.getName b)))
-
-#_(defn numeric? ^boolean [^Class tp]
-    (and (.isPrimitive tp) (not (or (identical? Character/TYPE tp)
-                                    (identical? Boolean/TYPE tp)
-                                    (identical? Void/TYPE tp)))))
-
-#_(defn reference? ^boolean [^Class tp]
-    (not (.isPrimitive tp)))
+(defn void? ^boolean [^Class tp]
+  (identical? Void/TYPE tp))
 
 ;;; From the point of view of Clojure there are no statements, only
 ;;; expressions producing some value.  Accordingly, the Java type
@@ -29,12 +23,11 @@
 ;;; the logical JVM type `void` and the type `nil` denoting an
 ;;; instruction that does not return.
 (def polymorphic Void/TYPE)
-(defn polymorphic? ^boolean [^Class expr-type]
-  (identical? Void/TYPE expr-type))
+(def polymorphic? void?) ;on the level of Clojure code, `void` means polymorphic
 
 (defn monomorphic-primitive? ^boolean [^Class expr-type]
   ;; FIXME... is the "primitive" in the name implied and should be dropped?
-  (and (.isPrimitive expr-type) (not (identical? Void/TYPE expr-type))))
+  (and (.isPrimitive expr-type) (not (polymorphic? expr-type))))
 
 ;;; The type of the special reference `nil`.  Also known as nullptr.
 (def poly-reference Void)
@@ -327,7 +320,7 @@
         ;; here holds: (not (identical? ptype atype))
 
         (polymorphic? ptype)   ;can turn any expression into statement
-        ;; here holds: (not (instance? Void/TYPE ptype))
+        ;; here holds: (not (void? ptype))
         
         (if (.isPrimitive atype)
           (or (polymorphic? atype) (from-primitive? (of atype)))

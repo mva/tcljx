@@ -1,8 +1,8 @@
 (ns tcljx.classgen.fngen
   (:require
-   (tcljx.data [config :as cfg] [context :as context] member [type :as type]
-               [reflect :as reflect] [resolve :as resolve] [ir :as ir]
-               [code :as code])
+   (tcljx.data [config :as cfg] [context :as context] [member :as member]
+               [type :as type] [reflect :as reflect] [resolve :as resolve]
+               [ir :as ir] [code :as code])
    (tcljx.classgen [classfile :as classfile] [runtime :as rt] segment
                    [util :as util] [emit :as emit] [constgen :as constgen]
                    [insn :as insn] [condgen :as condgen] [fnenv :as fnenv]))
@@ -33,7 +33,7 @@
 
 (defn- bridge-to-iseq [^ClassBuilder cb ^int flags
                        ^DirectMethodHandleDesc mhd-iseq]
-  (let [virtual? (zero? (bit-and flags (ir/acc* static)))
+  (let [virtual? (not (member/acc-static? flags))
         mtd-iseq (cond-> (.invocationType mhd-iseq)
                    virtual? (.dropParameterTypes 0 1))
         n (.parameterCount mtd-iseq)
@@ -459,7 +459,7 @@
               (loop [param-no 0, i 0]
                 (when (< i (alength fields))
                   (let [fs (aget fields i)]
-                    (recur (if (code/final-field? fs)
+                    (recur (if (member/acc-final? (.flags fs))
                              param-no
                              (do (code/put-field xb fs param-no)
                                  (inc param-no)))

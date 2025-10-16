@@ -1,8 +1,8 @@
 (ns tcljx.parser.deftype
   (:require
    (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
-               [context :as context] [reflect :as reflect] [ir :as ir]
-               [code :as code])
+               [context :as context] [reflect :as reflect] [member :as member]
+               [ir :as ir] [code :as code])
    (tcljx.parser [syntax :as syntax] [interop :as interop] [parse :as parse]))
   (:import
    (tcljx.data.ir Expr Binding ArityType AritySpec MethodSpec FieldSpec NmspClass
@@ -188,7 +188,7 @@
                           java-record? (ir/acc* private final)
                           :else (ir/acc* public final))]
               (when java-record?
-                (when (zero? (bit-and flags (ir/acc* final)))
+                (when-not (member/acc-final? flags)
                   (wrong/other (str "java.lang.Record cannot have mutable field "
                                     (wrong/q sym))))
                 (when (contains? prohibited-record-fields nm)

@@ -2,7 +2,7 @@
   (:require
    (tcljx.data [context :as context] [type :as type] [ir :as ir]
                [reflect :as reflect])
-   (tcljx.classgen util))
+   (tcljx.classgen [util :as util]))
   (:import
    (tcljx.data.type Wrapper)
    (tcljx.data.ir CodeEmitter Entity MethodSpec)
@@ -34,20 +34,13 @@
 ;;; be non-nil consumed value is produced.
 (defn with-adaption-barrier ^CodeEmitter [^Class produced-type ^CodeEmitter ce]
   (^CodeEmitter fn [xb consumed-type then-leave?]
-   (if (or (identical? Void/TYPE consumed-type)
+   (if (or (type/void? consumed-type)
            (identical? produced-type consumed-type)
            (= (.isPrimitive produced-type) (.isPrimitive consumed-type)))
      (.emit-insn* ce xb consumed-type then-leave?)
      (.emit-insn* ce xb produced-type false))))
 
-(letfn [(pop-operand ^void [^CodeBuilder xb ^Class on-stack-type]
-          ;; pre: `on-stack-type` is not Void/TYPE
-          (if (or (identical? Long/TYPE on-stack-type)
-                  (identical? Double/TYPE on-stack-type))
-            (-> xb .pop2)
-            (-> xb .pop)))
-        
-        (unbox-reference ^void [^CodeBuilder xb ^long consumer-fctx
+(letfn [(unbox-reference ^void [^CodeBuilder xb ^long consumer-fctx
                                 ^Class consumed-type ^Class on-stack-type]
           ;; pre: (.isPrimitive consumed-type)
           (let [box-type (.class-reference (type/of consumed-type))
@@ -106,7 +99,7 @@
                                          (type/of on-stack-type))
             ;; here holds: requested type is reference
                 
-            (identical? Void/TYPE on-stack-type)
+            (type/void? on-stack-type)
             (-> xb .aconst_null)
                 
             :else
@@ -125,8 +118,8 @@
     #_(prn :skip-adapt (identical? on-stack-type consumed-type)) ;FIXME... 16%?
     (when-not (identical? on-stack-type consumed-type)
       (cond
-        (identical? Void/TYPE consumed-type)
-        (pop-operand xb on-stack-type)
+        (type/void? consumed-type)
+        (util/pop xb on-stack-type)
         ;; here holds: this function leaves an operand on the stack
         
         (.isPrimitive on-stack-type)
@@ -137,8 +130,8 @@
 
   (defn statm? ^boolean [^CodeBuilder xb ^CodeEmitter ce]
     (when-some [on-stack-type (.emit-insn* ce xb Void/TYPE false)]
-      (when-not (identical? Void/TYPE on-stack-type)
-        (pop-operand xb on-stack-type))
+      (when-not (type/void? on-stack-type)
+        (util/pop xb on-stack-type))
       true))
   
   (defn insn? ^boolean [^CodeBuilder xb ^long consumer-fctx

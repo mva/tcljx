@@ -7,7 +7,7 @@
     [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
     [emit :as emit] [insn :as insn]
     [primitive :as primitive] [condgen :as condgen] [switchgen :as switchgen]
-    [trygen :as trygen] [fngen :as fngen]))
+    [trygen :as trygen] [fngen :as fngen] defgen))
   (:import
    (tcljx.data.ir Expr Exprs ExprFactory CodeEmitter Binding Entity
                   ArityType MethodSpec FieldSpec NamespaceBuilder
@@ -121,6 +121,11 @@
                                 (.length dims)))
              array-type))
           (insn/mk-insn array-type))))
+  (var-expr [_ arg]
+    (let [ce (.emitter arg)]
+      (if (instance? tcljx.classgen.defgen.DefVarDeref ce)
+        (.expr-of (.df ^tcljx.classgen.defgen.DefVarDeref ce))
+        (wrong/other "special form `var` only applicable to :var def"))))
   
   (progn-expr [_ xs x]
     (insn/progn xs x))

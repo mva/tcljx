@@ -70,9 +70,10 @@
     (or (lookup-type resolver sym)
         (throw (syntax/info "expected type expression" form)))))
 
+(defn cast-to-type ^Expr [^Expr x ^Parser parser ^long fctx ^Class tp]
+  (.type-cast (.expr-factory parser) fctx tp x))
 (defn cast-to-tag ^Expr [^Expr x ^Parser parser ^long fctx tag]
-  (let [tp (parse-type-symbol (.resolver parser) tag)]
-    (.type-cast (.expr-factory parser) fctx tp x)))
+  (cast-to-type x parser fctx (parse-type-symbol (.resolver parser) tag)))
 
 (defn- class-member-match ^MemberHandle [^boolean static? ^Class owner
                                          ^String mnm ^Class/1 ptags]
@@ -118,7 +119,7 @@
                    m (if (.startsWith nm ".")
                        (class-member-match false cl (.substring nm 1) ptags)
                        (class-member-match true cl nm ptags))]
-               (if (and (nil? ptags) (member/static-field? m))
+               (if (and (nil? ptags) (member/field? m) (member/static? m))
                  (.entity-getstatic etf m)
                  (.entity-class-member etf m)))))
          (when-some [cl (.lookup-class rsv nm)]

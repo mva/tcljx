@@ -14,15 +14,11 @@
             [(METHOD [PUBLIC ABSTRACT] "foo" "(Ljava/lang/Class;)I")]]
 
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(FIELD [PUBLIC STATIC FINAL] "a" "[Lpkg/ns0/IInterface;")]
-            [(FIELD [PUBLIC STATIC FINAL] "b" "[Lpkg/ns0/IInterface;")]
+            [(FIELD [PUBLIC STATIC VOLATILE] "a" "[Lpkg/ns0/IInterface;")]
+            [(FIELD [PUBLIC STATIC VOLATILE] "b" "[Lpkg/ns0/IInterface;")]
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
              (LDC "pkg.ns0")
              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-             (ACONST_NULL)
-             (PUTSTATIC . "a" "[Lpkg/ns0/IInterface;")
-             (ACONST_NULL)
-             (PUTSTATIC . "b" "[Lpkg/ns0/IInterface;")
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")

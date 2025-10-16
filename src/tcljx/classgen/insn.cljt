@@ -3,9 +3,9 @@
    (tcljx.data
     [config :as cfg] [wrong :as wrong] [context :as context] [member :as member]
     [type :as type] [ir :as ir] [reflect :as reflect])
-   (tcljx.classgen util [emit :as emit] [constgen :as constgen]))
+   (tcljx.classgen [util :as util] [emit :as emit] [constgen :as constgen]))
   (:import
-   (tcljx.data.ir Expr Exprs CodeEmitter Entity Binding ArityType)
+   (tcljx.data.ir Expr Exprs CodeEmitter Assignable Entity Binding ArityType)
    (tcljx.data.member MemberHandle)
    (java.lang.classfile CodeBuilder TypeKind Opcode)
    (java.lang.constant MethodTypeDesc DirectMethodHandleDesc
@@ -60,7 +60,7 @@
 
 
 ;;; Compilation centers around arrays of types and arrays of code
-;;; emitters.  For a sequence of forms, the parser vie ExprFactory
+;;; emitters.  For a sequence of forms, the parser via ExprFactory
 ;;; creates an instance of Insns: an array of code emitters and the
 ;;; array with the emitters' (context free) expression types.  Using
 ;;; method invocation as a generic example, the expression types are
@@ -99,7 +99,9 @@
   (^Insns [^Insn x0]
    (doto (mk-insns* 1) (.set 0 x0)))
   (^Insns [^Insn x0 ^Insn x1]
-   (doto (mk-insns* 2) (.set 0 x0) (.set 1 x1))))
+   (doto (mk-insns* 2) (.set 0 x0) (.set 1 x1)))
+  (^Insns [^Insn x0 ^Insn x1 ^Insn x2]
+   (doto (mk-insns* 3) (.set 0 x0) (.set 1 x1) (.set 2 x2))))
 (defn insns-of* ^Insns [xs]
   (let [n (count xs)]
     (case n
@@ -211,6 +213,9 @@
     insn-n            ;constant `statm` does not have any side effects
     (progn (insns-of statm) insn-n)))
 
+(defn bind-then-value ^Insn [^Binding bnd ^Entity ent-def]
+  (prog2 (mk-insn bnd Void/TYPE) (mk-insn ent-def (.value-type ent-def))))
+
 ;; Note: Casting to primitive numeric from either primitive numeric or
 ;; reference Number is a type conversion.
 (defn cast-to ^Insn [^Insn arg ^Class target-type ^long fctx]
@@ -221,10 +226,9 @@
       ;; polymorphic method invocation
       arg
 
-      (and (constgen/entity-null? (.emitter arg))
-           #_(type/poly-reference? x-tp)
-           #_(not (.isPrimitive target-type)))
-      (mk-insn (.emitter arg) target-type)
+      (or (constgen/entity-null? (.emitter arg))
+          (constgen/emitter-empty? (.emitter arg)))
+      (mk-insn (.emitter arg) target-type) ;preserve emitter identity
       
       :else
       (-> (^CodeEmitter fn [xb _ _]
@@ -289,67 +293,93 @@
   (redirecting-to ^DirectMethodHandleDesc [^Class return-type ^boolean varargs?
                                            ^Entity/1 params]))
 
-(defn invoke-member ^Insn [^MemberHandle m ^Insn receiver ^Insns args ^long fctx]
-  (-> (reify
-        CodeEmitter
-        (emit-insn* [_ xb consumed-type _]
-          (letfn [(invoke-polymorphic ^Class [^int fixed]
-                    (when (emit/typed-insns? xb fctx (.expr-types args)
-                                             (.emitters args) fixed (.length args))
-                      (let [mtd (mtd-of-poly consumed-type (.parameter-types m)
-                                             fixed (.expr-types args))]
-                        (-> (emit/with-line-number xb fctx)
-                            (reflect/invoke-member (.owner m) (.member m) mtd))
-                        consumed-type)))]
-            (let [fixed (member/end-of-fixed-parameters m)
-                  varargs-tp (member/varargs-parameter-type m)]
-              ;; new-dup-dance when creating a new instance of `owner`
-              (when (instance? java.lang.reflect.Constructor (.member m))
-                (-> xb (.new_ (reflect/describe-class (.owner m))) (.dup)))
-              ;; instance field or method require receiver argument
-              (when (or (nil? receiver)
-                        (emit/insn? xb fctx (.owner m) (.emitter receiver)))
-                ;; all fixed (i.e. non-vararg) arguments
-                (when (emit/typed-insns? xb fctx (.parameter-types m)
-                                         (.emitters args) 0 fixed)
-                  (if (neg? (.invocation-mode m))
-                    (invoke-polymorphic fixed)
-                    
-                    ;; optionally: all vararg arguments
-                    (when (or (nil? varargs-tp)
-                              (emit-array-of? xb (.getComponentType varargs-tp)
-                                              (.emitters args) fixed))
-                      ;; the actual invoke instruction
-                      (-> (emit/with-line-number xb fctx)
-                          (reflect/invoke-member (.owner m) (.member m)))
-                      (.return-type m))))))))
+(defn invoke-member
+  (^Insn [^MemberHandle m ^Insn receiver ^Insns args]
+   (invoke-member m receiver args context/fctx-none))
+  (^Insn [^MemberHandle m ^Insn receiver ^Insns args ^long fctx]
+   (-> (reify
+         CodeEmitter
+         (emit-insn* [_ xb consumed-type _]
+           (letfn [(invoke-polymorphic ^Class [^int fixed]
+                     (when (emit/typed-insns? xb fctx (.expr-types args)
+                                              (.emitters args) fixed (.length args))
+                       (let [mtd (mtd-of-poly consumed-type (.parameter-types m)
+                                              fixed (.expr-types args))]
+                         (-> (emit/with-line-number xb fctx)
+                             (reflect/invoke-member (.owner m) (.member m) mtd))
+                         consumed-type)))]
+             (let [fixed (member/end-of-fixed-parameters m)
+                   varargs-tp (member/varargs-parameter-type m)]
+               ;; new-dup-dance when creating a new instance of `owner`
+               (when (instance? java.lang.reflect.Constructor (.member m))
+                 (-> xb (.new_ (reflect/describe-class (.owner m))) (.dup)))
+               ;; instance field or method require receiver argument
+               (when (or (nil? receiver)
+                         (emit/insn? xb fctx (.owner m) (.emitter receiver)))
+                 ;; all fixed (i.e. non-vararg) arguments
+                 (when (emit/typed-insns? xb fctx (.parameter-types m)
+                                          (.emitters args) 0 fixed)
+                   (if (neg? (.invocation-mode m))
+                     (invoke-polymorphic fixed)
+                     
+                     ;; optionally: all vararg arguments
+                     (when (or (nil? varargs-tp)
+                               (emit-array-of? xb (.getComponentType varargs-tp)
+                                               (.emitters args) fixed))
+                       ;; the actual invoke instruction
+                       (-> (emit/with-line-number xb fctx)
+                           (reflect/invoke-member (.owner m) (.member m)))
+                       (.return-type m))))))))
 
-        PlainInvokeTest
-        (redirecting-to [inv return-type varargs? params]
-          (letfn [(direct-to-args? ^boolean [^Class/1 inv-atypes ^int inv-start]
-                    (when (= (alength params) (+ (.length args) inv-start))
-                      (loop [i (dec (alength params))]
-                        (cond
-                          (< i inv-start) true
-                          (let [ce-arg (emitter args (- i inv-start))]
-                            (and (identical? (aget params i) ce-arg)
-                                 (type/same? (.value-type ^Entity ce-arg)
-                                             (aget inv-atypes (- i inv-start)))))
-                          (recur (dec i))
-                          :else false))))
-                  (direct-to-receiver? ^boolean [] ;no cast on receiver value?
-                    (let [rec (aget params 0)]
-                      (and (identical? rec (.emitter receiver))
-                           (type/same? (.value-type rec) (.owner m)))))]
-            
-            (when (and (not= member/invoke-polymorphic (.invocation-mode m))
-                       (or (type/auto-return-marker? return-type)
-                           (type/same? return-type (.return-type m)))
-                       (= varargs? (member/varargs? m))
-                       (direct-to-args? (.parameter-types m) (int (some? receiver)))
-                       (or (nil? receiver) (direct-to-receiver?)))
-              (reflect/mhd-of-member (.owner m) (.member m))))))
-      (mk-insn (.return-type m))))
+         Assignable
+         (set-expr* [_ fctx value]
+           (let [nm (-> m .member .getName)
+                 owner-desc (reflect/describe-class (.owner m))
+                 tp (.return-type m), tpd (reflect/describe-class tp)]
+             (ensure-assignable tp value)
+             (when-not (member/field? m)
+               (wrong/other (str "member " (wrong/q-as-symbol nm) " is not a field")))
+             (when (member/final? m)
+               (wrong/other (str "field " (wrong/q-as-symbol nm) " is final")))
+             (-> (^CodeEmitter fn [xb consumed-type _]
+                  (when (or (nil? receiver)
+                            (emit/insn? xb fctx (.owner m) (.emitter receiver)))
+                    (when (emit/insn? xb fctx tp (.emitter value))
+                      (if (nil? receiver)
+                        (util/with-dup-unless-void-> xb consumed-type tp
+                          (.putstatic owner-desc nm tpd))
+                        (util/with-dup-x1-unless-void-> xb consumed-type tp
+                          (.putfield owner-desc nm tpd))))))
+                 (mk-insn tp))))
+         (redef-expr* [_ fctx value]
+           nil)
+         
+         PlainInvokeTest
+         (redirecting-to [inv return-type varargs? params]
+           (letfn [(direct-to-args? ^boolean [^Class/1 inv-atypes ^int inv-start]
+                     (when (= (alength params) (+ (.length args) inv-start))
+                       (loop [i (dec (alength params))]
+                         (cond
+                           (< i inv-start) true
+                           (let [ce-arg (emitter args (- i inv-start))]
+                             (and (identical? (aget params i) ce-arg)
+                                  (type/same? (.value-type ^Entity ce-arg)
+                                              (aget inv-atypes (- i inv-start)))))
+                           (recur (dec i))
+                           :else false))))
+                   (direct-to-receiver? ^boolean [] ;no cast on receiver value?
+                     (let [rec (aget params 0)]
+                       (and (identical? rec (.emitter receiver))
+                            (type/same? (.value-type rec) (.owner m)))))]
+             
+             (when (and (not= member/invoke-polymorphic (.invocation-mode m))
+                        (or (type/auto-return-marker? return-type)
+                            (type/same? return-type (.return-type m)))
+                        (= varargs? (member/varargs? m))
+                        (direct-to-args? (.parameter-types m) (int (some? receiver)))
+                        (or (nil? receiver) (direct-to-receiver?)))
+               (reflect/mhd-of-member (.owner m) (.member m))))))
+       (mk-insn (.return-type m)))))
 
 (defn- invoke-mhd* ^CodeBuilder [^CodeBuilder xb ^DirectMethodHandleDesc mhd]
   (let [cp (.constantPool xb)
@@ -398,16 +428,3 @@
 ;;; Invoke static runtime method without line number information.
 (defn invoke-runtime ^Insn [^MemberHandle m ^Insns args]
   (invoke-member m nil args context/fctx-none))
-
-;;; ------------------------------------------------------------------------
-
-;;; FIXME... drop this after all old unit tests have been ported over;
-;;; interesting experiment to see if it works, but probably of little
-;;; or even no practical value.
-(defmacro with-void-args-if-requested [consumed-type args & body]
-  (assert (symbol? consumed-type))
-  `(if (identical? Void/TYPE ~consumed-type)
-     (when (emit/insns? ~'xb ~'line Void/TYPE (.emitters ~args))
-       Void/TYPE)
-     (do ~@body)))
-

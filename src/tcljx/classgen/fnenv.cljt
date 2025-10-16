@@ -1,13 +1,14 @@
 (ns tcljx.classgen.fnenv   ;supporting functions for fn, itf fn, reify
-  (:require (tcljx.data [config :as cfg] [ir :as ir] [code :as code])
-            (tcljx.classgen [util :as util] [segment :as segment]
-                            [constgen :as constgen]))
-  (:import (tcljx.data.ir CodeEmitter Entity FnPromise FieldSpec)
-           (tcljx.classgen.segment CodePromise EnvFactory Display StoredEnv)
-           (java.lang.classfile CodeBuilder)
-           (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
-           (java.util Arrays List HashMap HashSet Map$Entry)
-           (java.util.function BiConsumer)))
+  (:require
+   (tcljx.data [config :as cfg] [member :as member] [ir :as ir] [code :as code])
+   (tcljx.classgen [util :as util] [segment :as segment] [constgen :as constgen]))
+  (:import
+   (tcljx.data.ir CodeEmitter Entity FnPromise FieldSpec)
+   (tcljx.classgen.segment CodePromise EnvFactory Display StoredEnv)
+   (java.lang.classfile CodeBuilder)
+   (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
+   (java.util Arrays List HashMap HashSet Map$Entry)
+   (java.util.function BiConsumer)))
 
 (defn load-env ^CodeBuilder [^CodeBuilder xb ^HashMap parent-e2d
                              ^Entity/1 aorigin]
@@ -111,7 +112,7 @@
   (identical? constgen/entity-null (aget aforward env-idx)))
 (defn mtd-of-patch ^MethodTypeDesc [^FieldSpec/1 fields]
   (letfn [(patched-type-desc ^ClassDesc [^FieldSpec fs]
-            (when-not (code/final-field? fs) (.type-desc fs)))]
+            (when-not (member/acc-final? (.flags fs)) (.type-desc fs)))]
     (when-some [xs (seq (keep patched-type-desc fields))]
       (MethodTypeDesc/of ConstantDescs/CD_void ^List xs))))
 (defn fields-exact ^FieldSpec/1 [^int start ^ClassDesc owner ^StoredEnv env

@@ -312,57 +312,57 @@
                              (recur (clojure.lang.RT/next s) 0))))
                        "foo")))))
 
-;; (deftest cons-into-list
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL]
-;;                      "list" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[STATIC . "fn~1" "([Ljava/lang/Object;)Ljava/lang/Object;"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL VARARGS]
-;;                      "fn~1" "([Ljava/lang/Object;)Ljava/lang/Object;")
-;;              ["LOCAL 0: Object[] items"]
-;;              (ALOAD_0)
-;;              (ARRAYLENGTH)
-;;              (ICONST_1)
-;;              (ISUB)
-;;              (ISTORE_1)
-;;              ["LOCAL 1: int i"]
-;;              (LDC [:bsm-quote "list" "Lclojure/lang/IPersistentList;" []])
-;;              (ASTORE_2)
-;;              ["LOCAL 2: IPersistentList ret"]
-;;              [L:0]
-;;              (ILOAD_1)
-;;              (IFLT L:1)
-;;              (ALOAD_2)
-;;              (ALOAD_0)
-;;              (ILOAD_1)
-;;              (AALOAD)
-;;              (INVOKEINTERFACE IPersistentList "cons"
-;;                               "(Ljava/lang/Object;)Lclojure/lang/IPersistentCollection;" :itf)
-;;              (CHECKCAST IPersistentList)
-;;              (ASTORE_2)
-;;              (IINC 1 -1)
-;;              (GOTO L:0)
-;;              [L:1]
-;;              (ALOAD_2)
-;;              (ARETURN)]
+(deftest cons-into-list
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL VARARGS]
+                     "fn~1" "([Ljava/lang/Object;)Ljava/lang/Object;")
+             ["LOCAL 0: Object[] items"]
+             (ALOAD_0)
+             (ARRAYLENGTH)
+             (ICONST_1)
+             (ISUB)
+             (ISTORE_1)
+             ["LOCAL 1: int i"]
+             (LDC [:bsm-quote "list" "Lclojure/lang/IPersistentList;" []])
+             (ASTORE_2)
+             ["LOCAL 2: IPersistentList ret"]
+             [L:0]
+             (ILOAD_1)
+             (IFLT L:1)
+             (ALOAD_2)
+             (ALOAD_0)
+             (ILOAD_1)
+             (AALOAD)
+             (INVOKEINTERFACE IPersistentList "cons"
+                              "(Ljava/lang/Object;)Lclojure/lang/IPersistentCollection;" :itf)
+             (CHECKCAST IPersistentList)
+             (ASTORE_2)
+             (IINC 1 -1)
+             (GOTO L:0)
+             [L:1]
+             (ALOAD_2)
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL]
+                     "list" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "fn~1" "([Ljava/lang/Object;)Ljava/lang/Object;"]]])
+             (ARETURN)]
 
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (def list
-;;                    (fn* [& ^Object/1 items]
-;;                         (loop* [i (- (alength items) 1), ret ()]
-;;                                (if (>= i 0)
-;;                                  (recur (- i 1) (.cons ret (aget items i)))
-;;                                  ret))))]))))
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def list
+                   (fn* [& ^Object/1 items]
+                        (loop* [i (- (alength items) 1), ret ()]
+                               (if (>= i 0)
+                                 (recur (- i 1) (.cons ret (aget items i)))
+                                 ret))))]))))
 
 (deftest join-vector-with-null-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")

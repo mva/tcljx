@@ -3,7 +3,7 @@
    (tcljx.data [meta :as meta] [reflect :as reflect] [type :as type] [ir :as ir])
    (tcljx.classgen [runtime :as rt] [util :as util]))
   (:import
-   (tcljx.data.ir CodeEmitter Entity Constant)
+   (tcljx.data.ir CodeEmitter Entity ImmediateEntity Constant)
    (clojure.lang Named IMeta)
    (java.lang.classfile CodeBuilder TypeKind)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry
@@ -101,14 +101,16 @@
       (.ldc xb (.loadable-entry this (.constantPool xb) false))
       opnd-type))
 
-  Entity
+  ImmediateEntity
   (value-type [_]
     opnd-type)
   (value-type-exact [this]
     (reflect/describe-class (.value-type this)))
   (entity-id [_]
     ir/entity-id-constant)
-
+  (namespace-if-def [_]
+    nil)
+  
   Constant
   (computational-value [_]
     loadable-value)
@@ -175,13 +177,15 @@
         (do (.ldc xb (.loadable-entry this (.constantPool xb) false))
             opnd-type))))
   
-  Entity
+  ImmediateEntity
   (value-type [_]
     opnd-type)
   (value-type-exact [this]
     (-> opnd-type (type/expr-to-logical) (reflect/describe-class )))
   (entity-id [_]
     ir/entity-id-constant)
+  (namespace-if-def [_]
+    nil)
 
   Constant
   (computational-value [_]

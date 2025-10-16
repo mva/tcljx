@@ -377,7 +377,7 @@
       (let [arg (take-arg form args)
             tp (.expr-type arg)]
         (cond
-          (type/same? Void/TYPE tp) insn/insn-empty
+          (type/void? tp) insn/insn-empty
           (.isPrimitive tp) (-> 0 (constgen/constant tp) (insn/mk-insn tp))
           :else insn/insn-null))))
   
@@ -457,7 +457,7 @@
                (when (emit/insn? xb fctx Integer/TYPE
                                  (insn/emitter args (inc n-gets)))
                  (when (emit/insn? xb fctx tp-set ce-set)
-                   (let [void? (identical? Void/TYPE consumed-type)
+                   (let [void? (type/void? consumed-type)
                          tk (TypeKind/from tp-set)]
                      (emit/with-line-number xb fctx)
                      (when-not void?

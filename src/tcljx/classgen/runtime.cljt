@@ -11,6 +11,7 @@
 (def RT (ClassDesc/of "tinyclj.lang.RT"))
 
 #_(def ClojureRT (ClassDesc/of "clojure.lang.RT"))
+(def Var (ClassDesc/of "clojure.lang.Var"))
 
 (def ^:private clnm-ifn 'clojure.lang.IFn)
 (def ^:private clnm-abstract-fn 'tinyclj.lang.AFnMh)
@@ -109,11 +110,17 @@
 
 ;;; ------------------------------------------------------------------------
 
+(def mtd-Object-void (MethodTypeDesc/of ConstantDescs/CD_Object))
+(def mtd-Object-Object (MethodTypeDesc/of ConstantDescs/CD_Object
+                                          ConstantDescs/CD_Object))
 (def mtd-String-void (MethodTypeDesc/of ConstantDescs/CD_String))
 (def mtd-int-void (MethodTypeDesc/of ConstantDescs/CD_int))
 (def mtd-void-map (MethodTypeDesc/of ConstantDescs/CD_void map))
+(def mtd-void-Object (MethodTypeDesc/of ConstantDescs/CD_void
+                                        ConstantDescs/CD_Object))
 (def mtd-boolean-Object (MethodTypeDesc/of ConstantDescs/CD_boolean
                                            ConstantDescs/CD_Object))
 (def mtd-ArraySeq-objects (MethodTypeDesc/of ArraySeq ObjectArray))
+
 (def mtd-apply (MethodTypeDesc/of ConstantDescs/CD_Object
                                   ifn ConstantDescs/CD_Object))

@@ -35,13 +35,11 @@
              (RETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(FIELD [PUBLIC STATIC FINAL] "a" "[Lpkg/ns0/Vec3;")]
+            [(FIELD [PUBLIC STATIC VOLATILE] "a" "[Lpkg/ns0/Vec3;")]
             
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
              (LDC "pkg.ns0")
              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-             (ACONST_NULL)
-             (PUTSTATIC . "a" "[Lpkg/ns0/Vec3;")
              (RETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
@@ -83,12 +81,11 @@
              (RETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(FIELD [PUBLIC STATIC FINAL] "a" "[Lpkg/ns0/T;")]
+            [(FIELD [PUBLIC STATIC VOLATILE] "a" "[Lpkg/ns0/T;")]
+            
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
              (LDC "pkg.ns0")
              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-             (ACONST_NULL)
-             (PUTSTATIC . "a" "[Lpkg/ns0/T;")
              (RETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
@@ -949,54 +946,55 @@
                    [clojure.lang.IType java.util.function.Function]
                    (apply [this x] this))]))))
 
-;; (deftest deftype-macro-test
-;;   (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"
-;;                    nil "java/lang/Object" [IType])
-;;             [(METHOD [PUBLIC SYNTHETIC] "<init>" "()V")
-;;              #_["LOCAL 0: uninitialized_this_type __this"]
-;;              (ALOAD_0)
-;;              (INVOKESPECIAL Object "<init>" "()V")
-;;              (RETURN)]]
+(deftest deftype-macro-test
+  (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"
+                   nil "java/lang/Object" [IType])
+            [(METHOD [PUBLIC SYNTHETIC] "<init>" "()V")
+             #_["LOCAL 0: uninitialized_this_type __this"]
+             (ALOAD_0)
+             (INVOKESPECIAL Object "<init>" "()V")
+             (RETURN)]]
            
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "deftype" "()Ltinyclj/lang/StaticFn;")
-;;              (RuntimeVisibleAnnotations (Macro))
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;" [[STATIC . "deftype~2" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "deftype~2" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
-;;              ["LOCAL 0: Object &form"]
-;;              ["LOCAL 1: Object &env"]
-;;              (LDC [:bsm-quote "list" "Lclojure/lang/IPersistentList;"
-;;                    [[:bsm-quote "symbol" "Lclojure/lang/Symbol;" ["deftype*"]]
-;;                     [:bsm-quote "symbol" "Lclojure/lang/Symbol;" ["pkg.ns0" "T"]]
-;;                     [:bsm-quote "symbol" "Lclojure/lang/Symbol;" ["pkg.ns0.T"]]
-;;                     [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;" []]
-;;                     [:bsm-quote "keyword" "Lclojure/lang/Keyword;" ["implements"]]
-;;                     [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
-;;                      [[:bsm-quote "symbol" "Lclojure/lang/Symbol;" ["clojure.lang.IType"]]]]]])
-;;              (ARETURN)]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "deftype~2" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
+             ["LOCAL 0: Object &form"]
+             ["LOCAL 1: Object &env"]
+             (LDC [:bsm-quote "list" "Lclojure/lang/IPersistentList;"
+                   [[:bsm-quote "symbol" "Lclojure/lang/Symbol;" ["deftype*"]]
+                    [:bsm-quote "symbol" "Lclojure/lang/Symbol;" ["pkg.ns0" "T"]]
+                    [:bsm-quote "symbol" "Lclojure/lang/Symbol;" ["pkg.ns0.T"]]
+                    [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;" []]
+                    [:bsm-quote "keyword" "Lclojure/lang/Keyword;" ["implements"]]
+                    [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                     [[:bsm-quote "symbol" "Lclojure/lang/Symbol;" ["clojure.lang.IType"]]]]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "deftype" "()Ltinyclj/lang/StaticFn;")
+             (RuntimeVisibleAnnotations (Macro))
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;" [[STATIC . "deftype~2" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"]]])
+             (ARETURN)]
 
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_11" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_11")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (def ^:macro deftype
-;;                    (fn* deftype [&form &env]
-;;                         '(deftype*
-;;                            pkg.ns0/T
-;;                            pkg.ns0.T
-;;                            []
-;;                            :implements
-;;                            [clojure.lang.IType])))
-;;                  (deftype)]))))
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_11" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_11")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def ^:macro deftype
+                   (fn* deftype [&form &env]
+                        '(deftype*
+                           pkg.ns0/T
+                           pkg.ns0.T
+                           []
+                           :implements
+                           [clojure.lang.IType])))
+                 (deftype)]))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -1109,13 +1107,11 @@
       (ARETURN)]]
            
     [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-     [(FIELD [PUBLIC STATIC FINAL] "a" "[Lpkg/ns0/Node;")]
+     [(FIELD [PUBLIC STATIC VOLATILE] "a" "[Lpkg/ns0/Node;")]
             
      [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
       (LDC "pkg.ns0")
       (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-      (ACONST_NULL)
-      (PUTSTATIC . "a" "[Lpkg/ns0/Node;")
       (RETURN)]]
     [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
      [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
@@ -1176,13 +1172,11 @@
              (ARETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(FIELD [PUBLIC STATIC FINAL] "a" "[Lpkg/ns0/Node;")]
+            [(FIELD [PUBLIC STATIC VOLATILE] "a" "[Lpkg/ns0/Node;")]
             
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
              (LDC "pkg.ns0")
              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-             (ACONST_NULL)
-             (PUTSTATIC . "a" "[Lpkg/ns0/Node;")
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
