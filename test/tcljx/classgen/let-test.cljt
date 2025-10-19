@@ -326,46 +326,47 @@
                              (let* [alias-x x]
                                alias-x)))])))
 
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(FIELD [PUBLIC STATIC FINAL] "x" "I") (ConstantValue 123)]
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "x" "()I")
+             (BIPUSH 123)
+             (IRETURN)]
             
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]
            
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns1/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[STATIC . "f~0" "()I"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "f~0" "()I")
-;;              (BIPUSH 123)
-;;              (IRETURN)]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns1/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()I")
+             (BIPUSH 123)
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~0" "()I"]]])
+             (ARETURN)]
             
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns1")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (LDC ___)
-;;              (INVOKESTATIC RT "ensureInitialized" "(Ljava/lang/Class;)V")
-;;              (RETURN)]]
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns1")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (LDC ___)
+             (INVOKESTATIC RT "ensureInitialized" "(Ljava/lang/Class;)V")
+             (RETURN)]]
            
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns1/___" nil "pkg/ns1/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "pkg.ns0,tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (def x 123)
-;;                  (ns pkg.ns1
-;;                    (:require pkg.ns0))
-;;                  (def f (fn* f ^int []
-;;                              (let* [alias-x pkg.ns0/x]
-;;                                alias-x)))])))
-  )
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns1/___" nil "pkg/ns1/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "pkg.ns0,tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def x 123)
+                 (ns pkg.ns1
+                   (:require pkg.ns0))
+                 (def f (fn* f ^int []
+                             (let* [alias-x pkg.ns0/x]
+                               alias-x)))]))))
 
 (deftest global-var-alias-function
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
@@ -400,51 +401,51 @@
                              (let* [alias-x f]
                                alias-x)))])))
   
-;;   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[STATIC . "f~0" "()Ljava/lang/Object;"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "f~0" "()Ljava/lang/Object;")
-;;              (ACONST_NULL)
-;;              (ARETURN)]
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()Ljava/lang/Object;")
+             (ACONST_NULL)
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~0" "()Ljava/lang/Object;"]]])
+             (ARETURN)]
             
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns0")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (RETURN)]]
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
            
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
-;;              (ARETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns1/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
-;;              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
-;;                    [[STATIC . "g~0" "()Ljava/lang/Object;"]]])
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC FINAL] "g~0" "()Ljava/lang/Object;")
-;;              (INVOKESTATIC _10 "f" "()Ltinyclj/lang/StaticFn;")
-;;              (ARETURN)]
-;;             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
-;;              (LDC "pkg.ns1")
-;;              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-;;              (LDC ___)
-;;              (INVOKESTATIC RT "ensureInitialized" "(Ljava/lang/Class;)V")
-;;              (RETURN)]]
-;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns1/___" nil "pkg/ns1/_10")
-;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "pkg.ns0,tinyclj.core")
-;;              (ARETURN)]]]
-;;          (nmsp '[(ns pkg.ns0)
-;;                  (def f (fn* f []
-;;                              nil))
-;;                  (ns pkg.ns1
-;;                    (:require pkg.ns0))
-;;                  (def g (fn* g []
-;;                              (let* [alias-x pkg.ns0/f]
-;;                                alias-x)))])))
-  )
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "tinyclj.core")
+             (ARETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns1/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "g~0" "()Ljava/lang/Object;")
+             (INVOKESTATIC _10 "f" "()Ltinyclj/lang/StaticFn;")
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "g~0" "()Ljava/lang/Object;"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns1")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (LDC ___)
+             (INVOKESTATIC RT "ensureInitialized" "(Ljava/lang/Class;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns1/___" nil "pkg/ns1/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "pkg.ns0,tinyclj.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def f (fn* f []
+                             nil))
+                 (ns pkg.ns1
+                   (:require pkg.ns0))
+                 (def g (fn* g []
+                             (let* [alias-x pkg.ns0/f]
+                               alias-x)))]))))
 
 (deftest close-over-global-var-alias
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")

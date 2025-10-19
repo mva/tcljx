@@ -50,7 +50,7 @@
 (defn value-of* ^Insn [^Entity ent]    ;pre: (some? (.value-type ent))
   (mk-insn ent (.value-type ent)))
 
-(defn constant-insn ^Insn [^Object value ^Class type]
+(defn constant ^Insn [^Object value ^Class type]
   (value-of* (constgen/constant value type)))
 
 
@@ -134,11 +134,12 @@
   (^Object [^Insns xs ^int i]        ;nil if `xs[i]` is not a Constant
    (constgen/const-value (.emitter xs i))))
 
-(defn loadables? ^boolean [^Insns insns]
-  (loop [i (dec (.length insns))]
-    (cond (neg? i) true
-          (const? insns i) (recur (dec i))
-          :else false)))
+(defn loadables? ^boolean [^Insns xs]
+  (let [emitters (.emitters xs)]
+    (loop [i (dec (alength emitters))]
+      (cond (neg? i) true
+            (ir/loadable? (aget emitters  i)) (recur (dec i))
+            :else false))))
 
 (defn emitter
   (^CodeEmitter [^Insn insn]

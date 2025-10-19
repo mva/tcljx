@@ -251,16 +251,16 @@
 
 (deftest reuse-ldc-inside-class-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC FINAL] "x" "Lclojure/lang/IPersistentVector;")]
             [(FIELD [PUBLIC STATIC FINAL] "y" "Ljava/lang/Object;")
              (RuntimeVisibleAnnotations (Alias ["of" "pkg.ns0/x"]))]
 
-            [(METHOD [PUBLIC STATIC FINAL] "x" "()Lclojure/lang/IPersistentVector;")
-             (LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;" [1 2]])
-             (ARETURN)]
-            
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
              (LDC "pkg.ns0")
              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"
+                   [1 2]])
+             (PUTSTATIC . "x" "Lclojure/lang/IPersistentVector;")
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
@@ -366,19 +366,19 @@
             
             [(METHOD [PUBLIC FINAL] "toString" "()Ljava/lang/String;")
              ["LOCAL 0: T _"]
-             (INVOKESTATIC _10 "x" "()Lclojure/lang/IPersistentVector;")
+             (GETSTATIC _10 "x" "Lclojure/lang/IPersistentVector;")
              (INVOKEINTERFACE IPersistentVector
                               "toString" "()Ljava/lang/String;" :itf)
              (ARETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "x" "()Lclojure/lang/IPersistentVector;")
-             (LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;" [1 2]])
-             (ARETURN)]
+            [(FIELD [PUBLIC STATIC FINAL] "x" "Lclojure/lang/IPersistentVector;")]
 
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
              (LDC "pkg.ns0")
              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;" [1 2]])
+             (PUTSTATIC . "x" "Lclojure/lang/IPersistentVector;")
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")

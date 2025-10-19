@@ -3,7 +3,7 @@
    (tcljx.data [meta :as meta] [reflect :as reflect] [type :as type] [ir :as ir])
    (tcljx.classgen [runtime :as rt] [util :as util]))
   (:import
-   (tcljx.data.ir CodeEmitter Entity ImmediateEntity Constant)
+   (tcljx.data.ir CodeEmitter Loadable Entity ImmediateEntity Constant)
    (clojure.lang Named IMeta)
    (java.lang.classfile CodeBuilder TypeKind)
    (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry
@@ -72,7 +72,7 @@
 (defn- collection-entry ^LoadableConstantEntry [^ConstantPoolBuilder cpb
                                                 ^Class tp ^CodeEmitter/1 ldbls]
   (letfn [(cde-coll ^ConstantDynamicEntry [^DirectMethodHandleDesc mhd]
-            (let [bs-args (for [^Constant ldbl ldbls]
+            (let [bs-args (for [^Loadable ldbl ldbls]
                             (.loadable-entry ldbl cpb true))
                   bsm (.bsmEntry cpb (.methodHandleEntry cpb rt/bsm-quote)
                                  ^java.util.List bs-args)
@@ -88,11 +88,15 @@
 (defn- with-meta-entry ^LoadableConstantEntry [^ConstantPoolBuilder cpb
                                                ^Class tp ^CodeEmitter/1 ldbls]
   (let [bsm (.bsmEntry cpb (.methodHandleEntry cpb rt/bsm-quote)
-                       ^java.util.List (for [^Constant ldbl ldbls]
+                       ^java.util.List (for [^Loadable ldbl ldbls]
                                          (.loadable-entry ldbl cpb true)))
         nat (.nameAndTypeEntry cpb "with-meta" (reflect/describe-class tp))]
     (.constantDynamicEntry cpb bsm nat)))
 
+;;; Symbol, keyword, pattern, or Clojure collection.  Identity must be
+;;; explicitly managed.  Does not participate in constant folding at
+;;; compile time.  During bootstrap, application and compiler code
+;;; have distinct representations of the entity's type.
 (deftype CollectionConstant [^Object loadable-value ^Class opnd-type
                              ^boolean associate-meta?]
   CodeEmitter
@@ -101,19 +105,7 @@
       (.ldc xb (.loadable-entry this (.constantPool xb) false))
       opnd-type))
 
-  ImmediateEntity
-  (value-type [_]
-    opnd-type)
-  (value-type-exact [this]
-    (reflect/describe-class (.value-type this)))
-  (entity-id [_]
-    ir/entity-id-constant)
-  (namespace-if-def [_]
-    nil)
-  
-  Constant
-  (computational-value [_]
-    loadable-value)
+  Loadable
   (loadable-entry [_ cpb logical-type?]
     (if (instance? CodeEmitter/1 loadable-value)
       (if associate-meta?
@@ -122,15 +114,15 @@
       (loadable-entry cpb loadable-value)))
   (datafy [_]
     (letfn [(value-seq ^seq [^CodeEmitter/1 a]
-              (list* (map Constant/.datafy a)))] ;wrap LazySeq
+              (list* (map Loadable/.datafy a)))] ;wrap LazySeq
       (cond
         (seq? loadable-value) (list* loadable-value) ;wrap LazySeq
         
         (instance? CodeEmitter/1 loadable-value)
         (let [a ^CodeEmitter/1 loadable-value]
           (if associate-meta?
-            (with-meta (Constant/.datafy (aget a 0))
-              (Constant/.datafy (aget a 1)))
+            (with-meta (Loadable/.datafy (aget a 0))
+              (Loadable/.datafy (aget a 1)))
             (condp identical? opnd-type
               type/vector (vec (value-seq a))
               type/map (apply array-map (value-seq a))
@@ -148,13 +140,19 @@
 (defn zero? ^boolean [^Object value]
   (and (instance? Number value) (= (.doubleValue ^Number value) 0.0)))
 
+;;; Primitive value, null, String, or Class.  Identity is either value
+;;; based (for primitives and null), or preserved by the JVM (String
+;;; and Class are interned).  Participates in constant folding at
+;;; compile time.  For non-null values the type is provided by the
+;;; JVM, and even during bootstrap both application and compiler code
+;;; agree on it.
 (deftype JvmConstant [^Object computational-value ^Class opnd-type]
   CodeEmitter
   (emit-insn* [this xb consumed-type _]
     (util/with-void-empty-if-requested consumed-type
       (cond
         (null? computational-value)
-        (do (.aconst_null xb)            ;elide any additional checkcast
+        (do (.aconst_null xb)          ;elide any additional checkcast
             (if (.isPrimitive consumed-type)
               (.class-reference (type/of consumed-type))
               consumed-type))
@@ -166,7 +164,7 @@
             consumed-type)
         
         (instance? Number computational-value)
-        (if (.isPrimitive consumed-type)  ;cannot be void
+        (if (.isPrimitive consumed-type) ;cannot be void
           (do (->> (type/convert-from-constant consumed-type computational-value)
                    (.loadConstant xb))
               consumed-type)
@@ -181,7 +179,7 @@
   (value-type [_]
     opnd-type)
   (value-type-exact [this]
-    (-> opnd-type (type/expr-to-logical) (reflect/describe-class )))
+    (-> opnd-type (type/expr-to-logical) (reflect/describe-class)))
   (entity-id [_]
     ir/entity-id-constant)
   (namespace-if-def [_]
@@ -225,13 +223,11 @@
     
     :else (JvmConstant. computational-value type)))
 
-(defn jvm-const? ^boolean [^CodeEmitter ce]
-  (instance? JvmConstant ce))
 (defn const? ^boolean [^CodeEmitter ce]
-  (instance? Constant ce))
+  (instance? JvmConstant ce))
 (defn const-value ^Object [^CodeEmitter ce]
   (when (const? ce)
-    (Constant/.computational-value ce)))
+    (JvmConstant/.computational-value ce)))
 
 (def entity-int-zero (constant 0 Integer/TYPE))
 (defn entity-zero? ^boolean [^CodeEmitter ce]

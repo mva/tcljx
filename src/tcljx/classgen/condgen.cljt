@@ -185,12 +185,12 @@
           ;; by compiler code, and that all non-NULL values (including
           ;; DynamicConstantDesc) always describe some literal and
           ;; known to be non-null value.
-          (let [c (insn/const-value x)]
-            (cond (nil? c) (if (insn/const? x)
-                             Boolean/FALSE     ;is never null
-                             nil)              ;may be null
-                  (constgen/null? c) Boolean/TRUE ;is always null
-                  :else Boolean/FALSE)))]      ;is never null
+          (let [ce (.emitter x)]
+            (if (ir/loadable? ce)
+              (if (constgen/null? (constgen/const-value ce))
+                Boolean/TRUE            ;is always null
+                Boolean/FALSE)          ;is never null
+              nil)))]                   ;may be null
   
   (defn acmp ^Insn [^Insn arg0 ^Insn arg1 ^int cmp-opcd ^long fctx]
     (or (when-some [c0 (null-value-pred arg0)]

@@ -1,11 +1,9 @@
 (ns tcljx.data.reflect
   (:import
-   (java.lang.classfile Opcode #_TypeKind ClassBuilder #_MethodBuilder
-                        CodeBuilder #_Label)
+   (java.lang.classfile Opcode ClassBuilder CodeBuilder)
    (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
                        DirectMethodHandleDesc DirectMethodHandleDesc$Kind
                        Constable ConstantDescs)
-   #_(java.lang.invoke MethodHandle TypeDescriptor$OfField MethodHandles$Lookup)
    (java.lang.reflect Method Constructor Executable Field Member Modifier)))
 
 (defn describe ^ConstantDesc [^Constable x]
@@ -87,13 +85,6 @@
   (if (instance? Executable member)
     (.getParameterTypes ^Executable member)
     (new Class/1 0)))
-
-;; (defn return-type ^Class [^Member member]
-;;   (condp instance? member
-;;     Method (.getReturnType ^Method member)
-;;     Field (.getType ^Field member)
-;;     Constructor (.getDeclaringClass ^Constructor member)
-;;     #_else (throw (IllegalArgumentException.))))
 
 (defn invoke-member
   (^CodeBuilder [^CodeBuilder xb ^Class owner ^Member member]

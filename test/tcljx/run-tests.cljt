@@ -17,12 +17,8 @@
                    fn-member-test fn-test definterface-test itf-fn-test
                    deftype-test record-test reify-test letfn-test closure-test
                    variadic-test main-test macro-test rtiow-nocore-test
-                   namespace-test set-test line-test)
-   
-   (tcljx #_require-test)
-   
+                   namespace-test set-test line-test require-test)
    tcljx.main                      ;at least compile unused namespaces
-   
    [tcljx.alpha.ptest :refer [run-scoped-tests]]))
 
 (def all-namespaces
@@ -71,8 +67,7 @@
     tcljx.classgen.namespace-test
     tcljx.classgen.set-test
     tcljx.classgen.line-test
-    
-    #_tcljx.classgen.require-test])
+    tcljx.classgen.require-test])
 
 (defn run []
   (run-scoped-tests all-namespaces))

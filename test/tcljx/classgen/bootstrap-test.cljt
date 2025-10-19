@@ -18,7 +18,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0 (:refer-clojure :none))]))))
 

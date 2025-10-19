@@ -9,6 +9,7 @@
 (defn parse-def ^Expr [^Parser parser ^long fctx [_ nm-sym & [init :as args]]]
   (let [nm (syntax/simple-symbol-str nm-sym)
         nm-meta (meta nm-sym)
+        private? (boolean (:private nm-meta))
         macro? (boolean (:macro nm-meta))
         redef? (boolean (:redef nm-meta))
         nm-tag (meta/get-tag nm-meta)
@@ -49,21 +50,21 @@
                 (wrong/other ":var and :macro are mutually exclusive"))
               (when redef?
                 (wrong/other ":var and :redef are mutually exclusive"))
-              (.new-def-var nmsp  nm (x-init) (or nm-tp Object)
+              (.new-def-var nmsp private? nm (x-init) (or nm-tp Object)
                             (boolean (:dynamic nm-meta)) x-meta))
             
             (or redef? (nil? args))
             (do (when macro?
                   (wrong/other ":macro and :redef are mutually exclusive"))
-                (.new-def-mutable nmsp nm (x-init)))
+                (.new-def-mutable nmsp private? nm (x-init)))
 
             (symbol? init)
             (let [ent (or (parse/lookup parser init)
                           (interop/lookup-class-entity parser init))]
               (if (of-immutable-def? ent)
                 (let [ns (.lookup-namespace (.resolver parser) (namespace init))]
-                  (.new-def-alias nmsp nm ent (str ns "/" (name init))))
-                (.new-def-immutable nmsp macro? nm (x-init))))
+                  (.new-def-alias nmsp private? nm ent (str ns "/" (name init))))
+                (.new-def-immutable nmsp private? macro? nm (x-init))))
 
             :else
-            (.new-def-immutable nmsp macro? nm (x-init))))))))
+            (.new-def-immutable nmsp private? macro? nm (x-init))))))))

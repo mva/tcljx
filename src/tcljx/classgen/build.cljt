@@ -13,7 +13,8 @@
    (java.lang.classfile ClassBuilder CodeBuilder)
    (java.lang.constant ClassDesc ConstantDescs MethodTypeDesc)
    (java.util List ArrayList HashSet)
-   (java.util.function Consumer Predicate)))
+   (java.util.function Consumer Predicate)
+   (java.util.stream Collectors)))
 
 (def ^:private segment-class-flags (ir/acc* public abstract))
 
@@ -87,11 +88,11 @@
        (.withMethodBody cb "main" mtd-main acc-main)))
 
 (defn capstone ^Consumer [^PackageBuilder pkg-build ^Segment segm
-                          ^Entity entry-main]
+                          ^HashSet require-strs ^Entity entry-main]
   (let [req-str (if (cfg/core-lib? (.pkg-name segm))
                   ""            ;suppress internal details of core lib
-                  ;; FIXME... use real requires
-                  (str/join "," (sort (list "tinyclj.core"))))]
+                  ^String (-> (.sorted (.stream require-strs))
+                              (.collect (Collectors/joining ","))))]
     (^Consumer fn ^void [^ClassBuilder cb]
      (-> (cfg/with-class-version cb)
          (.withFlags segment-class-flags)

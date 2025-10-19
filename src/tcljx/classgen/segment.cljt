@@ -103,8 +103,8 @@
       (Segment. (segment-cld pkg-name segm-id) (ArrayList.) pkg-name
                 (.segment-class segm) segm-id))))
 
-(defn capstone-class ^ClassDesc [^Segment segm]
-  (ClassDesc/of (.pkg-name segm) "___"))
+(defn capstone-class ^ClassDesc [^String ns-str]
+  (ClassDesc/of ns-str "___"))
 
 (defn code-promises ^CodePromise/1 [^List tasks]
   (let [acc-cps (ArrayList.), it (.iterator tasks)]

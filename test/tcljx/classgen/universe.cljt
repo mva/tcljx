@@ -1,3 +1,10 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
 (ns tcljx.classgen.universe
   (:require
    (tcljx.data
@@ -8,19 +15,20 @@
     [namespace :as namespace])
    (tcljx.classgen
     [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
-    [segment :as segment] [emit :as emit] [insn :as insn]
-    [codegen :as codegen] [entity :as entity] [fnenv :as fnenv]
-    [defgen :as defgen] [primitive :as primitive] [build :as build]))
+    [segment :as segment] [emit :as emit] [insn :as insn] [codegen :as codegen]
+    [entity :as entity] [fnenv :as fnenv] [defgen :as defgen]
+    [primitive :as primitive] [publics :as publics] [build :as build]))
   (:import
    (tcljx.data.ir Resolver NamespaceProvider ProvidedNamespace NmspClass
-                  NamespaceBuilder Expr ExprFactory EntityFactory Parser)
+                  NamespaceBuilder Require Expr Entity ExprFactory EntityFactory
+                  Parser)
    (tcljx.classgen.classfile Loader PackageBuilder)
    (tcljx.classgen.segment Segment SegmentBuilder)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassFile ClassBuilder CodeBuilder)
    (java.lang.invoke MethodType MethodHandle MethodHandles)
    (java.nio.file Path)
-   (java.util ArrayList)))
+   (java.util ArrayList HashSet)))
 
 (def ^:private mt-Class-bytes (MethodType/methodType Class byte/1))
 (defn- get-ephemeral-factory ^MethodHandle [^PackageBuilder pkg-build]
@@ -29,6 +37,31 @@
     (-> (MethodHandles/lookup)
         (.findVirtual (class ld) "ephemeralClass" mt-Class-bytes)
         (.bindTo ld))))
+
+(defn- add-required-globals ^map [^map globals ^Require require ^map other]
+  (let [rename (or (.rename-strs require) {})
+        assoc-req (fn assoc-req
+                    (^map [^map acc ^String nm]
+                     (if-some [ent (get other nm)]
+                       (assoc-req acc nm ent)
+                       (wrong/unresolved-nmsp-sym (.ns-str require) nm)))
+                    (^map [^map acc ^String nm* ^Entity ent]
+                     (let [nm (get rename nm* nm*)]
+                       (if (contains? acc nm)
+                         (wrong/other (str "required name already defined by this "
+                                           "namespace: " (wrong/q-as-symbol nm)))
+                         (assoc acc nm ent)))))]
+    (let [refer-all? (nil? (.refer-strs require))]
+      (if (and (empty? globals) refer-all? (empty? (.rename-strs require)))
+        (reduce dissoc other (.exclude-strs require)) ;scenario: core first
+        (if (or refer-all? (some? (.exclude-strs require)))
+          (let [excl-set (set (.exclude-strs require))]
+            (reduce (fn ^map [^map acc [nm ent]]
+                      (cond-> acc
+                        (not (contains? excl-set nm))
+                        (assoc-req nm ent)))
+                    globals other))
+          (reduce assoc-req globals (.refer-strs require)))))))
 
 (deftype NmspBuilderImpl [^NamespaceProvider universe
                           ^String ns-str
@@ -40,6 +73,8 @@
                           ^:unsynchronized-mutable ^map known-ns
                           ^:unsynchronized-mutable ^map ns-alias
                           ^:unsynchronized-mutable ^map imports
+                          ^HashSet require-strs
+                          import-namespace
                           ^:unsynchronized-mutable ^String current-source-file
                           ^:unsynchronized-mutable ^MethodHandle ephemeral-of]
   Resolver
@@ -61,8 +96,8 @@
     (if (or (nil? nmsp) (= nmsp ns-str))
       (.valAt globals nm nil)
       (when-some [nmsp* (.lookup-namespace this nmsp)]
-        (when-some [globals ^map (.valAt known-ns nmsp* nil)]
-          (.valAt globals nm nil)))))
+        (when-some [pn ^ProvidedNamespace (.valAt known-ns nmsp* nil)]
+          (.valAt (.globals pn) nm nil)))))
   (load-def-value [_ owner mangled-name value-type-exact]
     (-> (try
           (let [l (.lookup-in-pkg pkg-build)
@@ -88,46 +123,54 @@
   (universe [_]
     universe)
   (process-require [this require provided]
-    this)                               ;FIXME...
+    (let [ns-str (.ns-str provided)]
+      (set! globals (add-required-globals globals require (.globals provided)))
+      (set! known-ns (assoc known-ns ns-str provided))
+      (set! ns-alias (cond-> (assoc ns-alias ns-str ns-str)
+                       (some? (.alias-str require))
+                       (assoc (.alias-str require) ns-str)))
+      (.add require-strs ns-str)
+      (segment/stage-segment-task! segment (.force-clinit provided))
+      this))
   (process-imports [this import-strs]
     (doseq [^String nm import-strs]
       (if-some [cl (.lookup-class this nm)]
         (.import-class this cl)
         (throw (wrong/info-class-not-found nm))))
     this)
-  (new-def-immutable [_ macro? nm init]
+  (new-def-immutable [_ private? macro? nm init]
     #_(prn :new-def-immutable nm)
     (let [entity-id (if macro? ir/entity-id-def-macro ir/entity-id-def)
-          p (defgen/promise-def-immutable entity-id (.segment-class segment)
-              nm init)
+          p (defgen/promise-def-immutable entity-id private?
+              (.segment-class segment) nm init)
           ent (-> p .expr-of .emitter)
           bnd (ir/mk-binding ent nm false)
           init-ce (.emitter init)]
       (segment/stage-segment-task! segment p)
-      (set! globals (assoc globals nm (if (constgen/jvm-const? init-ce)
+      (set! globals (assoc globals nm (if (constgen/const? init-ce)
                                         init-ce
                                         (.bound-to bnd))))
       (insn/bind-then-value bnd ent)))
-  (new-def-mutable [_ nm init]
+  (new-def-mutable [_ private? nm init]
     #_(prn :new-def-mutable nm)
-    (let [p (defgen/promise-def-mutable ir/entity-id-def
+    (let [p (defgen/promise-def-mutable ir/entity-id-def private?
               (.segment-class segment) nm init)
           ent (-> p .expr-of .emitter)
           bnd (ir/mk-binding ent nm false)]
       (segment/stage-segment-task! segment p)
       (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/bind-then-value bnd ent)))
-  (new-def-var [_ nm init tp-var dynamic? meta]
+  (new-def-var [_ private? nm init tp-var dynamic? meta]
     #_(prn :new-def-var nm)
-    (let [p (defgen/promise-def-var (.segment-class segment) nm init
+    (let [p (defgen/promise-def-var private? (.segment-class segment) nm init
               tp-var dynamic? meta)
           bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)]
       (segment/stage-segment-task! segment p)
       (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/bind-then-value bnd (.df p))))
-  (new-def-alias [_ nm other-ent other-qname]
+  (new-def-alias [_ private? nm other-ent other-qname]
     #_(prn :new-def-alias nm)
-    (let [p (defgen/promise-def-alias nm other-ent other-qname)]
+    (let [p (defgen/promise-def-alias private? nm other-ent other-qname)]
       (segment/stage-segment-task! segment p)
       (set! globals (assoc globals nm other-ent))
       insn/insn-empty)) ;alias can refer to macro or primitive function
@@ -161,11 +204,15 @@
       this))
 
   (finish [this]
-    (.commit-segment-and-revert this (segment/size-segment-tasks segment) globals imports)
-    (->> (build/capstone pkg-build segment (.lookup-def this nil "-main"))
-         (ir/mk-nmsp-class (segment/capstone-class segment) (.super-class segment))
-         (classfile/bwdi pkg-build))
-    (ProvidedNamespace. ns-str))
+    (.commit-segment-and-revert this (segment/size-segment-tasks segment)
+                                globals imports)
+    (let [capstone-cld (segment/capstone-class (.pkg-name segment))
+          ncl (->> (build/capstone pkg-build segment require-strs
+                                   (.lookup-def this nil "-main"))
+                   (ir/mk-nmsp-class capstone-cld (.super-class segment))
+                   (classfile/bwdi pkg-build))]
+      (-> (set! known-ns (import-namespace known-ns (.defined-class ncl)))
+          (.valAt ns-str nil))))
   (commit-segment-and-revert [this end-of-segment then-globals then-imports]
     (let [tasks (-> (.subList (.tasks segment) 0 end-of-segment)
                     (fnenv/transitive-closure!))
@@ -207,10 +254,13 @@
                     etf (entity/mk-clinit-etf ns-str (.tasks segment))
                     xf (codegen/mk-factory)
                     globals primitive/primitive-nmsp-globals
-                    imports (resolve/predefined-imports (.rt-lookup loader))]
+                    imports (resolve/predefined-imports (.rt-lookup loader))
+                    import-nmsp (publics/mk-import-namespace
+                                 (.lookup-in-pkg pkg-build)
+                                 (.rt-lookup loader))]
                 (NmspBuilderImpl. this ns-str xf etf segment pkg-build
                                   globals known-ns ns-alias imports
-                                  source-file nil)))
+                                  (HashSet.) import-nmsp source-file nil)))
             
             (build-namespace ^ProvidedNamespace [^String ns-str ^seq ns-forms]
               (loop [acc (mk-nmsp-builder ns-str), forms (seq ns-forms)]
@@ -245,11 +295,16 @@
                  (aset a i))))
         a))))
 
-;;; No class files are written to disk if `dest-dir` is nil.
 (defn mk-universe
   (^NamespaceProvider [^map ns-form-map ^Loader loader]
-   (let [provided-ns {cfg/primitive-ns-str primitive/primitive-nmsp-globals
-                      cfg/core-lib (ProvidedNamespace. cfg/core-lib)}]
+   (let [pn-primitive (ProvidedNamespace. cfg/primitive-ns-str
+                                          primitive/primitive-nmsp-globals
+                                          insn/insn-empty)
+         pn-core (ProvidedNamespace. cfg/core-lib
+                                     {}
+                                     insn/insn-empty)
+         provided-ns {cfg/primitive-ns-str pn-primitive
+                      cfg/core-lib pn-core}]
      (mk-universe ns-form-map loader
                   (reduce dissoc provided-ns (keys ns-form-map)))))
   (^NamespaceProvider [^map ns-form-map ^Loader loader ^map provided-ns]

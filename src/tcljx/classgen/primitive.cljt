@@ -8,7 +8,7 @@
    (tinyclj [string :as str]))
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.ir CodeEmitter Entity ImmediateEntity Constant)
+   (tcljx.data.ir CodeEmitter Loadable Entity ImmediateEntity Constant)
    (tcljx.classgen.insn Insn Insns)
    (java.lang.classfile Opcode CodeBuilder TypeKind)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
@@ -54,7 +54,7 @@
           (if (type/polymorphic? target-type)
             insn/insn-empty             ;casting some constant to void
             (-> (type/convert-from-constant target-type c)
-                (insn/constant-insn target-type))))]
+                (insn/constant target-type))))]
 
   (defn- convert-to-primitive ^Insn [^Insn arg ^Class target-type ^long fctx]
     (or (when-some [c (insn/const-value arg)]
@@ -502,12 +502,13 @@
             (loop [i (dec (.length args'))]
               (when-not (neg? i)
                 (let [insn (insn/cast-to-logical args' i)
+                      ce (.emitter insn)
                       tp (insn/expr-type insn)]
                   (.set args' i
-                        (if (or (.isPrimitive tp) (insn/const? insn))
+                        (if (or (.isPrimitive tp) (ir/loadable? ce))
                           insn ;note: *all* constants are passed through
                           (-> (^CodeEmitter fn [xb _ _]
-                               (when (emit/insn? xb fctx tp (.emitter insn))
+                               (when (emit/insn? xb fctx tp ce)
                                  (-> (.ldc xb "")
                                      (.invokestatic cd-Objects "toString"
                                                     mtd-String-Object-String))
@@ -520,7 +521,7 @@
             (Constant/.loadable-entry (.emitter insn) cpb true)))
         (insn-str ^Insn [^String rstr ^Insns inv-args ^seq const-args
                          ^long fctx]
-          (let [recipe (insn/constant-insn rstr String)]
+          (let [recipe (insn/constant rstr String)]
             (cond
               (and (empty? const-args) (.empty? inv-args))
               recipe
@@ -558,10 +559,10 @@
                       (insn/insns-of* (reverse dyn-args))
                       (reverse const-args) fctx)
            
-            (let [x ^Insn (.get args i)]
-              (if (insn/const? x)
-                (let [s (str (Constant/.datafy (.emitter x)))
-                      x-str (insn/constant-insn s String)]
+            (let [x ^Insn (.get args i), ce (.emitter x)]
+              (if (ir/loadable? ce)
+                (let [s (str (Loadable/.datafy ce))
+                      x-str (insn/constant s String)]
                   (if (re-find re-marks s)
                     (recur (cons const-mark rparts) dyn-args
                            (cons x-str const-args) (inc i))

@@ -7,7 +7,7 @@
                    [util :as util] [emit :as emit] [constgen :as constgen]
                    [insn :as insn] [condgen :as condgen] [fnenv :as fnenv]))
   (:import
-   (tcljx.data.ir CodeEmitter Entity Constant BindableEntity FnPromise
+   (tcljx.data.ir CodeEmitter Entity BindableEntity ImmediateEntity FnPromise
                   ArityType AritySpec MethodSpec FieldSpec NmspClass
                   Parser ExprFactory EntityFactory)
    (tcljx.data.member MemberHandle)
@@ -71,11 +71,12 @@
                    ^DirectMethodHandleDesc/1 entry-mhds]
   CodeEmitter
   (emit-insn* [this xb consumed-type then-leave?]
-    (-> (.computational-value this)
+    (-> (DynamicConstantDesc/ofNamed rt/bsm-static-fn ConstantDescs/DEFAULT_NAME
+                                     rt/StaticFn entry-mhds)
         (constgen/constant (.value-type this))
         (.emit-insn* xb consumed-type then-leave?)))
   
-  Entity
+  ImmediateEntity
   (value-type [_]
     tinyclj.lang.StaticFn)
   (value-type-exact [_]
@@ -96,12 +97,7 @@
   (binding-mode-let [_]
     ir/bound-as-alias)
   (emit-setup-code? [_ xb param-no name]
-    true)
-  
-  Constant
-  (computational-value [_] ;never nil, but may require owner to be known
-    (DynamicConstantDesc/ofNamed rt/bsm-static-fn ConstantDescs/DEFAULT_NAME
-                                 rt/StaticFn entry-mhds)))
+    true))
 
 (defn- static-mhds ^DirectMethodHandleDesc/1 [^ClassDesc owner ^String name-prefix
                                               ^MethodSpec/1 specs]
@@ -288,7 +284,7 @@
            (when (emit/insn? xb fctx tinyclj.lang.AFnMh f)
              (insn/emit-invoke-arity (aget entry-mhds m-idx) at xs fctx xb)))
           (insn/mk-insn (.return-type at)))))
-  (emit-store [this xb]
+  (emit-store [this xb] ;highjacked to call __patch method with forward refs
     (when-not (identical? aorigin aforward)
       (let [tps (ArrayList.)]
         (.aload xb slot)           ;receiver is this function instance

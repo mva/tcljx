@@ -49,7 +49,7 @@
       inv))
   
   (expr-constant [_ value type]
-    (insn/constant-insn value type))
+    (insn/constant value type))
   (entity-class-member [this m]
     (fngen/class-member-fn m))
   (entity-getstatic [this m]

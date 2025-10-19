@@ -1191,3 +1191,15 @@
                    [clojure.lang.IType]
                    (toString [_] (.toString nds)))
                  (def ^pkg.ns0.Node/1 a)])))) ;non-trivial descriptor
+
+(deftest duplicate-method-test
+  (is (thrown-with-msg? java.lang.ClassFormatError #"Duplicate method"
+                        (nmsp '[(ns pkg.ns0)
+                                (deftype*
+                                  pkg.ns0/Node
+                                  pkg.ns0.Node
+                                  []
+                                  :implements
+                                  [clojure.lang.IType]
+                                  (toString [_] "abc")
+                                  (toString [_] "ABC"))]))))

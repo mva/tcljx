@@ -461,6 +461,8 @@
     (static-method tinyclj.lang.Literal "with_meta"
                    clojure.lang.IObj clojure.lang.IPersistentMap))
 
+  (def ensure-initialized (static-method tinyclj.lang.RT "ensureInitialized" Class))
+  
   (def create-var-2 (static-method clojure.lang.RT "var" String String))
   (def create-var-3 (static-method clojure.lang.RT "var" String String Object))
   (def set-meta (virtual-method clojure.lang.Var "setMeta" clojure.lang.IPersistentMap))

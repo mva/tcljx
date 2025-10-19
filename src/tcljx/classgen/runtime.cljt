@@ -25,6 +25,7 @@
 (def ^:private TypeDescriptor (ClassDesc/of "java.lang.invoke.TypeDescriptor"))
 (def ^:private LambdaMetafactory (ClassDesc/of "java.lang.invoke.LambdaMetafactory"))
 (def ^:private ObjectMethods (ClassDesc/of "java.lang.runtime.ObjectMethods"))
+(def ^:private Member (ClassDesc/of "java.lang.reflect.Member"))
 
 (def ^:private Object ConstantDescs/CD_Object)
 (def ObjectArray (.arrayType Object))
@@ -107,6 +108,11 @@
 (def mhd-map (mhd-static [Literal "map"] map [ObjectArray]))
 (def mhd-set (mhd-static [Literal "set"] set [ObjectArray]))
 (def mhd-list (mhd-static [Literal "list"] list [ObjectArray]))
+
+(def mhd-publicDefInfo (mhd-static [RT "publicDefInfo"]
+                                   ObjectArray [Lookup Member]))
+(def mhd-arityHandlesIfFn (mhd-static [RT "arityHandlesIfFn"]
+                                      MethodHandleArray [Lookup Class Object]))
 
 ;;; ------------------------------------------------------------------------
 

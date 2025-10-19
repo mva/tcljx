@@ -13,7 +13,7 @@
    [tcljx.parser.reader-test :as reader-test]
    [tcljx.classgen.classdata :as classdata] ;only available for unit tests
    [tcljx.alpha.ptest :as ptest]            ;for is
-   [tcljx.alpha.ptest__impl :as ptest__impl]) ;for get-test-context
+   [tcljx.alpha.ptest__impl :as ptest__impl]) ;for get-test-context-name
   (:import
    (tcljx.data.ir NmspClass)
    (tcljx.classgen.classfile Loader)
@@ -26,8 +26,8 @@
 ;;; FIXME... For now, the bootstrap class picks up classes of
 ;;; tinyclj.rt via the platform class loader, "seeing" the classes
 ;;; this application has been started with.  Change this to the
-;;; locally build module later, once some detail of tinyclj.rt changes
-;;; for tcljx, then class initialization should fail.
+;;; locally built module later.  Class initialization should fail,
+;;; once some detail of the rt module changes for tcljx.
 (def app-ld
   (let [
         ;; project-name (or (System/getenv "PROJECT_DIR")
@@ -77,12 +77,7 @@
                            (-> ncl .this-class .descriptorString)
                            (classdata/extract (.class-bytes ncl))))
          loader (classfile/mk-loader dest-dir app-ld dyn-ld class-sink)
-         
-         ns-forms-seq (split-at-ns formv)
-         
-         ;; provided-nmsp (em/mk-provided-nmsp cfg/core-lib bootstrap-globals-core)
-         
-         ]
+         ns-forms-seq (split-at-ns formv)]
      
      (let [ns-strs (->> (map nmsp-name-of ns-forms-seq)
                         ^String/1 (into-array String))
@@ -105,7 +100,7 @@
                             (no-tag? params)
                             (vary-meta assoc :tag meta/auto-return-type))
            ;; note: some forms must be wrapped in (do nil ...) to
-           ;; prevent them from disappearing
+           ;; prevent them from disappearing because of redirection
            form)]))
 
 (defn method-name [params]

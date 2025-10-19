@@ -171,9 +171,9 @@
    (info-unresolved "undefined symbol " sym-or-str))
   (^Throwable [^String msg-prefix sym-or-str]
    (wr-info (str msg-prefix (q sym-or-str)))))
-;; (defn unresolved-nmsp-sym [resolved-ns-nm ^Symbol fq-sym]
-;;   (throw (wr-info (str "no public var " (q (name fq-sym)) " in namespace "
-;;                        (q resolved-ns-nm)))))
+(defn unresolved-nmsp-sym [^String nmsp ^String nm]
+  (throw (wr-info (str "no public var " (q-as-symbol nm) " in namespace "
+                       (q-as-symbol nmsp)))))
 ;; (defn unresolved-interop [^String msg-prefix ^String nm ^Class opt-owner
 ;;                           ^map data]
 ;;   (throw (wr-info (cond-> (str msg-prefix (q (symbol nil nm)))

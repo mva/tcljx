@@ -99,7 +99,7 @@
       (.invoke* inv fctx form f m-idx args)))
 
   (attach-meta-to [this meta arg]
-    (if (and (insn/const? arg) (insn/const? meta))
+    (if (and (ir/loadable? (.emitter arg)) (ir/loadable? (.emitter meta)))
       (let [tp (insn/expr-type arg)]
         (-> (doto (new CodeEmitter/1 2)
               (aset 0 (.emitter arg))

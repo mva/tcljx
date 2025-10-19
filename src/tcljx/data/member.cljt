@@ -3,6 +3,7 @@
 
 (def acc-static? Modifier/isStatic)
 (def acc-final? Modifier/isFinal)
+(def acc-public? Modifier/isPublic)
 
 (def invoke-polymorphic -1) ;tail arguments & return type are polymorphic
 (def invoke-standard 0)     ;regular invocation

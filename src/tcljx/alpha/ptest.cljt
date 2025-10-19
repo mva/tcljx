@@ -64,9 +64,11 @@
 
 (defn run-and-report ^keyword [^vector nmspv]
   (let [rep (-> (impl/run-tests nmspv) (time))]
-    (println "\nRan" (.tests rep) "tests containing"
-             (impl/is-count rep) "assertions.")
-    (println (.is-fail rep) "failures," (.is-error rep) "errors.")
+    ;; Note: Print single string to avoid "failed to resolve runtime
+    ;; fn tinyclj.core/isa?" error in some rare bootstrap scenarios.
+    (println (str "\nRan " (.tests rep) " tests containing "
+                  (impl/is-count rep) " assertions."))
+    (println (str (.is-fail rep) " failures, " (.is-error rep) " errors."))
     (impl/exit-status rep)))
 
 (defn run-scoped-tests

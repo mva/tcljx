@@ -70,7 +70,8 @@
   (parameter-count ^int [])
 
   ;; The names of the parameters if the arity is being compiled from
-  ;; source.  For an imported function this is nil.
+  ;; source.  For an imported function this is nil, and only a
+  ;; synthetic name is returned when given an index.
   (parameter-names ^String/1 [])
   (parameter-name ^String [^int i])
 
@@ -88,11 +89,12 @@
                     ^boolean varargs? ^boolean variadic?]
   java.lang.Record
   IArityType
-  (parameter-count [_] (alength parameter-types))
-  (parameter-name [_ ^int i] (aget parameter-names i))
   (parameter-type [_ ^int i] (aget parameter-types i))
-  (varargs? [_] varargs?)
-  (variadic? [_] variadic?))
+  (parameter-count [_] (alength parameter-types))
+  (parameter-name [_ ^int i]
+    (if (some? parameter-names)
+      (aget parameter-names i)
+      (str "param-" (inc i)))))
 
 (defn with-return-type
   (^ArityType [^ArityType at ^Class tp]
@@ -324,18 +326,10 @@
 
 ;;; Any entity that can be turned into either an LDC instruction as
 ;;; part of a method's code attribute, or into a loadable entry inside
-;;; the constant pool.
-;;; 
-;;; An entity whose bytecode representation is a variant of the LDC
-;;; instruction.  Constant values must be visible to the parser,
-;;; because type expression literals (for example `Classname` or
-;;; `Classname/1`) are part of the syntax of some special forms.
-;;; Constant values are visible to the code generator to support
-;;; bottom up constant folding while building the expression tree.
-(definterface Constant
-  :extends [Entity]
-  (computational-value ^Object []) ;ConstantDesc, Class, or some non-nil value
-
+;;; the constant pool.  Loadables can be composed to create collection
+;;; loadables.
+(definterface Loadable
+  :extends [CodeEmitter]
   ;; If `logical-type?` is true, then make sure the entry materializes
   ;; as the actual logical type of the loadable, instead of its
   ;; computational type.  Only makes a difference to computational int
@@ -346,6 +340,18 @@
   ;; Return the compile time data structure representation of this
   ;; loadable.
   (datafy ^Object []))
+(defn loadable? ^boolean [^CodeEmitter ce]
+  (instance? Loadable ce))
+
+;;; An entity whose bytecode representation is a variant of the LDC
+;;; instruction.  Constant values must be visible to the parser,
+;;; because type expression literals (for example `Classname` or
+;;; `Classname/1`) are part of the syntax of some special forms.
+;;; Constant values are visible to the code generator to support
+;;; bottom up constant folding while building the expression tree.
+(definterface Constant
+  :extends [Entity Loadable]
+  (computational-value ^Object [])) ;ConstantDesc or Class
 
 (defn type-literal ^Class [^Expr x form] ;nil if not a type symbol
   (let [ce (.emitter x)]
@@ -356,7 +362,7 @@
 
 ;;; ------------------------------------------------------------------------
 
-(deftype ProvidedNamespace [^String ns-str]
+(deftype ProvidedNamespace [^String ns-str ^map globals ^Expr force-clinit]
   java.lang.Record)
 
 (definterface NamespaceProvider
@@ -364,7 +370,12 @@
   ;; an instance of `ProvidedNamespace` in the corresponding element
   ;; of the result, or an element of value nil if the namespace name
   ;; could not be resolved.
-  (require-namespaces ^ProvidedNamespace/1 [^String/1 ns-strs]))
+  (require-namespaces ^ProvidedNamespace/1 [^String/1 ns-strs])
+
+  ;; Adds the namespace represented by the given capstone class to the
+  ;; map of known namespaces.  Transitively adds any required
+  ;; namespaces, which may be referred to by macro or alias expansion.
+  (import-namespace ^map [^map known-ns ^Class capstone]))
 
 (deftype Require [^String ns-str
                   ^String alias-str     ;nil if no alias
@@ -400,10 +411,13 @@
   ;; Adds the new binding to the namespace.  Returns an expression
   ;; that initializes the binding with its value (if any).  Pass empty
   ;; expression as `init` if no intial value is provided.
-  (new-def-immutable ^Expr [^boolean macro? ^String nm ^Expr init])
-  (new-def-mutable ^Expr [^String nm ^Expr init])
-  (new-def-var ^Expr [^String nm ^Expr init ^Class tp-var ^boolean dynamic? ^Expr meta])
-  (new-def-alias ^Expr [^String nm ^Entity other-ent ^String other-qname])
+  (new-def-immutable ^Expr [^boolean private? ^boolean macro? ^String nm
+                            ^Expr init])
+  (new-def-mutable ^Expr [^boolean private? ^String nm ^Expr init])
+  (new-def-var ^Expr [^boolean private? ^String nm ^Expr init
+                      ^Class tp-var ^boolean dynamic? ^Expr meta])
+  (new-def-alias ^Expr [^boolean private? ^String nm
+                        ^Entity other-ent ^String other-qname])
   
   ;; FIXME... see tcljc/emitter/namespace.cljt
   ;; hack for dependency chain core_print.cljt

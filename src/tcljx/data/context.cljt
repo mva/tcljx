@@ -33,7 +33,7 @@
 (defn of-progn-prefix ^long [^long fctx]
   (bit-and-not fctx flag-can-recur))
 (defn of-finally ^long [^long fctx]
-  (bit-and-not fctx flag-statm-position))
+  (bit-and-not fctx flag-statm-position)) ;operand stack holds exception
 
 (def fctx-initial flag-statm-position)
 (def fctx-none 0l)           ;used as placeholder for "no line number"

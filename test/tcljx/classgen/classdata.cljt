@@ -32,15 +32,13 @@
       (recur (rest xs) (next ds)))))
 
 (def ^:private named-mhd
-  {#_#_rt/bsm-invoke :bsm-invoke
-   rt/bsm-quote :bsm-quote
+  {rt/bsm-quote :bsm-quote
    rt/bsm-concat :bsm-concat
    rt/bsm-static-fn :bsm-static-fn
    rt/bsm-invoke-fn :bsm-invoke-fn
    rt/bsm-clause-code :bsm-clause-code
    rt/bsm-metafactory :bsm-metafactory
    rt/bsm-object-method :bsm-object-method
-
    ConstantDescs/BSM_NULL_CONSTANT :bsm-null
    ConstantDescs/BSM_EXPLICIT_CAST :bsm-explicit-cast
    ConstantDescs/BSM_GET_STATIC_FINAL :bsm-get-static-final})
