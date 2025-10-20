@@ -11,13 +11,13 @@
 
 (deftest empty-bindings
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(FIELD [PUBLIC STATIC FINAL] "two" "I")]
+            [(METHOD [PUBLIC STATIC FINAL] "two" "()I")
+             (ICONST_2)
+             (IRETURN)]
 
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
              (LDC "pkg.ns0")
              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
-             (ICONST_2)
-             (PUTSTATIC . "two" "I")
              (RETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
