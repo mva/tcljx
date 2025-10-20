@@ -18,6 +18,14 @@
 
 (def ^:private sym-unquote (symbol cfg/core-lib "unquote"))
 (def ^:private sym-unquote-splicing (symbol cfg/core-lib "unquote-splicing"))
+(def ^:private sym-list (symbol cfg/core-lib "list"))
+(def ^:private sym-vector (symbol cfg/core-lib "vector"))
+(def ^:private sym-hash-map (symbol cfg/core-lib "hash-map"))
+(def ^:private sym-hash-set (symbol cfg/core-lib "hash-set"))
+(def ^:private sym-seq (symbol cfg/core-lib "seq"))
+(def ^:private sym-with-meta (symbol cfg/core-lib "with-meta"))
+(def ^:private sym-concat (symbol cfg/core-lib "concat"))
+(def ^:private sym-apply (symbol cfg/core-lib "apply"))
 
 (defn unquote? ^boolean [form]
   (and (seq? form) (= sym-unquote (first form))))
@@ -101,9 +109,9 @@
        (expand-list ^vector [xs]
          (reduce (fn ^vector [^vector ret item]
                    (.cons ret (cond
-                                (unquote? item) (list `list (second item))
+                                (unquote? item) (list sym-list (second item))
                                 (unquote-splicing? item) (second item)
-                                :else (list `list (template item)))))
+                                :else (list sym-list (template item)))))
                  [] xs))
        (flatten-map ^vector [m]
          (reduce (fn ^vector [^vector keyvals ^IMapEntry e]
@@ -119,30 +127,30 @@
        (unwrap-quote [x]                ;pre: `(quoted? x)` is true
          (if (seq? x) (second x) x))
        (quoted-in-list? ^boolean [x]
-         (and (seq? x) (= `list (first x)) (nil? (nnext x)) ;list of one?
+         (and (seq? x) (= sym-list (first x)) (nil? (nnext x)) ;list of one?
               (quoted? (second x))))
        (unwrap-list [x]            ;pre: `(quoted-in-list? x)` is true
          (unwrap-quote (second x)))
        (list-of? ^boolean [l]
-         (and (seq? l) (= (first l) `list)))
+         (and (seq? l) (= (first l) sym-list)))
        (concat-of [ls]
          (if (every? list-of? ls)
-           (list* `list (mapcat rest ls))
-           (cons `concat ls)))
+           (list* sym-list (mapcat rest ls))
+           (cons sym-concat ls)))
        (assemble [apply-sym apply-fn xs]
          (let [ls (expand-list xs)]
            (if (every? quoted-in-list? ls)
              (q (cond->> (map unwrap-list ls)
                   (some? apply-fn) (apply apply-fn)))
-             (cond->> (list `seq (concat-of ls))
-               (some? apply-sym) (list `apply apply-sym)))))
+             (cond->> (list sym-seq (concat-of ls))
+               (some? apply-sym) (list sym-apply apply-sym)))))
        
        (encode-collection [form]
          (cond
            (instance? IRecord form) form
-           (map? form) (assemble `hash-map hash-map (flatten-map form))
-           (vector? form) (assemble `vector vector form)
-           (set? form) (assemble `hash-set hash-set form)
+           (map? form) (assemble sym-hash-map hash-map (flatten-map form))
+           (vector? form) (assemble sym-vector vector form)
+           (set? form) (assemble sym-hash-set hash-set form)
            (or (seq? form) (list? form)) (if-some [seq (seq form)]
                                            (assemble nil nil seq)
                                            ())
@@ -169,7 +177,7 @@
           (let [m-tmpl (template m)]
             (if (and (quoted? tmpl) (quoted? m-tmpl))
               (q (with-meta (unwrap-quote tmpl) (unwrap-quote m-tmpl)))
-              (list `with-meta tmpl m-tmpl)))
+              (list sym-with-meta tmpl m-tmpl)))
           tmpl))))
 
 ;;; ------------------------------------------------------------------------

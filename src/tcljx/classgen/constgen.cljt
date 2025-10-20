@@ -46,9 +46,9 @@
             (cond
               (symbol? c) (cde-named "symbol" rt/symbol c)
               (seq? c) (cde-coll rt/mhd-list c)
-              (vector? c) (cde-coll rt/mhd-vector (tinyclj.core/seq c))
+              (vector? c) (cde-coll rt/mhd-vector (seq c))
               (map? c) (cde-coll rt/mhd-map (mapcat identity c))
-              (set? c) (cde-coll rt/mhd-set (tinyclj.core/seq c))
+              (set? c) (cde-coll rt/mhd-set (seq c))
               :else (throw (IllegalArgumentException. (str (class c))))))
           (entry-nometa ^LoadableConstantEntry [^Object c]
             ;; describe `c` ignoring its meta value
@@ -137,7 +137,7 @@
 
 (defn null? ^boolean [^Object value]
   (identical? ConstantDescs/NULL value))
-(defn zero? ^boolean [^Object value]
+(defn number-zero? ^boolean [^Object value]
   (and (instance? Number value) (= (.doubleValue ^Number value) 0.0)))
 
 ;;; Primitive value, null, String, or Class.  Identity is either value
@@ -219,7 +219,7 @@
     entity-null
     
     (type/same? Boolean/TYPE type)
-    (if (tinyclj.core/zero? ^int computational-value) entity-false entity-true)
+    (if (zero? ^int computational-value) entity-false entity-true)
     
     :else (JvmConstant. computational-value type)))
 
@@ -230,5 +230,5 @@
     (JvmConstant/.computational-value ce)))
 
 (def entity-int-zero (constant 0 Integer/TYPE))
-(defn entity-zero? ^boolean [^CodeEmitter ce]
-  (and (const? ce) (zero? (const-value ce))))
+(defn entity-number-zero? ^boolean [^CodeEmitter ce]
+  (and (const? ce) (number-zero? (const-value ce))))

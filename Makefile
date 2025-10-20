@@ -54,8 +54,8 @@ run-jfr: compile
 test:
 # This variant is for the compiler's unit tests.  It avoids a single
 # shared tcljc.rt/tinyclj.lang.RT whose markCoreInitialization() is
-# first called from tcljc.core/tinyclj.core._10.<clinit> and then
-# again in the running tests from tclj-dyn//tinyclj.core._10.<clinit>
+# first called from tcljc.core/clojure.core._10.<clinit> and then
+# again in the running tests from tclj-dyn//clojure.core._10.<clinit>
 	$(JAVA) -p ../bootstrap-tcljc --add-modules tcljc.core -cp $(DEST_DIR) $(RUN_TESTS_NS).___
 # This variant works for regular applications:
 #	$(JAVA) $(JAVA_OPTS) -cp $(DEST_DIR) $(RUN_TESTS_NS).___

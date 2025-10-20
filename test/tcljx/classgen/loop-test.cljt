@@ -230,7 +230,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def f (fn* f []
@@ -354,7 +354,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def list
@@ -392,7 +392,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def lift-ns
@@ -422,7 +422,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (fn* lift-ns [^String s]

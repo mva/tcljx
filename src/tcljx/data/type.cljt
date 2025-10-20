@@ -1,4 +1,5 @@
 (ns tcljx.data.type
+  (:require [tinyclj.core :as cc])
   (:import (java.lang.classfile CodeBuilder TypeKind)
            (java.lang.constant ConstantDesc))
   (:refer-clojure :exclude [symbol keyword vector map set list
@@ -81,12 +82,12 @@
 (defn type-symbol ^symbol [^Class tp]
   (let [n (type-dimensions tp)]
     (if (zero? n)
-      (tinyclj.core/symbol nil (.getName tp))
-      (tinyclj.core/symbol (loop [cl tp]
-                             (if (.isArray cl)
-                               (recur (.componentType cl))
-                               (.getName cl)))
-                           (str n)))))
+      (cc/symbol nil (.getName tp))
+      (cc/symbol (loop [cl tp]
+                   (if (.isArray cl)
+                     (recur (.componentType cl))
+                     (.getName cl)))
+                 (str n)))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -109,7 +110,7 @@
         Short/TYPE #_short 7            ;saload and sastore
         Void/TYPE #_void 8              ;arbitrary
         #_else (throw (IllegalArgumentException.)))
-      (tinyclj.core/byte)))
+      (cc/byte)))
 
 ;;; Like the primitive equivalent, the reference class of a box type
 ;;; is final.  This means, that an `isAssignableFrom` check reduces to
@@ -138,13 +139,13 @@
             (Wrapper. class-primitive class-reference
                       (TypeKind/from class-primitive)
                       (.isAssignableFrom Number class-reference)
-                      (tinyclj.core/short
+                      (cc/short
                        ;; can assign from itself and from void
                        (cond-> (-> 0 (bit-set prim-id) (bit-set 8))
                          (some? assignable-from)
                          (bit-or (.mask-assignable-from assignable-from))))
                       prim-id
-                      (if (> prim-id 3) (tinyclj.core/byte 0) prim-id))))]
+                      (if (> prim-id 3) (cc/byte 0) prim-id))))]
   (def byte (wrapper Byte/TYPE Byte nil))
   (def short (wrapper Short/TYPE Short byte))
   (def int (wrapper Integer/TYPE Integer short))
@@ -154,8 +155,8 @@
   (def boolean (wrapper Boolean/TYPE Boolean nil))
   (def char (wrapper Character/TYPE Character nil)) ;not numeric in Clojure
   (def void (Wrapper. Void/TYPE Void (TypeKind/from Void/TYPE)
-                      false (tinyclj.core/short -1) (primitive-id Void/TYPE)
-                      (tinyclj.core/byte -1))))
+                      false (cc/short -1) (primitive-id Void/TYPE)
+                      (cc/byte -1))))
 
 (def primitive-types [int long float double boolean byte char short void])
 
@@ -266,10 +267,10 @@
       #_double 3 (object (.doubleValue n))
       #_else
       (-> (case prim-id        ;conversion to computationally int type
-            #_boolean 4 (tinyclj.core/int (not= (.intValue n) 0))
-            #_byte 5 (tinyclj.core/int (.byteValue n))
-            #_char 6 (tinyclj.core/int (tinyclj.core/char (.intValue n)))
-            #_short 7 (tinyclj.core/int (.shortValue n)))
+            #_boolean 4 (cc/int (not= (.intValue n) 0))
+            #_byte 5 (cc/int (.byteValue n))
+            #_char 6 (cc/int (cc/char (.intValue n)))
+            #_short 7 (cc/int (.shortValue n)))
           (object)))))
 
 #_(defn of-descriptor ^Wrapper [^TypeDescriptor$OfField tpd]

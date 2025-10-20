@@ -152,19 +152,20 @@
                 (let [j (.indexOf req-strs (int \,) i)]
                   (if (neg? j)
                     known-ns
-                    (let [ns-str (.substring req-strs i j)
-                          capstone* (.capstone-for pb-tmpl ns-str) ]
-                      (-> (import-namespace known-ns capstone*)
+                    (let [ns-str (.substring req-strs i j)]
+                      (-> (cond-> known-ns
+                            (not (contains? known-ns ns-str))
+                            (import-namespace (.capstone-for pb-tmpl ns-str)))
                           (recur (inc j)))))))))
           (import-namespace ^map [^map known-ns ^Class capstone]
-            (if (contains? known-ns (.getPackageName capstone))
-              known-ns
-              (let [known-ns (import-requires known-ns capstone)]
-                (-> (.for-namespace pb-tmpl known-ns capstone)
-                    (segments-into! (.getSuperclass capstone))
-                    (.finish-namespace)))))]
-    
-    import-namespace))
+            (let [known-ns (import-requires known-ns capstone)]
+              (-> (.for-namespace pb-tmpl known-ns capstone)
+                  (segments-into! (.getSuperclass capstone))
+                  (.finish-namespace))))]
+    (fn ^map [^map known-ns ^Class capstone]
+      (cond-> known-ns
+        (not (contains? known-ns (.getPackageName capstone)))
+        (import-namespace capstone)))))
 
 (defn mk-import-namespace [^MethodHandles$Lookup lookup-in-pkg
                            ^MethodHandles$Lookup rt-lookup]

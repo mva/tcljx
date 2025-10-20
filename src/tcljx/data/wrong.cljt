@@ -23,7 +23,7 @@
   (toString [this]
     ;; For some reason, "make test" crashes in prn or println
     ;; with "IllegalStateException: failed to resolve runtime fn
-    ;; tinyclj.core/isa?" in some scenarios, where "make
+    ;; clojure.core/isa?" in some scenarios, where "make
     ;; watch-and-test" works as expected.  This happens in
     ;; the (.toString data), or later when trying to print the summary
     ;; report.  Running single tests via TEST=... avoids this problem.

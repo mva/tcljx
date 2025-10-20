@@ -1,6 +1,6 @@
 (ns tcljx.parser.syntax
   (:require (tcljx.data [config :as cfg] [wrong :as wrong])
-            [tinyclj.core :as core])
+            [tinyclj.core :as cc])
   (:refer-clojure :exclude [vector list map symbol first second]))
 
 (defn info
@@ -54,12 +54,12 @@
 ;;; ------------------------------------------------------------------------
 
 (defn strip-quote [x]
-  (if (and (seq? x) (= cfg/sym-quote (core/first x)) (nil? (nnext x)))
-    (core/second x)
+  (if (and (seq? x) (= cfg/sym-quote (cc/first x)) (nil? (nnext x)))
+    (cc/second x)
     x))
 
 (defn next-if-string ^seq [^seq xs]
-  (cond-> xs (string? (core/first xs)) (next)))
+  (cond-> xs (string? (cc/first xs)) (next)))
 
 (defn empty-tail
   (^void [^seq forms]
@@ -70,17 +70,17 @@
 
 (defn first [^seq forms]
   (if (some? (seq forms))
-    (core/first forms)
+    (cc/first forms)
     (throw (info "missing argument"))))
 
 (defn second [^seq forms]
   (if-some [xs (next forms)]
-    (core/first xs)
+    (cc/first xs)
     (throw (info "missing argument"))))
 
 (defn varargs-parameter ^symbol [[_ & forms]]
   (if (some? forms)
-    (simple-symbol (core/first forms))
+    (simple-symbol (cc/first forms))
     (throw (info "missing varargs parameter"))))
 
 ;;; ------------------------------------------------------------------------
@@ -96,7 +96,7 @@
               (cons (prefixed-nmsp-str spec prefix) rimports)
                       
               (seq? spec)
-              (let [prefix (prefixed-nmsp-str (core/first spec) prefix)]
+              (let [prefix (prefixed-nmsp-str (cc/first spec) prefix)]
                 (flatten-imports rimports (str prefix ".")
                                  (rest spec) spec))
                       

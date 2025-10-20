@@ -30,7 +30,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def f (fn* ^int [^int a ^int b] (+ a b)))]))))
@@ -57,7 +57,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def f (fn* ^float [^boolean b] (if b 1 0)))]))))
@@ -82,7 +82,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def add2 (fn* ^int [^int a ^int b] (+ a b)))]))))
@@ -120,7 +120,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          ;; Not implemented: Take the first def as the methods'
          ;; signature specification and then use .invokeExact() to
@@ -180,7 +180,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def add2 (fn* ^int [^int a ^int b] (+ a b)))
@@ -226,7 +226,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def ^:redef add2 (fn* ^:redef add2 ^int [^int a ^int b]
@@ -292,7 +292,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def ^:redef add (fn* ^:redef add
@@ -334,7 +334,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def add2 (fn* ^int [^int a ^int b] (+ a b)))
@@ -366,7 +366,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          ;; `str` is mapped to invoke dynamic and cannot be delegated
          ;; to, i.e. a regular static method implements function `f`
@@ -402,7 +402,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def inc-fn (fn* inc
@@ -445,7 +445,7 @@
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]
            
            [(CLASS Vx [PUBLIC FINAL] "pkg/ns0/fn$inc" nil "tinyclj/lang/AFnMh")
@@ -568,7 +568,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def fn-recur (fn* fn-recur [^int i]
@@ -597,7 +597,7 @@
 ;;              (RETURN)]]
 ;;            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
 ;;             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-;;              (LDC "tinyclj.core")
+;;              (LDC "clojure.core")
 ;;              (ARETURN)]]]
 ;;          (-> (nmsp '[(ns pkg.ns0)
 ;;                      (def f #(+ ^int %1 ^int %2))])
@@ -627,7 +627,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def key java.util.Map$Entry/.getKey
@@ -647,7 +647,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (fn* ^__auto-return-type__ []
@@ -665,7 +665,7 @@
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (fn* ^__auto-return-type__ []
@@ -685,7 +685,7 @@
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (fn* ^__auto-return-type__ []
@@ -705,7 +705,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (fn* ^__auto-return-type__ [^java.lang.invoke.MethodHandle mh]
@@ -724,7 +724,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (fn* ^__auto-return-type__ []

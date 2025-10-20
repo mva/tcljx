@@ -125,14 +125,14 @@
   (is (= () (call-expr ()))))
 
 (deftest primitive-list-test
-  ;; (tinyclj.lang.primitive/list) is another way to write ()
+  ;; (clojure.core.primitive/list) is another way to write ()
   (is (= '[(LDC [:bsm-quote "list" "Lclojure/lang/IPersistentList;" []])
            (ARETURN)]
-         (asm-expr (tinyclj.lang.primitive/list))))
-  ;; (tinyclj.lang.primitive/list "foo") is list equivalent of ["foo"]
+         (asm-expr (clojure.core.primitive/list))))
+  ;; (clojure.core.primitive/list "foo") is list equivalent of ["foo"]
   (is (= '[(LDC [:bsm-quote "list" "Lclojure/lang/IPersistentList;" ["foo"]])
            (ARETURN)]
-         (asm-expr (tinyclj.lang.primitive/list "foo")))))
+         (asm-expr (clojure.core.primitive/list "foo")))))
 
 (deftest constant-pool-literal-test
   (is-asm [0] [(LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;"

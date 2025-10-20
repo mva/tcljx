@@ -52,7 +52,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (definterface* FnInt2
@@ -90,7 +90,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def ^Runnable f
@@ -135,7 +135,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (def ^java.util.Comparator f
@@ -195,7 +195,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (definterface* FnMyFn
@@ -240,7 +240,7 @@
              (RETURN)]]
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (.accept (^java.util.function.Consumer fn* [x])
@@ -284,7 +284,7 @@
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
                      "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (^java.util.function.BinaryOperator fn* [x y] nil)]))))
@@ -317,7 +317,7 @@
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
                      "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (fn* ^java.util.function.Supplier [^String x]
@@ -358,7 +358,7 @@
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
                      "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  (fn* ^java.util.function.Function [^int n]

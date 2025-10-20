@@ -29,20 +29,20 @@
         minor 0 #_ClassFile/PREVIEW_MINOR_VERSION]
     (.withVersion cb major minor)))
 
-(def core-lib "tinyclj.core")
+(def core-lib "clojure.core")
 ;; (def core-lib-sym (symbol nil core-lib))
 (defn core-lib? ^boolean [^String ns-str] (= core-lib ns-str))
 
 (def sym-quote 'quote)
 
-;;; note: a copy of this lives in tinyclj.core/specials
+;;; note: a copy of this lives in clojure.core/specials
 (def specials '#{def loop* recur if case* let* letfn*
                  do fn* quote var import* . set! deftype* reify* try throw
                  monitor-enter monitor-exit catch finally new &
                  ;; special forms that are not special in Clojure:
                  definterface* instanceof*})
 
-(def primitive-ns-str "tinyclj.lang.primitive")
+(def primitive-ns-str "clojure.core.primitive")
 
 ;;; ------------------------------------------------------------------------
 

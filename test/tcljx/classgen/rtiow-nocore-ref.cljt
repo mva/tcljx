@@ -3,11 +3,11 @@
 (ns tcljx.classgen.rtiow-nocore-ref (:refer-clojure :none))
 
 ;;; Note: Cannot use syntax-quote because it expands to
-;;; `tinyclj.core/seq` and such like.
+;;; `clojure.core/seq` and such like.
 
 (def *ns* "tcljx.classgen.rtiow-nocore-ref")     ;real *ns* not available here
 
-(def list tinyclj.lang.primitive/list)
+(def list clojure.core.primitive/list)
 
 (def cons (fn* cons ^clojure.lang.ISeq [x seq]
                (clojure.lang.RT/cons x seq)))
@@ -76,17 +76,17 @@
       (cons 'tcljx.classgen.rtiow-nocore-ref/defn
             (cons (with-meta name '{:macro true}) mdecl)))))
 
-(def object tinyclj.lang.primitive/object)
-(def int tinyclj.lang.primitive/int)
-(def float tinyclj.lang.primitive/float)
+(def object clojure.core.primitive/object)
+(def int clojure.core.primitive/int)
+(def float clojure.core.primitive/float)
 
 (defmacro when [test & body]
   (list 'if test (cons 'do body)))
 
 (defmacro some? [arg]
-  (list 'not (list 'tinyclj.lang.primitive/identical? arg nil)))
+  (list 'not (list 'clojure.core.primitive/identical? arg nil)))
 
-(def str tinyclj.lang.primitive/str)
+(def str clojure.core.primitive/str)
 
 (defn symbol? ^boolean [x]
   (instance? clojure.lang.Symbol x))
@@ -153,23 +153,23 @@
           (cons 'definterface* (cons name sigs))
           (list 'import* class-name))))
 
-(def + tinyclj.lang.primitive/+)
-(def - tinyclj.lang.primitive/-)
-(def * tinyclj.lang.primitive/*)
-(def / tinyclj.lang.primitive//)
-(defmacro inc [arg] (list 'tinyclj.lang.primitive/+ arg 1))
-(defmacro dec [arg] (list 'tinyclj.lang.primitive/- arg 1))
+(def + clojure.core.primitive/+)
+(def - clojure.core.primitive/-)
+(def * clojure.core.primitive/*)
+(def / clojure.core.primitive//)
+(defmacro inc [arg] (list 'clojure.core.primitive/+ arg 1))
+(defmacro dec [arg] (list 'clojure.core.primitive/- arg 1))
 
-(def = tinyclj.lang.primitive/=)
-(def == tinyclj.lang.primitive/==)
-(def < tinyclj.lang.primitive/<)
-(def >= tinyclj.lang.primitive/>=)
-(def > tinyclj.lang.primitive/>)
-(def <= tinyclj.lang.primitive/<=)
+(def = clojure.core.primitive/=)
+(def == clojure.core.primitive/==)
+(def < clojure.core.primitive/<)
+(def >= clojure.core.primitive/>=)
+(def > clojure.core.primitive/>)
+(def <= clojure.core.primitive/<=)
 
-(def alength tinyclj.lang.primitive/alength)
-(def aget tinyclj.lang.primitive/aget)
-(def aset tinyclj.lang.primitive/aset)
+(def alength clojure.core.primitive/alength)
+(def aget clojure.core.primitive/aget)
+(def aset clojure.core.primitive/aset)
 
 ;;; ------------------------------------------------------------------------
 

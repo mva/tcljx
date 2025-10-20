@@ -199,12 +199,12 @@
   (is (= '(quote (1 2)) (rdr "`^:foo (1 2)")))
   (is (= '{:foo true} (-> (rdr "`^:foo (1 2)") (second) (meta))))
 
-  (is (= '(tinyclj.core/with-meta
+  (is (= '(clojure.core/with-meta
             (quote (1 2))
-            (tinyclj.core/apply
-             tinyclj.core/hash-map
-             (tinyclj.core/seq
-              (tinyclj.core/list :foo bar))))
+            (clojure.core/apply
+             clojure.core/hash-map
+             (clojure.core/seq
+              (clojure.core/list :foo bar))))
          (rdr "`^{:foo ~bar} (1 2)"))))
 
 (deftest quote-test
@@ -227,35 +227,35 @@
   (is (= '(quote a)
          (rdr "``~~'a")))
   
-  (is (= '(tinyclj.core/seq
-           (tinyclj.core/list (quote name.space/a) (quote name.space/b) x))
+  (is (= '(clojure.core/seq
+           (clojure.core/list (quote name.space/a) (quote name.space/b) x))
          (rdr "`(a b ~x)")))
-  (is (= '(tinyclj.core/seq
-           (tinyclj.core/list (quote name.space/a) x (quote name.space/b)))
+  (is (= '(clojure.core/seq
+           (clojure.core/list (quote name.space/a) x (quote name.space/b)))
          (rdr "`(a ~x b)")))
-  (is (= '(tinyclj.core/seq
-           (tinyclj.core/list x (quote name.space/a) (quote name.space/b)))
+  (is (= '(clojure.core/seq
+           (clojure.core/list x (quote name.space/a) (quote name.space/b)))
          (rdr "`(~x a b)"))))
 
 (deftest quoted-unquote-test
-  (is (= '(quote (tinyclj.core/unquote a))
+  (is (= '(quote (clojure.core/unquote a))
          (rdr "'~a"))))
 
 (deftest unquote-splicing-test
-  (is (= '(tinyclj.core/seq
-           (tinyclj.core/concat (tinyclj.core/list (quote name.space/a))
-                                (tinyclj.core/list (quote name.space/b))
+  (is (= '(clojure.core/seq
+           (clojure.core/concat (clojure.core/list (quote name.space/a))
+                                (clojure.core/list (quote name.space/b))
                                 [x y]))
          (rdr "`(a b ~@[x y])")))
-  (is (= '(tinyclj.core/seq
-           (tinyclj.core/concat (tinyclj.core/list (quote name.space/a))
+  (is (= '(clojure.core/seq
+           (clojure.core/concat (clojure.core/list (quote name.space/a))
                                 [x y]
-                                (tinyclj.core/list (quote name.space/b))))
+                                (clojure.core/list (quote name.space/b))))
          (rdr "`(a ~@[x y] b)")))
-  (is (= '(tinyclj.core/seq
-           (tinyclj.core/concat [x y]
-                                (tinyclj.core/list (quote name.space/a))
-                                (tinyclj.core/list (quote name.space/b))))
+  (is (= '(clojure.core/seq
+           (clojure.core/concat [x y]
+                                (clojure.core/list (quote name.space/a))
+                                (clojure.core/list (quote name.space/b))))
          (rdr "`(~@[x y] a b)")))
 
   (is (thrown-with-msg? WrongInfo
@@ -670,13 +670,13 @@
   (is (= '(quote a) (read1 "'a")))
   (is (= '(deref a) (read1 "@a")))
   
-  (is (= '(tinyclj.core/unquote a)
+  (is (= '(clojure.core/unquote a)
          (read1 "~a")))
-  (is (= '(tinyclj.core/unquote a)
+  (is (= '(clojure.core/unquote a)
          (read1 "`~~a")))
-  (is (= '(tinyclj.core/unquote-splicing a)
+  (is (= '(clojure.core/unquote-splicing a)
          (read1 "~@a")))
-  (is (= '(tinyclj.core/unquote-splicing a)
+  (is (= '(clojure.core/unquote-splicing a)
          (read1 "`~~@a"))))
 
 (deftest meta-value-test

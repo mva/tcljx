@@ -23,11 +23,6 @@
    (java.util List)
    (java.util.function Consumer Function)))
 
-;;; FIXME... For now, the bootstrap class picks up classes of
-;;; tinyclj.rt via the platform class loader, "seeing" the classes
-;;; this application has been started with.  Change this to the
-;;; locally built module later.  Class initialization should fail,
-;;; once some detail of the rt module changes for tcljx.
 (def app-ld
   (let [
         ;; project-name (or (System/getenv "PROJECT_DIR")

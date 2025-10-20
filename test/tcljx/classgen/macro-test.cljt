@@ -34,7 +34,7 @@
       (RETURN)]]
     [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_11")
      [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-      (LDC "tinyclj.core")
+      (LDC "clojure.core")
       (ARETURN)]]])
 
 (deftest open-code-macro
@@ -180,7 +180,7 @@
 
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_12")
             [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
-             (LDC "tinyclj.core")
+             (LDC "clojure.core")
              (ARETURN)]]]
          (nmsp '[(ns pkg.ns0)
                  ;; pkg/ns0/_10.class

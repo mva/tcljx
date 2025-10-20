@@ -421,7 +421,7 @@
   
   ;; FIXME... see tcljc/emitter/namespace.cljt
   ;; hack for dependency chain core_print.cljt
-  ;; -> MultiFn.java -> tinyclj.core fns
+  ;; -> MultiFn.java -> clojure.core fns
   (load-file ^NamespaceBuilder [^String path-str])
 
   (process-init-form ^NamespaceBuilder [^long fctx form])

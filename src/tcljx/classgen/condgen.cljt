@@ -134,18 +134,18 @@
     (loop [opcd cmp-opcd, left (aget args 0), right (aget args 1)]
       ;; loop body is executed at most twice
       (cond
-        (constgen/entity-zero? right)     ;slide if_icmpeq to ifeq
+        (constgen/entity-number-zero? right) ;slide if_icmpeq to ifeq
         (mk-ifpred (- (.bytecode eq-opc) 6) opcd arg-type
                    (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
               
-        (constgen/entity-zero? left) (recur (swap-cmp opcd) right left)
-              
+        (constgen/entity-number-zero? left) (recur (swap-cmp opcd) right left)
+        
         (constgen/entity-null? right)     ;slide if_acmpeq to ifnull
         (mk-ifpred (+ (.bytecode eq-opc) 33) opcd arg-type
                    (doto (new CodeEmitter/1 1) (aset 0 left)) fctx)
-              
+        
         (constgen/entity-null? left) (recur (swap-cmp opcd) right left)
-              
+        
         :else
         (mk-ifpred (.bytecode eq-opc) opcd arg-type
                    (doto (new CodeEmitter/1 2) (aset 0 left) (aset 1 right))
