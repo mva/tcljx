@@ -1,0 +1,31 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.classgen.rtiow-nocore-test
+  (:require
+   (tcljx.data [config :as cfg] [files :as files])
+   (tcljx.parser [reader :as reader])
+   (tcljx.classgen [classfile :as classfile] [bootstrap :as bootstrap])
+   [tcljx.alpha.ptest :refer [deftest]]))
+
+(deftest compile-rtiow-nocore-test
+  (let [ns-str "tcljx.classgen.rtiow-nocore-ref"
+        ns-path (files/namespace-path ns-str)
+        ns-reader (-> (files/path-of "test/tcljx.compiler")
+                      (.resolve ns-path)
+                      (files/path-url)
+                      (slurp)
+                      (reader/mk-reader))
+        dest-dir (bootstrap/dest-dir-for-this-test)
+        app-ld bootstrap/app-ld
+        dyn-ld (classfile/dyn-class-loader app-ld [])
+        class-sink nil
+        loader (classfile/mk-loader dest-dir app-ld dyn-ld class-sink)
+        ns-strs (doto (new String/1 1) (aset 0 ns-str))
+        nmsps (-> (bootstrap/mk-universe {ns-str ns-reader} loader)
+                  (.require-namespaces* ns-strs nil nil))]
+    nil))

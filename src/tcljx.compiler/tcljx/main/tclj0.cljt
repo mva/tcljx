@@ -1,0 +1,64 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.main.tclj0
+  (:require
+   (tcljx.data [config :as cfg] [files :as files] wrong)
+   (tcljx.classgen [classfile :as classfile] [insn :as insn]
+                   [primitive :as primitive] [universe :as universe])
+   (tcljx.main [options :as options] [invoke :as invoke] [efmt :as efmt])
+   [tinyclj.string :as str])
+  (:import
+   (tcljx.data.wrong WrongInfo)
+   (tcljx.data.ir ProvidedNamespace)
+   (tcljx.main.options Options)
+   (java.nio.file Path Files)))
+
+(defn- class-file? ^boolean [^Path x]
+  (str/ends-with? (.toString x) files/class-suffix))
+
+(defn wipe-dest-dir [^Options opts]     ;only deletes class files
+  (when (.dest-dir opts)
+    (doseq [^Path x (files/file-seq (.dest-dir opts))
+            :when (class-file? x)]
+      #_(prn :wipe-dest-dir (.toString x))
+      (Files/delete x))))
+
+(defn build-all ^map [^Options opts ^boolean load-from-dest-dir?]
+  (let [app-ld (classfile/app-class-loader (.parent-classloader opts)
+                                           (.sourcev opts))
+        dyn-sourcev (if (and load-from-dest-dir? (some? (.dest-dir opts)))
+                      [(.dest-dir opts)]
+                      [])
+        dyn-ld (classfile/dyn-class-loader app-ld dyn-sourcev)
+        loader (classfile/mk-loader (.dest-dir opts) app-ld dyn-ld nil)
+        
+        pn-primitive (ProvidedNamespace. cfg/primitive-ns-str
+                                         primitive/primitive-nmsp-globals
+                                         nil insn/insn-empty)
+        provided-ns {cfg/primitive-ns-str pn-primitive}
+
+        ;; All namespaces required by clojure.core are part of cyclic
+        ;; dependencies, but only clojure.core is allowed to initiate
+        ;; the cycle.  So *always* require it first, to prevent the
+        ;; other namespaces from entering the cycle.
+        preload-ns-strs (doto (new String/1 1) (aset 0 cfg/core-lib))
+        apn (-> (doto (universe/mk-universe nil loader provided-ns)
+                  (.require-namespaces* preload-ns-strs nil nil))
+                (.require-namespaces* (options/target-ns-strs opts) nil nil))]
+    (into {} (map (juxt ProvidedNamespace/.ns-str identity)) apn)))
+
+(defn run ^boolean [^Options opts]
+  (options/print-options opts)
+  (wipe-dest-dir opts)       ;wipe before any classloaders are created
+  (try
+    (-> (time (build-all opts false))
+        (invoke/invoke-and-report opts))
+    (catch WrongInfo e
+      (efmt/print-emap e)
+      (println)
+      false)))

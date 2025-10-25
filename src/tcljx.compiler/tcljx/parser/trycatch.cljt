@@ -1,0 +1,79 @@
+(ns tcljx.parser.trycatch
+  (:require
+   (tcljx.data [context :as context] [ir :as ir])
+   (tcljx.parser [syntax :as syntax] [parse :as parse] [interop :as interop]))
+  (:import
+   (tcljx.data.ir CodeEmitter Expr Exprs Binding Parser)))
+
+(deftype CatchBinding [^Binding bnd ^Class ctp]) ;FIXME... Valhalla value
+(letfn [(finally-form? ^boolean [x]
+          (and (seq? x) (= (first x) 'finally)))
+        (catch-form? ^boolean [x]
+          (and (seq? x) (= (first x) 'catch)))
+        (body-form? ^boolean [x]
+          (not (catch-form? x)))
+
+        (parse-finally ^Exprs [^Parser parser ^long fctx ^seq form]
+          (when (some? form)
+            (let [fctx (context/of-finally fctx)
+                  xs (parse/new-exprs parser 2)]
+              ;; parse finally twice: first copy is placed after the
+              ;; whole try/catch, the second is placed in the wildcard
+              ;; exception handler before the ATHROW
+              (.set xs 0 (parse/progn parser form fctx (next form)))
+              (.set xs 1 (parse/progn parser form fctx (next form)))
+              xs)))
+        (parse-binding ^CatchBinding [^Parser parser ^long fctx [_ tp nm :as form]]
+          (when-not (catch-form? form)
+            (throw (syntax/info "expect catch clause" form)))
+          (let [ctp (-> (parse/form parser fctx tp)
+                        (ir/type-literal tp))]
+            (when (or (nil? ctp) (not (.isAssignableFrom Throwable ctp)))
+              (throw (syntax/info "expect caught exception type" tp)))
+            (-> (.binding-catching-local (.entity-factory parser) fctx ctp
+                                         (syntax/simple-symbol-str nm))
+                (CatchBinding. ctp))))
+        (block-handler ^Expr [^Parser parser ^Binding bnd ^long fctx ^seq body]
+          ;; `block-bindings` implies that there is no information
+          ;; during code generation whether `body` throws
+          (let [bnds (new Binding/1 1)]
+            (aset bnds 0 bnd)
+            (.block-bindings (.expr-factory parser) fctx bnds false false
+                             (-> (ir/with-local-binding parser bnd)
+                                 (parse/progn fctx body)))))
+        (parse-try-catch ^Expr [^Parser parser ^long fctx ^seq formr
+                                ^seq finally-form]
+          (let [[body-forms catch-forms] (split-with body-form? formr)
+                body (parse/progn parser fctx body-forms)]
+            (cond
+              (seq catch-forms)
+              (let [ctps (new Class/1 (count catch-forms))
+                    b+cs (parse/new-exprs parser (inc (alength ctps)))]
+                (.set b+cs 0 body)
+                (loop [[catch-form & catch-formr] catch-forms, i 1]
+                  (when (< i (.length b+cs))
+                    (context/with-line-from-list [fctx catch-formr]
+                      (let [cb (parse-binding parser fctx catch-form)
+                            body (nthnext catch-form 3)]
+                        (aset ctps (dec i) (.ctp cb))
+                        (.set b+cs i (block-handler parser (.bnd cb) fctx body))))
+                    (recur catch-formr (inc i))))
+                (.try-catch-finally (.expr-factory parser) fctx
+                                    b+cs ctps
+                                    (parse-finally parser fctx finally-form)))
+
+              (some? finally-form)
+              (let [body-xs (parse/new-exprs parser 1)]
+                (.set body-xs 0 body)
+                (.try-catch-finally (.expr-factory parser) fctx
+                                    body-xs (new Class/1 0)
+                                    (parse-finally parser fctx finally-form)))
+
+              :else body)))]
+  
+  (defn parse-try ^Expr [^Parser parser ^long fctx [_ & formr]]
+    (let [fctx (context/of-progn-prefix fctx) ;assume closure
+          lst (last formr)]
+      (if (finally-form? lst)
+        (parse-try-catch parser fctx (butlast formr) lst)
+        (parse-try-catch parser fctx formr nil)))))

@@ -1,0 +1,266 @@
+(ns tcljx.classgen.publics
+  (:require
+   (tcljx.data [config :as cfg] [wrong :as wrong] [reflect :as reflect]
+               [type :as type] [resolve :as resolve] [member :as member]
+               [ir :as ir])
+   (tcljx.classgen [runtime :as rt] [segment :as segment] [insn :as insn]
+                   [constgen :as constgen] [defgen :as defgen]
+                   [fngen :as fngen])
+   [tinyclj.string :as str])
+  (:import
+   (tcljx.data.ir Entity ImmediateEntity ArityType MethodSpec ProvidedNamespace)
+   (tcljx.classgen.defgen DefMethod DefField DefMacro DefVarDeref)
+   (tcljx.classgen.fngen FnStatic FnVirtual)
+   (java.lang.constant ConstantDesc ClassDesc DirectMethodHandleDesc)
+   (java.lang.invoke MethodType MethodHandle MethodHandles MethodHandles$Lookup)
+   (java.lang.reflect Member Method Field)
+   (java.util HashMap ArrayList)))
+
+(letfn [(conj-rt-var! [acc ^String field-mnm ^Class deref-tp ^String def-nm]
+          (assoc! acc def-nm
+                  (-> (DefField. ir/entity-id-def (ir/acc* final) rt/ClojureRT
+                        field-mnm clojure.lang.Var nil)
+                      (DefVarDeref. deref-tp))))
+        (core-ns-globals []
+          (-> {}
+              (transient)
+              (conj-rt-var! "CURRENT_NS" clojure.lang.Namespace "*ns*")
+              (conj-rt-var! "AGENT" clojure.lang.Agent "*agent*")
+              (conj-rt-var! "OUT" java.io.Writer "*out*")
+              (conj-rt-var! "IN" Object "*in*")
+              (conj-rt-var! "ERR" Object "*err*")
+              (conj-rt-var! "FLUSH_ON_NEWLINE" Object "*flush-on-newline*")
+              (conj-rt-var! "PRINT_META" Object "*print-meta*")
+              (conj-rt-var! "PRINT_DUP" Object "*print-dup*")
+              (conj-rt-var! "PRINT_READABLY" Object "*print-readably*")
+              (conj-rt-var! "ASSERT" Object "*assert*")
+              (persistent!)))]
+  (defn initial-globals ^map [^String ns-str]
+    (if (cfg/core-lib? ns-str)
+      (core-ns-globals)
+      {})))
+
+;;; ------------------------------------------------------------------------
+
+(definterface PublicsBuilder
+  (public-def-info ^Object/1 [^Member member])
+  (fn-arities ^Object/1 [^Class tp ^Object value])
+  (lookup-symbol ^Entity [^symbol sym]) ;returns nil if local but missing
+  (capstone-for ^Class [^String ns-str])
+  (require-strings ^String [^Class capstone])
+  
+  (for-namespace ^PublicsBuilder [^map known-ns ^Class capstone])
+  (add-global ^void [^String mnm ^Entity ent])
+  (finish-namespace ^map []))
+
+
+(letfn [(method-specs-of ^MethodSpec/1 [^boolean virtual? ^MethodHandle/1 mhs]
+          (let [mspecs (new MethodSpec/1 (alength mhs))]
+            (dotimes [i (alength mspecs)]
+              (let [mh (aget mhs i), mt (.type mh)]
+                (aset mspecs i
+                      (-> (ArityType. (.returnType mt) (.parameterArray mt)
+                                      nil (.isVarargsCollector mh) false)
+                          (MethodSpec. nil nil nil i nil)))))
+            mspecs))]
+  
+  (defn- import-fn ^Entity [^PublicsBuilder pb ^Class declared-tp ^Object value]
+    (when-some [mhs (.fn-arities pb declared-tp value)]
+      (let [static? (type/same-name? tinyclj.lang.StaticFn declared-tp)
+            mspecs (method-specs-of (not static?) mhs)
+            mhds (new DirectMethodHandleDesc/1 (alength mhs))]
+        (dotimes [i (alength mhds)]
+          (aset mhds i (reflect/describe (aget mhs i))))
+        (if static?
+          (FnStatic. -1 mspecs mhds)
+          (FnVirtual. -1 mspecs mhds (reflect/describe declared-tp)
+                      nil nil nil -1))))))
+
+(defn- owner-of ^ClassDesc [^Member m]
+  (reflect/describe-class (.getDeclaringClass m)))
+
+(defn- mk-def-macro ^DefMacro [^ImmediateEntity dimm ^Object rt-value
+                               ^PublicsBuilder pb ^String fq-value]
+  (if (some? fq-value)
+    (when-some [ce-value (.lookup-symbol pb (symbol fq-value))]
+      (DefMacro. dimm fq-value ce-value rt-value))
+    (DefMacro. dimm nil nil rt-value)))
+
+(defn- def-of-method ^Entity [^Method m ^PublicsBuilder pb]
+  (letfn [(of-macro ^DefMacro [^Method m ^Object rt-value ^String fq-value]
+            (-> (DefMethod. ir/entity-id-def-macro 0 (owner-of m) (.getName m)
+                  (.getReturnType m) nil)
+                (mk-def-macro rt-value pb fq-value)))]
+    (let [mnm (.getName m), value (.invoke m nil), tp (.getReturnType m)]
+      ;; logic mirrors tcljx.parser.constant/parse-constant-nometa
+      (cond
+        (or (nil? value) (instance? ConstantDesc value))
+        (constgen/constant value tp)
+        (boolean? value)
+        (constgen/constant (int ^boolean value) tp)
+        (char? value)
+        (constgen/constant (int ^char value) tp)
+        (number? value)   ;any non-ConstantDesc number: Byte and Short
+        (constgen/constant (int ^Number value) tp)
+        :else       ;keyword, symbol, pattern, collection, or FnStatic
+        (let [pdf (.public-def-info pb m)]
+          (case (some-> pdf (aget 0))
+            ":macro" (of-macro m value (aget pdf 2))
+            #_else (DefMethod. ir/entity-id-def 0 (owner-of m) mnm tp
+                     (import-fn pb tp value))))))))
+
+(defn- def-of-field ^Entity [^Field f ^PublicsBuilder pb]
+  (letfn [(of-def ^DefField [^Field f ^Entity init-ce]
+            (DefField. ir/entity-id-def (.getModifiers f) (owner-of f)
+              (.getName f) (.getType f) init-ce))
+          (of-alias ^Entity [^String sym-str]
+            (.lookup-symbol pb (symbol sym-str))) ;nil if unknown or :private
+          (of-macro ^DefMacro [^Field f ^String fq-value]
+            (-> (DefField. ir/entity-id-def-macro (.getModifiers f)
+                  (owner-of f) (.getName f) (.getType f) nil)
+                (mk-def-macro nil pb fq-value)))]
+    (let [mnm (.getName f), pdf (.public-def-info pb f)]
+      (case (some-> pdf (aget 0))
+        ":var" (DefVarDeref. (of-def f nil) (aget pdf 1))
+        ":alias" (of-alias (aget pdf 1))
+        ":macro" (of-macro f (aget pdf 2))
+        #_else (of-def f (import-fn pb (.getType f) (.get f nil)))))))
+
+(deftype PublicsBuilderImpl [^MethodHandles$Lookup lookup-in-pkg
+                             ^MethodHandle pdf-mh
+                             ^MethodHandle arity-handles-mh
+                             ^map known-ns
+                             ^Class this-capstone
+                             ^String this-ns-str
+                             ^HashMap this-globals]
+  PublicsBuilder
+  (public-def-info [_ member]
+    ^Object/1 (.invokeExact pdf-mh lookup-in-pkg member))
+  (fn-arities [_ tp value]
+    ^MethodHandle/1 (.invokeExact arity-handles-mh lookup-in-pkg tp value))
+  (lookup-symbol [_ sym]
+    (let [nmsp (namespace sym), nm (name sym)]
+      (if-some [pn (.valAt known-ns nmsp nil)]
+        (.valAt (.globals ^ProvidedNamespace pn) nm nil)
+        (when (= nmsp this-ns-str)
+          (.getOrDefault this-globals nm nil)))))
+  (capstone-for [_ ns-str]
+    (.resolveConstantDesc (segment/capstone-class ns-str) lookup-in-pkg))
+  (require-strings [_ capstone]
+    ^String (.invokeExact (.findStatic lookup-in-pkg capstone rt/name-requires
+                                       (MethodType/methodType String))))
+  
+  (for-namespace [_ known-ns capstone]
+    (let [ns-str (.getPackageName capstone)]
+      (assert (not (contains? known-ns ns-str)))
+      (PublicsBuilderImpl. lookup-in-pkg pdf-mh arity-handles-mh
+                           known-ns capstone ns-str (HashMap.))))
+  (add-global [_ mnm ent]
+    (.put this-globals (cfg/demunge-name mnm) ent))
+  (finish-namespace [_]
+    (let [globals (into (initial-globals this-ns-str) this-globals)]
+      (->> (insn/insns-of (insn/constant this-capstone Class))
+           (insn/invoke-member resolve/ensure-initialized nil)
+           (ProvidedNamespace. this-ns-str globals this-capstone)
+           (assoc known-ns this-ns-str)))))
+
+(defn- add-method! ^void [^PublicsBuilder pb ^ArrayList !unresolved
+                          ^Method m]
+  (if-some [ent (def-of-method m pb)]
+    (.add-global pb (.getName m) ent)
+    (.add !unresolved m)))
+(defn- add-methods! ^PublicsBuilder [^PublicsBuilder pb ^ArrayList !unresolved
+                                     ^Method/1 am]
+  (dotimes [i (alength am)]
+    (let [m (aget am i)]
+      (when (and (member/acc-public? (.getModifiers m))
+                 (zero? (.getParameterCount m))
+                 (neg? (.lastIndexOf (.getName m) (int \~))))
+        (add-method! pb !unresolved m))))
+  pb)
+
+(defn- add-field! ^void [^PublicsBuilder pb ^ArrayList !unresolved
+                                   ^Field f]
+  (if-some [ent (def-of-field f pb)]
+    (.add-global pb (.getName f) ent)
+    (.add !unresolved f)))
+(defn- add-fields! ^PublicsBuilder [^PublicsBuilder pb ^ArrayList !unresolved
+                                    ^Field/1 af]
+  (dotimes [i (alength af)]
+    (let [f (aget af i)]
+      (when (member/acc-public? (.getModifiers f))
+        (add-field! pb !unresolved f))))
+  pb)
+
+(defn- mk-import-namespace* [^PublicsBuilder pb-tmpl]
+  (letfn [(iterate-unresolved ^PublicsBuilder [^PublicsBuilder pb ^ArrayList ms]
+            (if (.isEmpty ms)
+              pb
+              (let [!unresolved (ArrayList.)]
+                (doseq [m ms]
+                  (condp instance? m
+                    Field (add-field! pb !unresolved m)
+                    Method (add-method! pb !unresolved m)))
+                (if (= (.size !unresolved) (.size ms))
+                  (wrong/other (str "failed to resolve imported defs: "
+                                    (str/join " " (map Member/.getName ms))))
+                  (recur pb !unresolved)))))
+          (segment-into! ^PublicsBuilder [^PublicsBuilder pb ^Class segment]
+            (let [!unresolved (ArrayList.)]
+              (-> (add-methods! pb !unresolved (.getDeclaredMethods segment))
+                  (add-fields! !unresolved (.getDeclaredFields segment))
+                  (iterate-unresolved !unresolved))))
+          (segments-into! ^PublicsBuilder [^PublicsBuilder pb ^Class segment]
+            (cond-> pb
+              (not (identical? Object segment))
+              (-> (segments-into! (.getSuperclass segment))
+                  (segment-into! segment))))
+          (import-requires ^map [^map known-ns ^Class capstone]
+            (let [req-strs (.require-strings pb-tmpl capstone)]
+              (loop [known-ns known-ns, i 0]
+                (let [j (.indexOf req-strs (int \,) i)]
+                  (if (neg? j)
+                    known-ns
+                    (let [ns-str (.substring req-strs i j)]
+                      (-> (cond-> known-ns
+                            (not (contains? known-ns ns-str))
+                            (import-namespace (.capstone-for pb-tmpl ns-str)))
+                          (recur (inc j)))))))))
+          (import-namespace ^map [^map known-ns ^Class capstone]
+            (let [known-ns (import-requires known-ns capstone)]
+              (-> (.for-namespace pb-tmpl known-ns capstone)
+                  (segments-into! (.getSuperclass capstone))
+                  (.finish-namespace))))]
+    (fn ^map [^map known-ns ^Class capstone]
+      (cond-> known-ns
+        (not (contains? known-ns (.getPackageName capstone)))
+        (import-namespace capstone)))))
+
+(defn mk-import-namespace [^MethodHandles$Lookup lookup-in-pkg
+                           ^MethodHandles$Lookup rt-lookup]
+  (let [pdf-mh (.resolveConstantDesc rt/mhd-publicDefInfo rt-lookup)
+        arity-handles-mh (.resolveConstantDesc rt/mhd-arityHandlesIfFn rt-lookup)]
+    (-> (PublicsBuilderImpl. lookup-in-pkg pdf-mh arity-handles-mh
+                             nil nil nil nil)
+        (mk-import-namespace*))))
+
+(defn import-from-class-loader ^map [^ClassLoader ld
+                                     ^MethodHandles$Lookup rt-lookup
+                                     ^map known-ns ^String ns-str]
+  (letfn [(get-name ^String [^ClassDesc cld]
+            (let [s (.descriptorString cld)]
+              (-> (.substring s 1 (dec (.length s)))
+                  (.replace \/ \.))))
+          (try-load-capstone ^Class []
+            (try
+              (-> (segment/capstone-class ns-str)
+                  (get-name)
+                  (Class/forName true ld))
+              (catch ClassNotFoundException _
+                nil)))]
+    
+    (when-some [capstone (try-load-capstone)]
+      (let [lookup-in-pkg (.in (MethodHandles/publicLookup) capstone)
+            import-fn (mk-import-namespace lookup-in-pkg rt-lookup)]
+        (prn :import-from (.getName capstone))
+        (import-fn known-ns capstone)))))

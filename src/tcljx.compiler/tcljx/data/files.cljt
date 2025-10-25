@@ -1,0 +1,66 @@
+(ns tcljx.data.files
+  (:require [tinyclj.string :as str])
+  (:import
+   (java.net URL)
+   (java.nio.file Path Files)
+   (java.nio.file.attribute PosixFilePermission PosixFilePermissions)
+   (java.util Set)
+   (java.util.function Predicate)))
+
+(def source-suffix ".cljt")
+(def class-suffix ".class")
+
+(defn path-url ^URL [^Path p]
+  (-> p (.toUri) (.toURL)))
+
+(defn path-of
+  (^Path [^String x]
+   (Path/of x))
+  (^Path [^String x & ^String/1 more]
+   (Path/of x more)))
+
+(defn default-project-name ^String []
+  (-> (path-of (System/getProperty "user.dir"))
+      (.getFileName)
+      (.toString)))
+
+(defn tmp-dest-dir ^Path [^String dir-name]
+  (path-of (System/getProperty "java.io.tmpdir")
+           (System/getProperty "user.name") "tcljx" dir-name))
+
+(defn namespace-path ^Path [^String ns-str]
+  (Path/of (str (.replace ns-str \. \/) source-suffix)))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private create-directory-permissions
+  (-> (Set/of PosixFilePermission/OWNER_READ
+              PosixFilePermission/OWNER_WRITE
+              PosixFilePermission/OWNER_EXECUTE)
+      (PosixFilePermissions/asFileAttribute)))
+
+(defn create-directories ^Path [^Path p]
+  (Files/createDirectories p create-directory-permissions))
+
+(defn package-directory ^Path [^Path dest-dir ^String ns-str]
+  (.resolve dest-dir (path-of (.replace ns-str "." "/"))))
+
+(defn prepare-package-directory ^Path [^Path dest-dir ^String ns-str]
+  (when (some? dest-dir)
+    (create-directories (package-directory dest-dir ns-str))))
+
+;;; ------------------------------------------------------------------------
+
+(defn- path-seq [^Path p ^int max-depth ^Predicate pred]
+  (try
+    (-> p (Files/walk max-depth) (.filter pred) (.toArray) (seq))
+    (catch java.nio.file.NoSuchFileException _ ;thrown if `p` does not exist
+      nil)))
+
+(def ^:private file? (^Predicate fn [x] (Files/isRegularFile x)))
+(defn file-seq [^Path p]
+  (path-seq p Integer/MAX_VALUE file?))
+
+(def ^:private dir? (^Predicate fn [x] (Files/isDirectory x)))
+(defn recursive-directory-seq [^Path p]
+  (path-seq p Integer/MAX_VALUE dir?))

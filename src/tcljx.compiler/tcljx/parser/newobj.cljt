@@ -1,0 +1,16 @@
+(ns tcljx.parser.newobj
+  (:require
+   (tcljx.data [type :as type] [ir :as ir])
+   (tcljx.parser [syntax :as syntax] [parse :as parse]))
+  (:import
+   (tcljx.data.ir Expr Parser)))
+
+(defn parse-new ^Expr [^Parser parser ^Class owner ^long fctx [_ _ & args]]
+  (let [n (type/type-dimensions owner)]
+    (if (zero? n)                       ;constructor
+      (-> (.expr-factory parser)
+          (.invoke-constructor fctx owner (parse/args parser fctx args)))
+      (let [dims (parse/args parser fctx args)]
+        (syntax/first args)        ;at least one dimentions is provided
+        (syntax/empty-tail n args)
+        (.new-array (.expr-factory parser) fctx owner dims)))))

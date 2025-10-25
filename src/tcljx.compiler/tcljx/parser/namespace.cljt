@@ -1,0 +1,208 @@
+(ns tcljx.parser.namespace
+  (:require
+   (tcljx.data [config :as cfg] [files :as files] [meta :as meta]
+               [wrong :as wrong] [context :as context] [ir :as ir])
+   (tcljx.parser [reader :as reader] [syntax :as syntax]))
+  (:import
+   (tcljx.data.ir NamespaceBuilder ProvidedNamespace Require FormReader)))
+
+;;; The parser layer handles syntax (obviously), it resolves
+;;; names (managing defs and bindings in general), and it decides what
+;;; to expand (if its a macro invocation) and what to evaluate (if it
+;;; is a special form, a primitive function, an invocation, and so
+;;; on).  What it doesn't do is deriving or working with the type of
+;;; an evaluated expression.
+
+(letfn [(second-vector ^vector [^seq xs]
+          (mapv syntax/simple-symbol-str (syntax/vector (second xs))))
+        (second-map ^map [^seq xs]
+          (persistent! (reduce (fn [acc [k v]]
+                                 (assoc! acc (syntax/simple-symbol-str k)
+                                         (syntax/simple-symbol-str v)))
+                               (transient {})
+                               (syntax/map (second xs)))))
+        
+        (parse-require-spec ^Require [^String ns-str ^seq spec
+                                      ^seq error-context]
+          (loop [alias nil, refer [], rename {}, exclude []
+                 spec (seq spec)]
+            (if (some? spec)
+              (case (first spec)      ;parse like hash-map then merge 
+                :as (recur (syntax/simple-symbol-str (second spec)) refer rename
+                           exclude (nnext spec))
+                :refer (recur alias (if (identical? :all (second spec))
+                                      nil
+                                      (second-vector spec))
+                              rename exclude (nnext spec))
+                :rename (recur alias refer (second-map spec)
+                               exclude (nnext spec))
+                ::exclude (recur alias refer rename
+                                 (second-vector spec) (nnext spec))
+                #_else (throw (syntax/info "expect :as, :refer, or :rename"
+                                           (first spec))))
+              (Require. ns-str alias refer rename exclude error-context))))
+        (flatten-requires ^seq [^seq rrequires ^String prefix ^seq specs
+                                ^seq error-context]
+          (letfn [(flatten-require ^seq [^seq rrequires spec]
+                    (cond
+                      (symbol? spec)
+                      (let [ns-str (syntax/prefixed-nmsp-str spec prefix)]
+                        (cons
+                         (ir/require-refer-none ns-str error-context)
+                         rrequires))
+                      
+                      (vector? spec)
+                      (let [ns-str (syntax/prefixed-nmsp-str (first spec) prefix)]
+                        (cons
+                         (parse-require-spec ns-str (next spec) error-context)
+                         rrequires))
+                      
+                      (and (= prefix "") (seq? spec))
+                      (let [prefix (syntax/prefixed-nmsp-str (first spec) prefix)]
+                        (flatten-requires rrequires (str prefix ".")
+                                          (rest spec) spec))
+                      
+                      :else
+                      (throw (syntax/info "expect symbol, vector, or list" spec))))]
+            (context/with-error-info error-context
+              (reduce flatten-require rrequires specs))))
+        
+        (parse-refer-cljs ^Require [^seq rrefer-cljs]
+          (when (some? (nnext rrefer-cljs))
+            (throw (syntax/info "multiple :refer-clojure clauses")))
+          
+          (let [refer-clj (first rrefer-cljs)]
+            ;; pre: (first refer-clj) is :refer-clojure
+            (context/with-error-info refer-clj
+              (loop [^vector refer nil, exclude [], rename {}
+                     specs (next refer-clj)]
+                (if (some? specs)
+                  (case (first specs) ;parse like hash-map then merge 
+                    :only (recur (second-vector specs) exclude rename
+                                 (nnext specs))
+                    :exclude (recur refer (second-vector specs) rename
+                                    (nnext specs))
+                    :rename (recur refer exclude (second-map specs)
+                                   (nnext specs))
+                    #_else (throw (syntax/info "expect :only, :exclude, or :rename"
+                                               (first specs))))
+                  (Require. cfg/core-lib nil refer rename exclude
+                            refer-clj))))))
+
+        (process-require ^NamespaceBuilder [^NamespaceBuilder nmsp
+                                            ^Require require
+                                            ^ProvidedNamespace provided]
+          (context/with-error-info (.error-context require)
+            (if (nil? provided)
+              (throw (wrong/info-unresolved "no such namespace:"
+                                            (ir/required-ns-sym require)))
+              (.process-require nmsp require provided))))
+        (process-requires ^NamespaceBuilder [^NamespaceBuilder nmsp
+                                             ^seq requires]
+          (let [arequires ^Require/1 (into-array Require requires)
+                ans-strs (new String/1 (alength arequires))]
+            (dotimes [i (alength ans-strs)]
+              (aset ans-strs i (.ns-str (aget arequires i))))
+            
+            #_(prn :process-requires (vec ans-strs))
+            (let [provided (.require-namespaces nmsp ans-strs)]
+              (loop [nmsp nmsp, i 0]
+                (if (< i (alength provided))
+                  (-> nmsp
+                      (process-require (aget arequires i) (aget provided i))
+                      (recur (inc i)))
+                  nmsp)))))
+
+        (ns-form ^NamespaceBuilder [^NamespaceBuilder nmsp
+                                    [_ ns-sym & formr :as ^seq form]]
+          ;; pre: (first form) is 'ns
+          (when-not (= ns-sym (ir/ns-sym nmsp))
+            (wrong/other (str "ns name mismatch, expected "
+                              (wrong/q (ir/ns-sym nmsp))
+                              (wrong/got-q ns-sym))))
+          (loop [^seq rrequires nil
+                 ^seq rimports nil
+                 ^seq rrefer-cljs nil
+                 clauses (syntax/next-if-string formr)]
+            (if-some [[[tag :as clause] & clauses'] clauses]
+              (case tag
+                :require
+                (recur (flatten-requires rrequires "" (next clause) clause)
+                       rimports rrefer-cljs clauses')
+                
+                :import
+                (recur rrequires
+                       (syntax/flatten-imports rimports "" (next clause) clause)
+                       rrefer-cljs clauses')
+                
+                :refer-clojure
+                (recur rrequires rimports (cons clause rrefer-cljs) clauses')
+                
+                #_else
+                (throw (syntax/info "expect :require, :import, or :refer-clojure" tag)))
+              (let [requires (reverse rrequires)
+                    requires (cond
+                               (nil? rrefer-cljs)
+                               (cons ir/require-core-lib-default requires)
+                               (= rrefer-cljs '((:refer-clojure :none)))
+                               requires
+                               :else (cons (parse-refer-cljs rrefer-cljs)
+                                           requires))]
+                (-> (process-requires nmsp requires)
+                    (.process-imports (reverse rimports)))))))
+        (require-form ^NamespaceBuilder [^NamespaceBuilder nmsp
+                                         ^FormReader rdr ^seq form]
+          (let [specs (map syntax/strip-quote (rest form))
+                rrequires (flatten-requires nil "" specs form)]
+            (when (cfg/core-lib? (.ns-str nmsp))
+              ;; namespaces required from clojure.core have access to
+              ;; core's defs up to this point
+              (.commit-segment nmsp rdr))
+            (process-requires nmsp (reverse rrequires))))
+        (load-form ^NamespaceBuilder [^NamespaceBuilder nmsp
+                                      ^FormReader rdr ^seq form]
+          ;; emit pending classes with current SourceFile attribute;
+          ;; also: hack for dependency chain core_print.cljt ->
+          ;; MultiFn.java -> clojure.core fns
+          (.commit-segment nmsp rdr)
+          (loop [nmsp nmsp, [arg & argr :as args] (next form)]
+            (if (some? args)
+              (do (when-not (string? arg)
+                    (wrong/other (str "load expects file name string"
+                                      (wrong/got-q arg))))
+                  (let [path-str (str arg files/source-suffix)
+                        rdr' (.resolve rdr path-str)]
+                    (recur (-> nmsp (parse-all rdr') (.commit-segment rdr'))
+                           argr)))
+              nmsp)))
+        (in-ns-form ^NamespaceBuilder [^NamespaceBuilder nmsp
+                                       [_ ns-sym & formr :as ^seq form]]
+          ;; pre: (first form) is 'in-ns
+          (if (and (nil? formr)
+                   (= (syntax/strip-quote ns-sym) (ir/ns-sym nmsp)))
+            nmsp
+            (wrong/other (str "in-ns argument does not match current "
+                              "namespace " (wrong/q (ir/ns-sym nmsp))
+                              (wrong/got-q ns-sym)))))
+        
+        (parse-top-level-form ^NamespaceBuilder [^NamespaceBuilder nmsp
+                                                 ^FormReader rdr form]
+          (let [fctx context/fctx-initial]
+            (if (seq? form)
+              (context/with-line-from-list [fctx form]
+                (case (first form)
+                  ns (ns-form nmsp form)
+                  require (require-form nmsp rdr form)
+                  load (load-form nmsp rdr form)
+                  in-ns (in-ns-form nmsp form)
+                  #_else (.process-init-form nmsp rdr fctx form)))
+              (.process-init-form nmsp rdr fctx form))))
+
+        (parse-all ^NamespaceBuilder [^NamespaceBuilder nmsp ^FormReader rdr]
+          (loop [nmsp nmsp]
+            (let [form (.read rdr nmsp)]
+              (if (identical? :tcljx.parser.reader/EOF form)
+                nmsp
+                (recur (parse-top-level-form nmsp rdr form))))))]
+
+  (def parse-all parse-all))

@@ -1,0 +1,251 @@
+(ns tcljx.parser.fn
+  (:require
+   (tcljx.data [wrong :as wrong] [context :as context] [type :as type]
+               [ir :as ir] [resolve :as resolve] [reflect :as reflect])
+   (tcljx.parser [parse :as parse] [syntax :as syntax] [interop :as interop]
+                 [let :as let]))
+  (:import
+   (tcljx.data.ir Expr Exprs Entity Binding FnPromise ArityType AritySpec
+                  MethodSpec Parser ExprFactory EntityFactory Resolver)
+   (java.lang.constant MethodHandleDesc DirectMethodHandleDesc ConstantDescs)
+   (java.lang.reflect Method)
+   (java.util Arrays Comparator ArrayList HashMap)))
+
+(defn- fixup-arity-type ^ArityType [^ArityType at ^Method m]
+  (let [unhinted? (interop/unhinted-arity-type? at 0)
+        resolve (fn ^Class [^Class at-tp ^Class method-tp]
+                  (or at-tp (if unhinted? method-tp Object)))
+        rtype (let [mtype (.getReturnType m)
+                    rtype (resolve (.return-type at) mtype)]
+                (when-not (type/jvm-assignable-from? mtype rtype)
+                  (wrong/other (str "function result " (wrong/q rtype)
+                                    " not assignment compatible to method's "
+                                    (wrong/q mtype))))
+                rtype)
+        pclasses (.getParameterTypes m)
+        aparam-tp (new Class/1 (.parameter-count at))]
+    (dotimes [i (alength aparam-tp)]
+      (let [pclass (aget pclasses i)
+            dclass (resolve (aget (.parameter-types at) i) pclass)]
+        (if (type/jvm-assignable-from? pclass dclass)
+          (aset aparam-tp i dclass)
+          (wrong/other (str "function parameter " (wrong/q dclass)
+                            " not assignment compatible to "
+                            "method's " (wrong/q pclass))))))
+    (when-not (= (.varargs? at) (.isVarArgs m))
+      (wrong/other "interface and function disagree on varargs status"))
+    (ir/with-return-type at rtype aparam-tp)))
+
+(defn- itf-method ^Method [^AritySpec/1 specs ^Class itf-class]
+  (when-not (= (alength specs) 1)
+    (wrong/other "interface function must implement exactly one arity"))
+  (let [an (-> (aget specs 0) .at .parameter-count)]
+    (or (first (->> (resolve/itf-methods itf-class)
+                    (filter #(= (Method/.getParameterCount %) an))))
+        (wrong/other (str "interface " (wrong/q itf-class)
+                          " has no method of arity " an)))))
+
+(defn- fixup-arity-specs-from-itf ^AritySpec/1 [^AritySpec/1 specs ^Method m]
+  (let [spec (aget specs 0)]
+    (aset specs 0 (AritySpec. (fixup-arity-type (.at spec) m)
+                              (.body spec) (.error-context spec)))
+    specs))
+
+(defn- arity-specs-of ^AritySpec/1 [^Resolver rsv ^long fctx ^seq form
+                                    ^Class or-else-type ^boolean unnamed-fn?
+                                    ^seq more]
+  (letfn [(max-parameter-count ^int [^AritySpec/1 specs]
+            (loop [n 0, i (dec (alength specs))]
+              (if (neg? i)
+                n
+                (recur (max n (-> (aget specs i) .at .parameter-count))
+                       (dec i)))))
+          (arity-spec-of ^AritySpec [paramv ^seq body ^seq error-context]
+            (context/with-line-from-list [fctx error-context]
+              (-> (interop/parse-arity-type rsv paramv or-else-type unnamed-fn?)
+                  (AritySpec. body error-context))))
+          
+          (specs-1 ^AritySpec/1 [paramv ^seq body ^seq error-context]
+            (doto (new AritySpec/1 1)
+              (aset 0 (arity-spec-of paramv body error-context))))
+          (specs-n ^AritySpec/1 [^seq arity-seq] ;pre: `arity-seq` is not empty
+            (let [n (count arity-seq)
+                  specs (new AritySpec/1 n)]
+              (loop [seen-ns #{}, seen-va -1, i 0,
+                     [[paramv & body :as arity] & arity-r] arity-seq]
+                (if (< i n)
+                  (if (seq? arity)
+                    (let [spec (arity-spec-of paramv body arity)
+                          at (.at spec)
+                          n (.parameter-count at)
+                          va (if (ir/translates-to-varargs? at) i -1)]
+                      (when (contains? seen-ns n)
+                        (wrong/other (str "multiple function arities "
+                                          "with " n " parameters")))
+                      (when (and (>= va 0) (>= seen-va 0))
+                        (wrong/other (str "multiple variadic function "
+                                          "arities")))
+                      (aset specs i spec)
+                      (recur (conj seen-ns n) va (inc i) arity-r))
+                    (throw (syntax/info "expect function arity ([...] ...)"
+                                        arity)))
+
+                  (when (>= seen-va 0)
+                    (when (not= (max-parameter-count specs)
+                                (-> specs (aget seen-va) .at .parameter-count))
+                      (wrong/other "only maximum arity can be variadic")))))
+              specs))]
+    
+    (let [[h & t] more]
+      (if (seq? h)                      ;arity in parenthesis?
+        (if (some? t)                   ;more than one arity?
+          (specs-n more)
+          (specs-1 (first h) (next h) h))
+        (specs-1 h t form)))))          ;single inlined arity
+
+(deftype FnBundle [^EntityFactory parent ^String/1 aunique-nm
+                   ^ArrayList/1 afn-parts ^Entity/1 afn-entity])
+(defn- mk-fn-bundle ^FnBundle [^Parser parser ^int n]
+  (FnBundle. (.entity-factory parser) (new String/1 n) (new ArrayList/1 n)
+             (new Entity/1 n)))
+(defn- add-fn ^Entity [^FnBundle fnb ^int fn-idx ^String fn-nm
+                       ^AritySpec/1 arity-specs ^HashMap env-to-display]
+  (let [etf (.parent fnb)
+        unique-nm (.unique-name! etf (or fn-nm "fn"))
+        fn-parts (ArrayList.)
+        ent (.entity-fn etf arity-specs env-to-display unique-nm fn-parts)]
+    (aset (.aunique-nm fnb) fn-idx unique-nm)
+    (aset (.afn-parts fnb) fn-idx fn-parts)
+    (aset (.afn-entity fnb) fn-idx ent)
+    ent))
+(defn- arity-entity-factory [^FnBundle fnb ^int fn-idx ^HashMap fn-e2d]
+  (.method-etf (.parent fnb) (aget (.aunique-nm fnb) fn-idx) 0 fn-e2d
+               (aget (.afn-parts fnb) fn-idx)))
+(defn- parse-arity-bodies ^MethodSpec/1 [^FnBundle fnb ^Parser parser
+                                         ^String name ^int fn-idx
+                                         ^AritySpec/1 specs
+                                         ^HashMap env-to-display]
+  (let [arity-methods (new MethodSpec/1 (alength specs))]
+    (dotimes [i (alength arity-methods)]
+      (let [aspec (aget specs i)
+            mspec* (parse/method-spec-template aspec i name)
+            etf' (arity-entity-factory fnb fn-idx env-to-display)
+            parser' (.with-entity-factory parser etf')
+            mspec (parse/body-into mspec* false parser' aspec)]
+        (aset arity-methods i mspec)))
+    arity-methods))
+
+(defn parse-fn* ^Expr [^Parser parser ^long fctx ^seq form]
+  (letfn [(new-fn ^Expr [^symbol fn-nm ^seq more]
+            (let [specs (-> (.resolver parser)
+                            (arity-specs-of fctx form Object (nil? fn-nm) more))
+                  fnb (mk-fn-bundle parser 1)
+                  nm (if (some? fn-nm) (name fn-nm) "fn")
+                  env-to-display (HashMap.)
+                  ent-fn (add-fn fnb 0 nm specs env-to-display)
+                  parser* (cond-> parser
+                            (some? fn-nm)
+                            (ir/with-local-binding nm ent-fn))]
+              (->> (parse-arity-bodies fnb parser* nm 0 specs env-to-display)
+                   (.expr-fn (.entity-factory parser) ent-fn))))
+          (new-itf-fn ^Expr [^Class itf-class ^seq more]
+            (let [rsv (.resolver parser)
+                  specs-0 (arity-specs-of rsv fctx form nil true more)
+                  m (itf-method specs-0 itf-class)
+                  specs (fixup-arity-specs-from-itf specs-0 m)
+
+                  etf (.entity-factory parser)
+                  unique-nm (.unique-name! etf (.getSimpleName itf-class))
+                  fn-parts (ArrayList.)
+                  arity-methods (new MethodSpec/1 (alength specs))
+                  aspec (aget specs 0)
+                  mspec* (parse/method-spec-template aspec 0 "fn")
+                  fn-e2d (HashMap.)
+                  etf' (.method-etf etf unique-nm 0 fn-e2d fn-parts)
+                  parser' (.with-entity-factory parser etf')]
+              (->> (parse/body-into mspec* false parser' aspec)
+                   (aset arity-methods 0))
+              (.expr-itf-fn etf arity-methods fn-e2d unique-nm itf-class m
+                            fn-parts)))]
+    (let [itf-tag (interop/tag-of (first form))
+          fn-nm (second form)]
+      (if (symbol? fn-nm)
+        (do (when (some? (interop/tag-of fn-nm))
+              (wrong/other "type tag on function name is not supported"))
+            (when (some? itf-tag)
+              (wrong/other "interface function cannot have a name"))
+            (new-fn (syntax/simple-symbol fn-nm) (nnext form)))
+        (if (some? itf-tag)
+          (-> (.resolver parser)
+              (interop/resolve-interface (syntax/symbol itf-tag))
+              (new-itf-fn (next form)))
+          (new-fn nil (next form)))))))
+
+;;; ------------------------------------------------------------------------
+
+(defn- macroexpand-fnvec ^seq/1 [^Parser parser ^vector fnv]
+  (letfn [(fn-forms ^seq/1 [^vector fnv]
+            (let [n (count fnv), a (new seq/1 n)]
+              (loop [seen #{}, i 0]
+                (when (< i n)
+                  (let [x (syntax/list (nth fnv i))
+                        nm (syntax/simple-symbol (first x))]
+                    (when (contains? seen nm)
+                      (wrong/other (str "duplicate name in letfn bindings: "
+                                        (wrong/q nm))))
+                    (aset a i x)
+                    (recur (conj seen nm), (inc i)))))
+              a))
+          (prefix-with-fn ^seq [^seq x] ;prefix, discarding inner meta
+            (cons 'fn (with-meta x nil)))
+          (expand-once ^seq [[op-sym :as ^seq form]]
+            ;; this code follows the logic of `parse-expand-or-invoke`
+            (if-some [inv (parse/lookup parser op-sym)]
+              (if (ir/def-macro? inv)
+                (parse/expand-macro (.resolver parser) inv form)
+                form)
+              (cons 'fn* (rest form)))) ;looks like a unit test without `fn`
+          (expand-fn ^seq [^seq form]
+            (let [ex (expand-once form)]
+              (cond
+                (and (seq? ex) (= (first ex) 'fn*)) ex
+                (identical? form ex) (throw (IllegalStateException. "cyclic macro expansion in letfn*"))
+                :else (recur ex))))
+          (destructure-to-fn* ^seq [^seq form]
+            (expand-fn (prefix-with-fn form)))]
+    (let [afn (fn-forms fnv)]
+      (amap afn i res (destructure-to-fn* (aget afn i))))))
+
+(defn parse-letfn* ^Expr [^Parser parser ^long fctx
+                          [_ fnv & body :as ^seq form]]
+  (let [fnv (syntax/vector fnv)
+        afn (macroexpand-fnvec parser fnv)
+        n (alength afn)
+        etf (.entity-factory parser)
+        fnb (mk-fn-bundle parser n)
+        aspecs (new AritySpec/2 n)
+        aenv-to-display (new HashMap/1 n)
+        bnds (new Binding/1 n)]
+    (dotimes [i n]
+      (context/with-line-from-list [fctx (nth fnv i)]
+        (let [[_ fn-nm & more] (aget afn i)
+              specs (arity-specs-of (.resolver parser) fctx form Object false
+                                    more)
+              env-to-display (HashMap.)
+              ent-fn (add-fn fnb i (name fn-nm) specs env-to-display)]
+          (aset aspecs i specs)
+          (aset aenv-to-display i env-to-display)
+          (FnPromise/.count-value-use! ent-fn -1) ;back to zero
+          (aset bnds i (.binding-entity etf fctx (name fn-nm) ent-fn false)))))
+    (let [parser* (ir/with-local-bindings parser bnds)]
+      (dotimes [i n]
+        (context/with-line-from-list [fctx (nth fnv i)]
+          (let [fn-nm (second (aget afn i))
+                arity-methods (parse-arity-bodies fnb parser* (name fn-nm)
+                                                  i (aget aspecs i)
+                                                  (aget aenv-to-display i))
+                ent-fn (aget (.afn-entity fnb) i)]
+            (.expr-fn etf ent-fn arity-methods)))))
+    (.block-bindings (.expr-factory parser) fctx bnds true false
+                     (-> (ir/with-local-bindings parser bnds)
+                         (parse/progn fctx body)))))

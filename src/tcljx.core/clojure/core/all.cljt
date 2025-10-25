@@ -1,0 +1,21 @@
+(ns clojure.core.all (:refer-clojure :none)
+  (:require             ;all exports of clojure.core/module-info.java
+   ;; clojure.core namespaces
+   clojure.core
+   clojure.core.protocols
+   clojure.string
+   clojure.uuid
+   clojure.math
+   clojure.java.io
+
+   ;; rest of core library not required by clojure.core
+   clojure.datafy
+   clojure.edn
+   clojure.set
+   clojure.test
+   clojure.stacktrace
+   clojure.walk
+   clojure.template
+   clojure.instant      ;Clojure loads/requires this from clojure.core
+   clojure.xml
+   clojure.zip))

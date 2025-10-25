@@ -1,0 +1,995 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.parser.reader
+  (:require
+   (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong] [ir :as ir])
+   [tinyclj.string :as str])
+  (:import
+   (tcljx.data.ir Resolver FormReader)
+   (tcljx.data.wrong WrongInfo)
+   (tinyclj.lang Literal)
+   (clojure.lang IMapEntry IRecord Named)
+   (java.nio.file Path)
+   (java.util Arrays ArrayList)
+   (java.util.regex Matcher Pattern PatternSyntaxException)))
+
+(def ^:private sym-unquote (symbol cfg/core-lib "unquote"))
+(def ^:private sym-unquote-splicing (symbol cfg/core-lib "unquote-splicing"))
+(def ^:private sym-list (symbol cfg/core-lib "list"))
+(def ^:private sym-vector (symbol cfg/core-lib "vector"))
+(def ^:private sym-hash-map (symbol cfg/core-lib "hash-map"))
+(def ^:private sym-hash-set (symbol cfg/core-lib "hash-set"))
+(def ^:private sym-seq (symbol cfg/core-lib "seq"))
+(def ^:private sym-with-meta (symbol cfg/core-lib "with-meta"))
+(def ^:private sym-concat (symbol cfg/core-lib "concat"))
+(def ^:private sym-apply (symbol cfg/core-lib "apply"))
+
+(defn unquote? ^boolean [form]
+  (and (seq? form) (= sym-unquote (first form))))
+(defn unquote-splicing? ^boolean [form]
+  (and (seq? form) (= sym-unquote-splicing (first form))))
+
+(defn- mk-gensym-map []
+  (atom {}))
+
+(defn- gensym-symbol? [^String nmsp ^String nm]
+  (and (nil? nmsp) (.endsWith nm "#")))
+
+;;; Assume the compiler's `clojure.lang.RT/nextID` can be used here,
+;;; instead of the application's one.  Most of the time the two are
+;;; identical -- unless the `:platform` class loader is used, aka the
+;;; bootstrap scenario.  If they are distinct, the generated name
+;;; cannot conflict with an application `gensym`, because the latter
+;;; currently does not support a `suffix-string` like the "__auto__"
+;;; above.  Note: There is the option to use per-input atomic counters
+;;; starting at a defined value, but this would still leave macro use
+;;; of `gensym` non-deterministic.
+(defn- gensym-replacement [agensym-map ^String nm]
+  (or (get @agensym-map nm)
+      (let [nm-auto (str (.substring nm 0 (dec (.length nm)))
+                         "__" (clojure.lang.RT/nextID) "__auto__")
+            sym (symbol nil nm-auto)]
+        (swap! agensym-map assoc nm sym)
+        sym)))
+
+(defn- rewrite-synquote-name ^Named [^Named nm ^Resolver resolver]
+  (letfn [(lookup-class-name ^String [^String nm]
+            (if-some [tp (.lookup-class resolver nm)]
+              (.getName tp)
+              (when-not (neg? (.indexOf nm (int \.)))
+                nm)))
+          (trim-last ^String [^String nm]
+            (.substring nm 0 (dec (.length nm))))
+
+          (rewrite-qualified-name ^symbol [^symbol sym]
+            (if-some [ns-part (namespace sym)]
+              (if-some [ns-part' (or (.lookup-namespace resolver ns-part)
+                                     (lookup-class-name ns-part))]
+                (symbol ns-part' (name sym))
+                sym)
+              sym))
+          (rewrite-name-without-nmsp ^symbol [^symbol sym]
+            (let [nm (name sym)]
+              (cond
+                (.startsWith nm ".")    ;method name and ..
+                sym
+                
+                (.endsWith nm ".")      ;shorthand for (new ...)
+                (if-some [nm' (lookup-class-name (trim-last nm))]
+                  (symbol nil (str nm' "."))
+                  sym)
+                
+                :else
+                (or (.lookup-global-qname resolver nm)
+                    (if-some [nm' (lookup-class-name nm)]
+                      (symbol nil nm')
+                      (symbol (.ns-str resolver) nm))))))]
+    
+    (cond
+      (keyword? nm) nm
+      (some? (namespace nm)) (rewrite-qualified-name nm)
+      (contains? cfg/specials nm) nm
+      :else (rewrite-name-without-nmsp nm))))
+
+;;; ------------------------------------------------------------------------
+
+;; Baseline is the method syntaxQuote() from Clojure's
+;; LispReader.java.
+
+(defn template [form]
+  (letfn
+      [(wrong [^String msg]
+         (throw (wrong/wr-info msg {}))) ;no line/column info available here
+       (q [form]
+         (list cfg/sym-quote form))
+            
+       (expand-list ^vector [xs]
+         (reduce (fn ^vector [^vector ret item]
+                   (.cons ret (cond
+                                (unquote? item) (list sym-list (second item))
+                                (unquote-splicing? item) (second item)
+                                :else (list sym-list (template item)))))
+                 [] xs))
+       (flatten-map ^vector [m]
+         (reduce (fn ^vector [^vector keyvals ^IMapEntry e]
+                   (-> keyvals (.cons (.key e)) (.cons (.val e))))
+                 [] (seq m)))
+
+       (quoted? ^boolean [x]        ;quoted form or autoquoted literal
+         ;; Assumption: values with non-constant meta are represented
+         ;; by a (with-meta ...) form in `x` and return false.
+         (if (seq? x)
+           (and (= cfg/sym-quote (first x)) (nil? (meta x)))
+           (not (symbol? x))))
+       (unwrap-quote [x]                ;pre: `(quoted? x)` is true
+         (if (seq? x) (second x) x))
+       (quoted-in-list? ^boolean [x]
+         (and (seq? x) (= sym-list (first x)) (nil? (nnext x)) ;list of one?
+              (quoted? (second x))))
+       (unwrap-list [x]            ;pre: `(quoted-in-list? x)` is true
+         (unwrap-quote (second x)))
+       (list-of? ^boolean [l]
+         (and (seq? l) (= (first l) sym-list)))
+       (concat-of [ls]
+         (if (every? list-of? ls)
+           (list* sym-list (mapcat rest ls))
+           (cons sym-concat ls)))
+       (assemble [apply-sym apply-fn xs]
+         (let [ls (expand-list xs)]
+           (if (every? quoted-in-list? ls)
+             (q (cond->> (map unwrap-list ls)
+                  (some? apply-fn) (apply apply-fn)))
+             (cond->> (list sym-seq (concat-of ls))
+               (some? apply-sym) (list sym-apply apply-sym)))))
+       
+       (encode-collection [form]
+         (cond
+           (instance? IRecord form) form
+           (map? form) (assemble sym-hash-map hash-map (flatten-map form))
+           (vector? form) (assemble sym-vector vector form)
+           (set? form) (assemble sym-hash-set hash-set form)
+           (or (seq? form) (list? form)) (if-some [seq (seq form)]
+                                           (assemble nil nil seq)
+                                           ())
+           :else (throw (UnsupportedOperationException.
+                         "unknown collection type"))))]
+
+      (let [tmpl (cond
+                   (symbol? form) ;also covers members of `cfg/specials`
+                   (q form)
+                   
+                   (unquote? form)
+                   (second form)
+
+                   (unquote-splicing? form)
+                   (wrong "unquote-splicing ~@ outside of list")
+                   
+                   (coll? form)
+                   (encode-collection form)
+
+                   ;; all other forms produced by the reader are
+                   ;; auto-quoting
+                   :else form)]
+        (if-some [m (meta/source-meta form)]
+          (let [m-tmpl (template m)]
+            (if (and (quoted? tmpl) (quoted? m-tmpl))
+              (q (with-meta (unwrap-quote tmpl) (unwrap-quote m-tmpl)))
+              (list sym-with-meta tmpl m-tmpl)))
+          tmpl))))
+
+;;; ------------------------------------------------------------------------
+
+(defn- wrong ^void [& ^Object/1 msg-parts]
+  (throw (wrong/wr-info (str/join " " msg-parts))))
+(defn- wrong-pos ^void [^int pos & ^Object/1 msg-parts]
+  (throw (wrong/wr-info (str/join " " msg-parts) {:reader/position pos})))
+(defn- wrong-token ^void [^String cs ^int pos ^int end]
+  (throw (wrong/wr-info (str "invalid token: " (.substring cs pos end))
+                        {:reader/position pos})))
+(defn- rethrow-with-position ^void [^WrongInfo ex ^int pos]
+  (throw (cond-> ex
+           (not (contains? (wrong/wr-data ex) :reader/position))
+           (wrong/update-wr-data assoc :reader/position pos))))
+
+;;; "End of text" character virtually appended to program text to
+;;; enable one or more additional characters of lookahead without the
+;;; need to check the string's length first.  The assumption is that
+;;; this character does not appear in valid input text.  To simplify
+;;; program logic, `push-form` treats it like an unexpected closing
+;;; parenthesis.
+(def ^:private eot \u0000) ;or from private use area in Unicode's BMP(0)?
+
+(def ^:private bias-nothing Integer/MIN_VALUE)
+(def ^:private require-form \X)
+(letfn [(wrong-nothing ^void [^int pos ^char actual]
+          (if (= actual eot)
+            (wrong-pos pos "unexpected end of file")
+            (let [s (if (<= (int actual) (int \space))
+                      (str "\\u" (.toHexDigits (java.util.HexFormat/of) actual))
+                      (str "\\" actual))]
+              (wrong-pos pos "invalid start of token:" s))))
+        (compare-to-expected ^int [^int pos ^char expected ^String cs]
+          (let [actual (if (= pos (.length cs)) eot (.charAt cs pos))]
+            (if (= actual expected)
+              pos
+              (wrong-nothing pos actual))))]
+  (defn- check-nothing ^int [^int pos ^char expected ^String cs]
+    (if (neg? pos)
+      (compare-to-expected (- pos bias-nothing) expected cs)
+      pos)))
+
+;;; ------------------------------------------------------------------------
+
+(defn- mk-arg-env ^ArrayList []
+  (doto (ArrayList.) (.add nil)))
+
+(def ^:private fnlit-param-pat #"(?:(rest)|p(\d+))__fnlit__")
+(def ^:private max-fnlit-param 255)
+
+(letfn [(replacement-sym [^int idx]
+          (symbol nil (str (if (zero? idx) "rest" (str "p" idx))
+                           "__fnlit__")))
+        (register-arg! ^symbol [^ArrayList arg-env ^int idx]
+          ;; pre: `idx` is not negative, with zero meaning "rest parameter"
+          (while (<= (.size arg-env) idx)
+            (.add arg-env nil))
+          (or (.get arg-env idx)
+              (let [sym (replacement-sym idx)]
+                (.set arg-env idx sym)
+                sym)))
+        (collect-arg-tags ^map [^ArrayList arg-env body]
+          (let [sym-set (into #{} (remove nil?) arg-env)]
+            ((fn scan-fnlit-body ^map [^map acc x]
+               (if (seqable? x)
+                 (reduce scan-fnlit-body acc (seq x))
+                 (if-some [sym (sym-set x)]
+                   (update acc sym (fnil conj #{}) (-> x (meta) :tag))
+                   acc)))
+             {} body)))]
+
+  (defn- parse-arg-literal* ^symbol [^String s ^ArrayList arg-env]
+    (letfn [(parse-arg-num ^int [^String s] ;pre: (.length s) > 1
+              (let [ch-1 (.charAt s 1)
+                    n (if (and (Character/isDigit ch-1) (not= ch-1 \0))
+                        (try
+                          (Integer/parseUnsignedInt s 1 (.length s) 10)
+                          (catch NumberFormatException _
+                            -1))
+                        -1)]
+                (when-not (<= 1 n max-fnlit-param)
+                  (wrong "arg literal must be %, %& or %integer"))
+                n))]
+      (cond
+        (= s "%") (register-arg! arg-env 1)
+        (= s "%&") (register-arg! arg-env 0)
+        :else (register-arg! arg-env (parse-arg-num s)))))
+
+  (defn- parse-fnlit ^seq [^seq body ^ArrayList arg-env]
+    (letfn [(type-str [x]
+              (if (nil? x) "(none)" (str x)))
+            (tagged-parameter ^symbol [^map tag-map ^symbol p]
+              (let [tags (tag-map p)]
+                (when (> (count tags) 1)
+                  (wrong "conflicting type tags for arg literal:"
+                         (str/join " " (->> tags (map type-str) sort))))
+                (if-some [tag (first tags)]
+                  (with-meta p {:tag tag})
+                  p)))
+            (fnlit-sig []
+              (let [tag-map (collect-arg-tags arg-env body)]
+                (with-meta
+                  (->> (when-some [p (.get arg-env 0)]
+                         ['& (tagged-parameter tag-map p)])
+                       (concat (for [^int idx (range 1 (.size arg-env))]
+                                 (if-some [p (.get arg-env idx)]
+                                   (tagged-parameter tag-map p)
+                                   (replacement-sym idx))))
+                       (vec))
+                  {:tag meta/auto-return-type})))]
+      (with-meta (list 'fn* (fnlit-sig) body) (meta body)))))
+
+;;; ------------------------------------------------------------------------
+
+(definterface TokenParser
+  ;; The symbol being read *after* rewriting argument or gensym
+  ;; literal syntax.
+  (source-symbol ^symbol [^String nmsp ^String nm])
+  
+  ;; The symbol as being seen by the reader's caller.  This is usually
+  ;; the `source-symbol`, possibly with a syntax quoted name being
+  ;; expanded to its fully qualified representation.
+  (reader-symbol ^symbol [^String nmsp ^String nm])
+
+  ;; True when inside a function literal form `#(...)`.
+  (fn-literal? ^boolean [])
+  
+  ;; If true, then dispatch form `#<` is silently skipped.  Only set
+  ;; when within a discard.
+  (skip-over-unreadable? ^boolean [])
+
+  ;; Returns the TokenParser instance that applies within an unquote
+  ;; form `~` or `~@`.
+  (enter-unquote ^TokenParser []))
+
+(def discard-token-parser
+  (reify TokenParser
+    (source-symbol [_ nmsp nm] (symbol nmsp nm))
+    (reader-symbol [this nmsp nm] (.source-symbol this nmsp nm))
+    (fn-literal? [_] false)
+    (skip-over-unreadable? [_] true)
+    (enter-unquote [this] this)))
+
+(def root-token-parser
+  (reify TokenParser
+    (source-symbol [_ nmsp nm] (symbol nmsp nm))
+    (reader-symbol [this nmsp nm] (.source-symbol this nmsp nm))
+    (fn-literal? [_] false)
+    (skip-over-unreadable? [_] false)
+    (enter-unquote [this] this)))
+
+(defn- arg-literal? ^boolean [^String nmsp ^String nm]
+  (and (nil? nmsp) (= (.charAt nm 0) \%)))
+
+(defn- fnlit-token-parser ^TokenParser [^TokenParser parent ^ArrayList arg-env]
+  (reify TokenParser
+    (source-symbol [_ nmsp nm]
+      (if (arg-literal? nmsp nm)
+        (parse-arg-literal* nm arg-env)
+        (.source-symbol parent nmsp nm)))
+    (reader-symbol [this nmsp nm]
+      (.source-symbol this nmsp nm))
+    (fn-literal? [_]
+      true)
+    (skip-over-unreadable? [_]
+      (.skip-over-unreadable? parent))
+    (enter-unquote [this]
+      (.enter-unquote parent))))
+
+(defn- synquote-token-parser ^TokenParser [^TokenParser parent
+                                           ^Resolver resolver]
+  (let [gensym-map (mk-gensym-map)]
+    (reify TokenParser
+      (source-symbol [_ nmsp nm]
+        (if (gensym-symbol? nmsp nm)
+          (gensym-replacement gensym-map nm)
+          (.source-symbol parent nmsp nm)))
+      (reader-symbol [this nmsp nm]
+        (let [sym (.source-symbol this nmsp nm)]
+          (cond-> sym
+            (and (identical? nm (name sym)) (identical? nmsp (namespace sym)))
+            (rewrite-synquote-name resolver))))
+      (fn-literal? [_]
+        (.fn-literal? parent))
+      (skip-over-unreadable? [_]
+        (.skip-over-unreadable? parent))
+      (enter-unquote [this]
+        parent))))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private int-pat    ;from LispReader.java, but added suffix [lL]
+  #"([-+]?)(?:(0)|([1-9][0-9]*)|0[xX]([0-9A-Fa-f]+)|0([0-7]+)|([1-9][0-9]?)[rR]([0-9A-Za-z]+)|0[0-9]+)([lLN])?")
+(def ^:private float-pat  ;from LispReader.java, but added suffix [fF]
+  #"([-+]?[0-9]+(\.[0-9]*)?([eE][-+]?[0-9]+)?)([fFM])?")
+(def ^:private ratio-pat                ;from LispReader.java
+  #"([-+]?[0-9]+)/([0-9]+)")
+
+(defn- parse-number ^Number [^String s] ;see matchNumber in LispReader.java 
+  (letfn [(unsupported-big-int []
+            (wrong "BigInt values are not supported"))
+          (parse-int [^Matcher m ^String n ^int radix]
+            (let [bn (cond-> (BigInteger. n radix)
+                       (= "-" (.group m 1)) (.negate))
+                  x (.group m 8)]
+              (if (some? x)
+                (case (.charAt x 0)
+                  \N (unsupported-big-int)
+                  (\l \L) (if (< (.bitLength bn) 64)
+                            (object (.longValue bn)) ;return Long
+                            (wrong "value out of range for long:" bn))
+                  #_else (wrong (str "unsupported number suffix: " x)))
+                (if (< (.bitLength bn) 32)
+                  (object (.intValue bn)) ;force Integer
+                  (wrong "value out of range for int:" bn)))))
+          (match-int [^Matcher m]
+            (if-some [n (or (.group m 2) (.group m 3))]
+              (parse-int m n 10)
+              (if-some [n (.group m 4)]
+                (parse-int m n 16)
+                (if-some [n (.group m 5)]
+                  (parse-int m n 8)
+                  (if-some [n (.group m 7)]
+                    (parse-int m n (Integer/parseInt (.group m 6)))
+                    (wrong "invalid integer number:" (.group m)))))))
+
+          (unsupported-big-decimal []
+            (wrong "BigDecimal values are not supported"))
+          (match-float [^Matcher m ^String s]
+            (if-some [x (.group m 4)]
+              (case (.charAt x 0)
+                \M (unsupported-big-decimal)
+                (\f \F) (object (Float/parseFloat s))) ;force Float
+              (object (Double/parseDouble s))))]       ;return Double
+
+    (try
+      (or (let [m (.matcher int-pat s)]
+            (when (.matches m)
+              (match-int m)))
+          (let [m (.matcher float-pat s)]
+            (when (.matches m)
+              (match-float m s)))
+          (let [m (.matcher ratio-pat s)]
+            (when (.matches m)
+              (wrong "Ratio values are not supported")))
+          (wrong "invalid number:" s))
+      (catch NumberFormatException e
+        (wrong "number format error:" (.getMessage e))))))
+
+(defn- parse-unicode-char ^char [^String s ^int offset ^int length ^int base]
+  (when (or (not= (.length s) (+ offset length))
+            (loop [i (dec length)]
+              (cond
+                (neg? i) false
+                (neg? (Character/digit (.charAt s (+ offset i)) base)) true
+                :else (recur (dec i)))))
+    (wrong "invalid character code:" s))
+  (try
+    (let [n (Integer/parseInt s offset (+ offset length) base)]
+      (if (or (neg? n) (> n (int Character/MAX_VALUE)))
+        (do (wrong "character out of range:" s) \0)
+        (char n)))
+    (catch NumberFormatException e
+      (wrong "number format error:" (.getMessage e))
+      \0)))
+
+(defn- parse-octal-char ^char [^String s ^int offset ^int length]
+  (when (> length 3)
+    (wrong "invalid octal escape sequence length:" s))
+  (let [uc (parse-unicode-char s offset length 8)]
+    (when (> (int uc) 0377)
+      (wrong "octal escape sequence must be in range [0, 377]"))
+    uc))
+
+(defn- parse-character ^Character [^String s] ;pre: `s` starts with backslash
+  ;; see CharacterReader.invoke()
+  (let [h (when (> (.length s) 1)
+            (.charAt s 1))]
+    (or (when (= (.length s) 2)
+          (object h))
+        (get {"\\newline" \u000a
+              "\\space" \u0020
+              "\\tab" \u0009
+              "\\backspace" \u0008
+              "\\formfeed" \u000c
+              "\\return" \u000d} s nil)
+        (when (= h \u)
+          (let [uc (parse-unicode-char s 2 4 16)]
+            (if (<= 0xD800 (int uc) 0xDFFF) ;surrogate code unit?
+              (wrong "invalid surrogate character:" s)
+              (object uc))))
+        (when (= h \o)
+          (object (parse-octal-char s 2 (- (.length s) 2))))
+        (wrong "unsupported character:" s))))
+
+(defn- merge-meta [^map m dm]
+  (cond
+    (symbol? dm) (assoc m :tag dm)
+    (keyword? dm) (assoc m dm true)
+    (string? dm) (assoc m :tag dm)
+    (map? dm) (merge m dm)
+    (vector? dm) (assoc m :param-tags dm)
+    :else (wrong "metadata must be symbol, keyword, string, map, or vector")))
+
+(defn- checked-map ^map [^Object/1 es]
+  (loop [seen #{}, i 0]
+    (cond
+      (= i (alength es))
+      (Literal/map es)
+
+      (contains? seen (aget es i))
+      (wrong "duplicate key:" (aget es i))
+
+      :else (recur (conj seen (aget es i)) (+ i 2)))))
+
+(defn- checked-set ^set [^Object/1 es]
+  (loop [seen #{}, i 0]
+    (cond
+      (= i (alength es))
+      (Literal/set es)
+
+      (contains? seen (aget es i))
+      (wrong "duplicate key:" (aget es i))
+
+      :else (recur (conj seen (aget es i)) (inc i)))))
+
+;;; ------------------------------------------------------------------------
+
+(defn whitespace? ^boolean [^char ch]   ;includes \newline but not eot
+  (or (Character/isWhitespace ch) (= ch \,)))
+
+(defn macro? ^boolean [^char ch]
+  ;; A macro character starts a group form (\" \# \( \[ \{ \' \@ \` \~
+  ;; \^), starts a comment (\;), starts a character literal (\\),
+  ;; starts an argument token (\%), or ends a group (\" \) \] \}).
+  (case ch                      ;see `macros` array in LispReader.java
+    (\" \; \' \@ \^ \` \~ \( \) \[ \] \{ \} \\ \% \#) true
+    #_else false))
+
+(defn terminating-macro? ^boolean [^char ch] ;see isTerminatingMacro()
+  ;; A terminating macro character is a subset of `macro?` that
+  ;; excludes the characters (\# \% \').  As a consequence, all of
+  ;; "a'", "a#", and "a%" are valid symbols.
+  (let [mask-0 (bit-or (bit-shift-left 1l (- 34 0)) ; \"
+                       (bit-shift-left 1l (- 40 0)) ; \(
+                       (bit-shift-left 1l (- 41 0)) ; \)
+                       (bit-shift-left 1l (- 59 0))) ; \;
+        mask-1 (bit-or (bit-shift-left 1l (- 64 64)) ; \@
+                       (bit-shift-left 1l (- 91 64)) ; \[
+                       (bit-shift-left 1l (- 92 64)) ; \\
+                       (bit-shift-left 1l (- 93 64)) ; \]
+                       (bit-shift-left 1l (- 94 64)) ; \^
+                       (bit-shift-left 1l (- 96 64)) ; \`
+                       (bit-shift-left 1l (- 123 64)) ; \{
+                       (bit-shift-left 1l (- 125 64)) ; \}
+                       (bit-shift-left 1l (- 126 64)))] ; \~
+    (let [c (int ch)]
+      (if (< c 64)
+        (bit-test mask-0 c)
+        (bit-test mask-1 (- (min c 127) 64))))))
+
+(defn number-cont? ^boolean [^char ch]
+  (cond
+    (whitespace? ch) false
+    (macro? ch) false
+    :else true))
+(defn skip-number-cont ^int [^String cs ^int pos]
+  (let [n (.length cs)]
+    (loop [pos pos]
+      (if (and (< pos n) (number-cont? (.charAt cs pos)))
+        (recur (inc pos))
+        pos))))
+
+(defn token-cont? ^boolean [^char ch]
+  (cond
+    (whitespace? ch) false
+    (terminating-macro? ch) false
+    :else true))
+(defn skip-token-cont ^int [^String cs ^int pos]
+  (let [n (.length cs)]
+    (loop [pos pos]
+      (if (and (< pos n) (token-cont? (.charAt cs pos)))
+        (recur (inc pos))
+        pos))))
+
+(definterface IFormBuilder
+  ;; reading position
+  (current-line ^int [])
+  (beginning-of-line ^int [^int pos])
+  (namespace-context ^Resolver [])
+  (set-namespace-context ^void [^Resolver new-resolver])
+  ;; element stack
+  (size ^int [])
+  (grow ^Object/1 [])
+  (push ^int [^int pos ^Object e])
+  (pop ^Object [])
+  (pop-elements-from ^Object/1 [^int start])
+  (pop-list-from ^list [^int start]))
+
+;;; Holds mutable state tracking the position in the tree of generated
+;;; form instances.  Essentially a stack, of which the top elements
+;;; are repeatedly packaged up into a new list, vector, map, or set
+;;; form and pushed again.
+;;;
+;;; Note: The character position in `cs` is not part of `FormBuilder`.
+;;; Every parsing function takes the current position as first
+;;; argument, and returns the position on completion as result.
+(deftype FormBuilder [^String cs
+                      ^:unsynchronized-mutable ^Object/1 element-data
+                      ^:unsynchronized-mutable ^Resolver resolver
+                      ^:unsynchronized-mutable ^int size
+                      ^:unsynchronized-mutable ^int current-line]
+  IFormBuilder
+  (current-line [_]
+    current-line)
+  (beginning-of-line [_ pos]
+    (set! current-line (inc current-line))
+    pos)
+  (namespace-context [_]
+    resolver)
+  (set-namespace-context [_ new-resolver]
+    (set! resolver new-resolver))
+  
+  (size [_]
+    size)
+  (grow [_]
+    (let [old-capacity (alength element-data)
+          new-capacity (* old-capacity 2)]
+      (set! element-data (Arrays/copyOf element-data new-capacity))))
+  (push [this pos e]
+    (let [s size, es element-data]
+      (-> (if (= s (alength es)) (.grow this) es)
+          (aset s e))
+      (set! size (inc s))
+      pos))
+  (pop [_]
+    (let [s (dec size)]
+      (set! size s)
+      (aget element-data s)))
+  (pop-elements-from [_ from]
+    (let [s size]
+      (set! size from)
+      (Arrays/copyOfRange element-data from s)))
+  (pop-list-from [_ from]
+    (let [s size]
+      (set! size from)
+      (Literal/listOfRange element-data from s))))
+
+;;; Returns negative value at end of file, the position of the next
+;;; character to read otherwise.
+(defn- push-form-or-nothing* ^int [^int pos ^FormBuilder fb ^TokenParser tp]
+  (letfn [(length-cs ^int []
+            (.length (.cs fb)))         ;no need to compensate for eot
+          (char-at ^char [^int pos]
+            (if (>= pos (.length (.cs fb)))
+              eot
+              (.charAt (.cs fb) pos)))
+          (substring ^String [^int start ^int end]
+            (.substring (.cs fb) start end))
+          
+          (with-line [x ^int line]
+            (with-meta x {:line line}))
+          (mk-list [^int line op arg]
+            (with-line (list op arg) line))
+
+          (push-form
+            (^int [^int pos]
+             (-> (push-form-or-nothing pos)
+                 (check-nothing require-form (.cs fb))))
+            (^int [^int pos ^TokenParser tp]
+             (-> (push-form-or-nothing* pos fb tp)
+                 (check-nothing require-form (.cs fb)))))
+          (push-forms ^int [^int pos ^char end-ch]
+            (if (neg? pos)
+              (check-nothing pos end-ch (.cs fb))
+              (recur (push-form-or-nothing pos) end-ch)))
+          (push-forms-paired ^int [^int pos ^char end-ch]
+            (let [from (.size fb)
+                  pos (push-forms pos end-ch)]
+              (if (odd? (- (.size fb) from))
+                (check-nothing (+ pos bias-nothing) require-form (.cs fb))
+                pos)))
+          
+          (skip-comment ^int [^int pos]
+            (case (char-at pos)
+              \newline (.beginning-of-line fb (inc pos))
+              #_eot \u0000 pos
+              #_else (recur (inc pos))))
+          (skip-discard ^int [^int pos] ;pre: looking at "#_"
+            (let [pos (push-form (+ pos 2) discard-token-parser)]
+              (.pop fb)
+              pos))
+          
+          (push-number ^int [^int pos]  ;see readNumber()
+            (let [end (skip-number-cont (.cs fb) (inc pos))]
+              (.push fb end (parse-number (substring pos end)))))
+          (push-character ^int [^int pos]
+            (let [skip (- 2 (int (= (char-at (inc pos)) eot)))
+                  end (skip-token-cont (.cs fb) (+ pos skip))]
+              (.push fb end (parse-character (substring pos end)))))
+          
+          (namespace-separator ^int [^int pos ^int skip ^int end]
+            ;; also marked as invalid by Clojure:
+            ;; (or (.endsWith s ":") (pos? (.indexOf s "::" 1)))
+            (let [start (+ pos skip)]
+              (if (= (- end start) 1)
+                -1
+                (let [slash (.indexOf (.cs fb) (int \/) start end)]
+                  (if (or (= slash start) (= (inc slash) end) (= start end))
+                    (wrong-token (.cs fb) pos end)
+                    slash)))))
+          (push-symbol ^int [^int pos]  ;pre: not looking at \:
+            (let [end (skip-token-cont (.cs fb) pos)
+                  slash (namespace-separator pos 0 end)
+                  sym (if (neg? slash)
+                        (let [nm (substring pos end)]
+                          (cond (.equals "nil" nm) nil
+                                (.equals "true" nm) Boolean/TRUE
+                                (.equals "false" nm) Boolean/FALSE
+                                :else (.reader-symbol tp nil nm)))
+                        (let [nmsp (substring pos slash)
+                              nm (substring (inc slash) end)]
+                          (.reader-symbol tp nmsp nm)))]
+              (.push fb end sym)))
+          (parse-qualified-keyword ^keyword [^String nmsp ^String nm]
+            (let [resolver (.namespace-context fb)]
+              (if (some? nmsp)
+                (if-some [nmsp* (.lookup-namespace resolver nmsp)]
+                  (keyword nmsp* nm)
+                  (wrong "no such namespace:" nmsp))
+                (keyword (.ns-str resolver) nm))))
+          (push-keyword ^int [^int pos] ;pre: looking at \:
+            (let [two-colons? (= (char-at (inc pos)) \:)
+                  skip (inc (int two-colons?))
+                  start (+ pos skip)
+                  end (skip-token-cont (.cs fb) start)
+                  slash (namespace-separator pos skip end)
+                  nmsp (when (pos? slash) (substring start slash))
+                  nm (substring (if (pos? slash) (inc slash) start) end)]
+              (.push fb end (if two-colons?
+                              (parse-qualified-keyword nmsp nm)
+                              (keyword nmsp nm)))))
+          (push-number-or-symbol ^int [^int pos ^char char-after-sign]
+            ;; pre: not looking at whitespace or starting character of a macro
+            (if (Character/isDigit char-after-sign)
+              (push-number pos)
+              (push-symbol pos)))
+
+          (at-eol? ^boolean [^char ch]
+            (case ch
+              (\newline \return #_eot \u0000) true
+              false))
+          (append-escape ^int [^StringBuilder sb ^int pos] ;pre: looking at \\
+            (let [ch (char-at (inc pos))
+                  oct? (fn ^boolean [^int d]
+                         (if (>= (+ pos d) (length-cs))
+                           false
+                           (>= (Character/digit (char-at (+ pos d)) 8) 0)))]
+              (case ch
+                \t (do (.append sb \tab) 2)
+                \r (do (.append sb \return) 2)
+                \n (do (.append sb \newline) 2)
+                \\ (do (.append sb \\) 2)
+                \" (do (.append sb \") 2)
+                \b (do (.append sb \backspace) 2)
+                \f (do (.append sb \formfeed) 2)
+                \u (let [j (min (length-cs) (+ pos 6))
+                         x (substring pos j)]
+                     (.append sb (parse-unicode-char x 2 4 16))
+                     6)
+                #_else
+                (if (Character/isDigit ch)
+                  (let [len (if (oct? 2) (if (oct? 3) 3 2) 1)
+                        x (substring pos (+ pos len 1))]
+                    (.append sb (parse-octal-char x 1 len))
+                    (inc len))
+                  (wrong-pos pos "unsupported escape character:"
+                             (str \\ ch))))))
+          (skip-over-copied-text ^int [^int pos]
+            (let [cs (.cs fb), end (length-cs)]
+              (loop [i pos]
+                (if (< i end)
+                  (case (.charAt cs i)
+                    (\" \\ \newline) i
+                    #_else (recur (inc i)))
+                  i))))
+          (push-string* [^int pos ^String prefix]
+            (let [sb (StringBuilder. prefix)]
+              (loop [pos pos]
+                (case (char-at pos)
+                  \" (.push fb (inc pos) (.toString sb))
+                  \\ (if (at-eol? (char-at (inc pos)))
+                       (wrong-pos pos "incomplete quote at end of line")
+                       (recur (+ pos (append-escape sb pos))))
+                  \newline (do (.append sb \newline)
+                               (recur (.beginning-of-line fb (inc pos))))
+                  #_eot \u0000 (wrong "unterminated string")
+                  #_else (let [j (skip-over-copied-text (inc pos))]
+                           (.append sb (.cs fb) pos j)
+                           (recur j))))))
+          (push-string [^int pos]       ;pre: looking at \"
+            (let [j (skip-over-copied-text (inc pos))
+                  s (substring (inc pos) j)]
+              (if (= (char-at j) \")
+                (.push fb (inc j) s)
+                (push-string* j s))))
+          (compile-pattern ^Pattern [^String pattern]
+            (try
+              (Pattern/compile pattern)
+              (catch PatternSyntaxException e
+                (throw (wrong/wr-info (str "invalid regex " (wrong/q pattern))
+                                      {} e)))))
+          (push-regex ^int [^int pos]   ;pre: looking at "#\""
+            (let [sb (StringBuilder.)
+                  line (.current-line fb)]
+              (loop [pos (+ pos 2)]
+                (case (char-at pos)
+                  \" (.push fb (inc pos) (compile-pattern (.toString sb)))
+                  \\ (let [ch+1 (char-at (inc pos))]
+                       (if (at-eol? ch+1)
+                         (wrong-pos pos "incomplete quote at end of line")
+                         (do (.append sb \\) (.append sb ch+1)
+                             (recur (+ pos 2)))))
+                  \newline (do (.append sb \newline)
+                               (recur (.beginning-of-line fb (inc pos))))
+                  #_eot \u0000 (wrong "unterminated regular expression")
+                  #_else (let [j (skip-over-copied-text (inc pos))]
+                           (.append sb (.cs fb) pos j)
+                           (recur j))))))
+          
+          (push-list ^int [^int pos]    ;pre: looking at \(
+            (let [from (.size fb)
+                  line (.current-line fb)
+                  pos (push-forms (+ pos 1) \))
+                  x (.pop-list-from fb from)]
+              ;; omit line meta for empty list to retain identity
+              (->> (cond-> x (not (identical? () x)) (with-line line))
+                   (.push fb (inc pos) ))))
+          (push-vector ^int [^int pos]  ;pre: looking at \[
+            (let [from (.size fb)
+                  pos (push-forms (+ pos 1) \])]
+              (->> (Literal/vector (.pop-elements-from fb from))
+                   (.push fb (inc pos)))))
+          (push-map ^int [^int pos]     ;pre: looking at \{
+            (let [from (.size fb)
+                  pos (push-forms-paired (+ pos 1) \})]
+              (->> (checked-map (.pop-elements-from fb from))
+                   (.push fb (inc pos)))))
+          (push-set ^int [^int pos]     ;pre: looking at "#{"
+            (let [from (.size fb)
+                  pos (push-forms (+ pos 2) \})]
+              (->> (checked-set (.pop-elements-from fb from))
+                   (.push fb (inc pos)))))
+
+          (push-list-of-prefix ^int [^int pos ^symbol op]
+            (let [line (.current-line fb)
+                  pos (push-form (+ pos 1))]
+              (.push fb pos (mk-list line op (.pop fb)))))
+          (push-meta ^int [^int pos]    ;pre: looking at \^
+            (let [pos (push-form (inc pos))
+                  dm (.pop fb)
+                  pos (push-form pos)
+                  x (.pop fb)]
+              (when-not (instance? clojure.lang.IMeta x)
+                (wrong "metadata can only be applied to IMeta instances"))
+              (.push fb pos (with-meta x (merge-meta (meta x) dm)))))
+          
+          (push-syntax-quote ^int [^int pos]
+            (let [line (.current-line fb)
+                  tp' (synquote-token-parser tp (.namespace-context fb))
+                  pos (push-form (+ pos 1) tp')
+                  x (template (.pop fb))]
+              (.push fb pos (cond-> x (seq? x) (with-line line)))))
+          (push-unquote ^int [^int pos ^boolean splicing?]
+            (let [line (.current-line fb)
+                  pos (push-form (+ pos (if splicing? 2 1))
+                                 (.enter-unquote tp))]
+              (.push fb pos (mk-list line (if splicing?
+                                            sym-unquote-splicing
+                                            sym-unquote)
+                                     (.pop fb)))))
+          
+          (push-symbolic-value ^int [^int pos]
+            (let [pos (push-form (+ pos 2))
+                  sval (.pop fb)]
+              (if-some [x (get {'Inf Double/POSITIVE_INFINITY
+                                '-Inf Double/NEGATIVE_INFINITY
+                                'NaN Double/NaN} sval)]
+                (.push fb pos x)
+                (wrong "unknown symbolic value:" (str "##" sval)))))
+          (push-fn-literal ^int [^int pos] ;pre: looking at "#("
+            (when (.fn-literal? tp)
+              (wrong "nested fn literals #(...) are not allowed"))
+            (let [arg-env (mk-arg-env)
+                  pos (push-form (inc pos) (fnlit-token-parser tp arg-env))
+                  body (.pop fb)]
+              (.push fb pos (parse-fnlit body arg-env))))
+          (push-dispatch ^int [^int pos]
+            (let [ch (char-at (inc pos))]
+              (case ch
+                \{ (push-set pos)
+                \( (push-fn-literal pos)
+                \" (push-regex pos)
+                \' (push-list-of-prefix (inc pos) 'var)
+                \# (push-symbolic-value pos)
+                \_ (-> pos (skip-discard) (push-form-or-nothing))
+                \< (if (.skip-over-unreadable? tp)
+                     (.push fb (+ pos 2) nil) ;ignore discarded unreadable
+                     (wrong "unreadable form"))
+                #_else (wrong "unsupported dispatch:" (str "#" ch)))))
+          
+          (push-or-discard ^int [^int pos]
+            (let [ch (char-at pos)]
+              (case ch
+                (\+ \-) (push-number-or-symbol pos (char-at (inc pos)))
+                \" (push-string pos)
+                \# (push-dispatch pos)
+                \( (push-list pos)
+                \[ (push-vector pos)
+                \{ (push-map pos)
+                \' (push-list-of-prefix pos cfg/sym-quote)
+                \@ (push-list-of-prefix pos 'deref)
+                \` (push-syntax-quote pos)
+                \~ (push-unquote pos (= (char-at (inc pos)) \@))
+                \^ (push-meta pos)
+                \\ (push-character pos)
+                \: (push-keyword pos)
+                  
+                (\) \] \} #_eot \u0000) (+ pos bias-nothing)
+                \newline (do (.beginning-of-line fb (inc pos))
+                             (recur (inc pos)))
+                \, (recur (inc pos))
+                \; (recur (skip-comment pos))
+                #_else (if (Character/isWhitespace ch)
+                         (recur (inc pos))
+                         (push-number-or-symbol pos ch)))))
+          (recover-error-position ^int [^int pos]
+            ;; Skip any leading whitespace to get a better value for
+            ;; the error's position.  Does not skip discard.  This
+            ;; function must complete successfully.
+            (let [ch (char-at pos)]
+              (case ch
+                \, (recur (inc pos))
+                \; (recur (skip-comment pos))
+                #_else (if (Character/isWhitespace ch)
+                         (recur (inc pos))
+                         pos))))
+          (push-form-or-nothing ^int [^int pos]
+            (try
+              (push-or-discard pos)
+              (catch WrongInfo ex
+                (rethrow-with-position ex (recover-error-position pos)))))]
+    
+    (push-form-or-nothing pos)))
+
+(letfn [(assoc-line-column ^WrongInfo [^WrongInfo ex ^String cs]
+          (let [pos ^int (:reader/position (wrong/wr-data ex))]
+            (loop [line-num 1, i 0]
+              (let [j (.indexOf cs "\n" i)]
+                (if (or (neg? j) (>= j pos))
+                  (-> ex
+                      (wrong/update-wr-data assoc :reader/line line-num)
+                      (wrong/update-wr-data assoc :reader/column (- pos i)))
+                  (recur (inc line-num) (inc j)))))))]
+  
+  (defn push-1 ^int [^int pos ^FormBuilder fb ^Resolver resolver]
+    (try
+      (.set-namespace-context fb resolver)
+      (push-form-or-nothing* pos fb root-token-parser)
+      (catch WrongInfo ex
+        (throw (assoc-line-column ex (.cs fb)))))))
+
+(defn mk-form-builder ^FormBuilder [^String cs]
+  (FormBuilder. cs (new Object/1 16) nil 0 1))
+
+;;; ------------------------------------------------------------------------
+
+(defn- load-resource ^String [^ClassLoader app-ld ^Path path]
+  (prn :load-resource (str path))
+  (if-some [url (.getResource app-ld (.toString path))]
+    (-> (.openStream url)
+        (java.io.InputStreamReader.)
+        (.readAllAsString))
+    (wrong/other (str "no such file " (wrong/q path)))))
+
+(deftype Reader [^FormBuilder fb ^:unsynchronized-mutable ^int pos
+                 ^ClassLoader app-ld ^Path path]
+  FormReader
+  (read [_ resolver]
+    (if (neg? (set! pos (push-1 pos fb resolver)))
+      :tcljx.parser.reader/EOF
+      (let [form (.pop fb)]
+        #_(prn :form form)
+        form)))
+  (resolve [_ path-str]
+    (let [path' (if (.startsWith path-str "/")
+                  (java.nio.file.Path/of path-str)
+                  (-> path (.getParent) (.resolve path-str)))]
+      (-> (mk-form-builder (load-resource app-ld path'))
+          (Reader. 0 app-ld path'))))
+  (with-source-file [_ cb]
+    (cond-> cb
+      (some? path)
+      (.with (java.lang.classfile.attribute.SourceFileAttribute/of
+              (-> path .getFileName .toString))))))
+(defn mk-reader
+  (^FormReader [^String cs]
+   (mk-reader cs nil nil))
+  (^FormReader [^ClassLoader app-ld ^Path path]
+   (mk-reader (load-resource app-ld path) app-ld path))
+  (^FormReader [^String cs ^ClassLoader app-ld ^Path path]
+   (Reader. (mk-form-builder cs) 0 app-ld path)))

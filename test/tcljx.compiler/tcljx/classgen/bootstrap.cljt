@@ -1,0 +1,241 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.classgen.bootstrap
+  (:require
+   (tcljx.data [config :as cfg] [files :as files] [meta :as meta]
+               [reflect :as reflect] [macro :as macro])
+   (tcljx.classgen [classfile :as classfile] [insn :as insn]
+                   [universe :as universe] [primitive :as primitive])
+   [tcljx.parser.reader-test :as reader-test]
+   [tcljx.classgen.classdata :as classdata] ;only available for unit tests
+   [tcljx.alpha.ptest :as ptest]            ;for is
+   [tcljx.alpha.ptest__impl :as ptest__impl]) ;for get-test-context-name
+  (:import
+   (tcljx.data.ir NmspClass FormReader NamespaceProvider ProvidedNamespace)
+   (tcljx.classgen.classfile Loader)
+   (java.lang.invoke MethodHandle MethodType)
+   (java.lang.reflect Method)
+   (java.nio.file Path)
+   (java.util List)
+   (java.util.function Consumer Function)))
+
+(def app-ld
+  (let [
+        ;; project-name (or (System/getenv "PROJECT_DIR")
+        ;;                  (files/default-project-name))
+        ;; tcljx-mdir (files/tmp-dest-dir (str project-name ".mdir"))
+        ;; tcljx-mod-rt (.resolve tcljx-mdir (files/path-of "tcljc-rt.jar"))
+        
+        tcljx-mod-rt (files/path-of "../bootstrap-tcljc/tcljc.rt")]
+    (classfile/app-class-loader :platform [tcljx-mod-rt])))
+(def ^:private rt-lookup (classfile/get-rt-lookup app-ld))
+
+(defn mk-universe ^NamespaceProvider [^map reader-map ^Loader loader]
+  (let [pn-primitive (ProvidedNamespace. cfg/primitive-ns-str
+                                         primitive/primitive-nmsp-globals
+                                         nil insn/insn-empty)
+        pn-core (ProvidedNamespace. cfg/core-lib {} nil insn/insn-empty)
+        provided-ns {cfg/primitive-ns-str pn-primitive
+                     cfg/core-lib pn-core}]
+    (universe/mk-universe reader-map loader
+                          (reduce dissoc provided-ns (keys reader-map)))))
+
+
+(deftype ReaderStub [^:unsynchronized-mutable forms]
+  FormReader
+  (read [_ resolver]
+    (if (nil? forms)
+      :tcljx.parser.reader/EOF
+      (let [form (first forms)]
+        (set! forms (next forms))
+        form)))
+  (with-source-file [_ cb]
+    cb))
+(defn mk-reader-stub [forms]
+  (ReaderStub. (seq forms)))
+
+;;; ------------------------------------------------------------------------
+
+(defn dest-dir-for-this-test ^Path []
+  (let [nm (ptest__impl/get-test-context-name)]
+    (files/tmp-dest-dir (str "tcljx.test" "/" (namespace nm) "/" (name nm)))))
+
+(defn- ns? ^boolean [form]
+  (and (seq? form) (= (first form) 'ns)))
+
+(defn- nmsp-name-of ^String [^vector ns-forms]
+  (let [x (first ns-forms)]
+    (assert (ns? x) "first form must be (ns ...)")
+    (let [nm (second x)]
+      (assert (and (symbol? nm) (nil? (namespace nm)))
+              "ns name must be unqualified symbol")
+      (name nm))))
+
+(defn- split-at-ns ^vector [formv] ;returns vector of vectors, one for each ns
+  (loop [acc [], i 0, j 1]
+    (cond
+      (= i (count formv)) acc
+
+      (or (= (count formv) j) (ns? (nth formv j)))
+      (recur (conj acc (subvec formv i j)) j (inc j))
+      
+      :else (recur acc i (inc j)))))
+
+(defn nmsp
+  ([formv]
+   (nmsp (classfile/dyn-class-loader app-ld []) formv))
+  ([^ClassLoader dyn-ld formv]
+   (let [dest-dir (dest-dir-for-this-test)
+         !render-to (java.util.concurrent.ConcurrentHashMap.)
+         class-sink (^Consumer fn ^void [^NmspClass ncl]
+                     (.put !render-to
+                           (-> ncl .this-class .descriptorString)
+                           (classdata/extract (.class-bytes ncl))))
+         loader (classfile/mk-loader dest-dir app-ld dyn-ld class-sink)
+         ns-forms-seq (split-at-ns formv)]
+     
+     (let [ns-strs (->> (map nmsp-name-of ns-forms-seq)
+                        ^String/1 (into-array String))
+           nmsps (-> (into {} (map (juxt nmsp-name-of mk-reader-stub))
+                           ns-forms-seq)
+                     (mk-universe loader)
+                     (.require-namespaces* ns-strs nil nil))]
+       (dotimes [i (alength nmsps)]
+         (assert (some? (aget nmsps i)))))
+     
+     (->> (sort-by key (seq !render-to))
+          (mapv (comp vec val))))))
+
+;;; ------------------------------------------------------------------------
+
+(defn ns-with-fnbody [params form]
+  (letfn [(no-tag? ^boolean [x]
+            (not (contains? (meta x) :tag)))]
+    ['(ns pkg.ns0)
+     (list 'fn* #_unnamed (cond-> params
+                            (no-tag? params)
+                            (vary-meta assoc :tag meta/auto-return-type))
+           ;; note: some forms must be wrapped in (do nil ...) to
+           ;; prevent them from disappearing because of redirection
+           form)]))
+
+(defn method-name [params]
+  (str "fn~" (count params)))
+
+(defn fn-method-body [params form]
+  (letfn [(matches-class? [internal-name]
+            (fn class-pred ^boolean [xs]
+              (let [x (first xs)]
+                (and (seq? x)
+                     (= 'CLASS (first x))
+                     (= internal-name (nth x 3))))))
+          (matches-method? [mnm]
+            (fn method-pred ^boolean [xs]
+              (let [x (first xs)]
+                (and (seq? x)
+                     (= 'METHOD (first x))
+                     (= mnm (nth x 2))))))
+          (body-as-vector [m-seq]
+            (if (some? m-seq)
+              (->> (first m-seq)        ;first method
+                   (rest)               ;drop method header
+                   (vec))               ;return as vector
+              '[fn-arity-method-elided]))]
+    (->> (nmsp (ns-with-fnbody params form))
+         (filter (matches-class? "pkg/ns0/_10")) ;seq of at most one class
+         (first)                                 ;first class or nil
+         (filter (matches-method? (method-name params))) ;methods for name
+         (seq)
+         (body-as-vector))))
+
+(defn- force-fresh-method [form]
+  `(quote (do nil ~form)))
+
+(defmacro asm-expr
+  ([form]
+   `(asm-expr [] ~form))
+  ([params form]
+   `(fn-method-body '~params ~(force-fresh-method form))))
+
+(defmacro is-asm* [form exp-asm]        ;takes `exp-asm` as value
+  (with-meta `(ptest/is (= ~exp-asm (asm-expr ~form)))
+    (meta &form)))
+(defmacro is-asm [form exp-asm]         ;quotes `exp-asm`
+  (with-meta `(ptest/is (= (quote ~exp-asm) (asm-expr ~form)))
+    (meta &form)))
+
+(defmacro is-error [form exp-msg]
+  (with-meta `(ptest/is (ptest/thrown-with-msg? tcljx.data.wrong.WrongInfo
+                                                ~exp-msg (asm-expr ~form)))
+    (meta &form)))
+
+;;; ------------------------------------------------------------------------
+
+(defn fn-call-method [params form args]
+  (letfn [(get-method ^Method [^Class cl ^String nm]
+            (let [ms (filter #(= (.getName ^Method %) nm) (.getMethods cl))]
+              (assert (= (count ms) 1)
+                      (str "found " (count ms) " matches for method name "
+                           nm " in class " cl))
+              (first ms)))]
+    (let [dyn-ld (classfile/dyn-class-loader app-ld [])]
+      (nmsp dyn-ld (ns-with-fnbody params form))
+      (let [cl (Class/forName "pkg.ns0.___" true dyn-ld)
+            m (get-method cl (method-name params))]
+        (.invoke m nil (.toArray ^List args)))))) ;invoke static method
+
+(defmacro call-expr
+  ([form]
+   `(call-expr [] ~form []))
+  ([params form args]
+   ;; enforce materialization of method by wrapping form
+   `(fn-call-method '~params ~(force-fresh-method form) ~args)))
+
+(defmacro is-class [form cl]
+  (with-meta `(ptest/is (= ~cl (.getClass (call-expr ~form))))
+    (meta &form)))
+
+;;; ------------------------------------------------------------------------
+
+(defn str-expr
+  ([s]
+   (str-expr [] s))
+  ([params s]
+   (fn-method-body params (reader-test/read1 s))))
+
+;;; ------------------------------------------------------------------------
+
+(defn- mt-of ^MethodType [^Class return-type parameter-types]
+  (MethodType/methodType return-type ^List parameter-types))
+
+(def array-to-cpl (tcljx.data.macro.ArrayToCpl. (.getClassLoader Object)))
+
+(defn to-compiler-mh ^MethodHandle [^ClassLoader app-ld]
+  (let [ccm-cl (.lookupClass rt-lookup)
+        
+        ccm-cld (reflect/describe-class ccm-cl)
+        ccm-mt (mt-of ccm-cl [Function Function])
+        ccm (.findStatic rt-lookup ccm-cl "create" ccm-mt)
+
+        mtc-mt (mt-of Object [Object])
+        mtc (.findVirtual rt-lookup ccm-cl "appToCpl" mtc-mt)
+        args [nil array-to-cpl]]
+    (.bindTo mtc (.invokeWithArguments ccm ^List args))))
+
+(def target-to-compiler-mh (to-compiler-mh app-ld))
+
+(defn target->compiler [x]
+  (let [args [x]]
+    (.invokeWithArguments target-to-compiler-mh ^List args)))
+
+(defmacro data-expr
+  ([form]
+   `(data-expr [] ~form []))
+  ([params form args]
+   `(let [res# (fn-call-method '~params (object '~form) ~args)]
+      (target->compiler res#))))

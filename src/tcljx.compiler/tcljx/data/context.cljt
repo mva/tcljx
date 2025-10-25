@@ -1,0 +1,92 @@
+(ns tcljx.data.context
+  (:require (tcljx.data [wrong :as wrong]))
+  (:import (tcljx.data.wrong WrongInfo)))
+
+;;; If set in a form context, then a `recur` is possible.  This means
+;;; that the form is in tail position with respect to the
+;;; function (method, enclosing loop): there are no instructions
+;;; between the recur and the end of the function (method, enclosing
+;;; loop).  Put differently, the form is neither directly nor
+;;; indirectly providing an argument value to an expression *and* the
+;;; form is neither directly nor indirectly part of the butlast prefix
+;;; of a progn block.
+(def ^:private flag-can-recur (bit-shift-left 1l 32))
+(defn can-recur? ^boolean [^long fctx]
+  (not (zero? (bit-and flag-can-recur fctx))))
+(defn with-recur ^long [^long fctx]
+  (bit-or fctx flag-can-recur))
+
+;;; If set in a form context, then this form is in strict statement
+;;; position with respect to the function or method: the operand stack
+;;; is known to be empty.  This is used to decide whether a `try`
+;;; expression can be inlined, or should be turned into a closure.
+;;; The technical reason for this is that exception handlers clear the
+;;; operand stack on entry, which prevents a translated
+;;; try-catch-finally from appearing in arbitrary expression position.
+;;; The body of a function or method is always in statement position.
+(def ^:private flag-statm-position (bit-shift-left 1l 33))
+(defn can-inline-tcf? ^boolean [^long fctx]
+  (not (zero? (bit-and flag-statm-position fctx))))
+
+(defn of-arg ^long [^long fctx]
+  (bit-and-not fctx (bit-or flag-can-recur flag-statm-position)))
+(defn of-progn-prefix ^long [^long fctx]
+  (bit-and-not fctx flag-can-recur))
+(defn of-finally ^long [^long fctx]
+  (bit-and-not fctx flag-statm-position)) ;operand stack holds exception
+
+(def fctx-initial flag-statm-position)
+(def fctx-none 0l)           ;used as placeholder for "no line number"
+
+(def ^:private mask-line (dec (bit-shift-left 1l 32)))
+(def ^:private mask-flags (bit-not mask-line))
+(defn fctx-line ^int [^long fctx]
+  (int fctx))
+
+(defn update-line [^long fctx ^int line]
+  (bit-or (bit-and mask-flags fctx) (bit-and mask-line line)))
+(defn update-line-from-meta ^long [^long fctx form-meta]
+  (if (some? form-meta)
+    (if-some [line (.valAt ^map form-meta :line nil)]
+      (update-line fctx line)
+      fctx)
+    fctx))
+
+
+(defn decorate-with-fctx ^Throwable [^Throwable ex ^long fctx]
+  (letfn [(no-class-def-found ^WrongInfo [^Throwable e]
+            (let [nm (symbol nil (.replace (ex-message e) \/ \.))]
+              (wrong/wr-info (str "failed to load class " (wrong/q nm)) {} e)))]
+    (let [line (fctx-line fctx)]
+      (condp instance? ex
+        NoClassDefFoundError
+        (-> ex (no-class-def-found) (wrong/push-line-number* line))
+        WrongInfo
+        (-> ex (wrong/push-line-number* line))
+        #_else ex))))
+
+(defmacro with-line-from-meta [[fctx-sym form-meta :as binding] & body]
+  (assert (vector? binding))
+  (assert (symbol? fctx-sym))
+  `(let [~fctx-sym (update-line-from-meta ~fctx-sym ~form-meta)]
+     (try
+       ~@body
+       (catch Throwable ex#
+         (throw (decorate-with-fctx ex# ~fctx-sym))))))
+
+(defmacro with-line-from-list [[fctx-sym seq-form :as binding] & body]
+  (assert (vector? binding))
+  (assert (symbol? fctx-sym))
+  `(with-line-from-meta ~(vector fctx-sym `(meta ~seq-form)) ~@body))
+
+(defn decorate-with-line ^Throwable [^Throwable ex seq-form]
+  (decorate-with-fctx ex (update-line-from-meta 0 (meta seq-form))))
+
+;;; Decorate compile time errors *without* propagating line number
+;;; information into generated code.
+(defmacro with-error-info [seq-form & body]
+  `(try
+     ~@body
+     (catch Throwable ex#
+       (throw (decorate-with-line ex# ~seq-form)))))
+

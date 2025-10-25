@@ -1,0 +1,335 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.classgen.universe
+  (:require
+   (tcljx.data
+    [config :as cfg] [files :as files] [resolve :as resolve] [reflect :as reflect]
+    [meta :as meta] [wrong :as wrong] [context :as context] [ir :as ir])
+   (tcljx.parser
+    [reader :as reader] [form :as form] [parse :as parse]
+    [namespace :as namespace])
+   (tcljx.classgen
+    [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
+    [segment :as segment] [emit :as emit] [insn :as insn] [codegen :as codegen]
+    [entity :as entity] [fnenv :as fnenv] [defgen :as defgen]
+    [primitive :as primitive] [publics :as publics] [build :as build]))
+  (:import
+   (tcljx.data.ir Resolver FormReader NamespaceProvider ProvidedNamespace
+                  NmspClass NamespaceBuilder Require
+                  Expr Entity ExprFactory EntityFactory Parser)
+   (tcljx.classgen.classfile Loader PackageBuilder)
+   (tcljx.classgen.segment Segment SegmentBuilder)
+   (tcljx.classgen.insn Insn)
+   (java.lang.classfile ClassFile ClassBuilder CodeBuilder)
+   (java.lang.invoke MethodType MethodHandle MethodHandles)
+   (java.nio.file Path)
+   (java.util ArrayList HashSet)))
+
+(def ^:private mt-Class-bytes (MethodType/methodType Class byte/1))
+(defn- get-ephemeral-factory ^MethodHandle [^PackageBuilder pkg-build]
+  (let [ld (-> pkg-build .lookup-in-pkg .lookupClass .getClassLoader
+               (classfile/class-loader-instance "tclj-eph" nil))]
+    (-> (MethodHandles/lookup)
+        (.findVirtual (class ld) "ephemeralClass" mt-Class-bytes)
+        (.bindTo ld))))
+
+(defn- add-required-globals ^map [^map globals ^Require require ^map other]
+  (let [rename (or (.rename-strs require) {})
+        assoc-req (fn assoc-req
+                    (^map [^map acc ^String nm]
+                     (if-some [ent (get other nm)]
+                       (assoc-req acc nm ent)
+                       (wrong/unresolved-nmsp-sym (.ns-str require) nm)))
+                    (^map [^map acc ^String nm* ^Entity ent]
+                     (let [nm (get rename nm* nm*)]
+                       (if (contains? acc nm)
+                         (wrong/other (str "required name already defined by this "
+                                           "namespace: " (wrong/q-as-symbol nm)))
+                         (assoc acc nm ent)))))]
+    (let [refer-all? (nil? (.refer-strs require))]
+      (if (and (empty? globals) refer-all? (empty? (.rename-strs require)))
+        (reduce dissoc other (.exclude-strs require)) ;scenario: core first
+        (if (or refer-all? (not (empty? (.exclude-strs require))))
+          (let [excl-set (set (.exclude-strs require))]
+            (reduce (fn ^map [^map acc [nm ent]]
+                      (cond-> acc
+                        (not (contains? excl-set nm))
+                        (assoc-req nm ent)))
+                    globals other))
+          (reduce assoc-req globals (.refer-strs require)))))))
+
+(deftype NmspBuilder [^NamespaceProvider universe
+                      ^ExprFactory code-gen
+                      ^:unsynchronized-mutable ^EntityFactory entity-gen
+                      ^:unsynchronized-mutable ^Segment segment
+                      ^PackageBuilder pkg-build
+                      ^:unsynchronized-mutable ^map globals
+                      ^:unsynchronized-mutable ^map known-ns
+                      ^:unsynchronized-mutable ^map ns-alias
+                      ^:unsynchronized-mutable ^map imports
+                      ^HashSet require-strs ;implicitly mutable
+                      import-namespace-fn
+                      ^:unsynchronized-mutable ^MethodHandle ephemeral-of]
+  Resolver
+  (ns-str [_]
+    (.pkg-name segment))
+  (globals [_]                       ;only call from namespace thread!
+    globals)
+  (lookup-namespace [this alias]
+    (let [ns-str (.ns-str this)]
+      (if (or (nil? alias) (= alias ns-str))
+        ns-str
+        (.valAt ns-alias alias nil))))
+  (lookup-global-qname [this nm]
+    (when (some? (.valAt globals nm nil))
+      (symbol (.ns-str this) nm)))
+  (lookup-class [_ nm]
+    (or
+     (.valAt imports nm nil)
+     (when-some [cl (resolve/class-for-name (.lookup-in-pkg pkg-build) nm)]
+       (set! imports (assoc imports nm cl))
+       cl)))
+  (lookup-def [this nmsp nm]
+    (if (or (nil? nmsp) (= nmsp (.ns-str this)))
+      (.valAt globals nm nil)
+      (when-some [nmsp* (.lookup-namespace this nmsp)]
+        (when-some [pn ^ProvidedNamespace (.valAt known-ns nmsp* nil)]
+          (.valAt (.globals pn) nm nil)))))
+  (get-static-field [_ owner mangled-name value-type-exact]
+    (let [l (.lookup-in-pkg pkg-build)
+          owner* (.resolveConstantDesc owner l)
+          type* (.resolveConstantDesc value-type-exact l)]
+      (.invoke (->> type*
+                    (.findStaticGetter l owner* mangled-name)))))
+  (get-static-method [_ owner mangled-name value-type-exact]
+    (let [l (.lookup-in-pkg pkg-build)
+          owner* (.resolveConstantDesc owner l)
+          type* (.resolveConstantDesc value-type-exact l)]
+      (.invoke (->> (MethodType/methodType type*)
+                    (.findStatic l owner* mangled-name)))))
+  
+  (import-class [_ class]
+    (set! imports (-> imports
+                      (assoc (resolve/imported-short-name class) class)
+                      (assoc (resolve/imported-long-name class) class))))
+  (ephemeral-factory [_]
+    (or ephemeral-of
+        (set! ephemeral-of (get-ephemeral-factory pkg-build))))
+  
+  NamespaceBuilder
+  (universe [_]
+    universe)
+  (require-namespaces [this ns-strs]
+    (let [pn-core (when (cfg/core-lib? (.ns-str this))
+                    (let [last-segment (.super-class segment)]
+                      (->> (insn/insns-of (insn/constant last-segment Class))
+                           (insn/invoke-member resolve/ensure-initialized nil)
+                           (ProvidedNamespace. cfg/core-lib globals nil))))
+          apn (new ProvidedNamespace/1 (alength ns-strs))]
+      (dotimes [i (alength ns-strs)]
+        (aset apn i (get known-ns (aget ns-strs i) nil)))
+      (.require-namespaces* universe ns-strs apn pn-core)))
+  (process-require [this require provided]
+    (let [ns-str (.ns-str provided)]
+      (set! globals (add-required-globals globals require (.globals provided)))
+      (set! known-ns (assoc known-ns ns-str provided))
+      (set! ns-alias (cond-> (assoc ns-alias ns-str ns-str)
+                       (some? (.alias-str require))
+                       (assoc (.alias-str require) ns-str)))
+      (.add require-strs ns-str)
+      (segment/stage-segment-task! segment (.force-clinit provided))
+      this))
+  (process-imports [this import-strs]
+    (doseq [^String nm import-strs]
+      (if-some [cl (.lookup-class this nm)]
+        (.import-class this cl)
+        (throw (wrong/info-class-not-found nm))))
+    this)
+
+  (new-def-mutable [_ private? nm init]
+    #_(prn :new-def-mutable nm)
+    (let [p (defgen/promise-def-mutable ir/entity-id-def private?
+              (.segment-class segment) nm init)
+          ent (-> p .expr-of .emitter)
+          bnd (ir/mk-binding ent nm false)]
+      (segment/stage-segment-task! segment p)
+      (set! globals (assoc globals nm (.bound-to bnd)))
+      (insn/bind-then-value bnd ent)))
+  (new-def-immutable [_ private? nm init]
+    #_(prn :new-def-immutable nm)
+    (let [p (defgen/promise-def-immutable ir/entity-id-def private?
+              (.segment-class segment) nm init)
+          ent (-> p .expr-of .emitter)
+          bnd (ir/mk-binding ent nm false)
+          init-ce (.emitter init)]
+      (segment/stage-segment-task! segment p)
+      (set! globals (assoc globals nm (if (constgen/const? init-ce)
+                                        init-ce
+                                        (.bound-to bnd))))
+      (insn/bind-then-value bnd ent)))
+  (new-def-macro [_ private? nm init fq-value ce-value]
+    #_(prn :new-def-macro nm)
+    (let [p (defgen/promise-def-macro private? (.segment-class segment) nm init
+              fq-value ce-value)
+          ent (-> p .expr-of .emitter)
+          bnd (ir/mk-binding ent nm true)]
+      (segment/stage-segment-task! segment p)
+      (set! globals (assoc globals nm (.bound-to bnd)))
+      (insn/bind-then-value bnd ent)))
+  (new-def-var [_ private? nm init tp-var dynamic? meta]
+    #_(prn :new-def-var nm)
+    (let [p (defgen/promise-def-var private? (.segment-class segment) nm init
+              tp-var dynamic? meta)
+          bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)]
+      (segment/stage-segment-task! segment p)
+      (set! globals (assoc globals nm (.bound-to bnd)))
+      (insn/bind-then-value bnd (.df p))))
+  (new-def-alias [_ private? nm other-ent other-qname]
+    #_(prn :new-def-alias nm)
+    (let [p (defgen/promise-def-alias private? nm other-ent other-qname)]
+      (segment/stage-segment-task! segment p)
+      (set! globals (assoc globals nm other-ent))
+      insn/insn-empty)) ;alias can refer to macro or primitive function
+  
+  (process-init-form [this rdr fctx form]
+    ;; This method is only called for expression forms that do not
+    ;; manipulate `known-ns` or `ns-alias`.  The `globals` at start is
+    ;; stored as part of of `scope`.
+    (let [globals-before globals
+          imports-before imports
+          segm-size-before (segment/size-segment-tasks segment)
+          expr (try
+                 (-> (form/mk-parser code-gen entity-gen this globals-before)
+                     (parse/form fctx form))
+                 (catch tcljx.data.ir.ImplementationUnavailableException _
+                   ;; flush current segment into a class file, revert
+                   ;; state, and try again to parse `form`
+                   (.commit-segment-and-revert this rdr segm-size-before
+                                               globals-before imports-before)
+                   (try
+                     (-> (form/mk-parser code-gen entity-gen this globals-before)
+                         (parse/form fctx form)) ;try again *once*
+                     (catch tcljx.data.ir.ImplementationUnavailableException _
+                       (wrong/other (str "cannot define and expand macro "
+                                         "in same top-level form"))))))]
+      (segment/stage-segment-task! segment expr)
+      this))
+
+  (finish [this rdr]
+    (.commit-segment this rdr)
+    (let [capstone-cld (segment/capstone-class (.pkg-name segment))
+          all-requires (-> (.sorted (.stream require-strs))
+                           (.collect (java.util.stream.Collectors/joining ",")))
+          ncl (->> (build/capstone pkg-build segment all-requires
+                                   (.lookup-def this nil "-main"))
+                   (ir/mk-nmsp-class capstone-cld (.super-class segment))
+                   (classfile/bwdi pkg-build))]
+      (-> (set! known-ns (import-namespace-fn known-ns (.defined-class ncl)))
+          (.valAt (.ns-str this) nil))))
+  (commit-segment [this rdr]
+    (.commit-segment-and-revert this rdr (segment/size-segment-tasks segment)
+                                globals imports)
+    this)
+  (commit-segment-and-revert [this rdr end-of-segment
+                              then-globals then-imports]
+    (let [tasks (-> (.subList (.tasks segment) 0 end-of-segment)
+                    (fnenv/transitive-closure!))
+          clinit-statms (segment/clinit-statements tasks)
+          acp (segment/code-promises tasks)
+          class-elements (ArrayList.), other-classes (ArrayList.)
+          sb (SegmentBuilder. class-elements other-classes
+                              (.segment-class segment))
+          env-factory (fnenv/mk-env-factory (build/env-carrying-fns acp))]
+      (dotimes [i (alength acp)]
+        (.generate-and-deliver (aget acp i) sb env-factory nil))
+      (doseq [ncl other-classes]
+        (classfile/declare-class pkg-build ncl))
+      (doseq [^NmspClass ncl other-classes]
+        (->> (ir/with-class-handler ncl
+               (^java.util.function.Consumer fn ^void [^ClassBuilder cb]
+                (.accept (.class-handler ncl) cb)
+                (.with-source-file rdr cb)))
+             (classfile/bwdi pkg-build)))
+      (->> (build/segment rdr segment class-elements clinit-statms)
+           (ir/mk-nmsp-class (.segment-class segment) (.super-class segment))
+           (classfile/bwdi pkg-build)))
+    
+    ;; revert back to requested state & move to next segment
+    (set! ephemeral-of nil)             ;may contain stale classes
+    (set! segment (segment/next-segment segment))
+    (set! entity-gen (entity/mk-clinit-etf (.ns-str this) (.tasks segment)))
+    (set! globals then-globals)
+    (set! imports then-imports)))
+
+;;; ------------------------------------------------------------------------
+
+(deftype Universe [^Loader loader
+                   ^map reader-map
+                   ^:unsynchronized-mutable ^map known-ns
+                   ^map ns-alias]
+  NamespaceProvider
+  (require-namespaces* [this ns-strs apn-known pn-core]
+    (letfn [(mk-nmsp-reader ^FormReader [^String ns-str]
+              (let [!source-file-strs (HashSet.)]
+                (if (some? reader-map)
+                  (get reader-map ns-str)
+                  (let [nmsp-path (files/namespace-path ns-str)]
+                    (reader/mk-reader (.app-ld loader) nmsp-path)))))
+            (mk-nmsp-builder ^NmspBuilder [^String ns-str ^map known-ns
+                                           ^PackageBuilder pkg-build]
+              (let [segment (segment/mk-first-segment ns-str)
+                    etf (entity/mk-clinit-etf ns-str (.tasks segment))
+                    xf (codegen/mk-factory)
+                    globals (if (some? reader-map)
+                              primitive/primitive-nmsp-globals
+                              (publics/initial-globals ns-str))
+                    imports (resolve/predefined-imports (.rt-lookup loader))
+                    import-nmsp-fn (publics/mk-import-namespace
+                                    (.lookup-in-pkg pkg-build)
+                                    (.rt-lookup loader))
+                    require-strs (HashSet.)]
+                (NmspBuilder. this xf etf segment pkg-build
+                              globals known-ns ns-alias imports
+                              require-strs import-nmsp-fn nil)))
+            (compile-nmsp ^ProvidedNamespace [^String ns-str ^map known-ns']
+              (let [rdr (mk-nmsp-reader ns-str)
+                    pkg-build (classfile/mk-package-builder loader ns-str)
+                    l (.lookup-in-pkg pkg-build)]
+                (-> (.resolveConstantDesc rt/mhd-pushFileContext l)
+                    ^void (.invokeExact ns-str))
+                (try
+                  (-> (mk-nmsp-builder ns-str known-ns' pkg-build)
+                      (namespace/parse-all rdr)
+                      (.finish rdr))
+                  (finally
+                    (-> (.resolveConstantDesc rt/mhd-popFileContext l)
+                        ^void (.invokeExact))))))]
+      
+      (let [a (new ProvidedNamespace/1 (alength ns-strs))
+            known-ns' (cond-> known-ns
+                        (some? pn-core) (assoc cfg/core-lib pn-core))]
+        (dotimes [i (alength a)]
+          (let [ns-str (aget ns-strs i)]
+            (->> (or (some-> apn-known (aget i))
+                     (known-ns ns-str)
+                     #_
+                     (when-some [known-ns* (publics/import-from-class-loader
+                                            (.dyn-ld loader) (.rt-lookup loader)
+                                            known-ns ns-str)]
+                       (set! known-ns known-ns*)
+                       (.valAt known-ns* ns-str nil))
+                     (let [pn (compile-nmsp ns-str known-ns')]
+                       (set! known-ns (assoc known-ns ns-str pn))
+                       pn))
+                 (aset a i ))))
+        a))))
+
+(defn mk-universe ^NamespaceProvider [^map reader-map ^Loader loader
+                                      ^map provided-ns]
+  (let [ns-alias {cfg/primitive-ns-str cfg/primitive-ns-str}]
+    (Universe. loader reader-map provided-ns ns-alias)))

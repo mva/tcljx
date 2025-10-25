@@ -1,0 +1,657 @@
+(ns tcljx.data.ir
+  (:require
+   (tcljx.data [config :as cfg] member [reflect :as reflect]))
+  (:import
+   (tcljx.data.member MemberHandle)
+   (java.lang.classfile ClassBuilder CodeBuilder)
+   (java.lang.classfile.constantpool ConstantPoolBuilder LoadableConstantEntry)
+   (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
+   (java.lang.invoke MethodHandle)
+   (java.lang.reflect Method)
+   (java.util ArrayList HashMap)
+   (java.util.function Consumer Function)))
+
+;;; Emit instruction code into the CodeBuilder instance.  Return the
+;;; actual type of the value pushed onto operand stack, or nil if
+;;; control leaves the current method.  The produced operand type can
+;;; be either the original expression type baked into the emitter, or
+;;; the provided `consumed-type` expected by the instruction that
+;;; consumes the pushed operand.  If the returned operand type differs
+;;; from `consumed-type`, then `emit/insn?` and `emit/then-leave?`
+;;; adapt the on stack value to match the `consumed-type`.
+;;;
+;;; If `then-leave?` is set, then the emitted code is permitted to
+;;; close with a return instruction.  In this case the returned type
+;;; is nil.
+;;; 
+;;; No line number is passed to the method.  This limits any adapting
+;;; instructions to get to `consumed-type` to "safe" ones that are
+;;; known to never raise an exception.  `insn?` and `then-leave?` take
+;;; the consumer form's line number as parameter to perform throwing
+;;; adaptions like CHECKCAST.
+(definterface CodeEmitter
+  (emit-insn* ^Class [^CodeBuilder xb ^Class consumed-type
+                      ^boolean then-leave?]))
+
+;;; The parser works with opaque instances of Expr exclusively.  An
+;;; Expr gives a very restricted view on whatever data the code
+;;; generator keeps around to do its job, implemented by the generator
+;;; class Insn).  In particular, Expr does not expose the expression's
+;;; type.
+(definterface Expr         ;FIXME... turn this into an abstract class?
+  (emitter ^CodeEmitter []))
+
+(definterface Exprs
+  (length ^int [])
+  (empty? ^boolean [])
+  (get ^Expr [^int i])
+  (set ^Expr [^int i ^Expr x])
+  (emitter ^CodeEmitter [^int i])
+  (emitters ^CodeEmitter/1 [])
+  (drop ^Exprs [^int n]))
+
+;;; ------------------------------------------------------------------------
+
+;;; Description of an arity's signature.  Basically the information
+;;; encoded in an `fn` parameter vector, with the parameter names
+;;; being optional.
+(definterface IArityType
+  ;; The arity's return type.  In case of `auto-return-type`, this is
+  ;; replaced with the arity body's result type.
+  (return-type ^Class [])
+  
+  ;; This is the "internal" parameter list that is used to parse and
+  ;; compile the arity.  That is, for the variadic case the last/rest
+  ;; parameter is of type `ISeq`.
+  (parameter-types ^Class/1 [])
+  (parameter-type ^Class [^int i])
+  
+  ;; Number of parameters.
+  (parameter-count ^int [])
+
+  ;; The names of the parameters if the arity is being compiled from
+  ;; source.  For an imported function this is nil, and only a
+  ;; synthetic name is returned when given an index.
+  (parameter-names ^String/1 [])
+  (parameter-name ^String [^int i])
+
+  ;; JVM-style varargs arity/method with an array parameter like
+  ;; `Object...` or `int...`.  Mutually exclusive with `variadic?`.
+  (varargs? ^boolean [])
+
+  ;; Clojure-style variadic arity with an `ISeq` rest parameter.
+  ;; External view on the arity's method is a varargs `Object...` with
+  ;; a bridge method in between.  Mutually exclusive with `varargs?`.
+  (variadic? ^boolean []))
+
+(deftype ArityType [^Class return-type
+                    ^Class/1 parameter-types ^String/1 parameter-names
+                    ^boolean varargs? ^boolean variadic?]
+  java.lang.Record
+  IArityType
+  (parameter-type [_ ^int i] (aget parameter-types i))
+  (parameter-count [_] (alength parameter-types))
+  (parameter-name [_ ^int i]
+    (if (some? parameter-names)
+      (aget parameter-names i)
+      (str "param-" (inc i)))))
+
+(defn with-return-type
+  (^ArityType [^ArityType at ^Class tp]
+   (with-return-type at tp (.parameter-types at)))
+  (^ArityType [^ArityType at ^Class tp ^Class/1 ptps]
+   (ArityType. tp ptps (.parameter-names at) (.varargs? at) (.variadic? at))))
+
+(defn with-method-type ^ArityType [^ArityType at ^Method m]
+  (let [ptps (aclone (.parameter-types at))]
+    (System/arraycopy (.getParameterTypes m) 0 ptps 1 (dec (alength ptps)))
+    (ArityType. (.getReturnType m) ptps (.parameter-names at)
+                (.isVarArgs m) false)))
+
+(defn vararg-type ^Class [^ArityType at] ;nil if neither variadic nor varargs
+  (cond
+    (.variadic? at) Object
+    (.varargs? at) (let [pts (.parameter-types at)]
+                     (.getComponentType (aget pts (dec (alength pts)))))
+    :else nil))
+
+(defn translates-to-varargs? ^boolean [^ArityType at]
+  (or (.varargs? at) (.variadic? at)))
+
+;;; ------------------------------------------------------------------------
+
+;;; Raised if `expand-macro` is called on a def that has not been
+;;; defined into some segment class yet.
+(deftype ImplementationUnavailableException []
+  Exception)
+
+;;; Represents the current state of globals and namespace aliases at
+;;; this point, and the set of classes defined in the JVM classloader
+;;; at this time.  All sets of entities include the declarations done
+;;; before this point.  `lookup-global-qname` and `lookup-namespace`
+;;; never return entities declared after this point.  Because of
+;;; concurrency, `lookup-class` may return class instances defined in
+;;; parallel or at a later point.
+(definterface Resolver
+  (ns-str ^String [])                ;the name of this namespace
+  (globals ^map [])                  ;only call from namespace thread!
+  (lookup-namespace ^String [^String alias]) ;nil -> ns-str, not_found -> nil
+
+  ;; Called by the reader to replace a syntax quoted simple name with
+  ;; its namespace qualified equivalent.  Returns nil if there is no
+  ;; such global name at this point in the namespace.
+  (lookup-global-qname ^symbol [^String nm])
+
+  ;; Look up class by alias or by name.  May cache resolved class
+  ;; names for the scope of the namespace.  Returns nil if not found.
+  (lookup-class ^Class [^String nm])
+  
+  ;; Returns the entity representing the def form for `nm` in
+  ;; namespace `nmsp`, or nil if no such binding exists.  Use nil as
+  ;; `nmsp` to refer to the current namespace.
+  (lookup-def ^Entity [^String nmsp ^String nm])
+  (get-static-field ^Object [^ClassDesc owner ^String name
+                             ^ClassDesc value-type-exact])
+  (get-static-method ^Object [^ClassDesc owner ^String name
+                              ^ClassDesc value-type-exact])
+  
+  ;; pre: Called from namespace thread.
+  (import-class ^void [^Class class])
+  (ephemeral-factory ^MethodHandle []))
+
+;;; A named entity on the level of the code generator that exists at
+;;; runtime, usually appearing as the "provide the value of the given
+;;; name" operation of a bound name.  Exposes additional operations
+;;; beyond "emit code that produces this entity's value".  The code
+;;; emitted by Entity itself puts its current value on the operand
+;;; stack.
+;;;
+;;; An entity has a static and bounded compile-time scope in which it
+;;; can be accessed, for example to retrieve its value (if it has
+;;; any), or to access any of the other more specialized services like
+;;; direct invocation.  Only the entity's value can be passed on when
+;;; exiting the scope.  But this value does not provide any privileged
+;;; access to the entity it was derived from.
+;;;
+;;; Implementation note: To ease certain code generation patterns,
+;;; identity of Entity instances is important.  A runtime entity
+;;; should be mirrored by at most one Entity instance during
+;;; compilation.
+(definterface Entity
+  :extends [CodeEmitter]
+  ;; The type of the entity's value, for example when pushing it onto
+  ;; the operand stack.  If nil, then this entity cannot be reified as
+  ;; a regular value at runtime.  This is the case for macros and most
+  ;; primitive functions.
+  (value-type ^Class [])
+  (value-type-exact ^ClassDesc [])      ;only available in emit phase
+
+  ;; Indicates which invocation pattern to use: regular function call
+  ;; with type information available during compilation, dynamic (and
+  ;; generic) function call during runtime, or some specialized
+  ;; primitive function translation pattern.
+  (invoke-methods ^MethodSpec/1 [])
+  (invoke* ^Expr [^long fctx ^seq form ^CodeEmitter opt-f ^int m-idx
+                  ^Exprs xs])
+  
+  ;; The level of the scope that bounds visibility and accessibility
+  ;; of this entity and, for a closure, the entity's sequence number
+  ;; within that scope.
+  (entity-id ^int [])
+
+  ;; Emits code taking one operand from the stack and overwriting the
+  ;; entity's current value with it.
+  (emit-store ^CodeBuilder [^CodeBuilder xb])           ;optional
+  (emit-iinc ^CodeBuilder [^CodeBuilder xb ^int const]) ;optional
+  (runtime-value ^Object [^Resolver rsv])) ;only defined for defs
+
+;;; Note: A function's AritySpec array is in source code order.
+(deftype AritySpec [^ArityType at ^seq body ^seq error-context])
+
+;;; Note: A function's MethodSpec arrays is in parameter count order.
+;;; Source code order can be reconstructed via `source-idx`.
+(deftype MethodSpec [^ArityType at ^CodeEmitter code ^Expr x-body
+                     ^Entity/1 parameters ^int source-idx
+                     ^String name])   ;fn name or deftype* method name
+
+(deftype FieldSpec [^ClassDesc owner ^String field-name ^symbol type-tag
+                    ^int flags ^ClassDesc type-desc ^Class type])
+(defn with-field-type ^FieldSpec [^FieldSpec spec ^Class type]
+  (FieldSpec. (.owner spec) (.field-name spec) (.type-tag spec)
+              (.flags spec) (.type-desc spec) type))
+
+
+(def invoke-methods-primitive-fn nil) ;not invoked as a regular function
+(def invoke-methods-dynamic (new MethodSpec/1 0)) ;runtime invoke only
+
+(defn entity? ^boolean [^CodeEmitter ce]
+  (instance? Entity ce))
+
+(defn value-type-exact ^ClassDesc [^CodeEmitter ce ^Class or-else]
+  (if (instance? Entity ce)
+     (.value-type-exact ^Entity ce)
+     (reflect/describe-class or-else)))
+
+(defn invoke-methods-of ^MethodSpec/1 [^CodeEmitter ce]
+  (if (entity? ce)
+    (.invoke-methods ^Entity ce)
+    invoke-methods-dynamic))
+
+(def closure-level-constant 0) ;scope of constants spans all namespaces
+(def closure-level-def 1)      ;entity is a def on namespace level
+(def closure-level-clinit 2) ;scope of entity is a namespace segment's <clinit>
+
+(defn entity-id-of
+  (^int [^int closure-level]
+   (bit-shift-left closure-level 16))
+  (^int [^int closure-level ^int index]
+   (bit-or (entity-id-of closure-level) (inc index))))
+(defn closure-level* ^int [^int entity-id]
+  (unsigned-bit-shift-right entity-id 16))
+(defn closure-level ^int [^Entity ent]
+  (closure-level* (.entity-id ent)))
+(defn sequence-number ^int [^Entity ent]
+  (bit-and 0xffff (.entity-id ent)))
+
+(def entity-id-constant (entity-id-of closure-level-constant))
+(def entity-id-def (entity-id-of closure-level-def 0))
+(def entity-id-def-macro (entity-id-of closure-level-def 1))
+(def entity-id-def-primitive (entity-id-of closure-level-def 2))
+(def entity-id-def-var (entity-id-of closure-level-def 3))
+
+;;; An entity representing a `def` form of a namespace.
+(defn def-entity? ^boolean [^Entity ent]
+  (= closure-level-def (closure-level ent)))
+(defn def-macro? ^boolean [^Entity ent]
+  (= entity-id-def-macro (.entity-id ent)))
+
+
+(def bound-by-copy-to-local 0) ;create local, store value, read local
+(def bound-as-alias 1)         ;adds another name for this entity
+(def bound-with-emit-setup 2)  ;this entity handles setup and reads
+
+(definterface BindableEntity
+  :extends [Entity]
+  ;; How to handle a let binding of this entity.  Default for Entity
+  ;; is `bound-as-alias`, otherwise `bound-by-copy-to-local`.
+  (binding-mode-let ^int [])
+  
+  ;; Called from non-alias Binding with a `param-no` of -2, or from a
+  ;; method code's prologue with a non-negative `param-no` or -1 for
+  ;; the receiver.  A let binding usually allocates a local variable
+  ;; and stores in it the initial value, causing all later
+  ;; `emit-insn*` calls to emit a `loadLoad` instruction.  A def
+  ;; binding works similar, using a static field or a static method.
+  ;; Returns false if control then leaves the method.
+  (emit-setup-code? ^boolean [^CodeBuilder xb ^int param-no ^String name]))
+
+(defn binding-mode-let ^int [^CodeEmitter ce]
+  (if (instance? Entity ce)
+    (if (instance? BindableEntity ce)
+      (BindableEntity/.binding-mode-let ce)
+      bound-as-alias)
+    bound-by-copy-to-local))
+
+
+;;; An "immediate" entity can be referenced by a fixed nominal
+;;; description known at compilation time.  Applies to constants,
+;;; namespace-level defs, and functions with an empty environment.  An
+;;; immediate entity does not contribute to a closure's environment.
+(definterface ImmediateEntity
+  :extends [Entity]
+  (namespace-if-def ^String []))     ;nil if not a namespace-level def
+(defn immediate-entity? ^boolean [^CodeEmitter ce]
+  (instance? ImmediateEntity ce))
+
+;;; Counts the number of times a function definition or one of its
+;;; names is used in the source code, minus the number of times it
+;;; appears in an aliasing let binding or as target of a function
+;;; invocation.
+(definterface FnPromise
+  :extends [Entity]
+  (get-emit-entity ^Entity [])          ;for code generation of `def`
+  (value-use? ^boolean [])
+  (count-value-use! ^void [^int delta]))
+
+
+;;; A binding marks the place in the code sequence where entity
+;;; `bound-to` is associated with a name.
+(deftype Binding [^Entity bound-to ^String name ^boolean alias?]
+  java.lang.Record
+  CodeEmitter
+  (emit-insn* [this xb _ _]
+    (when (or alias? (BindableEntity/.emit-setup-code? bound-to xb -2 name))
+      Void/TYPE)))
+(def mk-binding Binding/new)
+
+;;; ------------------------------------------------------------------------
+
+;;; Any entity that can be turned into either an LDC instruction as
+;;; part of a method's code attribute, or into a loadable entry inside
+;;; the constant pool.  Loadables can be composed to create collection
+;;; loadables.
+(definterface Loadable
+  :extends [CodeEmitter]
+  ;; If `logical-type?` is true, then make sure the entry materializes
+  ;; as the actual logical type of the loadable, instead of its
+  ;; computational type.  Only makes a difference to computational int
+  ;; types other than int: boolean, character, byte, and short.
+  (loadable-entry ^LoadableConstantEntry [^ConstantPoolBuilder cpb
+                                          ^boolean logical-type?])
+  
+  ;; Return the compile time data structure representation of this
+  ;; loadable.
+  (datafy ^Object []))
+(defn loadable? ^boolean [^CodeEmitter ce]
+  (instance? Loadable ce))
+
+;;; An entity whose bytecode representation is a variant of the LDC
+;;; instruction.  Constant values must be visible to the parser,
+;;; because type expression literals (for example `Classname` or
+;;; `Classname/1`) are part of the syntax of some special forms.
+;;; Constant values are visible to the code generator to support
+;;; bottom up constant folding while building the expression tree.
+(definterface Constant
+  :extends [Entity Loadable]
+  (computational-value ^Object [])) ;ConstantDesc or Class
+
+(defn type-literal ^Class [^Expr x form] ;nil if not a type symbol
+  (let [ce (.emitter x)]
+    (when (and (instance? Constant ce)
+               (identical? Class (Entity/.value-type ce))
+               (symbol? form))
+      (Constant/.computational-value ce))))
+
+;;; ------------------------------------------------------------------------
+
+(deftype ProvidedNamespace [^String ns-str ^map globals ^Class capstone
+                            ^Expr force-clinit]
+  java.lang.Record)
+
+;;; Provides access to source files that make up the namespace.  Keeps
+;;; track of all source files that contribute to the namespace.
+(definterface FormReader
+  (read ^Object [^Resolver resolver]) ;end of file is :tcljx.parser.reader/EOF
+  (resolve ^FormReader [^String path-str])
+  (with-source-file ^ClassBuilder [^ClassBuilder cb]))
+
+(definterface NamespaceProvider
+  ;; Resolves and compiles the namespace names in `ns-strs`.  Returns
+  ;; an instance of `ProvidedNamespace` in the corresponding element
+  ;; of (a copy of) `apn-known`, or an element of value nil if the
+  ;; namespace name could not be resolved.  `pn-core` is added to the
+  ;; `known-ns` map of the required(!) namespaces.
+  (require-namespaces* ^ProvidedNamespace/1 [^String/1 ns-strs
+                                             ^ProvidedNamespace/1 apn-known
+                                             ^ProvidedNamespace pn-core])
+
+  ;; Adds the namespace represented by the given capstone class to the
+  ;; map of known namespaces.  Transitively adds any required
+  ;; namespaces, which may be referred to by macro or alias expansion.
+  (import-namespace ^map [^map known-ns ^Class capstone]))
+
+(deftype Require [^String ns-str
+                  ^String alias-str     ;nil if no alias
+                  ^vector refer-strs    ;nil means all, [] means none
+                  ^map rename-strs
+                  ^vector exclude-strs
+                  ^seq error-context]
+  java.lang.Record)
+(defn required-ns-sym ^symbol [^Require require]
+  (symbol nil (.ns-str require)))
+(defn require-refer-none [^String ns-str ^seq error-context]
+  (Require. ns-str nil [] {} [] error-context))
+(defn require-refer-all [^String ns-str ^seq error-context]
+  (Require. ns-str nil nil {} [] error-context))
+(def require-core-lib-default ;applies if no :refer-clojure clause is present
+  (require-refer-all cfg/core-lib nil))
+
+;;; Compiling a Clojure namespace means to mutate the system state one
+;;; top-level form at a time.  Model this with a mutable namespace
+;;; builder that both keeps track of the lookup tables the compiler
+;;; depends on, and that collects the pieces of information that will
+;;; be written to class files.
+;;;
+;;; Threading: Instance is confined to the single thread that parses
+;;; the non-function parts of a namespace.
+(definterface NamespaceBuilder
+  :extends [Resolver]
+  (universe ^NamespaceProvider [])
+  (require-namespaces ^ProvidedNamespace/1 [^String/1 ns-str])
+  (process-require ^NamespaceBuilder [^Require require
+                                      ^ProvidedNamespace provided])
+  (process-imports ^NamespaceBuilder [^seq import-strs])
+  
+  ;; Adds the new binding to the namespace.  Returns an expression
+  ;; that initializes the binding with its value (if any).  Pass empty
+  ;; expression as `init` if no intial value is provided.
+  (new-def-mutable ^Expr [^boolean private? ^String nm ^Expr init])
+  (new-def-immutable ^Expr [^boolean private? ^String nm ^Expr init])
+  (new-def-macro ^Expr [^boolean private? ^String nm ^Expr init
+                        ^String fq-value ^CodeEmitter ce-value])
+  (new-def-var ^Expr [^boolean private? ^String nm ^Expr init
+                      ^Class tp-var ^boolean dynamic? ^Expr meta])
+  (new-def-alias ^Expr [^boolean private? ^String nm
+                        ^Entity other-ent ^String other-qname])
+  
+  (process-init-form ^NamespaceBuilder [^FormReader rdr ^long fctx form])
+
+  (finish ^ProvidedNamespace [^FormReader rdr])
+  (commit-segment ^NamespaceBuilder [^FormReader rdr])
+  (commit-segment-and-revert ^void [^FormReader rdr ^int end-of-segment
+                                    ^map then-globals ^map then-imports]))
+
+(defn ns-sym ^symbol [^NamespaceBuilder nmsp]
+  (symbol nil (.ns-str nmsp)))
+
+
+(deftype NmspClass [^ClassDesc this-class ^ClassDesc super-if-class
+                    ^Consumer class-handler ^byte/1 class-bytes
+                    ^Class defined-class]
+  java.lang.Record)
+
+(defn mk-nmsp-class ^NmspClass [^ClassDesc this-class ^ClassDesc super-if-class
+                                ^Consumer class-handler]
+  (NmspClass. this-class super-if-class class-handler nil nil))
+
+(defn with-class-handler ^NmspClass [^NmspClass ncl ^Consumer cbh]
+  (NmspClass. (.this-class ncl) (.super-if-class ncl) cbh nil nil))
+
+;;; ------------------------------------------------------------------------
+
+(definterface EntityFactory
+  (scope-name ^String [])
+  (closure-level ^int [])               ;of this class/entity
+  (closes-over? ^boolean [^Entity ent])
+  (display-of! ^CodeEmitter [^Entity origin ^String local-name])
+  (value-of ^Expr [^Entity ent ^symbol form]) ;throw if (nil? (.value-type ent))
+  (invocation-of ^CodeEmitter [^Entity inv ^seq form])
+  
+  ;; Create an entity denoting the constant `value` of type `type`.
+  ;; For the most part, there is a one-to-one correspondence between
+  ;; the primitive (when possible) class of `value` and `type`.  The
+  ;; literal `nil` is represented by ConstantDescs/NULL with a type of
+  ;; type/polymorphic.
+  ;; "Computationally int" constants (boolean, char, byte, short) are
+  ;; represented by instances of Integer. and their `type` is
+  ;; Boolean/TYPE, Character/TYPE, and so on.  A wide range of types
+  ;; is accepted for `value`: instances of ConstantDesc, instances of
+  ;; Constable, and structured values provided by Clojure (symbol,
+  ;; keyword, vector, and so on).
+  (expr-constant ^Expr [^Object value ^Class type]) ;ConstantDesc or Class
+  (entity-class-member ^Entity [^MemberHandle m])
+  (entity-getstatic ^Entity [^MemberHandle m])
+
+  ;; Create a symbol, a keyword, a collection, or a regex Pattern.
+  ;; `value` usually is the compile time data structure as provided by
+  ;; the reader.  Alternatively and only for collections (incl. the
+  ;; with-meta construction), `value` can be an array `CodeEmitter/1`
+  ;; of constant folded expressions, i.e. instances of `Loadable`.
+  ;; Non-Constant loadables are never nil.
+  (new-loadable ^Expr [^Object value ^Class expr-type])
+  (new-collection ^Expr [^Class coll-type ^Exprs args])
+  
+  (next-entity-id ^int [])
+  (local-variable ^Entity [^Class type ^CodeEmitter init])
+  (parameter ^Entity [^Class type])
+  (entity-fn ^Entity [^AritySpec/1 arity-specs ^HashMap fn-e2d
+                      ^String unique-nm ^ArrayList !fn-parts])
+  (expr-fn ^Expr [^Entity fn-entity ^MethodSpec/1 arity-methods])
+  (expr-itf-fn ^Expr [^MethodSpec/1 method-specs ^HashMap itf-e2d
+                      ^String unique-nm ^Class itf-class ^Method method
+                      ^ArrayList !itf-parts])
+  (deftype-field ^Entity [^int entity-id ^FieldSpec spec])
+
+  (expr-deftype ^Expr [^NmspClass eph-ncl ^FieldSpec/1 field-specs
+                       ^boolean java-record? ^boolean defrecord?
+                       ^ArrayList !dt-parts ^MethodSpec/1 method-specs])
+  (expr-reify ^Expr [^NmspClass eph-ncl ^ClassDesc/1 interfaces
+                     ^CodeEmitter meta ^MethodSpec/1 method-specs
+                     ^HashMap reify-e2d ^ArrayList !reify-parts])
+  (expr-definterface ^Object [^NmspClass ncl])
+  (class-name-for-reify ^ClassDesc [])
+  
+  (binding-entity ^Binding [^long fctx ^String name ^Entity ent ^boolean alias?])
+  (binding-fresh ^Binding [^long fctx ^Class opt-type ^String name ^Expr init])
+  (binding-catching-local ^Binding [^long fctx ^Class type ^String name])
+  
+  (unique-name! ^String [^String name-suffix])
+  (method-etf ^EntityFactory [^String unique-nm ^int used-entity-ids
+                              ^HashMap owner-e2d ^ArrayList nested-parts])
+  (stage-part! ^Expr [part]))
+
+;;; An ExprFactory provides an API to the parser to generate a
+;;; representation of the namespace's entities and their executable
+;;; code.
+;;; 
+;;; Threading: Confined to a single thread, either one parsing a
+;;; function or to the thread parsing the non-function parts of a
+;;; namespace.
+(definterface ExprFactory
+  (empty-expr ^Expr [])
+  (new-exprs ^Exprs [^int length])
+  
+  (invoke-arity ^Expr [^long fctx ^seq form ^Entity inv ^CodeEmitter f ^Exprs args])
+  
+  ;; This method returns a constant expression when possible:
+  (attach-meta-to ^Expr [^Expr meta ^Expr arg])
+  
+  (new-array ^Expr [^long fctx ^Class array-type ^Exprs dims])
+  (var-expr ^Expr [^Expr arg])
+  
+  ;; ### basics
+  
+  (progn-expr ^Expr [^Exprs xs ^Expr x])
+
+  ;; Test, followed by the "true" path, optionally followed by
+  ;; the "false" path.
+  (if-expr ^Expr [^long fctx ^Exprs xs])
+  
+  ;; If the program provides a default path, then `paths-and-default`
+  ;; has one more element than `guards`.
+  (case-expr ^Expr [^Expr select ^Exprs/1 guards ^Exprs paths-and-default
+                    ^long fctx ^seq/1 error-contexts])
+
+  (invoke-value ^Expr [^long fctx ^Expr f ^Exprs args])
+  
+  ;; ### bindings
+
+  (block-bindings ^Expr [^long fctx ^Binding/1 bindings ^boolean patch-letfn?
+                         ^boolean recur-to-body? ^Expr body])
+  
+  (complete-method ^MethodSpec [^MethodSpec mspec ^Entity/1 pvars
+                                ^long fctx ^Expr body])
+  (with-recur-variables ^ExprFactory [^Entity/1 variables])
+  (recur-expr ^Expr [^long fctx ^Exprs args])
+  
+  (try-catch-finally ^Expr [^long fctx ^Exprs body+catches ^Class/1 catch-types
+                            ^Exprs finally])
+
+  ;; ### interop
+
+  (type-cast ^Expr [^long fctx ^Class target-type ^Expr arg])
+  
+  (invoke-constructor ^Expr [^long fctx ^Class owner ^Exprs args])
+  
+  ;; Invoke static public method or field `mnm` of class `owner`.
+  ;; Note: Invoking a field actually means to invoke the field's value
+  ;; as a function, instead of just getting its value.
+  (invoke-static-member ^Expr [^long fctx ^boolean invoke-value-of-field?
+                               ^Class owner ^String mnm ^Exprs args])
+  
+  (invoke-virtual-member ^Expr [^long fctx ^Expr receiver
+                                ^Class opt-owner ^String mnm ^Exprs args])
+
+  (get-static-field ^Expr [^long fctx ^Class owner ^String mnm])
+  (get-virtual-field ^Expr [^long fctx ^Expr receiver ^String mnm])
+  
+  (instanceof-expr ^Expr [^long fctx ^Class type ^Expr arg])
+  (throw-expr ^Expr [^long fctx ^Expr arg]))
+
+;;; Note: Factory methods return nil if operation is not supported.
+(definterface Assignable
+  :extends [CodeEmitter]
+  (set-expr* ^Expr [^long fctx ^Expr value]) ;implementing `set!`
+  (redef-expr* ^Expr [^long fctx ^Expr value])) ;implementint `def` assignment
+
+(definterface Parser
+  (parse-form ^Expr [^long fctx form])
+  
+  ;; Frequency of change: very low.
+  (resolver ^Resolver [])
+
+  ;; Frequency of change: one for every `loop*` expression.
+  (expr-factory ^ExprFactory [])
+
+  ;; Frequency of change: one for every fn or class scope
+  (entity-factory ^EntityFactory [])
+
+  ;; Maps simple name string to its associated binding.  The map can
+  ;; be incomplete if a namespace `def` was parsed after creation of
+  ;; the scope instance.  In this case, a second lookup using
+  ;; `resolver` must be done to get an accurate picture of all `def`s.
+  ;; Frequency of change: moderate.
+  (bindings* ^map [])
+  (with-bindings* ^Parser [^map bindings])
+  (with-expr-factory ^Parser [^ExprFactory xf])
+  (with-entity-factory ^Parser [^EntityFactory etf]))
+
+(defn def-from-this-namespace? ^boolean [^Entity ent ^Parser parser]
+  (when (instance? ImmediateEntity ent)
+    (= (.namespace-if-def ^ImmediateEntity ent) (-> parser .resolver .ns-str))))
+
+(defn exprs-of ^Exprs [^ExprFactory xf & ^Expr/1 xs*]
+  (let [xs (.new-exprs xf (alength xs*))]
+    (dotimes [i (.length xs)]
+      (.set xs i (aget xs* i)))
+    xs))
+
+(defn parameter-bindings ^Binding/1 [^Parser parser ^ArityType at]
+  (let [etf (.entity-factory parser)
+        bnds (new Binding/1 (.parameter-count at))]
+    (dotimes [i (alength bnds)]
+      (let [nm (.parameter-name at i)
+            param (.parameter etf (.parameter-type at i))]
+        (aset bnds i (mk-binding param nm false))))
+    bnds))
+
+(defn with-local-binding
+  (^Parser [^Parser parser ^Binding bnd]
+   (with-local-binding parser (.name bnd) (.bound-to bnd)))
+  (^Parser [^Parser parser ^String nm ^Entity ent]
+   (.with-bindings* parser (assoc (.bindings* parser) nm ent))))
+
+(defn with-local-bindings ^Parser [^Parser parser ^Binding/1 bnds]
+  (loop [locals (transient (.bindings* parser)), i 0]
+    (if (< i (alength bnds))
+      (let [bnd (aget bnds i)]
+        (recur (assoc! locals (.name bnd) (.bound-to bnd)) (inc i)))
+      (.with-bindings* parser (persistent! locals)))))
+
+(defmacro acc* [& flags]
+  (reduce #(bit-or ^int %1 (case %2
+                             public 0x0001, private 0x0002, protected 0x0004
+                             static 0x0008, final 0x0010, volatile 0x0040
+                             bridge 0x0040, varargs 0x0080, interface 0x0200,
+                             abstract 0x0400 synthetic 0x1000))
+          0 flags))

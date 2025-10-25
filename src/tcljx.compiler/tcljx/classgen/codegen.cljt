@@ -1,0 +1,379 @@
+(ns tcljx.classgen.codegen
+  (:require
+   (tcljx.data
+    [config :as cfg] [wrong :as wrong] [context :as context] [member :as member]
+    [type :as type] [ir :as ir] [resolve :as resolve] [reflect :as reflect])
+   (tcljx.classgen
+    [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
+    [emit :as emit] [insn :as insn]
+    [primitive :as primitive] [condgen :as condgen] [switchgen :as switchgen]
+    [trygen :as trygen] [fngen :as fngen] defgen))
+  (:import
+   (tcljx.data.ir Expr Exprs ExprFactory CodeEmitter Binding Entity
+                  ArityType MethodSpec FieldSpec NamespaceBuilder
+                  NmspClass Parser EntityFactory)
+   (tcljx.classgen.insn Insn Insns)
+   (java.lang.classfile ClassBuilder CodeBuilder Opcode Label TypeKind)
+   (java.lang.constant ConstantDesc ClassDesc MethodTypeDesc MethodHandleDesc
+                       ConstantDescs)
+   (java.util.function Consumer)))
+
+(defn- invoke-single-match ^Insn [^seq ms ^Insn receiver ^Insns args ^long fctx]
+  (when (nil? (next ms))
+    (when-some [m (first ms)]
+      (insn/invoke-member m receiver args fctx))))
+
+(defn- info-unresolved-member ^Throwable [^seq ms ^Class owner ^String mnm
+                                          ^Insns args ^String label]
+  ;; label is one of "static", "virtual", or "constructor"
+  (let [entity (str label (when (not= label "constructor")
+                            (if (.empty? args) " member" " method")))
+        mnm (cond->> mnm (= label "virtual") (str "."))
+        member (wrong/q-as-symbol owner mnm)]
+    (wrong/wr-info (if (nil? (seq ms))
+                     (str "no " entity " matching " member)
+                     (str "multiple " entity "s matching " member)))))
+
+(defn- recur-iinc-deltas ^int/1 [^Entity/1 entities ^CodeEmitter/1 ces]
+  (let [a (new int/1 (alength entities))]
+    (dotimes [i (alength a)]
+      (aset a i (primitive/iinc-delta (aget entities i) (aget ces i))))
+    a))
+
+(defn- method-index ^int [^MethodSpec/1 method-specs ^int arg-count]
+  (loop [i (dec (alength method-specs))]
+    (cond
+      (neg? i) (let [n-m1 (dec (alength method-specs))
+                     at* (-> method-specs (aget n-m1) .at)
+                     va? (ir/translates-to-varargs? at*)]
+                 (assert (and va? (>= arg-count (dec (.parameter-count at*)))))
+                 n-m1)
+      (= (-> method-specs (aget i) .at .parameter-count) arg-count) i
+      :else (recur (dec i)))))
+
+(defn- select-method-for-arity ^int [^Entity inv ^Insns xs]
+  (let [specs (.invoke-methods inv)
+        m-idx (method-index specs (.length xs))
+        at (.at (aget specs m-idx))
+        ptypes (.parameter-types at)
+        vararg-tp (ir/vararg-type at)
+        fixed (- (.parameter-count at) (int (some? vararg-tp)))]
+    (insn/ensure-assignables ptypes xs fixed)
+    (when (< fixed (alength ptypes)) ;any arguments passed as varargs?
+      (insn/ensure-assignable* vararg-tp xs fixed))
+    m-idx))
+
+;;; Bridge gap between Clojure variadic function and JVM vararg method
+;;; by casting the argument that can unintentionally match the
+;;; varargs' array parameter to type Object.
+(defn- fix-vararg-array! ^Class/1 [^Class/1 atypes]
+  (let [i (dec (alength atypes))]
+    (when (and (>= i 0) (.isArray (aget atypes i)))
+      (aset atypes i Object))
+    atypes))
+
+(defn- every-binding-alias? ^boolean [^Binding/1 bindings]
+  (loop [i (dec (alength bindings))]
+    (cond (neg? i) true
+          (.alias? (aget bindings i)) (recur (dec i))
+          :else false)))
+
+(definterface InsnFactory
+  :extends [ExprFactory]
+  (get-recur-target ^Label [])
+  (set-recur-target! ^void [^Label target])) ;on this copy of InsnFactory!
+
+;;; Note: To save work, this code generator assumes that it can use
+;;; types available at compile time to refer to runtime types of the
+;;; compiled application.  For example, it uses tinyclj.lang.StaticFn
+;;; as expression type, instead of the type (accidentally of the same
+;;; name) used by the application to hold a static function instance.
+;;; Likewise for symbols, keywords, vectors, and so on.  This works
+;;; only as long as compiler and application agree on the names of
+;;; their runtime classes.
+(deftype InsnFactoryImpl [^Entity/1 recur-variables
+                          ^:unsynchronized-mutable ^Label __recur-target]
+  InsnFactory
+  (empty-expr [_]
+    insn/insn-empty)
+  (new-exprs [_ n]
+    (if (zero? n)
+      insn/empty-insns
+      (Insns. (new CodeEmitter/1 n) (new Class/1 n))))
+  
+  (invoke-arity [this fctx form inv f args]
+    (let [m-idx (select-method-for-arity inv args)]
+      (.invoke* inv fctx form f m-idx args)))
+
+  (attach-meta-to [this meta arg]
+    (if (and (ir/loadable? (.emitter arg)) (ir/loadable? (.emitter meta)))
+      (let [tp (insn/expr-type arg)]
+        (-> (doto (new CodeEmitter/1 2)
+              (aset 0 (.emitter arg))
+              (aset 1 (.emitter meta)))
+            (constgen/collection tp true)
+            (insn/mk-insn tp)))
+      (insn/invoke-runtime resolve/literal-with-meta (insn/insns-of arg meta))))
+  (new-array [_ fctx array-type dims]
+    (let [dims ^Insns dims]
+      (insn/ensure-assignable* Integer/TYPE dims)
+      (-> (^CodeEmitter fn [xb _ _]
+           (when (emit/insns? xb fctx Integer/TYPE (.emitters dims))
+             (if (= (.length dims) 1)
+               (let [component-type (.getComponentType array-type)]
+                 (if (.isPrimitive component-type)
+                   (.newarray xb (TypeKind/from component-type))
+                   (.anewarray xb (reflect/describe-class component-type))))
+               (.multianewarray xb (reflect/describe-class array-type)
+                                (.length dims)))
+             array-type))
+          (insn/mk-insn array-type))))
+  (var-expr [_ arg]
+    (let [ce (.emitter arg)]
+      (if (instance? tcljx.classgen.defgen.DefVarDeref ce)
+        (.expr-of (.df ^tcljx.classgen.defgen.DefVarDeref ce))
+        (wrong/other "special form `var` only applicable to :var def"))))
+  
+  (progn-expr [_ xs x]
+    (insn/progn xs x))
+  (if-expr [_ fctx xs]
+    (let [xs ^Insns xs
+          tp (condgen/join-type (.expr-types xs) 1 (.length xs))
+          ce-false (if (= (.length xs) 3)
+                     (insn/emitter xs 2)
+                     (.emitter insn/insn-empty))]
+      (-> (.emitter (condgen/logical-truth (.get xs 0) fctx))
+          (condgen/mk-if tp (insn/emitter xs 1) ce-false fctx)
+          (insn/mk-insn tp))))
+  (case-expr [this select guards paths-and-default fctx error-contexts]
+    (let [select-tp (switchgen/adjust-numeric-type (insn/expr-type select))
+          n-paths (.length paths-and-default)
+          join-tp (-> (Insns/.expr-types paths-and-default)
+                      (condgen/join-type 0 n-paths))
+          default-path (if (= (alength guards) n-paths)
+                         ;; Important: This evaluates the select
+                         ;; expression a second time!  One possible
+                         ;; idea: dup the select, consume it in the
+                         ;; error path, and pop it immediately after
+                         ;; the end-of-switch label.
+                         (->> (switchgen/invoke-no-matching-clause select fctx)
+                              (.throw-expr this fctx))
+                         (.get paths-and-default (dec n-paths)))]
+      (switchgen/validate-guards select-tp guards fctx error-contexts)
+      (-> (if (switchgen/switch-on-int? select-tp)
+            (switchgen/switch-int (.emitter select) join-tp guards
+                                  (.emitters paths-and-default)
+                                  (.emitter default-path) fctx)
+            (switchgen/switch-map (.emitter select) join-tp guards
+                                  (.emitters paths-and-default)
+                                  (.emitter default-path) fctx))
+          (insn/mk-insn join-tp))))
+  (invoke-value [this fctx f args]
+    (let [f ^Insn f
+          args ^Insns args
+          f-tp (insn/logical-type f)]
+      (if (or (type/same? Object f-tp) (.isInterface f-tp)
+              (.isAssignableFrom clojure.lang.IFn f-tp))
+        (-> (^CodeEmitter fn [xb consumed-type _]
+             (let [cpb (.constantPool xb)
+                   atypes (fix-vararg-array! (insn/logical-types args))
+                   mhe (.methodHandleEntry cpb rt/bsm-invoke-fn)
+                   bsm (.bsmEntry cpb mhe (java.util.List/of))
+                   mtd (insn/mtd-of-fn-poly consumed-type f-tp atypes)
+                   nat (.nameAndTypeEntry cpb ConstantDescs/DEFAULT_NAME mtd)]
+               (when (emit/insn? xb fctx f-tp (.emitter f))
+                 (when (emit/typed-insns? xb fctx atypes (.emitters args))
+                   (-> (emit/with-line-number xb fctx)
+                       (.invokedynamic (.invokeDynamicEntry cpb bsm nat)))
+                   consumed-type))))
+            (insn/mk-insn type/polymorphic))
+        (throw (insn/wr-type "called function's type does not implement `IFn`"
+                             f)))))
+  
+  (block-bindings [this fctx bindings patch-letfn? recur-to-body? body]
+    (if (and (not recur-to-body?) (every-binding-alias? bindings))
+      body ;none of the bindings emits any code, nor is there a recur target
+      (-> (^CodeEmitter fn [xb consumed-type then-leave?]
+           (.block xb (^Consumer fn ^void [^CodeBuilder xb]
+                       (when (emit/statms? xb bindings)
+                         (when patch-letfn?
+                           (dotimes [i (alength bindings)]
+                             (.emit-store (.bound-to (aget bindings i)) xb)))
+                         (when recur-to-body?
+                           (let [start-of-body (.newLabel xb)]
+                             (.labelBinding xb start-of-body)
+                             (.set-recur-target! this start-of-body)))
+                         (emit/then-leave? xb fctx consumed-type (.emitter body)
+                                           then-leave?))))
+           (when-not then-leave? ;can the then-leave? above return true?
+             consumed-type))
+          (insn/mk-insn (insn/expr-type body)))))
+  (complete-method [this mspec pvars fctx body]
+    (let [rt (-> mspec .at .return-type)
+          at (if (type/auto-return-marker? rt)
+               (let [logical-tp (type/expr-to-logical (insn/expr-type body))]
+                 (ir/with-return-type (.at mspec) logical-tp))
+               (do (insn/ensure-assignable rt body)
+                   (.at mspec)))
+          code (^CodeEmitter fn [xb consumed-type then-leave?]
+                (emit/with-line-number xb fctx)
+                (.set-recur-target! this (.startLabel xb)) ;recur to bci 0
+                (when (emit/then-leave? xb fctx consumed-type (.emitter body)
+                                        then-leave?)
+                  consumed-type))]
+      (MethodSpec. at code body pvars (.source-idx mspec) (.name mspec))))
+
+  (set-recur-target! [this target]
+    (assert (nil? __recur-target)) ;wrong if single `finally` is emitted twice
+    (set! __recur-target target))
+  (get-recur-target [this]
+    __recur-target)
+  (with-recur-variables [_ variables]
+    (InsnFactoryImpl. variables nil))   ;clear __recur-target
+  (recur-expr [this fctx args]
+    (let [args ^Insns args
+          arg-types (.expr-types args)
+          ces (.emitters args)
+          entities recur-variables]
+      
+      (when-not (= (alength arg-types) (alength entities))
+        (-> (str "recur expects " (alength entities) " arguments"
+                 (wrong/got-int (alength arg-types)))
+            (wrong/wr-info)
+            (throw)))
+      (dotimes [i (alength arg-types)]
+        (let [exp (.value-type (aget entities i))
+              act (aget arg-types i)]
+          (when-not (type/assignable-from? exp act)
+            (-> (str "recur expects " (wrong/q-type exp) " for argument #"
+                     (inc i) (wrong/got-types arg-types))
+                (wrong/wr-info)
+                (throw)))))
+
+      (-> (^CodeEmitter fn [xb _ _]
+           (let [iinc-deltas (recur-iinc-deltas entities ces)]
+             (loop [i 0]
+               (if (< i (alength ces))
+                 ;; push operand or skip when rewriting as IINC
+                 (when (or (primitive/valid-iinc-const? (aget iinc-deltas i))
+                           (emit/insn? xb fctx (.value-type (aget entities i))
+                                       (aget ces i)))
+                   (recur (inc i)))
+                 
+                 ;; emit all store/iinc instructions
+                 (loop [i (dec (alength entities))]
+                   (if (neg? i)
+                     (do (.goto_ xb (.get-recur-target this))
+                         nil) ;operand type reported when emitting code
+                     (let [d (aget iinc-deltas i)
+                           ent (aget entities i)]
+                       (if (primitive/valid-iinc-const? d)
+                         (when-not (zero? d) ;elide for unchanged entity 
+                           (.emit-iinc ent xb d))
+                         (.emit-store ent xb))
+                       (recur (dec i)))))))))
+          (insn/mk-statm))))        ;`void` is type used while parsing
+  
+  (try-catch-finally [_ fctx body+catches catch-types finally]
+    (let [insns ^Insns body+catches
+          tp (condgen/join-type (.expr-types insns) 0 (.length insns))]
+      (-> (if (some? finally)
+            (trygen/try-catch-finally tp (.emitters insns) catch-types
+                                      (.emitters finally) fctx)
+            (trygen/try-catch tp (.emitters insns) catch-types fctx))
+          (insn/mk-insn tp))))
+
+  (type-cast [this fctx target-type arg]
+    (let [arg-tp (insn/expr-type arg)]
+      (letfn [(wr-info-invalid-cast ^Throwable []
+                (wrong/wr-info (str "cannot cast to " (wrong/q-type target-type)
+                                    (wrong/got-type arg-tp))))
+              (checkcast ^Insn [^Insn ref-arg ^Class ref-target]
+                (let [arg-tp (insn/expr-type ref-arg)]
+                  (if (or (.isInterface ref-target)
+                          (.isAssignableFrom ref-target arg-tp) ;empty
+                          (.isAssignableFrom arg-tp ref-target) ;checkcast
+                          (type/poly-reference? arg-tp)) ;cast from nil
+                    (insn/cast-to ref-arg ref-target fctx)
+                    (throw (wr-info-invalid-cast)))))
+              (boxed-arg ^Insn [^Class prim-tp]
+                (insn/cast-to arg (.class-reference (type/of prim-tp))
+                              context/fctx-none))]
+        (cond
+          (or (type/polymorphic? target-type) ;force void context
+              (type/polymorphic? arg-tp))
+          (-> arg (insn/cast-to target-type fctx))
+
+          (type/same? target-type arg-tp)
+          arg
+          
+          (.isPrimitive target-type)
+          (if (.isPrimitive arg-tp)
+            (throw (wr-info-invalid-cast)) ;no cast between different primitives
+            (-> (boxed-arg target-type) (insn/cast-to target-type fctx)))
+          
+          ;; here holds: `target-type` is reference
+          (.isPrimitive arg-tp)
+          (-> (boxed-arg arg-tp) (checkcast target-type))
+          
+          ;; here holds: both `target-type` and `arg-tp` are reference
+          :else (-> arg (checkcast target-type))))))
+  (invoke-constructor [_ fctx owner args]
+    (let [args ^Insns args
+          mnm resolve/constructor-name
+          ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
+      (or (invoke-single-match ms nil args fctx)
+          (throw (info-unresolved-member ms owner mnm args "constructor")))))
+  (invoke-static-member [_ fctx invoke-member-if-field? owner mnm args]
+    (let [args ^Insns args
+          ms (resolve/members-by-arg-types true owner mnm (.expr-types args))]
+      ;; (prn :et (seq (.expr-types args)))
+      ;; (prn :ms (seq ms))
+      ;; (prn :invoke-member-if-field? invoke-member-if-field?)
+      (or (when-some [insn (invoke-single-match ms nil args fctx)]
+            (if (and invoke-member-if-field? (member/field? (first ms)))
+              (assert false "not yet implemented")
+              insn))
+          (throw (info-unresolved-member ms owner mnm args "static")))))
+  (invoke-virtual-member [_ fctx receiver opt-owner mnm args]
+    (let [receiver ^Insn receiver
+          args ^Insns args
+          owner (or opt-owner (insn/expr-type receiver))
+          ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
+      (or (invoke-single-match ms receiver args fctx)
+          (throw (info-unresolved-member ms owner mnm args "virtual")))))
+
+  (get-static-field [_ fctx owner mnm]
+    (let [args insn/empty-insns
+          ms (resolve/field-exact nil true owner mnm resolve/empty-class-array)]
+      (or (invoke-single-match ms nil args fctx)
+          (throw (info-unresolved-member ms owner mnm args "static")))))
+  (get-virtual-field [_ fctx receiver mnm]
+    (let [receiver ^Insn receiver
+          args insn/empty-insns
+          owner (insn/expr-type receiver)
+          ms (resolve/field-exact nil false owner mnm (.expr-types args))]
+      (or (invoke-single-match ms receiver args fctx)
+          (throw (wrong/wr-info (str "no virtual field matching "
+                                     (wrong/q-as-symbol owner mnm)))))))
+
+  (instanceof-expr [_ fctx type arg]
+    (let [arg ^Insn arg]
+      (-> (^CodeEmitter fn [xb _ _]
+           (when (emit/insn? xb context/fctx-none Object (.emitter arg))
+             (-> (emit/with-line-number xb fctx)
+                 (.instanceOf (reflect/describe-class type)))
+             Boolean/TYPE))
+          (insn/mk-insn Boolean/TYPE))))
+  (throw-expr [_ fctx arg]
+    (let [arg ^Insn arg]
+      (if (.isAssignableFrom Throwable (insn/logical-type arg))
+        (-> (^CodeEmitter fn [xb _ _]
+             (when (insn/emit-logical? xb arg)
+               (-> xb (emit/with-line-number fctx) (.athrow))
+               nil))         ;operand type reported when emitting code
+            (insn/mk-insn Void/TYPE))   ;type used while parsing
+        (throw (insn/info-type "expect instance of Throwable" arg))))))
+
+(defn mk-factory ^ExprFactory []
+  (InsnFactoryImpl. nil nil))
