@@ -1,7 +1,8 @@
 (ns tcljx.data.type
   (:require [tinyclj.core :as cc])
   (:import (java.lang.classfile CodeBuilder TypeKind)
-           (java.lang.constant ConstantDesc))
+           (java.lang.constant ConstantDesc)
+           (java.lang.invoke MethodHandles$Lookup))
   (:refer-clojure :exclude [symbol keyword vector map set list
                             byte short int long float double char boolean void]))
 
@@ -342,18 +343,44 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def symbol clojure.lang.Symbol)
-(def keyword clojure.lang.Keyword)
-(def vector clojure.lang.IPersistentVector)
-(def map clojure.lang.IPersistentMap)
-(def set clojure.lang.IPersistentSet)
-(def list clojure.lang.IPersistentList)
-(def seq clojure.lang.ISeq)
+;;; These remain unbound until `fixup-runtime-types!` is called:
+(def ^:redef ^Class symbol)
+(def ^:redef ^Class keyword)
+(def ^:redef ^Class vector)
+(def ^:redef ^Class map)
+(def ^:redef ^Class set)
+(def ^:redef ^Class list)
+(def ^:redef ^Class seq)
+(def ^:redef ^Class ifn)
+(def ^:redef ^Class iobj)
+(def ^:redef ^Class ClojureRT)
+(def ^:redef ^Class Var)
+(def ^:redef ^Class Namespace)
+(def ^:redef ^Class Agent)
+(def ^:redef ^Class Literal)
+(def ^:redef ^Class AFnMh)
+(def ^:redef ^Class StaticFn)
 
-(defn of-quoted-form ^Class [form]      ;pre: (instance? IMeta form)
-  (cond
-    (vector? form) vector
-    (map? form) map
-    (set? form) set
-    (seq? form) list
-    :else (.getClass form)))            ;symbol
+(defn fixup-runtime-types! [^MethodHandles$Lookup rt-lookup]
+  (letfn [(find-class ^Class [^Class compiler-type]
+            (.findClass rt-lookup (.getName compiler-type)))]
+    (when (some? symbol)
+      (throw (IllegalStateException.)))
+    (def symbol (find-class clojure.lang.Symbol))
+    (def keyword (find-class clojure.lang.Keyword))
+    (def vector (find-class clojure.lang.IPersistentVector))
+    (def map (find-class clojure.lang.IPersistentMap))
+    (def set (find-class clojure.lang.IPersistentSet))
+    (def list (find-class clojure.lang.IPersistentList))
+    (def seq (find-class clojure.lang.ISeq))
+    (def ifn (find-class clojure.lang.IFn))
+    (def iobj (find-class clojure.lang.IObj))
+    
+    (def ClojureRT (find-class clojure.lang.RT))
+    (def Var (find-class clojure.lang.Var))
+    (def Namespace (find-class clojure.lang.Namespace))
+    (def Agent (find-class clojure.lang.Agent))
+    
+    (def Literal (find-class tinyclj.lang.Literal))
+    (def AFnMh (find-class tinyclj.lang.AFnMh))
+    (def StaticFn (find-class tinyclj.lang.StaticFn))))

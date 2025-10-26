@@ -74,7 +74,8 @@ public final class RT {
 
   public static void ensureInitialized(Class cl) {
     try {
-      MethodHandles.publicLookup().ensureInitialized(cl);
+      //MethodHandles.publicLookup().ensureInitialized(cl);
+      Class.forName(cl.getName(), true, cl.getClassLoader());
     } catch (Exception e) {
       throw clojure.lang.Util.sneakyThrow(e);
     }

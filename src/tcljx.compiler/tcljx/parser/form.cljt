@@ -24,14 +24,16 @@
     #_(binding [*print-meta* #_false true]
         (prn :parse-expression form))
     
-    (letfn [(parse-collection-literal ^Expr [^long fctx form ^map form-meta]
+    (letfn [(type-of-quoted-form ^Class [form] ;pre: (instance? IMeta form)
+              (cond
+                (vector? form) type/vector
+                (map? form) type/map
+                (set? form) type/set
+                (seq? form) type/list
+                (symbol? form) type/symbol))
+            (parse-collection-literal ^Expr [^long fctx form ^map form-meta]
               (let [x-meta (parse/meta this fctx form-meta nil)
-                    coll-tp (cond
-                              (vector? form) type/vector
-                              (map? form) type/map
-                              (set? form) type/set
-                              (seq? form) type/list
-                              :else (throw (IllegalStateException.)))
+                    coll-tp (type-of-quoted-form form)
                     x (->> (if (identical? type/map coll-tp)
                              (mapcat identity form)
                              (seq form))
@@ -44,7 +46,7 @@
             (parse-quoted-form ^Expr [form]
               (if (instance? IMeta form)
                 ;; symbol, list, vector, map, set
-                (let [tp (type/of-quoted-form form)]
+                (let [tp (type-of-quoted-form form)]
                   (.new-loadable entity-factory form tp))
                 ;; adjust type to primitive if possible
                 (constant/parse-constant-nometa this form)))
@@ -184,7 +186,7 @@
             (parse-expand-or-invoke ^Expr [^symbol op ^long fctx ^seq form]
               (if-some [inv (parse/lookup this op)]
                 (if (ir/def-macro? inv)
-                  (->> (parse/expand-macro resolver inv form)
+                  (->> (.expand-macro resolver inv form)
                        (.parse-form this fctx))
                   (->> (parse/args this fctx (rest form))
                        (invoke-entity fctx form inv)))

@@ -155,7 +155,7 @@
             variadic? (nil? tp)]
         (aset ptypes n-fixed
               (cond
-                (nil? tp) (when (some? or-else-type) clojure.lang.ISeq)
+                (nil? tp) (when (some? or-else-type) type/seq)
                 (.isArray tp) tp
                 :else (wrong/other "type of rest parameter must be array" tp)))
         (aset pnames n-fixed (name psym))

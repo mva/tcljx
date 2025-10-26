@@ -9,23 +9,25 @@
    [tinyclj.string :as str])
   (:import
    (tcljx.data.ir Entity ImmediateEntity ArityType MethodSpec ProvidedNamespace)
+   (tcljx.classgen.insn Insn)
    (tcljx.classgen.defgen DefMethod DefField DefMacro DefVarDeref)
    (tcljx.classgen.fngen FnStatic FnVirtual)
    (java.lang.constant ConstantDesc ClassDesc DirectMethodHandleDesc)
-   (java.lang.invoke MethodType MethodHandle MethodHandles MethodHandles$Lookup)
+   (java.lang.invoke MethodType MethodHandle MethodHandles MethodHandles$Lookup
+                     TypeDescriptor$OfField)
    (java.lang.reflect Member Method Field)
    (java.util HashMap ArrayList)))
 
 (letfn [(conj-rt-var! [acc ^String field-mnm ^Class deref-tp ^String def-nm]
           (assoc! acc def-nm
                   (-> (DefField. ir/entity-id-def (ir/acc* final) rt/ClojureRT
-                        field-mnm clojure.lang.Var nil)
+                        field-mnm type/Var nil)
                       (DefVarDeref. deref-tp))))
         (core-ns-globals []
           (-> {}
               (transient)
-              (conj-rt-var! "CURRENT_NS" clojure.lang.Namespace "*ns*")
-              (conj-rt-var! "AGENT" clojure.lang.Agent "*agent*")
+              (conj-rt-var! "CURRENT_NS" type/Namespace "*ns*")
+              (conj-rt-var! "AGENT" type/Agent "*agent*")
               (conj-rt-var! "OUT" java.io.Writer "*out*")
               (conj-rt-var! "IN" Object "*in*")
               (conj-rt-var! "ERR" Object "*err*")
@@ -39,6 +41,10 @@
     (if (cfg/core-lib? ns-str)
       (core-ns-globals)
       {})))
+
+(defn insn-force-clinit ^Insn [^TypeDescriptor$OfField class]
+  (let [ensure-args (insn/insns-of (insn/constant class Class))]
+    (insn/invoke-member resolve/ensure-initialized nil ensure-args)))
 
 ;;; ------------------------------------------------------------------------
 
@@ -146,7 +152,7 @@
           (.getOrDefault this-globals nm nil)))))
   (capstone-for [_ ns-str]
     (.resolveConstantDesc (segment/capstone-class ns-str) lookup-in-pkg))
-  (require-strings [_ capstone]
+  (require-strings [_ capstone]         ;also initializes class
     ^String (.invokeExact (.findStatic lookup-in-pkg capstone rt/name-requires
                                        (MethodType/methodType String))))
   
@@ -159,8 +165,7 @@
     (.put this-globals (cfg/demunge-name mnm) ent))
   (finish-namespace [_]
     (let [globals (into (initial-globals this-ns-str) this-globals)]
-      (->> (insn/insns-of (insn/constant this-capstone Class))
-           (insn/invoke-member resolve/ensure-initialized nil)
+      (->> (insn-force-clinit this-capstone)
            (ProvidedNamespace. this-ns-str globals this-capstone)
            (assoc known-ns this-ns-str)))))
 

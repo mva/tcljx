@@ -79,12 +79,7 @@
     (let [args ^Insns args]
       (if (insn/loadables? args)
         (.new-loadable this (.emitters args) coll-type)
-        (-> (condp identical? coll-type
-              type/vector resolve/literal-vector
-              type/map resolve/literal-map
-              type/set resolve/literal-set
-              type/list resolve/literal-list)
-            (insn/invoke-runtime args)))))
+        (insn/invoke-runtime (resolve/literal-factory coll-type) args))))
   
   (next-entity-id [_]
     (set! curr-entity-id (inc curr-entity-id)))

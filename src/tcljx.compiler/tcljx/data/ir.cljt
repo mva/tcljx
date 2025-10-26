@@ -134,6 +134,7 @@
 ;;; parallel or at a later point.
 (definterface Resolver
   (ns-str ^String [])                ;the name of this namespace
+  (expand-macro ^Object [^Entity macro ^seq form])
   (globals ^map [])                  ;only call from namespace thread!
   (lookup-namespace ^String [^String alias]) ;nil -> ns-str, not_found -> nil
 

@@ -83,7 +83,7 @@
   
   ImmediateEntity
   (value-type [_]
-    tinyclj.lang.StaticFn)
+    type/StaticFn)
   (value-type-exact [_]
     rt/StaticFn)
   (entity-id [_]
@@ -209,7 +209,7 @@
   
   Entity
   (value-type [_]
-    tinyclj.lang.StaticFn)
+    type/StaticFn)
   (value-type-exact [_]
     (throw (IllegalStateException.)))
   (entity-id [_]
@@ -289,11 +289,11 @@
           (.invokestatic this-class rt/name-factory-method
                          (util/mtd-factory this-class aorigin)))
       (.aload xb slot))
-    tinyclj.lang.AFnMh)
+    type/AFnMh)
   
   Entity
   (value-type [_]
-    tinyclj.lang.AFnMh)
+    type/AFnMh)
   (value-type-exact [_]
     this-class)
   (entity-id [_]
@@ -303,7 +303,7 @@
   (invoke* [this fctx form f m-idx xs]
     (let [at (.at (aget method-specs m-idx))]
       (-> (^CodeEmitter fn [xb _ _]
-           (when (emit/insn? xb fctx tinyclj.lang.AFnMh f)
+           (when (emit/insn? xb fctx type/AFnMh f)
              (insn/emit-invoke-arity (aget entry-mhds m-idx) at xs fctx xb)))
           (insn/mk-insn (.return-type at)))))
   (emit-store [this xb] ;highjacked to call __patch method with forward refs
@@ -325,7 +325,7 @@
   (emit-setup-code? [this xb param-no name]
     (let [label (.newLabel xb)]
       (set! slot -1)                 ;force emit of factory invocation
-      (.emit-insn* this xb tinyclj.lang.AFnMh false)
+      (.emit-insn* this xb type/AFnMh false)
       (set! slot (.allocateLocal xb TypeKind/REFERENCE))
       (-> (.storeLocal xb TypeKind/REFERENCE slot)
           (.labelBinding label)
@@ -334,8 +334,8 @@
 
 (defn- entity-this ^Entity [^ClassDesc owner]
   (reify Entity
-    (emit-insn* [_ xb _ _] (code/load-receiver xb) tinyclj.lang.AFnMh)
-    (value-type [_] tinyclj.lang.AFnMh)
+    (emit-insn* [_ xb _ _] (code/load-receiver xb) type/AFnMh)
+    (value-type [_] type/AFnMh)
     (value-type-exact [_] owner)
     (entity-id [_] -1)))
 
@@ -534,7 +534,7 @@
   
   Entity
   (value-type [_]
-    tinyclj.lang.AFnMh)
+    type/AFnMh)
   (value-type-exact [_]
     (.value-type-exact __emit))
   (entity-id [_]

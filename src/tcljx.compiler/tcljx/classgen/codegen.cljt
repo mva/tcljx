@@ -83,14 +83,6 @@
   (get-recur-target ^Label [])
   (set-recur-target! ^void [^Label target])) ;on this copy of InsnFactory!
 
-;;; Note: To save work, this code generator assumes that it can use
-;;; types available at compile time to refer to runtime types of the
-;;; compiled application.  For example, it uses tinyclj.lang.StaticFn
-;;; as expression type, instead of the type (accidentally of the same
-;;; name) used by the application to hold a static function instance.
-;;; Likewise for symbols, keywords, vectors, and so on.  This works
-;;; only as long as compiler and application agree on the names of
-;;; their runtime classes.
 (deftype InsnFactoryImpl [^Entity/1 recur-variables
                           ^:unsynchronized-mutable ^Label __recur-target]
   InsnFactory
@@ -113,7 +105,7 @@
               (aset 1 (.emitter meta)))
             (constgen/collection tp true)
             (insn/mk-insn tp)))
-      (insn/invoke-runtime resolve/literal-with-meta (insn/insns-of arg meta))))
+      (insn/invoke-runtime (resolve/with-meta-factory) (insn/insns-of arg meta))))
   (new-array [_ fctx array-type dims]
     (let [dims ^Insns dims]
       (insn/ensure-assignable* Integer/TYPE dims)
@@ -173,7 +165,7 @@
           args ^Insns args
           f-tp (insn/logical-type f)]
       (if (or (type/same? Object f-tp) (.isInterface f-tp)
-              (.isAssignableFrom clojure.lang.IFn f-tp))
+              (.isAssignableFrom type/ifn f-tp))
         (-> (^CodeEmitter fn [xb consumed-type _]
              (let [cpb (.constantPool xb)
                    atypes (fix-vararg-array! (insn/logical-types args))

@@ -8,8 +8,8 @@
 (ns tcljx.classgen.bootstrap
   (:require
    (tcljx.data [config :as cfg] [files :as files] [meta :as meta]
-               [reflect :as reflect] [macro :as macro])
-   (tcljx.classgen [classfile :as classfile] [insn :as insn]
+               [type :as type] [reflect :as reflect])
+   (tcljx.classgen [classfile :as classfile] [insn :as insn] macro
                    [universe :as universe] [primitive :as primitive])
    [tcljx.parser.reader-test :as reader-test]
    [tcljx.classgen.classdata :as classdata] ;only available for unit tests
@@ -34,6 +34,7 @@
         tcljx-mod-rt (files/path-of "../bootstrap-tcljc/tcljc.rt")]
     (classfile/app-class-loader :platform [tcljx-mod-rt])))
 (def ^:private rt-lookup (classfile/get-rt-lookup app-ld))
+(type/fixup-runtime-types! rt-lookup)
 
 (defn mk-universe ^NamespaceProvider [^map reader-map ^Loader loader]
   (let [pn-primitive (ProvidedNamespace. cfg/primitive-ns-str
@@ -213,7 +214,7 @@
 (defn- mt-of ^MethodType [^Class return-type parameter-types]
   (MethodType/methodType return-type ^List parameter-types))
 
-(def array-to-cpl (tcljx.data.macro.ArrayToCpl. (.getClassLoader Object)))
+(def array-to-cpl (tcljx.classgen.macro.ArrayToCpl. (.getClassLoader Object)))
 
 (defn to-compiler-mh ^MethodHandle [^ClassLoader app-ld]
   (let [ccm-cl (.lookupClass rt-lookup)

@@ -249,7 +249,7 @@
   ImmediateEntity
   (value-type [this]
     (when (some? ce-value)
-      tinyclj.lang.AFnMh))
+      type/AFnMh))
   (value-type-exact [_]
     (.value-type-exact dimm))
   (entity-id [_]
@@ -294,7 +294,7 @@
 (deftype DefVarDeref [^DefField df ^Class deref-tp]
   CodeEmitter
   (emit-insn* [this xb consumed-type then-leave?]
-    (when (.emit-insn* df xb clojure.lang.Var then-leave?)
+    (when (.emit-insn* df xb type/Var then-leave?)
       (.invokevirtual xb rt/Var "deref" rt/mtd-Object-void)
       Object))
   ImmediateEntity
@@ -316,7 +316,7 @@
   Assignable
   (set-expr* [_ fctx value]
     (-> (^CodeEmitter fn [xb consumed-type _]
-         (.emit-insn* df xb clojure.lang.Var false)
+         (.emit-insn* df xb type/Var false)
          (when (emit/insn? xb fctx deref-tp (.emitter value))
            (.invokevirtual xb rt/Var "set" rt/mtd-Object-Object)
            Object))
@@ -324,7 +324,7 @@
   (redef-expr* [_ fctx value]
     (insn/ensure-assignable deref-tp value)
     (-> (^CodeEmitter fn [xb consumed-type _]
-         (when (emit/insn? xb fctx clojure.lang.Var df)
+         (when (emit/insn? xb fctx type/Var df)
            (when (emit/insn? xb fctx Object (.emitter value))
              (util/with-dup-unless-void-> xb consumed-type Object
                (.invokevirtual rt/Var "bindRoot" rt/mtd-void-Object)))))
@@ -354,14 +354,17 @@
             (let [x-nmsp (insn/constant (.packageName owner) String)
                   x-nm (insn/constant nm String)]
               (if (constgen/emitter-empty? (.emitter init-var))
-                (insn/invoke-member resolve/create-var-2 nil
-                                    (insn/insns-of x-nmsp x-nm))
-                (insn/invoke-member resolve/create-var-3 nil
-                                    (insn/insns-of x-nmsp x-nm init-var)))))
+                (-> (resolve/static-method type/ClojureRT "var" String String)
+                    (insn/invoke-member nil (insn/insns-of x-nmsp x-nm)))
+                (-> (resolve/static-method type/ClojureRT "var" String String Object)
+                    (insn/invoke-member nil (insn/insns-of x-nmsp x-nm init-var))))))
           (set-meta ^Insn [^Insn x]
-            (insn/invoke-member resolve/set-meta x (insn/insns-of x-meta)))
+            ;; resolve "setMeta" late to pick up runtime type/map
+            (-> (resolve/virtual-method type/Var "setMeta" type/map)
+                (insn/invoke-member x (insn/insns-of x-meta))))
           (set-dynamic ^Insn [^Insn x]
-            (insn/invoke-member resolve/set-dynamic x (insn/insns-of)))]
+            (-> (resolve/virtual-method type/Var "setDynamic")
+                (insn/invoke-member x (insn/insns-of))))]
     (let [init (cond-> (create-var)
                  (some? x-meta) (set-meta)
                  dynamic? (set-dynamic))

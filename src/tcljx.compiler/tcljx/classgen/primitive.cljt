@@ -576,7 +576,7 @@
         (if (insn/loadables? args)
           (-> (constgen/collection (.emitters args) type/list false)
               (insn/mk-insn type/list))
-          (insn/invoke-runtime resolve/literal-list args)))))
+          (insn/invoke-runtime (resolve/literal-factory type/list) args)))))
 
 ;;; ------------------------------------------------------------------------
 

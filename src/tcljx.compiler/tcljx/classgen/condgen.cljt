@@ -425,9 +425,6 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def rt-boolean-cast
-  (resolve/static-method clojure.lang.RT "booleanCast" Object))
-
 ;; Implements Clojure's idea of a "logically true" expression.
 (defn logical-truth ^Insn [^Insn arg ^long fctx]
   (let [arg-tp (insn/expr-type arg)]
@@ -444,7 +441,8 @@
       insn/insn-false
       
       (.isAssignableFrom arg-tp Boolean) ;argument may be Boolean instance
-      (insn/invoke-runtime rt-boolean-cast (insn/insns-of arg))
+      (-> (resolve/static-method type/ClojureRT "booleanCast" Object)
+          (insn/invoke-runtime (insn/insns-of arg)))
       
       :else     ;any reference that is a non-Boolean subtype of Object
       (acmp arg insn/insn-null cmp-ne fctx))))

@@ -7,7 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.main.tclj0
   (:require
-   (tcljx.data [config :as cfg] [files :as files] wrong)
+   (tcljx.data [config :as cfg] [files :as files] wrong [type :as type])
    (tcljx.classgen [classfile :as classfile] [insn :as insn]
                    [primitive :as primitive] [universe :as universe])
    (tcljx.main [options :as options] [invoke :as invoke] [efmt :as efmt])
@@ -36,6 +36,7 @@
                       [])
         dyn-ld (classfile/dyn-class-loader app-ld dyn-sourcev)
         loader (classfile/mk-loader (.dest-dir opts) app-ld dyn-ld nil)
+        _ (type/fixup-runtime-types! (.rt-lookup loader))
         
         pn-primitive (ProvidedNamespace. cfg/primitive-ns-str
                                          primitive/primitive-nmsp-globals

@@ -2,7 +2,7 @@
   (:require
    (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
                [context :as context] [reflect :as reflect] [member :as member]
-               [ir :as ir] [code :as code])
+               [type :as type] [ir :as ir] [code :as code])
    (tcljx.parser [syntax :as syntax] [interop :as interop] [parse :as parse]))
   (:import
    (tcljx.data.ir Expr Binding ArityType AritySpec MethodSpec FieldSpec NmspClass
@@ -302,7 +302,7 @@
         etf (.entity-factory parser)
         this-class (.class-name-for-reify etf)
         supers (->> (map #(interop/resolve-class rsv %) implementv)
-                    (cons clojure.lang.IObj)
+                    (cons type/iobj)
                     (supers-of))
         methods ^seq/1 (into-array clojure.lang.ISeq methods)
         cbh (^Consumer fn ^void [^ClassBuilder cb]

@@ -359,7 +359,7 @@
                                    & ^Class/1 ptypes]
   (runtime-method* true owner method-name ptypes))
 (defn virtual-method ^MemberHandle [^Class owner ^String method-name
-                                   & ^Class/1 ptypes]
+                                    & ^Class/1 ptypes]
   (runtime-method* false owner method-name ptypes))
 
 ;;; ------------------------------------------------------------------------
@@ -452,18 +452,14 @@
 ;;; ------------------------------------------------------------------------
 
 (letfn [(find-factory ^MemberHandle [^String method-name]
-          (static-method tinyclj.lang.Literal method-name Object/1))]
-  (def literal-vector (find-factory "vector")) ;type/vector
-  (def literal-map (find-factory "map"))       ;type/map
-  (def literal-set (find-factory "set"))       ;type/set
-  (def literal-list (find-factory "list"))     ;type/list
-  (def literal-with-meta
-    (static-method tinyclj.lang.Literal "with_meta"
-                   clojure.lang.IObj clojure.lang.IPersistentMap))
-
-  (def ensure-initialized (static-method tinyclj.lang.RT "ensureInitialized" Class))
-  
-  (def create-var-2 (static-method clojure.lang.RT "var" String String))
-  (def create-var-3 (static-method clojure.lang.RT "var" String String Object))
-  (def set-meta (virtual-method clojure.lang.Var "setMeta" clojure.lang.IPersistentMap))
-  (def set-dynamic (virtual-method clojure.lang.Var "setDynamic")))
+          (static-method type/Literal method-name Object/1))]
+  (defn literal-factory ^MemberHandle [^Class coll-type]
+    (condp identical? coll-type
+      type/vector (find-factory "vector")
+      type/map (find-factory "map")
+      type/set (find-factory "set")
+      type/list (find-factory "list")))
+  (defn with-meta-factory ^MemberHandle []
+    (static-method type/Literal "with_meta" type/iobj type/map))
+    
+  (def ensure-initialized (static-method tinyclj.lang.RT "ensureInitialized" Class)))

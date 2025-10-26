@@ -202,7 +202,7 @@
             ;; this code follows the logic of `parse-expand-or-invoke`
             (if-some [inv (parse/lookup parser op-sym)]
               (if (ir/def-macro? inv)
-                (parse/expand-macro (.resolver parser) inv form)
+                (.expand-macro (.resolver parser) inv form)
                 form)
               (cons 'fn* (rest form)))) ;looks like a unit test without `fn`
           (expand-fn ^seq [^seq form]

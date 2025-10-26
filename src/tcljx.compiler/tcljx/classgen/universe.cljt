@@ -15,9 +15,10 @@
     [namespace :as namespace])
    (tcljx.classgen
     [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
-    [segment :as segment] [emit :as emit] [insn :as insn] [codegen :as codegen]
-    [entity :as entity] [fnenv :as fnenv] [defgen :as defgen]
-    [primitive :as primitive] [publics :as publics] [build :as build]))
+    [segment :as segment] [emit :as emit] [insn :as insn] [macro :as macro]
+    [codegen :as codegen] [entity :as entity] [fnenv :as fnenv]
+    [defgen :as defgen] [primitive :as primitive] [publics :as publics]
+    [build :as build]))
   (:import
    (tcljx.data.ir Resolver FormReader NamespaceProvider ProvidedNamespace
                   NmspClass NamespaceBuilder Require
@@ -73,11 +74,17 @@
                       ^:unsynchronized-mutable ^map ns-alias
                       ^:unsynchronized-mutable ^map imports
                       ^HashSet require-strs ;implicitly mutable
+                      ^MethodHandle apply-mh
                       import-namespace-fn
                       ^:unsynchronized-mutable ^MethodHandle ephemeral-of]
   Resolver
   (ns-str [_]
     (.pkg-name segment))
+  (expand-macro [this macro form]
+    (let [f (.runtime-value macro this)]
+      (if (some? apply-mh)
+        (macro/apply-macro-mapped apply-mh f form nil)
+        (macro/apply-macro-direct f form nil))))
   (globals [_]                       ;only call from namespace thread!
     globals)
   (lookup-namespace [this alias]
@@ -127,8 +134,7 @@
   (require-namespaces [this ns-strs]
     (let [pn-core (when (cfg/core-lib? (.ns-str this))
                     (let [last-segment (.super-class segment)]
-                      (->> (insn/insns-of (insn/constant last-segment Class))
-                           (insn/invoke-member resolve/ensure-initialized nil)
+                      (->> (publics/insn-force-clinit last-segment)
                            (ProvidedNamespace. cfg/core-lib globals nil))))
           apn (new ProvidedNamespace/1 (alength ns-strs))]
       (dotimes [i (alength ns-strs)]
@@ -289,13 +295,14 @@
                               primitive/primitive-nmsp-globals
                               (publics/initial-globals ns-str))
                     imports (resolve/predefined-imports (.rt-lookup loader))
+                    apply-mh (classfile/get-apply-mh (.rt-lookup loader))
                     import-nmsp-fn (publics/mk-import-namespace
                                     (.lookup-in-pkg pkg-build)
                                     (.rt-lookup loader))
                     require-strs (HashSet.)]
                 (NmspBuilder. this xf etf segment pkg-build
                               globals known-ns ns-alias imports
-                              require-strs import-nmsp-fn nil)))
+                              require-strs apply-mh import-nmsp-fn nil)))
             (compile-nmsp ^ProvidedNamespace [^String ns-str ^map known-ns']
               (let [rdr (mk-nmsp-reader ns-str)
                     pkg-build (classfile/mk-package-builder loader ns-str)
@@ -317,7 +324,6 @@
           (let [ns-str (aget ns-strs i)]
             (->> (or (some-> apn-known (aget i))
                      (known-ns ns-str)
-                     #_
                      (when-some [known-ns* (publics/import-from-class-loader
                                             (.dyn-ld loader) (.rt-lookup loader)
                                             known-ns ns-str)]

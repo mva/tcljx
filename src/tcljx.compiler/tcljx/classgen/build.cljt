@@ -79,7 +79,7 @@
        (.withMethodBody cb "main" mtd-main acc-main)))
 (defn- with-main-apply ^ClassBuilder [^ClassBuilder cb ^Entity entry-main]
   (->> (^Consumer fn ^void [^CodeBuilder xb]
-        (emit/insn? xb context/fctx-none clojure.lang.IFn entry-main)
+        (emit/insn? xb context/fctx-none type/ifn entry-main)
         (-> (.aload xb (.parameterSlot xb 0))
             (.invokestatic rt/RT "apply" rt/mtd-apply)
             (.pop)

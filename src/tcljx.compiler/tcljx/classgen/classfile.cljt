@@ -1,6 +1,7 @@
 (ns tcljx.classgen.classfile
   (:require
-   (tcljx.data [config :as cfg] [files :as files] [wrong :as wrong] [ir :as ir]))
+   (tcljx.data [config :as cfg] [files :as files] [wrong :as wrong] [ir :as ir])
+   (tcljx.classgen [runtime :as rt]))
   (:import
    (tcljx.data.ir NmspClass)
    (java.lang.classfile ClassFile ClassBuilder CodeBuilder Opcode TypeKind
@@ -8,7 +9,7 @@
                         ClassHierarchyResolver$ClassHierarchyInfo)
    (java.lang.classfile.instruction OperatorInstruction)
    (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
-   (java.lang.invoke MethodType MethodHandles$Lookup)
+   (java.lang.invoke MethodType MethodHandle MethodHandles$Lookup)
    (java.net URLClassLoader URL)
    (java.nio.file Path Files)
    (java.util.concurrent ConcurrentHashMap)
@@ -134,6 +135,14 @@
         mt (MethodType/methodType MethodHandles$Lookup byte/1)
         mh (.findVirtual rt-lookup (class dyn-ld) "lookupInPackage" mt)]
     ^MethodHandles$Lookup (.invokeExact (.bindTo mh dyn-ld) bs)))
+
+(defn get-apply-mh ^MethodHandle [^MethodHandles$Lookup rt-lookup]
+  (let [compiler-rt-witness tinyclj.lang.StaticFn
+        app-rt-witness (.resolveConstantDesc rt/StaticFn rt-lookup)
+        shared-runtime? (identical? compiler-rt-witness app-rt-witness)]
+    (if shared-runtime?
+      nil                            ;can use macro/apply-macro-direct
+      (.resolveConstantDesc rt/mhd-applyMacroMapped rt-lookup))))
 
 ;;; Coordinates cross cutting concerns for building and defining
 ;;; classes.  For the Class-File API it provides the class hierarchy
