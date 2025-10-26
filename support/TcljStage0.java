@@ -19,22 +19,8 @@ import java.nio.file.Path;
 class TcljStage0 {
   static final String stageName = "stage0";
   
-  static Path stageModuleMdir(String stageName, String moduleName) { // tcljx-foo
-    return Path.of(System.getProperty("java.io.tmpdir"),
-                   System.getProperty("user.name"),
-                   "tcljx-"+stageName+".mdir",
-                   moduleName+".jar");
-  }
-  
-  static Path stageModuleCldir(String stageName, String moduleName) { // tcljx.foo
-    return Path.of(System.getProperty("java.io.tmpdir"),
-                   System.getProperty("user.name"),
-                   "tcljx-"+stageName+".cldir",
-                   moduleName);
-  }
-  
   static Path stage0Source(String moduleName) {
-    return stageModuleMdir(stageName, moduleName);
+    return Shared.modulePath(stageName, moduleName);
   }
   static URL stage0Module(String moduleName) throws Exception {
     //System.out.println("[module] "+stage0Source(moduleName).toUri().toURL());
@@ -43,19 +29,19 @@ class TcljStage0 {
   
   static Method stage0Main() throws Exception {
     var urls = new URL[] {
-      stage0Module("tcljc-rt"),
-      stage0Module("tcljc-core"),
-      stage0Module("tcljx-compiler")
-    };
+      stage0Module("tcljc.rt"),
+      stage0Module("tcljc.core"),
+      stage0Module("tcljx.compiler") };
     var parent = ClassLoader.getPlatformClassLoader();
-    return TcljBoot.mainMethodOf(new URLClassLoader(stageName, urls, parent), "tcljx.main");
+    return Shared.mainMethodOf(new URLClassLoader(stageName, urls, parent),
+                               "tcljx.main");
   }
 
   static String[] stage0Args(String[] cmdlineArgs) {
-    return TcljBoot.concat(new String[] {
+    return Shared.concat(new String[] {
         "--deterministic",
-        "-s", stageModuleCldir("stage1", "tcljx.rt").toString()
-      }, cmdlineArgs);
+        "-s", Shared.modulePath("stage1", "tcljx.rt").toString() },
+      cmdlineArgs);
   }
   
   public static final void main(String... args) throws Exception {

@@ -82,6 +82,14 @@ support/DONE: support/*.java
 COMPILER_BOOT=$(JAVA) -cp support TcljBoot
 COMPILER_STAGE0=$(BUILD_JAVA_ONCE) -cp support TcljStage0
 
+TCLJX_SOURCE_RT := src/tcljx.rt/module-info.java \
+  $(sort $(wildcard src/tcljx.rt/*/lang/*.java))
+TCLJX_SOURCE_CORE := src/tcljx.core/module-info.java \
+  $(sort $(wildcard src/tcljx.core/*/*.cljt srx/tcljx.core/*/*/*.cljt)) 
+TCLJX_SOURCE_COMPILER := src/tcljx.compiler/module-info.java \
+  $(sort $(wildcard src/tcljx.compiler/*/*.cljt src/tcljx.compiler/*/*/*.cljt)) 
+TCLJX_SOURCE_RTIOW := test/tcljx.compiler/tcljx/classgen/rtiow-ref.cljt
+
 # ------------------------------------------------------------------------
 # Create module directory $(STAGE0_MDIR) using the bootstrap
 # compiler's compiles and the bootstrap compiler's output for
@@ -92,56 +100,49 @@ BUILD_JAVA_ONCE=$(JAVA) -XX:TieredStopAtLevel=1
 BUILD_JAR=$(JAVA_BIN)jar
 TCLJX_MAIN_NS=tcljx.main
 
-# Note: Compilation of clojure.instant depends on module java.sql
-STAGE0=$(TMP_USER)/tcljx-stage0
-STAGE0_MDIR=$(STAGE0).mdir
 
-$(STAGE0_MDIR)/tcljx-compiler.jar: support/DONE
+STAGE0_MDIR=$(TMP_USER)/tcljx-stage0.mdir-xpl
+
+# Note: Compilation of clojure.instant depends on module java.sql
+$(STAGE0_MDIR)/DONE: $(TCLJX_SOURCE_COMPILER) support/DONE
 	mkdir -p $(STAGE0_MDIR)
 # tcljc.rt / tcljc-rt.jar
 	cp -r $(BOOTSTRAP_MDIR)/tcljc.rt $(STAGE0_MDIR)
-	$(BUILD_JAR) --create --file=$(STAGE0_MDIR)/tcljc-rt.jar -C $(STAGE0_MDIR)/tcljc.rt .
-	rm -rf $(STAGE0_MDIR)/tcljc.rt
 # tcljc.core / tcljc-core.jar
 	cp -r $(BOOTSTRAP_MDIR)/tcljc.core $(STAGE0_MDIR)
-	$(BUILD_JAR) --create --file=$(STAGE0_MDIR)/tcljc-core.jar -C $(STAGE0_MDIR)/tcljc.core .
-	rm -rf $(STAGE0_MDIR)/tcljc.core
 # tcljx.compiler / tcljx-compiler.jar
 	$(COMPILER_BOOT) -d $(STAGE0_MDIR)/tcljx.compiler -s src/tcljx.compiler $(TCLJX_MAIN_NS)
 	$(BUILD_JAVAC) -p $(STAGE0_MDIR) -d $(STAGE0_MDIR)/tcljx.compiler src/tcljx.compiler/module-info.java
-	$(BUILD_JAR) --create --file=$(STAGE0_MDIR)/tcljx-compiler.jar --main-class=$(TCLJX_MAIN_NS).___ -C $(STAGE0_MDIR)/tcljx.compiler .
-	rm -rf $(STAGE0_MDIR)/tcljx.compiler
+	touch $@
 
 # ------------------------------------------------------------------------
 # Use bootstrapped compiler to build modules for runtime, core
 # library, and compiler.  Build the module directories in
 # $(STAGE1_CLASSES).(rt|core|compiler)
 
-STAGE1=$(TMP_USER)/tcljx-stage1
-STAGE1_CLASSES=$(STAGE1).cldir/tcljx
+STAGE1_MDIR=$(TMP_USER)/tcljx-stage1.mdir-xpl
 
-TCLJX_SOURCE_RT := $(sort $(wildcard src/tcljx.rt/*/lang/*.java)) src/tcljx.rt/module-info.java
-$(STAGE1_CLASSES).rt/module-info.class: $(TCLJX_SOURCE_RT)
+STAGE1_MINFO_RT=$(STAGE1_MDIR)/tcljx.rt/module-info.class
+$(STAGE1_MINFO_RT): $(TCLJX_SOURCE_RT)
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
 	mkdir -p --mode 700 "$(TMP_USER)" "$(dir $@)"
 	$(BUILD_JAVAC) -d "$(dir $@)" $^
 
-TCLJX_SOURCE_CORE := $(sort $(wildcard src/tcljx.core/*/*.cljt srx/tcljc.core/*/*/*.cljt)) src/tcljx.core/module-info.java
-$(STAGE1_CLASSES).core/module-info.class: $(STAGE1_CLASSES).rt/module-info.class $(TCLJX_SOURCE_CORE) $(STAGE0_MDIR)/tcljx-compiler.jar support/DONE
+STAGE1_MINFO_CORE=$(STAGE1_MDIR)/tcljx.core/module-info.class
+$(STAGE1_MINFO_CORE): $(STAGE1_MINFO_RT) $(TCLJX_SOURCE_CORE) $(STAGE0_MDIR)/DONE
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
 	$(COMPILER_STAGE0) -d "$(dir $@)" -s src/tcljx.core clojure.core.all
 	$(BUILD_JAVAC) -p $(dir $<) -d "$(dir $@)" src/tcljx.core/module-info.java
 
-TCLJX_SOURCE_RTIOW := test/tcljx.compiler/tcljx/classgen/rtiow-ref.cljt
-$(STAGE1_CLASSES).rtiow/ray.ppm: $(STAGE1_CLASSES).core/module-info.class $(TCLJX_SOURCE_RTIOW) support/DONE
+$(STAGE1_MDIR)/tcljx.rtiow/ray.ppm: $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_RTIOW)
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
-	$(COMPILER_STAGE0) -d $(STAGE1_CLASSES).rtiow -s $(STAGE1_CLASSES).rt -s $(STAGE1_CLASSES).core -s test/tcljx.compiler tcljx.classgen.rtiow-ref
-	$(JAVA) -cp $(STAGE1_CLASSES).rt:$(dir $<):$(STAGE1_CLASSES).rtiow tcljx.classgen.rtiow-ref.___ >$@
+	$(COMPILER_STAGE0) -d $(STAGE1_MDIR)/tcljx.rtiow -s $(STAGE1_MDIR)/tcljx.rt -s $(STAGE1_MDIR)/tcljx.core -s test/tcljx.compiler tcljx.classgen.rtiow-ref
+	$(JAVA) -cp $(STAGE1_MDIR)/tcljx.rt:$(dir $<):$(STAGE1_MDIR)/tcljx.rtiow tcljx.classgen.rtiow-ref.___ >$@
 	@echo "3cf6c9b9f93edb0de2bc24015c610d78  $@" | md5sum -c -
 
-stage0-mdir: $(STAGE0_MDIR)/tcljx-compiler.jar
-stage1-core: $(STAGE1_CLASSES).core/module-info.class
-stage1-rtiow: $(STAGE1_CLASSES).rtiow/ray.ppm
+stage0-mdir: $(STAGE0_MDIR)/DONE
+stage1-core: $(STAGE1_MINFO_CORE)
+stage1-rtiow: $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm

@@ -24,31 +24,21 @@ class TcljBoot {
     return bootstrapSource(nameSuffix).toUri().toURL();
   }
 
-  static Method mainMethodOf(ClassLoader loader, String nmspName) throws Exception {
-    var nmspCapstone = Class.forName(nmspName+".___", true, loader);
-    return nmspCapstone.getDeclaredMethod("main", String.class.arrayType());
-  }
   static Method bootstrapMain() throws Exception {
     var urls = new URL[] {
       bootstrapModule("rt"),
       bootstrapModule("core"),
-      bootstrapModule("compiler")
-    };
+      bootstrapModule("compiler") };
     var parent = ClassLoader.getPlatformClassLoader();
-    return mainMethodOf(new URLClassLoader("bootstrap", urls, parent), "tcljc.main");
+    return Shared.mainMethodOf(new URLClassLoader("bootstrap", urls, parent),
+                               "tcljc.main");
   }
 
-  static String[] concat(String[] a, String[] b) {
-    var x = new String[a.length + b.length];
-    System.arraycopy(a, 0, x, 0, a.length);
-    System.arraycopy(b, 0, x, a.length, b.length);
-    return x;
-  }
   static String[] bootstrapArgs(String[] cmdlineArgs) {
-    return concat(new String[] {
+    return Shared.concat(new String[] {
         "-s", bootstrapSource("rt").toString(),
-        "-s", bootstrapSource("core").toString()
-      }, cmdlineArgs);
+        "-s", bootstrapSource("core").toString() },
+      cmdlineArgs);
   }
   
   public static final void main(String... args) throws Exception {
