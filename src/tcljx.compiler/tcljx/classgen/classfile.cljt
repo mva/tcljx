@@ -9,7 +9,7 @@
                         ClassHierarchyResolver$ClassHierarchyInfo)
    (java.lang.classfile.instruction OperatorInstruction)
    (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
-   (java.lang.invoke MethodType MethodHandle MethodHandles$Lookup)
+   (java.lang.invoke MethodType MethodHandle MethodHandles MethodHandles$Lookup)
    (java.net URLClassLoader URL)
    (java.nio.file Path Files)
    (java.util.concurrent ConcurrentHashMap)
@@ -91,7 +91,12 @@
                  ^ClassLoader dyn-ld
                  ^MethodHandles$Lookup rt-lookup
                  ^Consumer class-sink
-                 ^ClassHierarchyResolver chr-from-file])
+                 ^ClassHierarchyResolver chr-from-file
+
+                 ;; support for tcljx.classgen.publics:
+                 ^MethodHandles$Lookup public-lookup
+                 ^MethodHandle mh-public-def-info
+                 ^MethodHandle mh-fn-arities])
 
 ;;; If a non-nil `dest-dir` is provided, then class files will be
 ;;; written to this directory.  If a non-nil `class-sink` is provided,
@@ -104,8 +109,12 @@
    (mk-loader dest-dir app-ld dyn-ld nil))
   (^Loader [^Path dest-dir ^ClassLoader app-ld ^ClassLoader dyn-ld
             ^Consumer class-sink]
-   (Loader. dest-dir app-ld dyn-ld (get-rt-lookup app-ld) class-sink
-            (ClassHierarchyResolver/ofResourceParsing dyn-ld))))
+   (let [rt-lookup (get-rt-lookup app-ld)]
+     (Loader. dest-dir app-ld dyn-ld rt-lookup class-sink
+              (ClassHierarchyResolver/ofResourceParsing dyn-ld)
+              (MethodHandles/publicLookup)
+              (.resolveConstantDesc rt/mhd-publicDefInfo rt-lookup)
+              (.resolveConstantDesc rt/mhd-arityHandlesIfFn rt-lookup)))))
 
 (deftype PackageBuilder [^Path pkg-dir
                          ^MethodHandles$Lookup lookup-in-pkg
@@ -154,6 +163,13 @@
                                         ns-str)]
     (PackageBuilder. pkg-dir lookup-in-pkg (.class-sink loader)
                      (.chr-from-file loader) (ConcurrentHashMap.))))
+
+(defn push-file-context ^void [^PackageBuilder pkg-build ^String ns-str]
+  (-> (.resolveConstantDesc rt/mhd-pushFileContext (.lookup-in-pkg pkg-build))
+      ^void (.invokeExact ns-str)))
+(defn pop-file-context ^void [^PackageBuilder pkg-build]
+  (-> (.resolveConstantDesc rt/mhd-popFileContext (.lookup-in-pkg pkg-build))
+      ^void (.invokeExact)))
 
 ;;; ------------------------------------------------------------------------
 

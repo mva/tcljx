@@ -14,7 +14,7 @@
     [reader :as reader] [form :as form] [parse :as parse]
     [namespace :as namespace])
    (tcljx.classgen
-    [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
+    [classfile :as classfile] [constgen :as constgen]
     [segment :as segment] [emit :as emit] [insn :as insn] [macro :as macro]
     [codegen :as codegen] [entity :as entity] [fnenv :as fnenv]
     [defgen :as defgen] [primitive :as primitive] [publics :as publics]
@@ -75,7 +75,6 @@
                       ^:unsynchronized-mutable ^map imports
                       ^HashSet require-strs ;implicitly mutable
                       ^MethodHandle apply-mh
-                      import-namespace-fn
                       ^:unsynchronized-mutable ^MethodHandle ephemeral-of]
   Resolver
   (ns-str [_]
@@ -135,11 +134,30 @@
     (let [pn-core (when (cfg/core-lib? (.ns-str this))
                     (let [last-segment (.super-class segment)]
                       (->> (publics/insn-force-clinit last-segment)
-                           (ProvidedNamespace. cfg/core-lib globals nil))))
+                           (ProvidedNamespace. cfg/core-lib globals
+                                               (new String/1 0) nil))))
+          all-ns (.require-namespaces* universe ns-strs pn-core)
           apn (new ProvidedNamespace/1 (alength ns-strs))]
-      (dotimes [i (alength ns-strs)]
-        (aset apn i (get known-ns (aget ns-strs i) nil)))
-      (.require-namespaces* universe ns-strs apn pn-core)))
+
+      ;; Note: The `merge-transitive` is *very* conservative, because
+      ;; it assumes that any namespace in the transitive chain of
+      ;; requires may appear during macro expansion.
+      (letfn [(merge-transitive ^map [^map known-ns ^ProvidedNamespace pn]
+                (if (or (nil? pn) (contains? known-ns (.ns-str pn)))
+                  known-ns ;pn of nil means a cylic require of core-lib
+                  (reduce #(merge-transitive %1 (get all-ns ^String %2))
+                          (assoc known-ns (.ns-str pn) pn)
+                          (.require-strs pn))))]
+        (dotimes [i (alength ns-strs)]
+          (let [req-str (aget ns-strs i)]
+            (if-some [known-pn (.valAt known-ns req-str nil)]
+              (aset apn i known-pn) ;retain own provided version of core-lib
+              (if-some [req-pn (.valAt all-ns req-str nil)]
+                (do (aset apn i req-pn)
+                    (set! known-ns (merge-transitive known-ns req-pn)))
+                (wrong/other (str "unresolved namespace "
+                                  (wrong/q-as-symbol req-str))))))))
+      apn))
   (process-require [this require provided]
     (let [ns-str (.ns-str provided)]
       (set! globals (add-required-globals globals require (.globals provided)))
@@ -235,8 +253,7 @@
                                    (.lookup-def this nil "-main"))
                    (ir/mk-nmsp-class capstone-cld (.super-class segment))
                    (classfile/bwdi pkg-build))]
-      (-> (set! known-ns (import-namespace-fn known-ns (.defined-class ncl)))
-          (.valAt (.ns-str this) nil))))
+      (.defined-class ncl)))
   (commit-segment [this rdr]
     (.commit-segment-and-revert this rdr (segment/size-segment-tasks segment)
                                 globals imports)
@@ -276,10 +293,10 @@
 
 (deftype Universe [^Loader loader
                    ^map reader-map
-                   ^:unsynchronized-mutable ^map known-ns
+                   ^:unsynchronized-mutable ^map all-pns
                    ^map ns-alias]
   NamespaceProvider
-  (require-namespaces* [this ns-strs apn-known pn-core]
+  (require-namespaces* [this ns-strs pn-core]
     (letfn [(mk-nmsp-reader ^FormReader [^String ns-str]
               (let [!source-file-strs (HashSet.)]
                 (if (some? reader-map)
@@ -296,44 +313,45 @@
                               (publics/initial-globals ns-str))
                     imports (resolve/predefined-imports (.rt-lookup loader))
                     apply-mh (classfile/get-apply-mh (.rt-lookup loader))
-                    import-nmsp-fn (publics/mk-import-namespace
-                                    (.lookup-in-pkg pkg-build)
-                                    (.rt-lookup loader))
                     require-strs (HashSet.)]
                 (NmspBuilder. this xf etf segment pkg-build
                               globals known-ns ns-alias imports
-                              require-strs apply-mh import-nmsp-fn nil)))
-            (compile-nmsp ^ProvidedNamespace [^String ns-str ^map known-ns']
+                              require-strs apply-mh nil)))
+            (emit-nmsp ^Class [^String ns-str ^map provided-ns]
               (let [rdr (mk-nmsp-reader ns-str)
-                    pkg-build (classfile/mk-package-builder loader ns-str)
-                    l (.lookup-in-pkg pkg-build)]
-                (-> (.resolveConstantDesc rt/mhd-pushFileContext l)
-                    ^void (.invokeExact ns-str))
+                    pkg-build (classfile/mk-package-builder loader ns-str)]
+                (classfile/push-file-context pkg-build ns-str)
                 (try
-                  (-> (mk-nmsp-builder ns-str known-ns' pkg-build)
+                  (-> (mk-nmsp-builder ns-str provided-ns pkg-build)
                       (namespace/parse-all rdr)
                       (.finish rdr))
                   (finally
-                    (-> (.resolveConstantDesc rt/mhd-popFileContext l)
-                        ^void (.invokeExact))))))]
+                    (classfile/pop-file-context pkg-build)))))
+            (compile-nmsp ^ProvidedNamespace [^String ns-str ^map provided-ns]
+              (let [capstone (emit-nmsp ns-str provided-ns)
+                    globals (publics/import-globals loader all-pns capstone)
+                    req-strs (publics/require-strings loader capstone)]
+                (ProvidedNamespace. ns-str globals req-strs capstone
+                                    (publics/insn-force-clinit capstone))))
+            (import-nmsp ^ProvidedNamespace [^String ns-str ^Class capstone]
+              (let [req-strs (publics/require-strings loader capstone)]
+                (.require-namespaces* this req-strs nil)
+                (let [globals (publics/import-globals loader all-pns capstone)]
+                  (ProvidedNamespace. ns-str globals req-strs capstone
+                                      (publics/insn-force-clinit capstone)))))]
       
-      (let [a (new ProvidedNamespace/1 (alength ns-strs))
-            known-ns' (cond-> known-ns
-                        (some? pn-core) (assoc cfg/core-lib pn-core))]
-        (dotimes [i (alength a)]
+      (let [provided-ns (cond-> all-pns
+                          (some? pn-core) (assoc cfg/core-lib pn-core))]
+        (dotimes [i (alength ns-strs)]
           (let [ns-str (aget ns-strs i)]
-            (->> (or (some-> apn-known (aget i))
-                     (known-ns ns-str)
-                     (when-some [known-ns* (publics/import-from-class-loader
-                                            (.dyn-ld loader) (.rt-lookup loader)
-                                            known-ns ns-str)]
-                       (set! known-ns known-ns*)
-                       (.valAt known-ns* ns-str nil))
-                     (let [pn (compile-nmsp ns-str known-ns')]
-                       (set! known-ns (assoc known-ns ns-str pn))
-                       pn))
-                 (aset a i ))))
-        a))))
+            (when-not (contains? all-pns ns-str)
+              (when (cfg/core-lib? ns-str) ;prevent cyclic import of core lib
+                (set! all-pns (assoc all-pns ns-str nil)))
+              (let [pn (if-some [cl (publics/try-load-capstone loader ns-str)]
+                         (import-nmsp ns-str cl)
+                         (compile-nmsp ns-str provided-ns))]
+                (set! all-pns (assoc all-pns ns-str pn)))))))
+      all-pns)))
 
 (defn mk-universe ^NamespaceProvider [^map reader-map ^Loader loader
                                       ^map provided-ns]

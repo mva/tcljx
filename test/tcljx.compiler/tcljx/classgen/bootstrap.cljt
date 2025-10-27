@@ -37,10 +37,12 @@
 (type/fixup-runtime-types! rt-lookup)
 
 (defn mk-universe ^NamespaceProvider [^map reader-map ^Loader loader]
-  (let [pn-primitive (ProvidedNamespace. cfg/primitive-ns-str
+  (let [empty-req-strs (new String/1 0)
+        pn-primitive (ProvidedNamespace. cfg/primitive-ns-str
                                          primitive/primitive-nmsp-globals
-                                         nil insn/insn-empty)
-        pn-core (ProvidedNamespace. cfg/core-lib {} nil insn/insn-empty)
+                                         empty-req-strs nil insn/insn-empty)
+        pn-core (ProvidedNamespace. cfg/core-lib {} empty-req-strs
+                                    nil insn/insn-empty)
         provided-ns {cfg/primitive-ns-str pn-primitive
                      cfg/core-lib pn-core}]
     (universe/mk-universe reader-map loader
@@ -101,13 +103,11 @@
          ns-forms-seq (split-at-ns formv)]
      
      (let [ns-strs (->> (map nmsp-name-of ns-forms-seq)
-                        ^String/1 (into-array String))
-           nmsps (-> (into {} (map (juxt nmsp-name-of mk-reader-stub))
-                           ns-forms-seq)
-                     (mk-universe loader)
-                     (.require-namespaces* ns-strs nil nil))]
-       (dotimes [i (alength nmsps)]
-         (assert (some? (aget nmsps i)))))
+                        ^String/1 (into-array String))]
+       (-> (into {} (map (juxt nmsp-name-of mk-reader-stub))
+                 ns-forms-seq)
+           (mk-universe loader)
+           (.require-namespaces* ns-strs nil)))
      
      (->> (sort-by key (seq !render-to))
           (mapv (comp vec val))))))

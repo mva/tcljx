@@ -136,6 +136,13 @@ $(STAGE1_MINFO_CORE): $(STAGE1_MINFO_RT) $(TCLJX_SOURCE_CORE) $(STAGE0_MDIR)/DON
 	$(COMPILER_STAGE0) -d "$(dir $@)" -s src/tcljx.core clojure.core.all
 	$(BUILD_JAVAC) -p $(dir $<) -d "$(dir $@)" src/tcljx.core/module-info.java
 
+STAGE1_MINFO_COMPILER=$(STAGE1_MDIR)/tcljx.compiler/module-info.class
+$(STAGE1_MINFO_COMPILER): $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_COMPILER)
+	@echo; echo "### $(dir $@)"
+	@rm -rf "$(dir $@)"
+	$(COMPILER_STAGE0) -d "$(dir $@)" -s $(dir $(STAGE1_MINFO_CORE)) -s src/tcljx.compiler $(TCLJX_MAIN_NS)
+	$(BUILD_JAVAC) -p $(dir $<) -d "$(dir $@)" src/tcljx.compiler/module-info.java
+
 $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm: $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_RTIOW)
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
@@ -145,4 +152,5 @@ $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm: $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_RTIOW)
 
 stage0-mdir: $(STAGE0_MDIR)/DONE
 stage1-core: $(STAGE1_MINFO_CORE)
+stage1-compiler: $(STAGE1_MINFO_COMPILER)
 stage1-rtiow: $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm

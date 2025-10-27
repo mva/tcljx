@@ -365,8 +365,8 @@
 
 ;;; ------------------------------------------------------------------------
 
-(deftype ProvidedNamespace [^String ns-str ^map globals ^Class capstone
-                            ^Expr force-clinit]
+(deftype ProvidedNamespace [^String ns-str ^map globals ^String/1 require-strs
+                            ^Class capstone ^Expr force-clinit]
   java.lang.Record)
 
 ;;; Provides access to source files that make up the namespace.  Keeps
@@ -378,13 +378,10 @@
 
 (definterface NamespaceProvider
   ;; Resolves and compiles the namespace names in `ns-strs`.  Returns
-  ;; an instance of `ProvidedNamespace` in the corresponding element
-  ;; of (a copy of) `apn-known`, or an element of value nil if the
-  ;; namespace name could not be resolved.  `pn-core` is added to the
-  ;; `known-ns` map of the required(!) namespaces.
-  (require-namespaces* ^ProvidedNamespace/1 [^String/1 ns-strs
-                                             ^ProvidedNamespace/1 apn-known
-                                             ^ProvidedNamespace pn-core])
+  ;; a map of all currently existing namespaces on completion.
+  ;; `pn-core` is added to the `known-ns` map of the required(!)
+  ;; namespaces.
+  (require-namespaces* ^map [^String/1 ns-strs ^ProvidedNamespace pn-core])
 
   ;; Adds the namespace represented by the given capstone class to the
   ;; map of known namespaces.  Transitively adds any required
@@ -437,7 +434,7 @@
   
   (process-init-form ^NamespaceBuilder [^FormReader rdr ^long fctx form])
 
-  (finish ^ProvidedNamespace [^FormReader rdr])
+  (finish ^Class [^FormReader rdr])
   (commit-segment ^NamespaceBuilder [^FormReader rdr])
   (commit-segment-and-revert ^void [^FormReader rdr ^int end-of-segment
                                     ^map then-globals ^map then-imports]))

@@ -40,7 +40,7 @@
         
         pn-primitive (ProvidedNamespace. cfg/primitive-ns-str
                                          primitive/primitive-nmsp-globals
-                                         nil insn/insn-empty)
+                                         (new String/1 0) nil insn/insn-empty)
         provided-ns {cfg/primitive-ns-str pn-primitive}
 
         ;; All namespaces required by clojure.core are part of cyclic
@@ -48,10 +48,11 @@
         ;; the cycle.  So *always* require it first, to prevent the
         ;; other namespaces from entering the cycle.
         preload-ns-strs (doto (new String/1 1) (aset 0 cfg/core-lib))
-        apn (-> (doto (universe/mk-universe nil loader provided-ns)
-                  (.require-namespaces* preload-ns-strs nil nil))
-                (.require-namespaces* (options/target-ns-strs opts) nil nil))]
-    (into {} (map (juxt ProvidedNamespace/.ns-str identity)) apn)))
+        ns-strs (options/target-ns-strs opts)
+        all-pns (-> (doto (universe/mk-universe nil loader provided-ns)
+                      (.require-namespaces* preload-ns-strs nil))
+                    (.require-namespaces* ns-strs nil))]
+    (into {} (map (juxt identity all-pns)) ns-strs)))
 
 (defn run ^boolean [^Options opts]
   (options/print-options opts)
