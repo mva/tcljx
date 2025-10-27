@@ -24,20 +24,12 @@
                   NmspClass NamespaceBuilder Require
                   Expr Entity ExprFactory EntityFactory Parser)
    (tcljx.classgen.classfile Loader PackageBuilder)
-   (tcljx.classgen.segment Segment SegmentBuilder)
+   (tcljx.classgen.segment CodePromise Segment SegmentBuilder)
    (tcljx.classgen.insn Insn)
    (java.lang.classfile ClassFile ClassBuilder CodeBuilder)
-   (java.lang.invoke MethodType MethodHandle MethodHandles)
+   (java.lang.invoke MethodHandle)
    (java.nio.file Path)
    (java.util ArrayList HashSet)))
-
-(def ^:private mt-Class-bytes (MethodType/methodType Class byte/1))
-(defn- get-ephemeral-factory ^MethodHandle [^PackageBuilder pkg-build]
-  (let [ld (-> pkg-build .lookup-in-pkg .lookupClass .getClassLoader
-               (classfile/class-loader-instance "tclj-eph" nil))]
-    (-> (MethodHandles/lookup)
-        (.findVirtual (class ld) "ephemeralClass" mt-Class-bytes)
-        (.bindTo ld))))
 
 (defn- add-required-globals ^map [^map globals ^Require require ^map other]
   (let [rename (or (.rename-strs require) {})
@@ -74,15 +66,15 @@
                       ^:unsynchronized-mutable ^map ns-alias
                       ^:unsynchronized-mutable ^map imports
                       ^HashSet require-strs ;implicitly mutable
-                      ^MethodHandle apply-mh
+                      ^MethodHandle apply-macro-mh
                       ^:unsynchronized-mutable ^MethodHandle ephemeral-of]
   Resolver
   (ns-str [_]
     (.pkg-name segment))
   (expand-macro [this macro form]
-    (let [f (.runtime-value macro this)]
-      (if (some? apply-mh)
-        (macro/apply-macro-mapped apply-mh f form nil)
+    (let [f (.runtime-value ^CodePromise macro pkg-build)]
+      (if (some? apply-macro-mh)
+        (macro/apply-macro-mapped apply-macro-mh f form nil)
         (macro/apply-macro-direct f form nil))))
   (globals [_]                       ;only call from namespace thread!
     globals)
@@ -95,29 +87,16 @@
     (when (some? (.valAt globals nm nil))
       (symbol (.ns-str this) nm)))
   (lookup-class [_ nm]
-    (or
-     (.valAt imports nm nil)
-     (when-some [cl (resolve/class-for-name (.lookup-in-pkg pkg-build) nm)]
-       (set! imports (assoc imports nm cl))
-       cl)))
+    (or (.valAt imports nm nil)
+        (when-some [cl (.class-for-name pkg-build nm)]
+          (set! imports (assoc imports nm cl))
+          cl)))
   (lookup-def [this nmsp nm]
     (if (or (nil? nmsp) (= nmsp (.ns-str this)))
       (.valAt globals nm nil)
       (when-some [nmsp* (.lookup-namespace this nmsp)]
         (when-some [pn ^ProvidedNamespace (.valAt known-ns nmsp* nil)]
           (.valAt (.globals pn) nm nil)))))
-  (get-static-field [_ owner mangled-name value-type-exact]
-    (let [l (.lookup-in-pkg pkg-build)
-          owner* (.resolveConstantDesc owner l)
-          type* (.resolveConstantDesc value-type-exact l)]
-      (.invoke (->> type*
-                    (.findStaticGetter l owner* mangled-name)))))
-  (get-static-method [_ owner mangled-name value-type-exact]
-    (let [l (.lookup-in-pkg pkg-build)
-          owner* (.resolveConstantDesc owner l)
-          type* (.resolveConstantDesc value-type-exact l)]
-      (.invoke (->> (MethodType/methodType type*)
-                    (.findStatic l owner* mangled-name)))))
   
   (import-class [_ class]
     (set! imports (-> imports
@@ -125,7 +104,7 @@
                       (assoc (resolve/imported-long-name class) class))))
   (ephemeral-factory [_]
     (or ephemeral-of
-        (set! ephemeral-of (get-ephemeral-factory pkg-build))))
+        (set! ephemeral-of (.ephemeral-factory pkg-build))))
   
   NamespaceBuilder
   (universe [_]
@@ -312,11 +291,10 @@
                               primitive/primitive-nmsp-globals
                               (publics/initial-globals ns-str))
                     imports (resolve/predefined-imports (.rt-lookup loader))
-                    apply-mh (classfile/get-apply-mh (.rt-lookup loader))
                     require-strs (HashSet.)]
                 (NmspBuilder. this xf etf segment pkg-build
                               globals known-ns ns-alias imports
-                              require-strs apply-mh nil)))
+                              require-strs (.apply-macro-mh loader) nil)))
             (emit-nmsp ^Class [^String ns-str ^map provided-ns]
               (let [rdr (mk-nmsp-reader ns-str)
                     pkg-build (classfile/mk-package-builder loader ns-str)]

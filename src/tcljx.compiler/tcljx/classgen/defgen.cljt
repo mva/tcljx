@@ -80,8 +80,8 @@
                 (when (some? ann-elem) (.with fb ann-elem)))
                (.withField cb mnm (.value-type-exact this))))
          (.add-elements sb)))
-  (runtime-value [this rsv]
-    (.get-static-field rsv owner mnm (.value-type-exact this))))
+  (runtime-value [this pkg-build]
+    (.get-static-field pkg-build owner mnm (.value-type-exact this))))
 (defn- promise-field ^CodePromise [^int entity-id ^int flags ^ClassDesc owner
                                    ^String nm ^Class tp ^CodeEmitter init-ce]
   (assert (some? init-ce))
@@ -130,8 +130,8 @@
                (.withMethod cb mnm (MethodTypeDesc/of (.value-type-exact this))
                             flags)))
          (.add-elements sb)))
-  (runtime-value [this rsv]
-    (.get-static-method rsv owner mnm (.value-type-exact this))))
+  (runtime-value [this pkg-build]
+    (.get-static-method pkg-build owner mnm (.value-type-exact this))))
 (defn- promise-method ^CodePromise [^int entity-id ^boolean private?
                                     ^ClassDesc owner ^String nm ^Class tp
                                     ^Entity init-ce]
@@ -183,9 +183,9 @@
                 (promise-field entity-id flags owner nm tp ce*)))]
       (set! __entity (-> p .expr-of .emitter))
       (.generate-and-deliver p sb env-factory ann-elem)))
-  (runtime-value [_ rsv]
+  (runtime-value [_ pkg-build]
     (if (some? __entity)
-      (.runtime-value __entity rsv)
+      (.runtime-value ^CodePromise __entity pkg-build)
       (throw (tcljx.data.ir.ImplementationUnavailableException.)))))
 
 (defn promise-def-mutable ^CodePromise [^int entity-id ^boolean private?
@@ -258,14 +258,6 @@
     ir/invoke-methods-dynamic)
   (namespace-if-def [_]
     (.namespace-if-def dimm))
-  (runtime-value [this rsv]
-    (if (some? __runtime-value)         ;only caches non-nil values
-      __runtime-value
-      (let [x (try ;use let to have an empty operand stack for the try
-                (.runtime-value dimm rsv)
-                (catch java.lang.ReflectiveOperationException _
-                  (throw (tcljx.data.ir.ImplementationUnavailableException.))))]
-        (set! __runtime-value x))))
   
   BindableEntity
   (binding-mode-let [_]
@@ -280,7 +272,15 @@
     nil)
   (generate-and-deliver [this sb env-factory _]
     (.generate-and-deliver ^CodePromise dimm sb env-factory
-                           (annotation-macro fq-value))))
+                           (annotation-macro fq-value)))
+  (runtime-value [this pkg-build]
+    (if (some? __runtime-value)         ;only caches non-nil values
+      __runtime-value
+      (let [x (try ;use let to have an empty operand stack for the try
+                (.runtime-value ^CodePromise dimm pkg-build)
+                (catch java.lang.ReflectiveOperationException _
+                  (throw (tcljx.data.ir.ImplementationUnavailableException.))))]
+        (set! __runtime-value x)))))
 
 (defn promise-def-macro ^CodePromise [^boolean private? ^ClassDesc owner
                                       ^String nm ^Insn init
@@ -343,7 +343,7 @@
                         (Signature/parseFrom)
                         (SignatureAttribute/of))]
       (.generate-and-deliver df sb env-factory signature)))
-  (runtime-value [this rsv]
+  (runtime-value [this pkg-build]
     (throw (IllegalStateException.))))
 
 (defn promise-def-var ^DefVarDeref [^boolean private?

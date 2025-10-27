@@ -1,6 +1,8 @@
 (ns tcljx.classgen.segment
-  (:require (tcljx.data [ir :as ir]))
+  (:require (tcljx.data [ir :as ir])
+            (tcljx.classgen classfile))
   (:import (tcljx.data.ir CodeEmitter Entity Expr MethodSpec NmspClass)
+           (tcljx.classgen.classfile PackageBuilder)
            (java.lang.classfile ClassFileElement)
            (java.lang.constant ClassDesc ConstantDescs)
            (java.util List ArrayList HashMap)
@@ -79,7 +81,8 @@
   (env-to-display ^HashMap [])      ;entities that methods closed over
   (!nested-parts ^ArrayList []) ;of CodePromises, nil if lacking methods
   (generate-and-deliver ^void [^SegmentBuilder sb ^EnvFactory env-factory
-                               ^ClassFileElement ann-elem]))
+                               ^ClassFileElement ann-elem])
+  (runtime-value ^Object [^PackageBuilder pkg-build]))
 
 ;;; ------------------------------------------------------------------------
 

@@ -69,8 +69,8 @@
         urls (into-array URL (map files/path-url class-paths))]
     (URLClassLoader. "tclj-app" urls parent-ld)))
 
-(defn class-loader-instance ^URLClassLoader [^ClassLoader parent ^String name
-                                             source-paths]
+(defn- class-loader-instance ^URLClassLoader [^ClassLoader parent ^String name
+                                              source-paths]
   (let [dyn-cl-class (.loadClass parent "tinyclj.lang.DynamicClassLoader")
         c (.getConstructor dyn-cl-class String URL/1 ClassLoader)
         urls (->> source-paths (map files/path-url) (distinct) (into-array URL))]
@@ -96,7 +96,18 @@
                  ;; support for tcljx.classgen.publics:
                  ^MethodHandles$Lookup public-lookup
                  ^MethodHandle mh-public-def-info
-                 ^MethodHandle mh-fn-arities])
+                 ^MethodHandle mh-fn-arities
+
+                 ;; support for macro-expand:
+                 ^MethodHandle apply-macro-mh])
+
+(defn- get-apply-macro ^MethodHandle [^MethodHandles$Lookup rt-lookup]
+  (let [compiler-rt-witness tinyclj.lang.StaticFn
+        app-rt-witness (.resolveConstantDesc rt/StaticFn rt-lookup)
+        shared-runtime? (identical? compiler-rt-witness app-rt-witness)]
+    (if shared-runtime?
+      nil                            ;can use macro/apply-macro-direct
+      (.resolveConstantDesc rt/mhd-applyMacroMapped rt-lookup))))
 
 ;;; If a non-nil `dest-dir` is provided, then class files will be
 ;;; written to this directory.  If a non-nil `class-sink` is provided,
@@ -112,19 +123,57 @@
    (let [rt-lookup (get-rt-lookup app-ld)]
      (Loader. dest-dir app-ld dyn-ld rt-lookup class-sink
               (ClassHierarchyResolver/ofResourceParsing dyn-ld)
+              
               (MethodHandles/publicLookup)
               (.resolveConstantDesc rt/mhd-publicDefInfo rt-lookup)
-              (.resolveConstantDesc rt/mhd-arityHandlesIfFn rt-lookup)))))
+              (.resolveConstantDesc rt/mhd-arityHandlesIfFn rt-lookup)
+              (get-apply-macro rt-lookup)))))
 
+(definterface IPackageBuilder
+  (class-for-name ^Class [^String nm])
+  (ephemeral-factory ^MethodHandle [])
+  (get-static-field ^Object [^ClassDesc owner ^String name
+                             ^ClassDesc value-type-exact])
+  (get-static-method ^Object [^ClassDesc owner ^String name
+                              ^ClassDesc value-type-exact]))
+
+(def ^:private mt-Class-bytes (MethodType/methodType Class byte/1))
 (deftype PackageBuilder [^Path pkg-dir
                          ^MethodHandles$Lookup lookup-in-pkg
                          ^Consumer class-sink
                          ^ClassHierarchyResolver chr-from-file
                          ^ConcurrentHashMap chr-class-map]
+  IPackageBuilder
+  (class-for-name [_ nm]
+    (when (pos? (.indexOf nm (int \.))) ;format must be pkgName.className
+      (try
+        (.resolveConstantDesc (ClassDesc/of nm) lookup-in-pkg)
+        (catch ClassNotFoundException _
+          nil))))  
+  (ephemeral-factory [_]
+    (let [ld (-> lookup-in-pkg .lookupClass .getClassLoader
+                 (class-loader-instance "tclj-eph" nil))]
+      (-> (MethodHandles/lookup)
+          (.findVirtual (class ld) "ephemeralClass" mt-Class-bytes)
+          (.bindTo ld))))
+  (get-static-field [_ owner mangled-name value-type-exact]
+    (let [owner* (.resolveConstantDesc owner lookup-in-pkg)
+          type* (.resolveConstantDesc value-type-exact lookup-in-pkg)]
+      (.invoke (->> type*
+                    (.findStaticGetter lookup-in-pkg owner* mangled-name)))))
+  (get-static-method [_ owner mangled-name value-type-exact]
+    (let [owner* (.resolveConstantDesc owner lookup-in-pkg)
+          type* (.resolveConstantDesc value-type-exact lookup-in-pkg)]
+      (.invoke (->> (MethodType/methodType type*)
+                    (.findStatic lookup-in-pkg owner* mangled-name)))))
+  
   ClassHierarchyResolver
   (getClassInfo [_ class-desc]
     (or (.get chr-class-map class-desc)
         (.getClassInfo chr-from-file class-desc))))
+
+(def pkg-build-public (PackageBuilder. nil (MethodHandles/publicLookup)
+                                       nil nil nil))
 
 (defn- mk-lookup-in-pkg ^MethodHandles$Lookup [^MethodHandles$Lookup rt-lookup
                                                ^ClassLoader dyn-ld
@@ -144,14 +193,6 @@
         mt (MethodType/methodType MethodHandles$Lookup byte/1)
         mh (.findVirtual rt-lookup (class dyn-ld) "lookupInPackage" mt)]
     ^MethodHandles$Lookup (.invokeExact (.bindTo mh dyn-ld) bs)))
-
-(defn get-apply-mh ^MethodHandle [^MethodHandles$Lookup rt-lookup]
-  (let [compiler-rt-witness tinyclj.lang.StaticFn
-        app-rt-witness (.resolveConstantDesc rt/StaticFn rt-lookup)
-        shared-runtime? (identical? compiler-rt-witness app-rt-witness)]
-    (if shared-runtime?
-      nil                            ;can use macro/apply-macro-direct
-      (.resolveConstantDesc rt/mhd-applyMacroMapped rt-lookup))))
 
 ;;; Coordinates cross cutting concerns for building and defining
 ;;; classes.  For the Class-File API it provides the class hierarchy

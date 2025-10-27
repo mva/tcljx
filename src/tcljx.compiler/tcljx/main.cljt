@@ -70,6 +70,6 @@
                                   (Optional/empty)
                                   (let [known-ns (.get ^Optional opt-known-ns)]
                                     (-> (invoke/namespace-of known-ns var-name)
-                                        (invoke/var-value var-name)
+                                        (invoke/def-value var-name)
                                         (Optional/of))))))]
     (tclj1/run opts on-completion)))

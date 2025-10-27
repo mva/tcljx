@@ -8,49 +8,32 @@
 (ns tcljx.main.invoke
   (:require
    (tcljx.data [config :as cfg][wrong :as wrong] [type :as type] ir)
-   (tcljx.classgen [runtime :as rt])
+   (tcljx.classgen [runtime :as rt] [classfile :as classfile] segment)
    (tcljx.main [options :as options])
    [tcljx.alpha.ptest__style :as style])
   (:import
    (tcljx.data.ir Entity Resolver ProvidedNamespace)
+   (tcljx.classgen.classfile PackageBuilder)
+   (tcljx.classgen.segment CodePromise)
    (tcljx.main.options Options)
    (java.lang.invoke MethodType MethodHandle MethodHandles MethodHandles$Lookup)))
-
-(deftype ResolverStub [^MethodHandles$Lookup lookup-in-pkg]
-  Resolver
-  (get-static-field [_ owner mangled-name value-type-exact]
-    (let [owner* (.resolveConstantDesc owner lookup-in-pkg)
-          type* (.resolveConstantDesc value-type-exact lookup-in-pkg)]
-      (.invoke (->> type*
-                    (.findStaticGetter lookup-in-pkg owner* mangled-name)))))
-  (get-static-method [_ owner mangled-name value-type-exact]
-    (let [owner* (.resolveConstantDesc owner lookup-in-pkg)
-          type* (.resolveConstantDesc value-type-exact lookup-in-pkg)]
-      (.invoke (->> (MethodType/methodType type*)
-                    (.findStatic lookup-in-pkg owner* mangled-name))))))
-
-(defn- resolver-for ^ResolverStub [^ProvidedNamespace pn]
-  (ResolverStub. (.in (MethodHandles/publicLookup) (.capstone pn))))
 
 (defn namespace-of ^ProvidedNamespace [^map known-ns ^symbol var-name]
   (or ^ProvidedNamespace (get known-ns (namespace var-name))
       (wrong/other (str "[namespace] no such namespace: "
                         (wrong/q (namespace var-name))))))
 
-(defn var-value
-  (^Object [^ProvidedNamespace pn ^symbol var-name]
-   (var-value (resolver-for pn) pn var-name))
-  (^Object [^Resolver rsv ^ProvidedNamespace pn ^symbol var-name]
-   (if-some [ent (-> (get (.globals pn) (namespace var-name))
-                     ^Entity (get (name var-name)))]
-     (.runtime-value ent rsv)
-     (wrong/other (str "[var-value] no public var " (wrong/q var-name))))))
+(defn def-value ^Object [^ProvidedNamespace pn ^symbol var-name]
+  (if-some [def (-> (get (.globals pn) (namespace var-name))
+                    ^CodePromise (get (name var-name)))]
+    (.runtime-value def classfile/pkg-build-public)
+    (wrong/other (str "[var-value] no public def " (wrong/q var-name)))))
 
 (defn- applicable ^MethodHandle [^map known-ns ^symbol fn-spec]
   (let [pn (namespace-of known-ns fn-spec)
-        rsv (resolver-for pn)
-        value (var-value rsv pn fn-spec)]
-    (.bindTo (.resolveConstantDesc rt/mhd-apply (.lookup-in-pkg rsv)) value)))
+        value (def-value pn fn-spec)
+        l (.lookup-in-pkg classfile/pkg-build-public)]
+    (.bindTo (.resolveConstantDesc rt/mhd-apply l) value)))
 
 (defn- result-style [^keyword res]
   (case res

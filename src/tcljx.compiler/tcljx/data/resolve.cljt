@@ -95,21 +95,6 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- maybe-class-name? ^boolean [^String nm] ;format must be pkgName.className
-  (pos? (.indexOf nm (int \.))))
-
-;; nil if no match
-(defn class-for-desc ^Class [^MethodHandles$Lookup l ^ClassDesc cld]
-  (try
-    (.resolveConstantDesc cld l)
-    (catch ClassNotFoundException _
-      nil)))
-(defn class-for-name ^Class [^MethodHandles$Lookup l ^String nm]
-  (when (maybe-class-name? nm)
-    (class-for-desc l (ClassDesc/of nm))))
-
-;;; ------------------------------------------------------------------------
-
 (defn- static-member?
   (^boolean [^Member m]
    (Modifier/isStatic (.getModifiers m)))

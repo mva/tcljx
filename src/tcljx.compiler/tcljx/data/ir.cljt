@@ -151,10 +151,6 @@
   ;; namespace `nmsp`, or nil if no such binding exists.  Use nil as
   ;; `nmsp` to refer to the current namespace.
   (lookup-def ^Entity [^String nmsp ^String nm])
-  (get-static-field ^Object [^ClassDesc owner ^String name
-                             ^ClassDesc value-type-exact])
-  (get-static-method ^Object [^ClassDesc owner ^String name
-                              ^ClassDesc value-type-exact])
   
   ;; pre: Called from namespace thread.
   (import-class ^void [^Class class])
@@ -202,9 +198,8 @@
 
   ;; Emits code taking one operand from the stack and overwriting the
   ;; entity's current value with it.
-  (emit-store ^CodeBuilder [^CodeBuilder xb])           ;optional
-  (emit-iinc ^CodeBuilder [^CodeBuilder xb ^int const]) ;optional
-  (runtime-value ^Object [^Resolver rsv])) ;only defined for defs
+  (emit-store ^CodeBuilder [^CodeBuilder xb])            ;optional
+  (emit-iinc ^CodeBuilder [^CodeBuilder xb ^int const])) ;optional
 
 ;;; Note: A function's AritySpec array is in source code order.
 (deftype AritySpec [^ArityType at ^seq body ^seq error-context])
