@@ -860,3 +860,33 @@
                         (nmsp '[(ns pkg.ns0)
                                 (def f (fn* f ^boolean []
                                             (def foo 123)))]))))
+
+(deftest cast-prevents-def-alias
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC FINAL] "objs" "[Ljava/lang/Object;")]
+            [(FIELD [PUBLIC STATIC FINAL] "a" "[Ljava/lang/Runnable;")]
+            [(FIELD [PUBLIC STATIC FINAL] "b" "[Ljava/lang/Runnable;")]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (ICONST_0)
+             (ANEWARRAY "Runnable[]")
+             (PUTSTATIC . "objs" "[Ljava/lang/Object;")
+             
+             (GETSTATIC . "objs" "[Ljava/lang/Object;")
+             (CHECKCAST "Runnable[]")
+             (PUTSTATIC . "a" "[Ljava/lang/Runnable;")
+             
+             (GETSTATIC . "objs" "[Ljava/lang/Object;")
+             (CHECKCAST "Runnable[]")
+             (PUTSTATIC . "b" "[Ljava/lang/Runnable;")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def objs ^Object/1 (new Runnable/1 0))
+                 (def a ^Runnable/1 objs)
+                 (def ^Runnable/1 b objs)]))))

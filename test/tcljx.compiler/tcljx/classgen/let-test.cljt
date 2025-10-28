@@ -584,3 +584,25 @@
                  (def foo (reify* []))
                  (let* [alias foo]
                    (fn* f ^boolean [] (identical? nil alias)))]))))
+
+(deftest cast-prevents-let-alias
+  (is (= '[["LOCAL 0: Object[] objs"]
+           (ALOAD_0)
+           (CHECKCAST "Runnable[]")
+           (ASTORE_1)
+           ["LOCAL 1: Runnable[] a"]
+           (ALOAD_1)
+           (ARETURN)]
+         (asm-expr [^Object/1 objs]
+                   (let* [a ^Runnable/1 objs]
+                     a))))
+  (is (= '[["LOCAL 0: Object[] objs"]
+           (ALOAD_0)
+           (CHECKCAST "Runnable[]")
+           (ASTORE_1)
+           ["LOCAL 1: Runnable[] a"]
+           (ALOAD_1)
+           (ARETURN)]
+         (asm-expr [^Object/1 objs]
+                   (let* [^Runnable/1 a objs]
+                     a)))))
