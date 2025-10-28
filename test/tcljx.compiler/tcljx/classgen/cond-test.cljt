@@ -227,6 +227,42 @@
          (asm-expr [^boolean x ^Object y]
                    (if x x y)))))
                  
+(deftest boolean-position-when
+  (is (= '[["LOCAL 0: boolean test?"]
+           (ILOAD_0)
+           (IFEQ L:0)
+           (ICONST_1) (IRETURN)
+           [L:0]
+           (ICONST_0) (IRETURN)]
+         (asm-expr ^boolean [^boolean test?]
+                   (if test? true))))
+  (is (= '[["LOCAL 0: boolean test?"]
+           (ILOAD_0)
+           (IFEQ L:0)
+           (ICONST_0) (IRETURN)
+           [L:0]
+           (ICONST_1) (IRETURN)]
+         (asm-expr ^boolean [^boolean test?]
+                   (if test? (do) true)))))
+
+(deftest integer-position-when
+  (is (= '[["LOCAL 0: boolean test?"]
+           (ILOAD_0)
+           (IFEQ L:0)
+           (ICONST_2) (IRETURN)
+           [L:0]
+           (ICONST_0) (IRETURN)]
+         (asm-expr ^int [^boolean test?]
+                   (if test? 2))))
+  (is (= '[["LOCAL 0: boolean test?"]
+           (ILOAD_0)
+           (IFEQ L:0)
+           (ICONST_0) (IRETURN)
+           [L:0]
+           (ICONST_2) (IRETURN)]
+         (asm-expr ^int [^boolean test?]
+                   (if test? (do) 2)))))
+
 (deftest if-let-independent-locals
   (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/FooClass"
                    nil "java/lang/Object" [IType])
@@ -760,3 +796,64 @@
            (IF_ACMPNE L:0) (ICONST_1) (IRETURN)
            [L:0] (ICONST_0) (IRETURN)]
          (asm-expr [x] (= x java.lang.String)))))
+
+(deftest polymorphic-invocation-provides-logical-truth
+  (is (= '[["LOCAL 0: Object pred"]
+           (ALOAD_0)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                          :bsm-invoke-fn [])
+           (INVOKESTATIC RT "booleanCast" "(Ljava/lang/Object;)Z")
+           (IFEQ L:0)
+           (ICONST_1)
+           (IRETURN)
+           [L:0]
+           (ICONST_0)
+           (IRETURN)]
+         (asm-expr [pred]
+                   (if (pred) true false))))
+
+  (is (= '[["LOCAL 0: ISeq s"]
+           ["LOCAL 1: Object pred"]
+           (ALOAD_0)
+           (IFNULL L:0)
+           (ALOAD_1)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;" :bsm-invoke-fn [])
+           (GOTO L:1)
+           [L:0]
+           (ALOAD_0)
+           [L:1]
+           (INVOKESTATIC RT "booleanCast" "(Ljava/lang/Object;)Z")
+           (IFEQ L:2)
+           (ICONST_1)
+           (IRETURN)
+           [L:2]
+           (ICONST_0)
+           (IRETURN)]
+         (asm-expr [^seq s pred] ;guard of outer if is unroll of (and s (pred))
+                   (if (if s (pred) s)
+                     true
+                     false))))
+
+  (is (= '[["LOCAL 0: boolean s"]
+           ["LOCAL 1: Object pred"]
+           (ILOAD_0)
+           (IFEQ L:0)
+           (ALOAD_1)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                          :bsm-invoke-fn [])
+           (INVOKESTATIC RT "booleanCast" "(Ljava/lang/Object;)Z")
+           (GOTO L:1)
+           [L:0]
+           (ILOAD_0)
+           [L:1]
+           (IFEQ L:2)
+           (ICONST_1)
+           (IRETURN)
+           [L:2]
+           (ICONST_0)
+           (IRETURN)]
+         (asm-expr [^boolean s pred]
+                   (if (if s (pred) s)
+                     true
+                     false)))))
+

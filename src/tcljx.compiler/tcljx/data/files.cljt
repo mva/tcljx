@@ -1,5 +1,4 @@
 (ns tcljx.data.files
-  (:require [tinyclj.string :as str])
   (:import
    (java.net URL)
    (java.nio.file Path Files)

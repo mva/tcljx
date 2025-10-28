@@ -171,12 +171,20 @@
                    atypes (fix-vararg-array! (insn/logical-types args))
                    mhe (.methodHandleEntry cpb rt/bsm-invoke-fn)
                    bsm (.bsmEntry cpb mhe (java.util.List/of))
-                   mtd (insn/mtd-of-fn-poly consumed-type f-tp atypes)
+                   mtd (-> (if (identical? Boolean/TYPE consumed-type)
+                             Object ;apply Clojure's idea of logical truth
+                             consumed-type)
+                           (insn/mtd-of-fn-poly f-tp atypes))
                    nat (.nameAndTypeEntry cpb ConstantDescs/DEFAULT_NAME mtd)]
                (when (emit/insn? xb fctx f-tp (.emitter f))
                  (when (emit/typed-insns? xb fctx atypes (.emitters args))
                    (-> (emit/with-line-number xb fctx)
                        (.invokedynamic (.invokeDynamicEntry cpb bsm nat)))
+                   (when (identical? Boolean/TYPE consumed-type)
+                     ;; FIXME... or introduce a marker type to
+                     ;; distinguish context "JVM boolean" from
+                     ;; context "Clojure logical truth"?
+                     (.invokestatic xb rt/ClojureRT "booleanCast" rt/mtd-boolean-Object))
                    consumed-type))))
             (insn/mk-insn type/polymorphic))
         (throw (insn/wr-type "called function's type does not implement `IFn`"

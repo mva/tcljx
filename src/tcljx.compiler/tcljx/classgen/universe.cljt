@@ -22,7 +22,7 @@
   (:import
    (tcljx.data.ir Resolver FormReader NamespaceProvider ProvidedNamespace
                   NmspClass NamespaceBuilder Require
-                  Expr Entity ExprFactory EntityFactory Parser)
+                  Expr Entity ImmediateEntity ExprFactory EntityFactory Parser)
    (tcljx.classgen.classfile Loader PackageBuilder)
    (tcljx.classgen.segment CodePromise Segment SegmentBuilder)
    (tcljx.classgen.insn Insn)
@@ -84,8 +84,9 @@
         ns-str
         (.valAt ns-alias alias nil))))
   (lookup-global-qname [this nm]
-    (when (some? (.valAt globals nm nil))
-      (symbol (.ns-str this) nm)))
+    (when-some [ent (.valAt globals nm nil)]
+      (-> (or (.namespace-if-def ^ImmediateEntity ent) (.ns-str this))
+          (symbol  nm))))
   (lookup-class [_ nm]
     (or (.valAt imports nm nil)
         (when-some [cl (.class-for-name pkg-build nm)]

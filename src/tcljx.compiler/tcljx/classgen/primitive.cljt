@@ -5,7 +5,7 @@
    (tcljx.classgen [classfile :as classfile] [constgen :as constgen]
                    [emit :as emit] [insn :as insn] [runtime :as rt]
                    [condgen :as condgen])
-   (tinyclj [string :as str]))
+   [tinyclj.string :as str])
   (:import
    (tcljx.data.type Wrapper)
    (tcljx.data.ir CodeEmitter Loadable Entity ImmediateEntity Constant)

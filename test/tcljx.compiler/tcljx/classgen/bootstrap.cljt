@@ -58,7 +58,9 @@
         (set! forms (next forms))
         form)))
   (with-source-file [_ cb]
-    cb))
+    cb)
+  (resource-url [_]
+    nil))
 (defn mk-reader-stub [forms]
   (ReaderStub. (seq forms)))
 

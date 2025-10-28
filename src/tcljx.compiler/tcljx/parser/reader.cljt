@@ -14,6 +14,7 @@
    (tcljx.data.wrong WrongInfo)
    (tinyclj.lang Literal)
    (clojure.lang IMapEntry IRecord Named)
+   (java.net URI URL)
    (java.nio.file Path)
    (java.util Arrays ArrayList)
    (java.util.regex Matcher Pattern PatternSyntaxException)))
@@ -958,16 +959,20 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- load-resource ^String [^ClassLoader app-ld ^Path path]
-  (prn :load-resource (str path))
+(defn- read-resource ^String [^URI ruri]
+  (prn :read-resource (str ruri))
+  (-> (.toURL ruri)
+      (.openStream)
+      (java.io.InputStreamReader.)
+      (.readAllAsString)))
+
+(defn- resource-uri ^URI [^ClassLoader app-ld ^Path path]
   (if-some [url (.getResource app-ld (.toString path))]
-    (-> (.openStream url)
-        (java.io.InputStreamReader.)
-        (.readAllAsString))
+    (.toURI url)
     (wrong/other (str "no such file " (wrong/q path)))))
 
 (deftype Reader [^FormBuilder fb ^:unsynchronized-mutable ^int pos
-                 ^ClassLoader app-ld ^Path path]
+                 ^ClassLoader app-ld ^URI ruri]
   FormReader
   (read [_ resolver]
     (if (neg? (set! pos (push-1 pos fb resolver)))
@@ -977,19 +982,23 @@
         form)))
   (resolve [_ path-str]
     (let [path' (if (.startsWith path-str "/")
-                  (java.nio.file.Path/of path-str)
-                  (-> path (.getParent) (.resolve path-str)))]
-      (-> (mk-form-builder (load-resource app-ld path'))
+                  (resource-uri app-ld (Path/of path-str))
+                  (.resolve ruri path-str))]
+      (-> (mk-form-builder (read-resource path'))
           (Reader. 0 app-ld path'))))
+  (resource-url [_]
+    (.toURL ruri))
   (with-source-file [_ cb]
-    (cond-> cb
-      (some? path)
-      (.with (java.lang.classfile.attribute.SourceFileAttribute/of
-              (-> path .getFileName .toString))))))
+    (when (some? ruri)
+      (let [path (.getPath ruri), i (.lastIndexOf path (int \/))]
+        (.with cb (java.lang.classfile.attribute.SourceFileAttribute/of
+                   (.substring path (inc i))))))
+    cb))
 (defn mk-reader
   (^FormReader [^String cs]
    (mk-reader cs nil nil))
   (^FormReader [^ClassLoader app-ld ^Path path]
-   (mk-reader (load-resource app-ld path) app-ld path))
-  (^FormReader [^String cs ^ClassLoader app-ld ^Path path]
-   (Reader. (mk-form-builder cs) 0 app-ld path)))
+   (let [ruri (resource-uri app-ld path)]
+     (mk-reader (read-resource ruri) app-ld ruri)))
+  (^FormReader [^String cs ^ClassLoader app-ld ^URI ruri]
+   (Reader. (mk-form-builder cs) 0 app-ld ruri)))

@@ -369,6 +369,7 @@
 (definterface FormReader
   (read ^Object [^Resolver resolver]) ;end of file is :tcljx.parser.reader/EOF
   (resolve ^FormReader [^String path-str])
+  (resource-url ^java.net.URL [])
   (with-source-file ^ClassBuilder [^ClassBuilder cb]))
 
 (definterface NamespaceProvider

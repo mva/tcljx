@@ -10,8 +10,7 @@
    (tcljx.data [config :as cfg] [files :as files] wrong [type :as type])
    (tcljx.classgen [classfile :as classfile] [insn :as insn]
                    [primitive :as primitive] [universe :as universe])
-   (tcljx.main [options :as options] [invoke :as invoke] [efmt :as efmt])
-   [tinyclj.string :as str])
+   (tcljx.main [options :as options] [invoke :as invoke] [efmt :as efmt]))
   (:import
    (tcljx.data.wrong WrongInfo)
    (tcljx.data.ir ProvidedNamespace)
@@ -19,7 +18,7 @@
    (java.nio.file Path Files)))
 
 (defn- class-file? ^boolean [^Path x]
-  (str/ends-with? (.toString x) files/class-suffix))
+  (.endsWith (.toString x) files/class-suffix))
 
 (defn wipe-dest-dir [^Options opts]     ;only deletes class files
   (when (.dest-dir opts)

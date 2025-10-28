@@ -7,8 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.data.wrong
   (:require (tcljx.data [meta :as meta] [type :as type])
-            [tcljx.alpha.ptest__style :as style]
-            [tinyclj.string :as str])
+            [tcljx.alpha.ptest__style :as style])
   (:import (clojure.lang Symbol Named)))
 
 ;;; Compilation errors raise an exception of type WrongInfo.  It
@@ -84,14 +83,14 @@
 (defn wr-info-line-number ^WrongInfo [msg form]
   (push-line-number (wr-info msg) (meta/line-of form)))
 
-;; ;;; Only assoc `k` to the exception's data if this key is not defined
-;; ;;; yet.  With exceptions decorated from the most to the least
-;; ;;; specific context, this is used to preserve the most specific
-;; ;;; information available.
-;; (defn assoc-if-new ^WrongInfo [^WrongInfo e k v]
-;;   (cond-> e
-;;     (not (contains? (wr-data e) k))
-;;     (update-wr-data assoc k v)))
+;;; Only assoc `k` to the exception's data if this key is not defined
+;;; yet.  With exceptions decorated from the most to the least
+;;; specific context, this is used to preserve the most specific
+;;; information available.
+(defn assoc-if-new ^WrongInfo [^WrongInfo e k v]
+  (cond-> e
+    (not (contains? (wr-data e) k))
+    (update-wr-data assoc k v)))
 
 ;; (defn assoc-dep-map ^WrongInfo [^Throwable t ^map dep-map]
 ;;   #_(.printStackTrace t)

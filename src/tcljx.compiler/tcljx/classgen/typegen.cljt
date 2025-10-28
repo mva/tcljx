@@ -4,7 +4,7 @@
                [type :as type] [ir :as ir] [code :as code])
    (tcljx.classgen segment [util :as util] [runtime :as rt] [emit :as emit]
                    [constgen :as constgen] [insn :as insn] [fnenv :as fnenv])
-   (tinyclj [string :as str]))
+   [tinyclj.string :as str])
   (:import
    (tcljx.data.ir CodeEmitter Entity MethodSpec FieldSpec NmspClass)
    (tcljx.classgen.insn Insn)

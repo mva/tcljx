@@ -199,10 +199,14 @@
               (.process-init-form nmsp rdr fctx form))))
 
         (parse-all ^NamespaceBuilder [^NamespaceBuilder nmsp ^FormReader rdr]
-          (loop [nmsp nmsp]
-            (let [form (.read rdr nmsp)]
-              (if (identical? :tcljx.parser.reader/EOF form)
-                nmsp
-                (recur (parse-top-level-form nmsp rdr form))))))]
+          (try
+            (loop [nmsp nmsp]
+              (let [form (.read rdr nmsp)]
+                (if (identical? :tcljx.parser.reader/EOF form)
+                  nmsp
+                  (recur (parse-top-level-form nmsp rdr form)))))
+            (catch tcljx.data.wrong.WrongInfo ex
+              (throw (wrong/assoc-if-new ex :file/resource-url
+                                         (.resource-url rdr))))))]
 
   (def parse-all parse-all))

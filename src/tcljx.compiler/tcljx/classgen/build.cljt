@@ -3,8 +3,7 @@
    (tcljx.data [config :as cfg] [files :as files] [type :as type]
                [context :as context] [ir :as ir] [resolve :as resolve])
    (tcljx.classgen [classfile :as classfile] [runtime :as rt] [util :as util]
-                   segment [emit :as emit] [insn :as insn] [fngen :as fngen])
-   [tinyclj.string :as str])
+                   segment [emit :as emit] [insn :as insn] [fngen :as fngen]))
   (:import
    (tcljx.data.ir CodeEmitter Entity MethodSpec NmspClass FormReader)
    (tcljx.classgen.classfile PackageBuilder)

@@ -43,7 +43,9 @@
   (invoke* [this fctx form _ m-idx xs]
     (.invoke* ^Entity init-ce fctx form this m-idx xs))
   (namespace-if-def [_]
-    (.packageName owner))
+    (if (identical? rt/ClojureRT owner)
+      cfg/core-lib ;predefined core def introduced by publics/initial-globals
+      (.packageName owner)))
   BindableEntity
   (binding-mode-let [_]
     (if (member/acc-final? flags)

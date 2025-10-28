@@ -63,7 +63,9 @@
                 (.labelBinding xb end-false)
                 (when (or return-t? return-f?)
                   consumed-type))))
-          (when (.emit-branch-on? branch xb true end-false) ;consumed-type: void
+
+          ;; here holds: consumed-type is `void`
+          (when (.emit-branch-on? branch xb true end-false)
             ;; FIXME... when-not to (list 'if test (list 'do) (cons 'do body))
             ;; FIXME... related: maybe if should require exactly 3 args?
             (emit/insn? xb fctx Void/TYPE if-false)
@@ -401,16 +403,18 @@
                         (recur candidate (inc i))
                         :else
                         (throw (info-incompatible-types)))))))))
-          (reference-type ^Class []
+          (reference-type ^Class [] ;pre: at least one type is reference
             (loop [candidate nil, i start]
               (if (>= i end)
                 (or candidate Object)
                 (let [tp (aget types i)]
                   (cond
+                    (type/polymorphic? tp)
+                    Object        ;may appear in logical-truth context
                     (or (type/poly-reference? tp)
                         (.isPrimitive tp)
                         (identical? candidate tp))
-                    (recur candidate (inc i)) ;implied if `tp` is polymorphic
+                    (recur candidate (inc i))
                     (nil? candidate)
                     (recur tp (inc i))
                     :else
@@ -425,24 +429,30 @@
 
 ;;; ------------------------------------------------------------------------
 
+(defn- boolean-cast ^Insn [^Insn arg]
+  (-> (resolve/static-method type/ClojureRT "booleanCast" Object)
+      (insn/invoke-runtime (insn/insns-of arg))))
+
 ;; Implements Clojure's idea of a "logically true" expression.
-(defn logical-truth ^Insn [^Insn arg ^long fctx]
+(defn logical-truth ^Insn [^Insn arg ^long fctx] ;FIXME... can drop fctx here?
   (let [arg-tp (insn/expr-type arg)]
     (cond
       (type/same? Boolean/TYPE arg-tp)
       arg                      ;identity if `arg` is primitive boolean
+
+      (type/polymorphic? arg-tp) ;void is polymorphic: must be conservative
+      (boolean-cast arg)
       
-      (.isPrimitive arg-tp)
-      ;; void is false, other non-boolean primitive types are true
-      (insn/prog2 arg (insn/insn-boolean (not (type/void? arg-tp))))
+      (.isPrimitive arg-tp) ;other non-boolean/non-void primitive types are true
+      (insn/prog2 arg insn/insn-true)
 
       ;; arg is reference; important: any nil value is logically false
       (constgen/entity-null? (.emitter arg)) ;argument is literal nil
       insn/insn-false
       
-      (.isAssignableFrom arg-tp Boolean) ;argument may be Boolean instance
-      (-> (resolve/static-method type/ClojureRT "booleanCast" Object)
-          (insn/invoke-runtime (insn/insns-of arg)))
+      (or (.isAssignableFrom arg-tp Boolean) ;argument may be Boolean instance
+          (type/poly-reference? arg-tp))
+      (boolean-cast arg)
       
       :else     ;any reference that is a non-Boolean subtype of Object
       (acmp arg insn/insn-null cmp-ne fctx))))

@@ -1,0 +1,153 @@
+diff -Nru src/tcljx.compiler/tcljx/alpha/ptest.cljt ../tcljx.compiler.patched/tcljx/alpha/ptest.cljt
+--- src/tcljx.compiler/tcljx/alpha/ptest.cljt	2025-10-21 15:21:33.117233530 +0200
++++ ../tcljx.compiler.patched/tcljx/alpha/ptest.cljt	2025-10-27 11:35:34.692155370 +0100
+@@ -42,7 +42,7 @@
+     (assert (some? line) "form of `is` macro has no :line meta")
+     `(when-some [~ctx (impl/is-context-if-selected ~line)]
+        ~(case (when (seq? form) (first form))
+-          (= tinyclj.core/= tinyclj.lang.primitive/equiv-nary)
++          (= clojure.core/= clojure.core.primitive/=)
+           `(impl/equiv-test ~ctx ~form)
+           
+           (thrown? tcljx.alpha.ptest/thrown?)
+@@ -65,7 +65,7 @@
+ (defn run-and-report ^keyword [^vector nmspv]
+   (let [rep (-> (impl/run-tests nmspv) (time))]
+     ;; Note: Print single string to avoid "failed to resolve runtime
+-    ;; fn tinyclj.core/isa?" error in some rare bootstrap scenarios.
++    ;; fn clojure.core/isa?" error in some rare bootstrap scenarios.
+     (println (str "\nRan " (.tests rep) " tests containing "
+                   (impl/is-count rep) " assertions."))
+     (println (str (.is-fail rep) " failures, " (.is-error rep) " errors."))
+diff -Nru src/tcljx.compiler/tcljx/alpha/textflow__pp.cljt ../tcljx.compiler.patched/tcljx/alpha/textflow__pp.cljt
+--- src/tcljx.compiler/tcljx/alpha/textflow__pp.cljt	2025-10-21 15:21:33.117233530 +0200
++++ ../tcljx.compiler.patched/tcljx/alpha/textflow__pp.cljt	2025-10-27 11:34:16.675129773 +0100
+@@ -8,9 +8,9 @@
+ (ns tcljx.alpha.textflow__pp
+   (:require [tcljx.alpha.textflow :as tf]
+             [tcljx.alpha.textflow__insn :as insn]
+-            [tinyclj.core.protocols :refer [datafy]])
++            [clojure.core.protocols :refer [datafy]])
+   (:import (tcljx.alpha.textflow Cursor BufferedCursor)
+-           (tinyclj.core.protocols Datafiable)
++           (clojure.core.protocols Datafiable)
+            (java.util Map$Entry)
+            (clojure.lang IMeta)
+            (java.util.function BiFunction IntUnaryOperator)
+diff -Nru src/tcljx.compiler/tcljx/classgen/primitive.cljt ../tcljx.compiler.patched/tcljx/classgen/primitive.cljt
+--- src/tcljx.compiler/tcljx/classgen/primitive.cljt	2025-10-27 11:45:37.462059332 +0100
++++ ../tcljx.compiler.patched/tcljx/classgen/primitive.cljt	2025-10-27 11:46:22.192644995 +0100
+@@ -5,7 +5,7 @@
+    (tcljx.classgen [classfile :as classfile] [constgen :as constgen]
+                    [emit :as emit] [insn :as insn] [runtime :as rt]
+                    [condgen :as condgen])
+-   [tinyclj.string :as str])
++   [clojure.string :as str])
+   (:import
+    (tcljx.data.type Wrapper)
+    (tcljx.data.ir CodeEmitter Loadable Entity ImmediateEntity Constant)
+diff -Nru src/tcljx.compiler/tcljx/classgen/publics.cljt ../tcljx.compiler.patched/tcljx/classgen/publics.cljt
+--- src/tcljx.compiler/tcljx/classgen/publics.cljt	2025-10-27 09:34:11.223172715 +0100
++++ ../tcljx.compiler.patched/tcljx/classgen/publics.cljt	2025-10-27 11:40:22.591933940 +0100
+@@ -6,7 +6,7 @@
+    (tcljx.classgen [runtime :as rt] classfile [segment :as segment]
+                    [insn :as insn] [constgen :as constgen] [defgen :as defgen]
+                    [fngen :as fngen])
+-   [tinyclj.string :as str])
++   [clojure.string :as str])
+   (:import
+    (tcljx.data.ir Entity ImmediateEntity ArityType MethodSpec ProvidedNamespace)
+    (tcljx.classgen.classfile Loader)
+diff -Nru src/tcljx.compiler/tcljx/classgen/typegen.cljt ../tcljx.compiler.patched/tcljx/classgen/typegen.cljt
+--- src/tcljx.compiler/tcljx/classgen/typegen.cljt	2025-10-27 11:45:05.838645223 +0100
++++ ../tcljx.compiler.patched/tcljx/classgen/typegen.cljt	2025-10-27 11:44:47.009398646 +0100
+@@ -4,7 +4,7 @@
+                [type :as type] [ir :as ir] [code :as code])
+    (tcljx.classgen segment [util :as util] [runtime :as rt] [emit :as emit]
+                    [constgen :as constgen] [insn :as insn] [fnenv :as fnenv])
+-   [tinyclj.string :as str])
++   [clojure.string :as str])
+   (:import
+    (tcljx.data.ir CodeEmitter Entity MethodSpec FieldSpec NmspClass)
+    (tcljx.classgen.insn Insn)
+diff -Nru src/tcljx.compiler/tcljx/data/config.cljt ../tcljx.compiler.patched/tcljx/data/config.cljt
+--- src/tcljx.compiler/tcljx/data/config.cljt	2025-10-23 09:22:09.332065720 +0200
++++ ../tcljx.compiler.patched/tcljx/data/config.cljt	2025-10-27 11:37:35.096736656 +0100
+@@ -7,7 +7,7 @@
+ ;; You must not remove this notice, or any other, from this software.
+ (ns tcljx.data.config
+   (:require
+-   [tinyclj.string :as str])
++   [clojure.string :as str])
+   (:import
+    (java.lang.classfile ClassFile ClassBuilder)
+    (java.lang.constant ClassDesc)))
+diff -Nru src/tcljx.compiler/tcljx/data/type.cljt ../tcljx.compiler.patched/tcljx/data/type.cljt
+--- src/tcljx.compiler/tcljx/data/type.cljt	2025-10-26 14:33:00.368188966 +0100
++++ ../tcljx.compiler.patched/tcljx/data/type.cljt	2025-10-27 11:36:55.192212780 +0100
+@@ -1,5 +1,5 @@
+ (ns tcljx.data.type
+-  (:require [tinyclj.core :as cc])
++  (:require [clojure.core :as cc])
+   (:import (java.lang.classfile CodeBuilder TypeKind)
+            (java.lang.constant ConstantDesc)
+            (java.lang.invoke MethodHandles$Lookup))
+diff -Nru src/tcljx.compiler/tcljx/main/efmt.cljt ../tcljx.compiler.patched/tcljx/main/efmt.cljt
+--- src/tcljx.compiler/tcljx/main/efmt.cljt	2025-10-21 15:21:33.281236323 +0200
++++ ../tcljx.compiler.patched/tcljx/main/efmt.cljt	2025-10-27 11:39:29.757241095 +0100
+@@ -9,7 +9,7 @@
+   (:require
+    (tcljx.data [wrong :as wrong])
+    [tcljx.alpha.ptest__style :as style]
+-   [tinyclj.string :as str])
++   [clojure.string :as str])
+   (:import
+    (tcljx.data.wrong WrongInfo)
+    (java.lang.constant ClassDesc ConstantDescs)
+diff -Nru src/tcljx.compiler/tcljx/main/options.cljt ../tcljx.compiler.patched/tcljx/main/options.cljt
+--- src/tcljx.compiler/tcljx/main/options.cljt	2025-10-25 17:20:38.186822962 +0200
++++ ../tcljx.compiler.patched/tcljx/main/options.cljt	2025-10-27 11:39:57.305602374 +0100
+@@ -8,7 +8,7 @@
+ (ns tcljx.main.options
+   (:require
+    (tcljx.data [config :as cfg] [files :as files])
+-   [tinyclj.string :as str])
++   [clojure.string :as str])
+   (:import
+    (java.nio.file Path Files)))
+ 
+diff -Nru src/tcljx.compiler/tcljx/main/watcher.cljt ../tcljx.compiler.patched/tcljx/main/watcher.cljt
+--- src/tcljx.compiler/tcljx/main/watcher.cljt	2025-10-21 15:21:33.270236136 +0200
++++ ../tcljx.compiler.patched/tcljx/main/watcher.cljt	2025-10-27 11:39:40.496381940 +0100
+@@ -7,7 +7,7 @@
+ ;; You must not remove this notice, or any other, from this software.
+ (ns tcljx.main.watcher
+   (:require (tcljx.data [files :as files])
+-            [tinyclj.string :as str])
++            [clojure.string :as str])
+   (:import (java.nio.file Path Paths FileSystems WatchService WatchKey
+                           WatchEvent StandardWatchEventKinds)
+            (java.util.concurrent TimeUnit)))
+diff -Nru src/tcljx.compiler/tcljx/parser/reader.cljt ../tcljx.compiler.patched/tcljx/parser/reader.cljt
+--- src/tcljx.compiler/tcljx/parser/reader.cljt	2025-10-24 16:23:44.571621128 +0200
++++ ../tcljx.compiler.patched/tcljx/parser/reader.cljt	2025-10-27 11:40:11.367786772 +0100
+@@ -8,7 +8,7 @@
+ (ns tcljx.parser.reader
+   (:require
+    (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong] [ir :as ir])
+-   [tinyclj.string :as str])
++   [clojure.string :as str])
+   (:import
+    (tcljx.data.ir Resolver FormReader)
+    (tcljx.data.wrong WrongInfo)
+diff -Nru src/tcljx.compiler/tcljx/parser/syntax.cljt ../tcljx.compiler.patched/tcljx/parser/syntax.cljt
+--- src/tcljx.compiler/tcljx/parser/syntax.cljt	2025-10-21 15:21:33.118233547 +0200
++++ ../tcljx.compiler.patched/tcljx/parser/syntax.cljt	2025-10-27 11:37:02.158304247 +0100
+@@ -1,6 +1,6 @@
+ (ns tcljx.parser.syntax
+   (:require (tcljx.data [config :as cfg] [wrong :as wrong])
+-            [tinyclj.core :as cc])
++            [clojure.core :as cc])
+   (:refer-clojure :exclude [vector list map symbol first second]))
+ 
+ (defn info
