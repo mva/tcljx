@@ -85,6 +85,7 @@ support/DONE: support/*.java
 
 COMPILER_BOOT=$(JAVA) -cp support TcljBoot
 COMPILER_STAGE0=$(BUILD_JAVA_ONCE) -cp support TcljStage0
+COMPILER_STAGE1=$(BUILD_JAVA_ONCE) -cp support TcljStage1
 
 TCLJX_SOURCE_RT := src/tcljx.rt/module-info.java \
   $(sort $(wildcard src/tcljx.rt/*/lang/*.java))
@@ -109,7 +110,7 @@ STAGE0_MDIR=$(TMP_USER)/tcljx-stage0.mdir-xpl
 
 # Note: Compilation of clojure.instant depends on module java.sql
 $(STAGE0_MDIR)/DONE: $(TCLJX_SOURCE_COMPILER) support/DONE
-	mkdir -p $(STAGE0_MDIR)
+	mkdir -p --mode 700 $(STAGE0_MDIR)
 # tcljc.rt / tcljc-rt.jar
 	cp -r $(BOOTSTRAP_MDIR)/tcljc.rt $(STAGE0_MDIR)
 # tcljc.core / tcljc-core.jar
@@ -120,16 +121,16 @@ $(STAGE0_MDIR)/DONE: $(TCLJX_SOURCE_COMPILER) support/DONE
 	touch $@
 
 # ------------------------------------------------------------------------
-# Use bootstrapped compiler to build modules for runtime, core
-# library, and compiler.  Build the module directories in
-# $(STAGE1_CLASSES).(rt|core|compiler).  Note: STAGE1_MDIR and
+# Use bootstrapped compiler to build modules for core library and
+# compiler.  Build the module directories in
+# $(STAGE1_MDIR).(rt|core|compiler).  Note: STAGE1_MDIR and
 # STAGE1_MINFO_RT must be defined before target `test` and
 # `watch-and-test`.
 
 $(STAGE1_MINFO_RT): $(TCLJX_SOURCE_RT)
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
-	mkdir -p --mode 700 "$(TMP_USER)" "$(dir $@)"
+	mkdir -p --mode 700 "$(dir $@)"
 	$(BUILD_JAVAC) -d "$(dir $@)" $^
 
 STAGE1_MINFO_CORE=$(STAGE1_MDIR)/tcljx.core/module-info.class
@@ -158,7 +159,32 @@ $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm: $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_RTIOW)
 	$(JAVA) -cp $(STAGE1_MDIR)/tcljx.rt:$(dir $<):$(STAGE1_MDIR)/tcljx.rtiow tcljx.classgen.rtiow-ref.___ >$@
 	@echo "3cf6c9b9f93edb0de2bc24015c610d78  $@" | md5sum -c -
 
+# ------------------------------------------------------------------------
+# Use stage1 compiler to build modules for core library and compiler.
+# Build the module directories in $(STAGE2_MDIR).(rt|core|compiler).
+
+STAGE2_MDIR=$(TMP_USER)/tcljx-stage2.mdir-xpl
+STAGE2_MINFO_RT=$(STAGE2_MDIR)/tcljx.rt/module-info.class
+
+$(STAGE2_MINFO_RT): $(STAGE1_MINFO_RT)
+	@echo; echo "### $(dir $@)"
+	@rm -rf "$(dir $@)"
+	mkdir  -p --mode 700 $(STAGE2_MDIR)
+	cp -r $(STAGE1_MDIR)/tcljx.rt $(STAGE2_MDIR)
+
+STAGE2_MINFO_CORE=$(STAGE2_MDIR)/tcljx.core/module-info.class
+$(STAGE2_MINFO_CORE): $(STAGE2_MINFO_RT) $(TCLJX_SOURCE_CORE) $(STAGE1_MINFO_COMPILER)
+	@echo; echo "### $(dir $@)"
+	@rm -rf "$(dir $@)"
+	$(COMPILER_STAGE1) -d "$(dir $@)" -s src/tcljx.core clojure.core.all
+	$(BUILD_JAVAC) -p $(STAGE2_MDIR) -d "$(dir $@)" src/tcljx.core/module-info.java
+
+##########################################################################
+
 stage0-mdir: $(STAGE0_MDIR)/DONE
+stage1-rt: $(STAGE1_MINFO_RT)
 stage1-core: $(STAGE1_MINFO_CORE)
 stage1-compiler: $(STAGE1_MINFO_COMPILER)
 stage1-rtiow: $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm
+stage2-rt: $(STAGE2_MINFO_RT)
+stage2-core: $(STAGE2_MINFO_CORE)

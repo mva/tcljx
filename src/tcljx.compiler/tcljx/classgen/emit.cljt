@@ -35,6 +35,7 @@
 (defn with-adaption-barrier ^CodeEmitter [^Class produced-type ^CodeEmitter ce]
   (^CodeEmitter fn [xb consumed-type then-leave?]
    (if (or (type/void? consumed-type)
+           (type/polymorphic? produced-type)
            (identical? produced-type consumed-type)
            (= (.isPrimitive produced-type) (.isPrimitive consumed-type)))
      (.emit-insn* ce xb consumed-type then-leave?)

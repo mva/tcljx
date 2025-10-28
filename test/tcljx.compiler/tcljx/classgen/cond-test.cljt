@@ -283,12 +283,14 @@
              (INVOKESPECIAL FooClass "<init>" "()V")
              (ASTORE_1)
              ["LOCAL 1: FooClass a"]
+             (ACONST_NULL)
              (GOTO L:2)
              
              [L:1]
              (GETSTATIC Boolean "TRUE" "Ljava/lang/Boolean;")
              (ASTORE_1)
              ["LOCAL 1: Boolean b"]
+             (ACONST_NULL)
              [L:2]
              (GOTO L:4)
 
@@ -296,7 +298,6 @@
              [L:3]
              (ATHROW)
              [L:4]
-             (ACONST_NULL)
              (ARETURN)]
             [(METHOD [PUBLIC STATIC FINAL] "if-let" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"

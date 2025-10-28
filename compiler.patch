@@ -3,8 +3,8 @@ diff -Nru src/tcljx.compiler/module-info.java ../tcljx.compiler.patched/module-i
 +++ ../tcljx.compiler.patched/module-info.java	2025-10-28 10:21:12.340250067 +0100
 @@ -1,5 +1,5 @@
   module tcljx.compiler {
--   requires /*transitive*/ tcljc.core;
-+   requires /*transitive*/ tcljx.core;
+-   requires transitive tcljc.core;
++   requires transitive tcljx.core;
  
     // exports tcljx.alpha.ptest__align;
     // exports tcljx.alpha.ptest;

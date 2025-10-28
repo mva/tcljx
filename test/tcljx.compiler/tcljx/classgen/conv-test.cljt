@@ -630,3 +630,122 @@
            (ICONST_0)
            (IRETURN)]
          (asm-expr [^boolean x] (if x 1)))))
+
+
+(deftest polymorphic-if-test
+  ;; as function result
+  (is (= '[["LOCAL 0: Object f"]
+           (ALOAD_0)
+           (IFNONNULL L:0)
+           (ALOAD_0)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                          :bsm-invoke-fn [])
+           (ARETURN)
+           [L:0]
+           (ALOAD_0)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                          :bsm-invoke-fn [])
+           (ARETURN)]
+         (asm-expr ^Object [^Object f]
+                   (if (identical? f nil)
+                     (f)
+                     (f)))))
+  ;; as let result
+  (is (= '[["LOCAL 0: Object f"]
+           (ALOAD_0)
+           (IFNONNULL L:0)
+           (ALOAD_0)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                          :bsm-invoke-fn [])
+           (ARETURN)
+           [L:0]
+           (ALOAD_0)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                          :bsm-invoke-fn [])
+           (ARETURN)]
+         (asm-expr ^Object [^Object f]
+                   (let* []
+                     (if (identical? f nil)
+                       (f)
+                       (f))))))
+  ;; as value of let binding
+  (is (= '[["LOCAL 0: Object f"]
+           (ALOAD_0)
+           (IFNONNULL L:0)
+           (ALOAD_0)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                          :bsm-invoke-fn [])
+           (GOTO L:1)
+           [L:0]
+           (ALOAD_0)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                          :bsm-invoke-fn [])
+           [L:1]
+           (ASTORE_1)
+           ["LOCAL 1: Object res"]
+           (ALOAD_1)
+           (ARETURN)]
+         (asm-expr ^Object [^Object f]
+                   (let* [res (if (identical? f nil)
+                                (f)
+                                (f))]
+                     res))))
+  ;; passed as fn argument
+  (is (= '[["LOCAL 0: Object f"]
+           (ALOAD_0)
+           (IFNONNULL L:0)
+           (ALOAD_0)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                          :bsm-invoke-fn [])
+           (GOTO L:1)
+           [L:0]
+           (ALOAD_0)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                          :bsm-invoke-fn [])
+           [L:1]
+           (INVOKESTATIC . "fn$fn~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+           (ARETURN)]
+         (asm-expr ^Object [^Object f]
+                   ((fn* [x] nil) (if (identical? f nil)
+                                    (f)
+                                    (f))))))
+  ;; as initialization of def
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(FIELD [PUBLIC STATIC VOLATILE] "f" "Ljava/lang/Object;")]
+            [(FIELD [PUBLIC STATIC FINAL] "x" "Ljava/lang/Object;")]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "fn~0" "()Ljava/lang/Object;")
+             (ACONST_NULL)
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "fn~0" "()Ljava/lang/Object;"]]])
+             (PUTSTATIC . "f" "Ljava/lang/Object;")
+             
+             (GETSTATIC . "f" "Ljava/lang/Object;")
+             (IFNONNULL L:0)
+             (GETSTATIC . "f" "Ljava/lang/Object;")
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                            :bsm-invoke-fn [])
+             (GOTO L:1)
+             [L:0]
+             (GETSTATIC . "f" "Ljava/lang/Object;")
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
+                            :bsm-invoke-fn [])
+             [L:1]
+             (PUTSTATIC . "x" "Ljava/lang/Object;")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1"
+                     "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def ^:redef f)
+                 (def f (fn* []))
+                 (def x (if (identical? f nil)
+                          (f)
+                          (f)))]))))
