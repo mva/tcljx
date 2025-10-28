@@ -35,7 +35,7 @@
 (defn of-finally ^long [^long fctx]
   (bit-and-not fctx flag-statm-position)) ;operand stack holds exception
 
-(def fctx-initial flag-statm-position)
+(def fctx-initial (bit-or 0l flag-statm-position))
 (def fctx-none 0l)           ;used as placeholder for "no line number"
 
 (def ^:private mask-line (dec (bit-shift-left 1l 32)))

@@ -188,7 +188,8 @@
                     Field (add-field! pb !unresolved m)
                     Method (add-method! pb !unresolved m)))
                 (if (= (.size !unresolved) (.size ms))
-                  (wrong/other (str "failed to resolve imported defs: "
+                  (wrong/other (str "failed to resolve imported defs (like a "
+                                    "public alias for private def): "
                                     (str/join " " (map Member/.getName ms))))
                   (recur !unresolved)))))
           (segment-into! ^void [^Class segment]
