@@ -580,7 +580,8 @@
   (get-virtual-field ^Expr [^long fctx ^Expr receiver ^String mnm])
   
   (instanceof-expr ^Expr [^long fctx ^Class type ^Expr arg])
-  (throw-expr ^Expr [^long fctx ^Expr arg]))
+  (throw-expr ^Expr [^long fctx ^Expr arg])
+  (monitor-expr ^Expr [^long fctx ^boolean enter? ^Expr lockee]))
 
 ;;; Note: Factory methods return nil if operation is not supported.
 (definterface Assignable
