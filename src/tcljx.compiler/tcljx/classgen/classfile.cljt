@@ -91,7 +91,6 @@
                  ^ClassLoader dyn-ld
                  ^MethodHandles$Lookup rt-lookup
                  ^Consumer class-sink
-                 ^ClassHierarchyResolver chr-from-file
 
                  ;; support for tcljx.classgen.publics:
                  ^MethodHandles$Lookup public-lookup
@@ -122,7 +121,6 @@
             ^Consumer class-sink]
    (let [rt-lookup (get-rt-lookup app-ld)]
      (Loader. dest-dir app-ld dyn-ld rt-lookup class-sink
-              (ClassHierarchyResolver/ofResourceParsing dyn-ld)
               
               (MethodHandles/publicLookup)
               (.resolveConstantDesc rt/mhd-publicDefInfo rt-lookup)
@@ -141,7 +139,6 @@
 (deftype PackageBuilder [^Path pkg-dir
                          ^MethodHandles$Lookup lookup-in-pkg
                          ^Consumer class-sink
-                         ^ClassHierarchyResolver chr-from-file
                          ^ConcurrentHashMap chr-class-map]
   IPackageBuilder
   (class-for-name [_ nm]
@@ -169,11 +166,20 @@
   
   ClassHierarchyResolver
   (getClassInfo [_ class-desc]
-    (or (.get chr-class-map class-desc)
-        (.getClassInfo chr-from-file class-desc))))
+    (letfn [(lookup-chi ^ClassHierarchyResolver$ClassHierarchyInfo []
+              (let [cl (.resolveConstantDesc class-desc lookup-in-pkg)]
+                (if (.isInterface cl)
+                  (ClassHierarchyResolver$ClassHierarchyInfo/ofInterface)
+                  (-> (when-some [super (.getSuperclass cl)]
+                        (.get (.describeConstable super)))
+                      (ClassHierarchyResolver$ClassHierarchyInfo/ofClass)))))]
+      (or (.get chr-class-map class-desc)
+          (let [chi (lookup-chi)]
+            (.put chr-class-map class-desc chi)
+            chi)))))
 
 (def pkg-build-public (PackageBuilder. nil (MethodHandles/publicLookup)
-                                       nil nil nil))
+                                       nil nil))
 
 (defn- mk-lookup-in-pkg ^MethodHandles$Lookup [^MethodHandles$Lookup rt-lookup
                                                ^ClassLoader dyn-ld
@@ -203,7 +209,7 @@
         lookup-in-pkg (mk-lookup-in-pkg (.rt-lookup loader) (.dyn-ld loader)
                                         ns-str)]
     (PackageBuilder. pkg-dir lookup-in-pkg (.class-sink loader)
-                     (.chr-from-file loader) (ConcurrentHashMap.))))
+                     (ConcurrentHashMap.))))
 
 (defn push-file-context ^void [^PackageBuilder pkg-build ^String ns-str]
   (-> (.resolveConstantDesc rt/mhd-pushFileContext (.lookup-in-pkg pkg-build))
