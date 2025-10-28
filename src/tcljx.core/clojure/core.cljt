@@ -1614,12 +1614,13 @@
   {:added "1.0"}
   [x & body]
   `(let [locklocal# ~x]
-     ((fn []    ;force empty operand stack and inlining of try/finally
-        (monitor-enter locklocal#)
-        (try
-          ~@body
-          (finally
-            (monitor-exit locklocal#)))))))
+     ;; FIXME... how to force empty operand stack and inlining of
+     ;; whole "monitor-enter followed by try/finally" sequence?
+     (monitor-enter locklocal#)
+     (try
+       ~@body
+       (finally
+         (monitor-exit locklocal#)))))
 
 (defmacro ..
   "form => fieldName-symbol or (instanceMethodName-symbol args*)
