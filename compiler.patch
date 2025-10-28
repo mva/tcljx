@@ -1,6 +1,16 @@
+diff -Nru src/tcljx.compiler/module-info.java ../tcljx.compiler.patched/module-info.java
+--- src/tcljx.compiler/module-info.java	2025-10-25 17:54:13.840624694 +0200
++++ ../tcljx.compiler.patched/module-info.java	2025-10-28 10:21:12.340250067 +0100
+@@ -1,5 +1,5 @@
+  module tcljx.compiler {
+-   requires /*transitive*/ tcljc.core;
++   requires /*transitive*/ tcljx.core;
+ 
+    // exports tcljx.alpha.ptest__align;
+    // exports tcljx.alpha.ptest;
 diff -Nru src/tcljx.compiler/tcljx/alpha/ptest.cljt ../tcljx.compiler.patched/tcljx/alpha/ptest.cljt
 --- src/tcljx.compiler/tcljx/alpha/ptest.cljt	2025-10-21 15:21:33.117233530 +0200
-+++ ../tcljx.compiler.patched/tcljx/alpha/ptest.cljt	2025-10-27 11:35:34.692155370 +0100
++++ ../tcljx.compiler.patched/tcljx/alpha/ptest.cljt	2025-10-28 10:20:15.467385666 +0100
 @@ -42,7 +42,7 @@
      (assert (some? line) "form of `is` macro has no :line meta")
      `(when-some [~ctx (impl/is-context-if-selected ~line)]
@@ -21,7 +31,7 @@ diff -Nru src/tcljx.compiler/tcljx/alpha/ptest.cljt ../tcljx.compiler.patched/tc
      (println (str (.is-fail rep) " failures, " (.is-error rep) " errors."))
 diff -Nru src/tcljx.compiler/tcljx/alpha/textflow__pp.cljt ../tcljx.compiler.patched/tcljx/alpha/textflow__pp.cljt
 --- src/tcljx.compiler/tcljx/alpha/textflow__pp.cljt	2025-10-21 15:21:33.117233530 +0200
-+++ ../tcljx.compiler.patched/tcljx/alpha/textflow__pp.cljt	2025-10-27 11:34:16.675129773 +0100
++++ ../tcljx.compiler.patched/tcljx/alpha/textflow__pp.cljt	2025-10-28 10:20:15.467385666 +0100
 @@ -8,9 +8,9 @@
  (ns tcljx.alpha.textflow__pp
    (:require [tcljx.alpha.textflow :as tf]
@@ -35,8 +45,8 @@ diff -Nru src/tcljx.compiler/tcljx/alpha/textflow__pp.cljt ../tcljx.compiler.pat
             (clojure.lang IMeta)
             (java.util.function BiFunction IntUnaryOperator)
 diff -Nru src/tcljx.compiler/tcljx/classgen/primitive.cljt ../tcljx.compiler.patched/tcljx/classgen/primitive.cljt
---- src/tcljx.compiler/tcljx/classgen/primitive.cljt	2025-10-27 11:45:37.462059332 +0100
-+++ ../tcljx.compiler.patched/tcljx/classgen/primitive.cljt	2025-10-27 11:46:22.192644995 +0100
+--- src/tcljx.compiler/tcljx/classgen/primitive.cljt	2025-10-28 08:29:11.138586086 +0100
++++ ../tcljx.compiler.patched/tcljx/classgen/primitive.cljt	2025-10-28 10:20:15.467385666 +0100
 @@ -5,7 +5,7 @@
     (tcljx.classgen [classfile :as classfile] [constgen :as constgen]
                     [emit :as emit] [insn :as insn] [runtime :as rt]
@@ -47,8 +57,8 @@ diff -Nru src/tcljx.compiler/tcljx/classgen/primitive.cljt ../tcljx.compiler.pat
     (tcljx.data.type Wrapper)
     (tcljx.data.ir CodeEmitter Loadable Entity ImmediateEntity Constant)
 diff -Nru src/tcljx.compiler/tcljx/classgen/publics.cljt ../tcljx.compiler.patched/tcljx/classgen/publics.cljt
---- src/tcljx.compiler/tcljx/classgen/publics.cljt	2025-10-27 09:34:11.223172715 +0100
-+++ ../tcljx.compiler.patched/tcljx/classgen/publics.cljt	2025-10-27 11:40:22.591933940 +0100
+--- src/tcljx.compiler/tcljx/classgen/publics.cljt	2025-10-28 07:47:39.795661739 +0100
++++ ../tcljx.compiler.patched/tcljx/classgen/publics.cljt	2025-10-28 10:20:15.467385666 +0100
 @@ -6,7 +6,7 @@
     (tcljx.classgen [runtime :as rt] classfile [segment :as segment]
                     [insn :as insn] [constgen :as constgen] [defgen :as defgen]
@@ -60,7 +70,7 @@ diff -Nru src/tcljx.compiler/tcljx/classgen/publics.cljt ../tcljx.compiler.patch
     (tcljx.classgen.classfile Loader)
 diff -Nru src/tcljx.compiler/tcljx/classgen/typegen.cljt ../tcljx.compiler.patched/tcljx/classgen/typegen.cljt
 --- src/tcljx.compiler/tcljx/classgen/typegen.cljt	2025-10-27 11:45:05.838645223 +0100
-+++ ../tcljx.compiler.patched/tcljx/classgen/typegen.cljt	2025-10-27 11:44:47.009398646 +0100
++++ ../tcljx.compiler.patched/tcljx/classgen/typegen.cljt	2025-10-28 10:20:15.467385666 +0100
 @@ -4,7 +4,7 @@
                 [type :as type] [ir :as ir] [code :as code])
     (tcljx.classgen segment [util :as util] [runtime :as rt] [emit :as emit]
@@ -72,7 +82,7 @@ diff -Nru src/tcljx.compiler/tcljx/classgen/typegen.cljt ../tcljx.compiler.patch
     (tcljx.classgen.insn Insn)
 diff -Nru src/tcljx.compiler/tcljx/data/config.cljt ../tcljx.compiler.patched/tcljx/data/config.cljt
 --- src/tcljx.compiler/tcljx/data/config.cljt	2025-10-23 09:22:09.332065720 +0200
-+++ ../tcljx.compiler.patched/tcljx/data/config.cljt	2025-10-27 11:37:35.096736656 +0100
++++ ../tcljx.compiler.patched/tcljx/data/config.cljt	2025-10-28 10:20:15.468385681 +0100
 @@ -7,7 +7,7 @@
  ;; You must not remove this notice, or any other, from this software.
  (ns tcljx.data.config
@@ -84,7 +94,7 @@ diff -Nru src/tcljx.compiler/tcljx/data/config.cljt ../tcljx.compiler.patched/tc
     (java.lang.constant ClassDesc)))
 diff -Nru src/tcljx.compiler/tcljx/data/type.cljt ../tcljx.compiler.patched/tcljx/data/type.cljt
 --- src/tcljx.compiler/tcljx/data/type.cljt	2025-10-26 14:33:00.368188966 +0100
-+++ ../tcljx.compiler.patched/tcljx/data/type.cljt	2025-10-27 11:36:55.192212780 +0100
++++ ../tcljx.compiler.patched/tcljx/data/type.cljt	2025-10-28 10:20:15.468385681 +0100
 @@ -1,5 +1,5 @@
  (ns tcljx.data.type
 -  (:require [tinyclj.core :as cc])
@@ -94,7 +104,7 @@ diff -Nru src/tcljx.compiler/tcljx/data/type.cljt ../tcljx.compiler.patched/tclj
             (java.lang.invoke MethodHandles$Lookup))
 diff -Nru src/tcljx.compiler/tcljx/main/efmt.cljt ../tcljx.compiler.patched/tcljx/main/efmt.cljt
 --- src/tcljx.compiler/tcljx/main/efmt.cljt	2025-10-21 15:21:33.281236323 +0200
-+++ ../tcljx.compiler.patched/tcljx/main/efmt.cljt	2025-10-27 11:39:29.757241095 +0100
++++ ../tcljx.compiler.patched/tcljx/main/efmt.cljt	2025-10-28 10:20:15.468385681 +0100
 @@ -9,7 +9,7 @@
    (:require
     (tcljx.data [wrong :as wrong])
@@ -106,7 +116,7 @@ diff -Nru src/tcljx.compiler/tcljx/main/efmt.cljt ../tcljx.compiler.patched/tclj
     (java.lang.constant ClassDesc ConstantDescs)
 diff -Nru src/tcljx.compiler/tcljx/main/options.cljt ../tcljx.compiler.patched/tcljx/main/options.cljt
 --- src/tcljx.compiler/tcljx/main/options.cljt	2025-10-25 17:20:38.186822962 +0200
-+++ ../tcljx.compiler.patched/tcljx/main/options.cljt	2025-10-27 11:39:57.305602374 +0100
++++ ../tcljx.compiler.patched/tcljx/main/options.cljt	2025-10-28 10:20:15.468385681 +0100
 @@ -8,7 +8,7 @@
  (ns tcljx.main.options
    (:require
@@ -118,7 +128,7 @@ diff -Nru src/tcljx.compiler/tcljx/main/options.cljt ../tcljx.compiler.patched/t
  
 diff -Nru src/tcljx.compiler/tcljx/main/watcher.cljt ../tcljx.compiler.patched/tcljx/main/watcher.cljt
 --- src/tcljx.compiler/tcljx/main/watcher.cljt	2025-10-21 15:21:33.270236136 +0200
-+++ ../tcljx.compiler.patched/tcljx/main/watcher.cljt	2025-10-27 11:39:40.496381940 +0100
++++ ../tcljx.compiler.patched/tcljx/main/watcher.cljt	2025-10-28 10:20:15.468385681 +0100
 @@ -7,7 +7,7 @@
  ;; You must not remove this notice, or any other, from this software.
  (ns tcljx.main.watcher
@@ -129,8 +139,8 @@ diff -Nru src/tcljx.compiler/tcljx/main/watcher.cljt ../tcljx.compiler.patched/t
                            WatchEvent StandardWatchEventKinds)
             (java.util.concurrent TimeUnit)))
 diff -Nru src/tcljx.compiler/tcljx/parser/reader.cljt ../tcljx.compiler.patched/tcljx/parser/reader.cljt
---- src/tcljx.compiler/tcljx/parser/reader.cljt	2025-10-24 16:23:44.571621128 +0200
-+++ ../tcljx.compiler.patched/tcljx/parser/reader.cljt	2025-10-27 11:40:11.367786772 +0100
+--- src/tcljx.compiler/tcljx/parser/reader.cljt	2025-10-27 14:20:11.736263967 +0100
++++ ../tcljx.compiler.patched/tcljx/parser/reader.cljt	2025-10-28 10:20:15.468385681 +0100
 @@ -8,7 +8,7 @@
  (ns tcljx.parser.reader
    (:require
@@ -142,7 +152,7 @@ diff -Nru src/tcljx.compiler/tcljx/parser/reader.cljt ../tcljx.compiler.patched/
     (tcljx.data.wrong WrongInfo)
 diff -Nru src/tcljx.compiler/tcljx/parser/syntax.cljt ../tcljx.compiler.patched/tcljx/parser/syntax.cljt
 --- src/tcljx.compiler/tcljx/parser/syntax.cljt	2025-10-21 15:21:33.118233547 +0200
-+++ ../tcljx.compiler.patched/tcljx/parser/syntax.cljt	2025-10-27 11:37:02.158304247 +0100
++++ ../tcljx.compiler.patched/tcljx/parser/syntax.cljt	2025-10-28 10:20:15.468385681 +0100
 @@ -1,6 +1,6 @@
  (ns tcljx.parser.syntax
    (:require (tcljx.data [config :as cfg] [wrong :as wrong])

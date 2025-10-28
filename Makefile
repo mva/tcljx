@@ -89,7 +89,7 @@ COMPILER_STAGE0=$(BUILD_JAVA_ONCE) -cp support TcljStage0
 TCLJX_SOURCE_RT := src/tcljx.rt/module-info.java \
   $(sort $(wildcard src/tcljx.rt/*/lang/*.java))
 TCLJX_SOURCE_CORE := src/tcljx.core/module-info.java \
-  $(sort $(wildcard src/tcljx.core/*/*.cljt srx/tcljx.core/*/*/*.cljt)) 
+  $(sort $(wildcard src/tcljx.core/*/*.cljt src/tcljx.core/*/*/*.cljt)) 
 TCLJX_SOURCE_COMPILER := src/tcljx.compiler/module-info.java \
   $(sort $(wildcard src/tcljx.compiler/*/*.cljt src/tcljx.compiler/*/*/*.cljt)) 
 TCLJX_SOURCE_RTIOW := test/tcljx.compiler/tcljx/classgen/rtiow-ref.cljt
@@ -137,8 +137,9 @@ $(STAGE1_MINFO_CORE): $(STAGE1_MINFO_RT) $(TCLJX_SOURCE_CORE) $(STAGE0_MDIR)/DON
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
 	$(COMPILER_STAGE0) -d "$(dir $@)" -s src/tcljx.core clojure.core.all
-	$(BUILD_JAVAC) -p $(dir $<) -d "$(dir $@)" src/tcljx.core/module-info.java
+	$(BUILD_JAVAC) -p $(STAGE1_MDIR) -d "$(dir $@)" src/tcljx.core/module-info.java
 
+# diff -Nru src/tcljx.compiler ../tcljx.compiler.patched >compiler.patch
 PATCHED_DIR=$(TMP_USER)/tcljx.compiler.patched
 STAGE1_MINFO_COMPILER=$(STAGE1_MDIR)/tcljx.compiler/module-info.class
 $(STAGE1_MINFO_COMPILER): $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_COMPILER)
@@ -148,7 +149,7 @@ $(STAGE1_MINFO_COMPILER): $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_COMPILER)
 	cp -r src/tcljx.compiler "$(PATCHED_DIR)"
 	patch -p2 -d "$(PATCHED_DIR)" <compiler.patch
 	$(COMPILER_STAGE0) -d "$(dir $@)" -s $(dir $(STAGE1_MINFO_CORE)) -s "$(PATCHED_DIR)" $(TCLJX_MAIN_NS)
-	$(BUILD_JAVAC) -p $(dir $<) -d "$(dir $@)" src/tcljx.compiler/module-info.java
+	$(BUILD_JAVAC) -p $(STAGE1_MDIR) -d "$(dir $@)" "$(PATCHED_DIR)"/module-info.java
 
 $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm: $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_RTIOW)
 	@echo; echo "### $(dir $@)"
