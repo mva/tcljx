@@ -158,6 +158,12 @@
                                                (alength fields))
                           (ir/acc* public synthetic)))))
 
+(defn- factory-create ^ClassBuilder [^ClassBuilder cb ^ClassDesc this-class]
+  (let [mtd (MethodTypeDesc/of this-class (ClassDesc/of "clojure.lang.IPersistentMap"))]
+    (->> (^Consumer fn ^void [^CodeBuilder xb]
+          (-> xb (.aconst_null) (.areturn)))
+         (.withMethodBody cb "create" mtd (ir/acc* public static)))))
+
 (defn- record-attribute ^ClassBuilder [^ClassBuilder cb ^FieldSpec/1 fields]
   (let [a (new RecordComponentInfo/1 (alength fields))]
     (dotimes [i (alength a)]
@@ -267,7 +273,9 @@
         cbh-1 (^Consumer fn ^void [^ClassBuilder cb]
                (when (.java-record? supers)
                  (doseq [^FieldSpec spec fields]
-                   (code/with-getter cb spec))))
+                   (code/with-getter cb spec)))
+               (when defrecord?
+                 (factory-create cb this-class)))
         bs (.build (ClassFile/of) this-class (.andThen cbh-0 cbh-1))
         eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)
         fbnds (new Binding/1 (alength fields))]
@@ -283,9 +291,9 @@
                           (ir/mk-binding (.field-name fspec) false)))))
     
     (let [eph-ncl (NmspClass. this-class (.super-class supers) cbh-0 nil eph-cl)
-          dt-e2d (HashMap.)     ;should remain empty!
+          dt-e2d (HashMap.)             ;should remain empty!
           deftype-parts (ArrayList.)]
-          ;; note: can call Resolver.globals() only on namespace thread
+      ;; note: can call Resolver.globals() only on namespace thread
       (->> (complete-methods (-> (.with-bindings* parser (.globals rsv))
                                  (ir/with-local-bindings fbnds)) eph-cl
                              (.unique-name! etf (.displayName this-class))
