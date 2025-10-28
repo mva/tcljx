@@ -25,14 +25,10 @@
    (java.util.function Consumer Function)))
 
 (def app-ld
-  (let [
-        ;; project-name (or (System/getenv "PROJECT_DIR")
-        ;;                  (files/default-project-name))
-        ;; tcljx-mdir (files/tmp-dest-dir (str project-name ".mdir"))
-        ;; tcljx-mod-rt (.resolve tcljx-mdir (files/path-of "tcljc-rt.jar"))
-        
-        tcljx-mod-rt (files/path-of "../bootstrap-tcljc/tcljc.rt")]
-    (classfile/app-class-loader :platform [tcljx-mod-rt])))
+  (let [stage1-classes-rt (Path/of (System/getProperty "java.io.tmpdir")
+                                   (System/getProperty "user.name")
+                                   "tcljx-stage1.mdir-xpl" "tcljx.rt")]
+    (classfile/app-class-loader :platform [stage1-classes-rt])))
 (def ^:private rt-lookup (classfile/get-rt-lookup app-ld))
 (type/fixup-runtime-types! rt-lookup)
 

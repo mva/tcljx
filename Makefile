@@ -41,14 +41,18 @@ run-jfr: compile
 #	@$(JFR) view hot-methods $(JFR_RECORDING)
 	@$(JFR) view method-timing $(JFR_RECORDING)
 
+# Both `test` and `watch-and-test` depend on STAGE1_MINFO_RT:
+STAGE1_MDIR=$(TMP_USER)/tcljx-stage1.mdir-xpl
+STAGE1_MINFO_RT=$(STAGE1_MDIR)/tcljx.rt/module-info.class
+
 # Call with "make test TEST=<scope>" (with <scope> being "ns-name" or
 # "ns-name/var-name") to only run tests from the given namespace or
 # var.  Only call this after compile, possibly while one of the
 # watch-and-xxx targets is running.
-test: support/DONE
+test: support/DONE $(STAGE1_MINFO_RT)
 	$(JAVA) -p ../bootstrap-tcljc --add-modules tcljc.core -cp $(DEST_DIR) $(RUN_TESTS_NS).___
 #	$(COMPILER_BOOT) -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)/run
-watch-and-test: support/DONE
+watch-and-test: support/DONE $(STAGE1_MINFO_RT)
 	$(COMPILER_BOOT) --watch -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)/run
 
 
@@ -118,11 +122,10 @@ $(STAGE0_MDIR)/DONE: $(TCLJX_SOURCE_COMPILER) support/DONE
 # ------------------------------------------------------------------------
 # Use bootstrapped compiler to build modules for runtime, core
 # library, and compiler.  Build the module directories in
-# $(STAGE1_CLASSES).(rt|core|compiler)
+# $(STAGE1_CLASSES).(rt|core|compiler).  Note: STAGE1_MDIR and
+# STAGE1_MINFO_RT must be defined before target `test` and
+# `watch-and-test`.
 
-STAGE1_MDIR=$(TMP_USER)/tcljx-stage1.mdir-xpl
-
-STAGE1_MINFO_RT=$(STAGE1_MDIR)/tcljx.rt/module-info.class
 $(STAGE1_MINFO_RT): $(TCLJX_SOURCE_RT)
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
