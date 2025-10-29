@@ -13,16 +13,9 @@
         (body-form? ^boolean [x]
           (not (catch-form? x)))
 
-        (parse-finally ^Exprs [^Parser parser ^long fctx ^seq form]
+        (parse-finally ^Expr [^Parser parser ^long fctx ^seq form]
           (when (some? form)
-            (let [fctx (context/of-finally fctx)
-                  xs (parse/new-exprs parser 2)]
-              ;; parse finally twice: first copy is placed after the
-              ;; whole try/catch, the second is placed in the wildcard
-              ;; exception handler before the ATHROW
-              (.set xs 0 (parse/progn parser form fctx (next form)))
-              (.set xs 1 (parse/progn parser form fctx (next form)))
-              xs)))
+            (parse/progn parser form (context/of-finally fctx) (next form))))
         (parse-binding ^CatchBinding [^Parser parser ^long fctx [_ tp nm :as form]]
           (when-not (catch-form? form)
             (throw (syntax/info "expect catch clause" form)))

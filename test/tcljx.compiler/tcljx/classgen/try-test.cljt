@@ -429,7 +429,7 @@
                          ;; the output code
                          (.println System/out s))))))))
 
-(deftest finally-duplicates-function
+(deftest finally-defines-function
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(METHOD [STATIC FINAL] "f~1" "(I)Ljava/lang/Object;")
              ["LOCAL 0: int b"]
@@ -438,14 +438,7 @@
              (INVOKEVIRTUAL OutputStream "write" "(I)V")
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [STATIC FINAL] "f^1~1" "(I)Ljava/lang/Object;")
-             ["LOCAL 0: int b"]
-             (INVOKESTATIC OutputStream "nullOutputStream" "()Ljava/io/OutputStream;")
-             (ILOAD_0)
-             (INVOKEVIRTUAL OutputStream "write" "(I)V")
-             (ACONST_NULL)
-             (ARETURN)]
-
+            
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
              (LDC "pkg.ns0")
              (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
@@ -462,7 +455,7 @@
              
              #_catch-any (EXCEPTION_CATCH L:0 L:2 L:2 any) [L:2]
              (BIPUSH 65)
-             (INVOKESTATIC . "f^1~1" "(I)Ljava/lang/Object;")
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/Object;")
              (POP)
              (ATHROW)
              

@@ -224,7 +224,7 @@
       (MethodSpec. at code body pvars (.source-idx mspec) (.name mspec))))
 
   (set-recur-target! [this target]
-    (assert (nil? __recur-target)) ;wrong if single `finally` is emitted twice
+    ;; __recur-target already defined if single `finally` is emitted twice
     (set! __recur-target target))
   (get-recur-target [this]
     __recur-target)
@@ -279,7 +279,7 @@
           tp (condgen/join-type (.expr-types insns) 0 (.length insns))]
       (-> (if (some? finally)
             (trygen/try-catch-finally tp (.emitters insns) catch-types
-                                      (.emitters finally) fctx)
+                                      (.emitter finally) fctx)
             (trygen/try-catch tp (.emitters insns) catch-types fctx))
           (insn/mk-insn tp))))
 
@@ -381,7 +381,7 @@
            (when (emit/insn? xb fctx Object (.emitter lockee))
              (emit/with-line-number xb fctx)
              (if enter? (.monitorenter xb) (.monitorexit xb))
-             Void/TYPE))             ;operand type reported when emitting code
+             Void/TYPE))     ;operand type reported when emitting code
           (insn/mk-insn Void/TYPE)))))
 
 (defn mk-factory ^ExprFactory []

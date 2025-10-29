@@ -559,7 +559,7 @@
   (recur-expr ^Expr [^long fctx ^Exprs args])
   
   (try-catch-finally ^Expr [^long fctx ^Exprs body+catches ^Class/1 catch-types
-                            ^Exprs finally])
+                            ^Expr finally])
 
   ;; ### interop
 

@@ -49,7 +49,7 @@
 (defn try-catch-finally ^CodeEmitter [^Class produced-type
                                       ^CodeEmitter/1 body+catch-ces
                                       ^Class/1 catch-types
-                                      ^CodeEmitter/1 finally ^long fctx]
+                                      ^CodeEmitter finally ^long fctx]
   (emit/with-adaption-barrier produced-type
     (^CodeEmitter fn [xb consumed-type then-leave?]
      (let [body-start (.newLabel xb)
@@ -66,12 +66,12 @@
        
        (let [handler (.newLabel xb)] ;exceptional `finally` instructions
          (.labelBinding xb handler)
-         (when (emit/insn? xb fctx Void/TYPE (aget finally 1))
+         (when (emit/insn? xb fctx Void/TYPE finally)
            (.athrow xb))      ;line number of original exception applies
          (.exceptionCatchAll xb body-start body-end handler)
 
          (.labelBinding xb target-finally) ;regular `finally` instructions
          (when (and continue-after-body?
-                    (emit/insn? xb fctx Void/TYPE (aget finally 0)))
+                    (emit/insn? xb fctx Void/TYPE finally))
            consumed-type))))))
  
