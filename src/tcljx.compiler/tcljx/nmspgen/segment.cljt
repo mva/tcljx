@@ -1,0 +1,135 @@
+(ns tcljx.nmspgen.segment
+  (:require (tcljx.data [ir :as ir])
+            (tcljx.nmspgen classfile))
+  (:import (tcljx.data.ir CodeEmitter Entity Expr MethodSpec NmspClass)
+           (tcljx.nmspgen.classfile PackageBuilder)
+           (java.lang.classfile ClassFileElement)
+           (java.lang.constant ClassDesc ConstantDescs)
+           (java.util List ArrayList HashMap)
+           (java.util.function Consumer BiFunction Predicate)))
+
+(definterface IDisplay
+  (local-name ^String [])
+  (merge-name! ^Object [^String other-name])
+  (set-emitter! ^void [^CodeEmitter ce]))
+
+;;; Local copy of a value taken from the entity `origin`, where
+;;; `origin` is defined by a parent of the current function (or reify,
+;;; or interface function).
+(deftype Display [^Entity origin ^int local-entity-id
+                  ^:unsynchronized-mutable ^String local-name
+                  ^:unsynchronized-mutable ^CodeEmitter __emit]
+  CodeEmitter
+  (emit-insn* [_ xb consumed-type then-leave?]
+    (.emit-insn* __emit xb consumed-type then-leave?))
+  IDisplay
+  (local-name [_]
+    local-name)
+  (merge-name! [this other-name]
+    (when (< (.compareTo other-name local-name) 0)
+      (set! local-name other-name))
+    this)
+  (set-emitter! [_ ce]
+    (set! __emit ce)))
+
+;;; Note: If there are multiple candidates for origin's `local-name`
+;;; in this scope, then keep the one that sorts as smallest.
+(defn display-of! ^Display [^HashMap env-to-display ^Entity origin
+                            ^String local-name]
+  (->> (^BiFunction fn [^Entity o ^Display d]
+        (if (some? d)
+          (.merge-name! d local-name)
+          (Display. o 0 local-name nil)))
+       (.compute env-to-display origin)))
+
+(definterface ISegmentBuilder
+  (segment-class ^ClassDesc [])
+  (namespace-class ^ClassDesc [^String class-name])
+  (add-elements ^void [^Consumer class-handler])
+  (add-class-file ^void [^NmspClass ncl]))
+
+(deftype SegmentBuilder [^ArrayList class-elements ;of Consumer
+                         ^ArrayList other-classes  ;of NmspClass
+                         ^ClassDesc segment-class]
+  ISegmentBuilder
+  (segment-class [_]
+    segment-class)
+  (namespace-class [_ class-name]
+    ;; FIXME... drop this? the pkg-name is availabe by other means
+    (ClassDesc/of (.packageName segment-class) class-name))
+  (add-elements [_ class-handler]
+    (.add class-elements class-handler))
+  (add-class-file [_ ncl]
+    (.add other-classes ncl)))
+
+(deftype StoredEnv [^Entity/1 aorigin, ^Display/1 adisplay])
+
+(definterface EnvFactory
+  (fn-carries-env? ^boolean [^Entity fn-p]) ;pre: `fn-p` is FnPromise
+  (stored-in-env? ^boolean [^Entity origin])
+  (stored-environment! ^StoredEnv [^CodePromise cp ^CodeEmitter this-emit])
+  (stored-origin ^Entity/1 [^CodePromise cp]))
+
+;;; Created during the parsing phase.  `generate-and-deliver` is
+;;; called before the emit phase, to add elements to the segment class
+;;; under construction, or whole classes accompanying it.  Note:
+;;; `!nested-parts` may be filled in by a thread other than the one
+;;; that created this object.
+(definterface CodePromise
+  (expr-of ^Expr [])
+  (child-methods ^MethodSpec/1 [])  ;nil if lacking methods
+  (env-to-display ^HashMap [])      ;entities that methods closed over
+  (!nested-parts ^ArrayList []) ;of CodePromises, nil if lacking methods
+  (generate-and-deliver ^void [^SegmentBuilder sb ^EnvFactory env-factory
+                               ^ClassFileElement ann-elem])
+  (runtime-value ^Object [^PackageBuilder pkg-build]))
+
+;;; ------------------------------------------------------------------------
+
+(deftype Segment [^ClassDesc segment-class
+                  ^ArrayList tasks
+                  ^String pkg-name
+                  ^ClassDesc super-class
+                  ^int segment-id])
+
+(defn stage-segment-task! ^void [^Segment segm task]
+  (.add (.tasks segm) task))
+(defn size-segment-tasks ^int [^Segment segm]
+  (.size (.tasks segm)))
+
+(letfn [(segment-cld ^ClassDesc [^String pkg-name ^int segm-id]
+          (ClassDesc/of pkg-name (str "_" segm-id)))]
+  (defn mk-first-segment ^Segment [^String pkg-name]
+    (let [segm-id 10]
+      (Segment. (segment-cld pkg-name segm-id) (ArrayList.) pkg-name
+                ConstantDescs/CD_Object segm-id)))
+  (defn next-segment ^Segment [^Segment segm]
+    (let [pkg-name (-> segm .pkg-name), segm-id (-> segm .segment-id (inc))]
+      (Segment. (segment-cld pkg-name segm-id) (ArrayList.) pkg-name
+                (.segment-class segm) segm-id))))
+
+(defn capstone-class ^ClassDesc [^String ns-str]
+  (ClassDesc/of ns-str "___"))
+
+(defn code-promises ^CodePromise/1 [^List tasks]
+  (let [acc-cps (ArrayList.), it (.iterator tasks)]
+    (letfn [(add-part! ^void [^CodePromise part]
+              (when-some [nested (.!nested-parts part)]
+                (let [it* (.iterator nested)]
+                  (loop [] (when (.hasNext it*) (add-part! (.next it*))
+                                 (recur)))))
+              (.add acc-cps part))]
+      (loop [] (when (.hasNext it)
+                 (let [task (.next it)]
+                   (when (instance? CodePromise task) (add-part! task)))
+                 (recur)))
+      (.toArray acc-cps (new CodePromise/1 0)))))
+
+(defn clinit-statements ^CodeEmitter/1 [^List tasks]
+  (let [al (ArrayList.), it (.iterator tasks)]
+    (loop [] (when (.hasNext it)
+               (let [task (.next it)]
+                 (when-not (instance? CodePromise task)
+                   (.add al (.emitter ^Expr task)))
+                 (recur))))
+    (.toArray al (new CodeEmitter/1 0))))

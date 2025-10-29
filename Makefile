@@ -32,7 +32,7 @@ TEST_OUT=$(TMP_USER)/tcljx/$(PROJECT_DIR).test
 JFR=$(JAVA_BIN)jfr
 JFR_RECORDING=/tmp/recording.jfr
 run-jfr: compile
-	$(JAVA) -XX:StartFlightRecording:filename=$(JFR_RECORDING),method-timing="tcljx.classgen.util.LocalVariable" -cp ../bootstrap-tcljc/tcljc.rt:../bootstrap-tcljc/tcljc.core:$(DEST_DIR) $(RUN_TESTS_NS).___
+	$(JAVA) -XX:StartFlightRecording:filename=$(JFR_RECORDING),method-timing="tcljx.nmspgen.util.LocalVariable" -cp ../bootstrap-tcljc/tcljc.rt:../bootstrap-tcljc/tcljc.core:$(DEST_DIR) $(RUN_TESTS_NS).___
 #	$(JAVA) -XX:StartFlightRecording:filename=$(JFR_RECORDING),settings=profile $(JAVA_OPTS) -cp $(DEST_DIR) $(MAIN_NS).___ $(ARGS)
 #	$(JFR) summary $(JFR_RECORDING)
 #	$(JFR) print --events jdk.MethodTrace --stack-depth 20 $(JFR_RECORDING)
@@ -79,7 +79,7 @@ TCLJX_SOURCE_CORE := src/tcljx.core/module-info.java \
   $(sort $(wildcard src/tcljx.core/*/*.cljt src/tcljx.core/*/*/*.cljt)) 
 TCLJX_SOURCE_COMPILER := src/tcljx.compiler/module-info.java \
   $(sort $(wildcard src/tcljx.compiler/*/*.cljt src/tcljx.compiler/*/*/*.cljt)) 
-TCLJX_SOURCE_RTIOW := test/tcljx.compiler/tcljx/classgen/rtiow-ref.cljt
+TCLJX_SOURCE_RTIOW := test/tcljx.compiler/tcljx/nmspgen/rtiow-ref.cljt
 
 # ------------------------------------------------------------------------
 # Create module directory $(STAGE0_MDIR) using the bootstrap
@@ -144,8 +144,8 @@ $(STAGE1_MINFO_COMPILER): $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_COMPILER)
 $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm: $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_RTIOW)
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
-	$(COMPILER_STAGE0) -d $(STAGE1_MDIR)/tcljx.rtiow -s $(STAGE1_MDIR)/tcljx.rt -s $(STAGE1_MDIR)/tcljx.core -s test/tcljx.compiler tcljx.classgen.rtiow-ref
-	$(JAVA) -cp $(STAGE1_MDIR)/tcljx.rt:$(dir $<):$(STAGE1_MDIR)/tcljx.rtiow tcljx.classgen.rtiow-ref.___ >$@
+	$(COMPILER_STAGE0) -d $(STAGE1_MDIR)/tcljx.rtiow -s $(STAGE1_MDIR)/tcljx.rt -s $(STAGE1_MDIR)/tcljx.core -s test/tcljx.compiler tcljx.nmspgen.rtiow-ref
+	$(JAVA) -cp $(STAGE1_MDIR)/tcljx.rt:$(dir $<):$(STAGE1_MDIR)/tcljx.rtiow tcljx.nmspgen.rtiow-ref.___ >$@
 	@echo "3cf6c9b9f93edb0de2bc24015c610d78  $@" | md5sum -c -
 
 # ------------------------------------------------------------------------

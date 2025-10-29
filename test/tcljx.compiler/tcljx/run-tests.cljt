@@ -9,7 +9,7 @@
   (:require
    (tcljx.alpha textflow__pp-test ptest__align-test ptest-test)
    (tcljx.parser reader-test)
-   (tcljx.classgen bootstrap-test invoke-test unreachable-test
+   (tcljx.nmspgen bootstrap-test invoke-test unreachable-test
                    const-test conv-test prim-conv-test dot-form-test new-test
                    arith-test let-test quote-test meta-test str-test bits-test
                    array-test clone-test switch-test cond-test logic-test
@@ -27,47 +27,47 @@
     tcljx.alpha.ptest__align-test
     
     tcljx.parser.reader-test
-    tcljx.classgen.bootstrap-test
-    tcljx.classgen.invoke-test
-    tcljx.classgen.unreachable-test
-    tcljx.classgen.const-test
-    tcljx.classgen.conv-test
-    tcljx.classgen.prim-conv-test
-    tcljx.classgen.dot-form-test
-    tcljx.classgen.new-test
-    tcljx.classgen.arith-test
-    tcljx.classgen.let-test
-    tcljx.classgen.quote-test
-    tcljx.classgen.meta-test
-    tcljx.classgen.str-test
-    tcljx.classgen.bits-test
-    tcljx.classgen.array-test
-    tcljx.classgen.clone-test
-    tcljx.classgen.switch-test
-    tcljx.classgen.cond-test
-    tcljx.classgen.logic-test
-    tcljx.classgen.xcmp-test
-    tcljx.classgen.try-test
-    tcljx.classgen.loop-test
-    tcljx.classgen.unboxing-test
-    tcljx.classgen.boxing-test
-    tcljx.classgen.fn-member-test
-    tcljx.classgen.fn-test
-    tcljx.classgen.definterface-test
-    tcljx.classgen.itf-fn-test
-    tcljx.classgen.deftype-test
-    tcljx.classgen.record-test
-    tcljx.classgen.reify-test
-    tcljx.classgen.letfn-test
-    tcljx.classgen.closure-test
-    tcljx.classgen.variadic-test
-    tcljx.classgen.main-test
-    tcljx.classgen.macro-test
-    tcljx.classgen.rtiow-nocore-test
-    tcljx.classgen.namespace-test
-    tcljx.classgen.set-test
-    tcljx.classgen.line-test
-    tcljx.classgen.require-test])
+    tcljx.nmspgen.bootstrap-test
+    tcljx.nmspgen.invoke-test
+    tcljx.nmspgen.unreachable-test
+    tcljx.nmspgen.const-test
+    tcljx.nmspgen.conv-test
+    tcljx.nmspgen.prim-conv-test
+    tcljx.nmspgen.dot-form-test
+    tcljx.nmspgen.new-test
+    tcljx.nmspgen.arith-test
+    tcljx.nmspgen.let-test
+    tcljx.nmspgen.quote-test
+    tcljx.nmspgen.meta-test
+    tcljx.nmspgen.str-test
+    tcljx.nmspgen.bits-test
+    tcljx.nmspgen.array-test
+    tcljx.nmspgen.clone-test
+    tcljx.nmspgen.switch-test
+    tcljx.nmspgen.cond-test
+    tcljx.nmspgen.logic-test
+    tcljx.nmspgen.xcmp-test
+    tcljx.nmspgen.try-test
+    tcljx.nmspgen.loop-test
+    tcljx.nmspgen.unboxing-test
+    tcljx.nmspgen.boxing-test
+    tcljx.nmspgen.fn-member-test
+    tcljx.nmspgen.fn-test
+    tcljx.nmspgen.definterface-test
+    tcljx.nmspgen.itf-fn-test
+    tcljx.nmspgen.deftype-test
+    tcljx.nmspgen.record-test
+    tcljx.nmspgen.reify-test
+    tcljx.nmspgen.letfn-test
+    tcljx.nmspgen.closure-test
+    tcljx.nmspgen.variadic-test
+    tcljx.nmspgen.main-test
+    tcljx.nmspgen.macro-test
+    tcljx.nmspgen.rtiow-nocore-test
+    tcljx.nmspgen.namespace-test
+    tcljx.nmspgen.set-test
+    tcljx.nmspgen.line-test
+    tcljx.nmspgen.require-test])
 
 (defn run []
   (run-scoped-tests all-namespaces))

@@ -1,0 +1,213 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.nmspgen.arith-test
+  (:require [tcljx.nmspgen.bootstrap :refer [asm-expr fn-call-method is-class]]
+            [tcljx.alpha.ptest :refer :all]))
+
+(deftest int-add-test
+  ;; everything starts with a constant literal
+  (is (= '[(ICONST_1) (IRETURN)]
+         (asm-expr 1)))
+  ;; an auspicious beginning
+  (is (= '[(ICONST_3) (IRETURN)]
+         (asm-expr (+ 1 2))))
+  ;; but in the Lisp tradition, we can take a step back
+  (is (= '[(ICONST_1) (IRETURN)]
+         (asm-expr (+ 1))))
+  ;; and another one
+  (is (= '[(ICONST_0) (IRETURN)]
+         (asm-expr (+))))
+  ;; that being settled, we can go in the other direction
+  (is (= '[(BIPUSH 6) (IRETURN)]
+         (asm-expr (+ 1 2 3)))))
+
+(deftest int-sub-test
+  (is (= '[(ICONST_M1) (IRETURN)]
+         (asm-expr (- 1 2))))
+  (is (= '[(ICONST_M1) (IRETURN)]
+         (asm-expr (- 1))))
+  (is (= '[(ICONST_0) (IRETURN)]
+         (asm-expr (-))))               ;error in Clojure
+  (is (= '[(BIPUSH -4) (IRETURN)]
+         (asm-expr (- 1 2 3)))))
+
+;; Note: primitive results are boxed.
+(deftest result-type-literals-test
+  (is-class 1 Integer)
+  (is-class (byte 1) Byte)
+  (is-class 1.0 Double)
+  (is-class (float 1.0) Float))
+
+(deftest result-type-binary-int-test
+  (is-class (+ 1 1) Integer)
+  (is-class (+ (byte 1) (byte 1)) Integer)
+  (is-class (quot 3 2) Integer)
+  (is-class (quot (byte 3) (byte 2)) Integer))
+
+(deftest result-type-unary-int-test
+  (is-class (+ 1) Integer)
+  (is-class (+ (byte 1)) Integer)
+  (is-class (- 1) Integer)
+  (is-class (- (byte 1)) Integer)
+  (is-class (* 1) Integer)
+  (is-class (* (byte 1)) Integer)
+  (is-class (/ 1) Float)
+  (is-class (/ (byte 1)) Float))
+
+(deftest result-type-nonary-int-test
+  (is-class (+) Integer)
+  (is-class (*) Integer)
+  (is-class (-) Integer)                ;error in Clojure
+  (is-class (/) Float))                 ;error in Clojure
+
+(deftest result-type-binary-float-test
+  (is-class (+ 1.0 1.0) Double)
+  (is-class (+ (float 1.0) 1.0) Double)
+  (is-class (+ 1.0 (float 1.0)) Double)
+  (is-class (+ (float 1.0) (float 1.0)) Float)
+  (is-class (/ 3.0 2.0) Double)
+  (is-class (/ (float 3.0) 2.0) Double)
+  (is-class (/ 3.0 (float 2.0)) Double)
+  (is-class (+ (float 3.0) (float 2.0)) Float))
+
+(deftest result-type-unary-float-test
+  (is-class (+ 1.0) Double)
+  (is-class (+ (float 1.0)) Float)
+  (is-class (* 1.0) Double)
+  (is-class (* (float 1.0)) Float)
+  (is-class (/ 1.0) Double)
+  (is-class (/ (float 1.0)) Float))
+
+(deftest negate-test
+  (is (= '[["LOCAL 0: int a"] (ILOAD_0) (INEG) (IRETURN)]
+         (asm-expr ^int [^int a] (- a))))
+  (is (= '[["LOCAL 0: long a"] (LLOAD_0) (LNEG) (LRETURN)]
+         (asm-expr ^long [^long a] (- a))))
+  (is (= '[["LOCAL 0: float a"] (FLOAD_0) (FNEG) (FRETURN)]
+         (asm-expr ^float [^float a] (- a))))
+  (is (= '[["LOCAL 0: double a"] (DLOAD_0) (DNEG) (DRETURN)]
+         (asm-expr ^double [^double a] (- a)))))
+
+(deftest xdiv-float-nary-test
+  (is (= '[["LOCAL 0: int x"]
+           (ILOAD_0)
+           (I2F)
+           (LDC 1000.0f)
+           (FDIV)
+           (FRETURN)]
+         (asm-expr ^float [^int x] (/ x 1000.0f))))
+  (is (= '[["LOCAL 0: int x"]
+           (ILOAD_0)
+           (I2D)
+           (LDC2_W 1000.0)
+           (DDIV)
+           (DRETURN)]
+         (asm-expr ^double [^int x] (/ x 1000.0))))
+  (is (= '[["LOCAL 0: long x"]
+           (LLOAD_0)
+           (L2F)
+           (LDC 1000.0f)
+           (FDIV)
+           (FRETURN)]
+         (asm-expr ^float [^long x] (/ x 1000.0f))))
+  (is (= '[["LOCAL 0: long x"]
+           (LLOAD_0)
+           (L2D)
+           (LDC2_W 1000.0)
+           (DDIV)
+           (DRETURN)]
+         (asm-expr ^double [^long x] (/ x 1000.0)))))
+
+;; note: Clojure `/` with integer arguments returns a rational
+(deftest division-with-negative
+  ;; integer division with quot & rem
+  (is (= '[["LOCAL 0: int p"]
+           ["LOCAL 1: int q"]
+           (ILOAD_0)
+           (ILOAD_1)
+           (IDIV)
+           (IRETURN)]
+         (asm-expr ^int [^int p ^int q] (quot p q))))
+  (is (= '[["LOCAL 0: int p"]
+           ["LOCAL 1: int q"]
+           (ILOAD_0)
+           (ILOAD_1)
+           (IREM)
+           (IRETURN)]
+         (asm-expr ^int [^int p ^int q] (rem p q))))
+  (is (= '[(ICONST_M1) (IRETURN)] (asm-expr (quot -3 2))))
+  (is (= '[(ICONST_M1) (IRETURN)] (asm-expr (rem -3 2))))
+  
+  ;; double division with quot & rem
+  (is (= '[["LOCAL 0: double p"]
+           ["LOCAL 2: double q"]
+           (DLOAD_0)
+           (DLOAD_2)
+           (DDIV)
+           (D2L)
+           (L2D) 
+           (DRETURN)]
+         (asm-expr ^double [^double p ^double q] (quot p q))))
+  (is (= '[["LOCAL 0: double p"]
+           ["LOCAL 2: double q"]
+           (DLOAD_0)
+           (DLOAD_2)
+           (DREM)
+           (DRETURN)]
+         (asm-expr ^double [^double p ^double q] (rem p q))))
+  (is (= '[(LDC2_W -1.0) (DRETURN)] (asm-expr (quot -3.0 2.0))))
+  (is (= '[(LDC2_W -1.0) (DRETURN)] (asm-expr (rem -3.0 2.0)))))
+
+(deftest add-zero-test
+  ;; Note: Getting rid of "offset+0" or "v>>0" may conflict with very
+  ;; low-level optimizations of the C2 HotSpot compiler like
+  ;; https://bugs.openjdk.org/browse/JDK-8318446 (via
+  ;; https://www.youtube.com/watch?v=xFb_LcapbXw&t=1457s) -- *if* they
+  ;; match on *exactly* the source code level instruction pattern.
+  ;; But https://bugs.openjdk.org/browse/JDK-8347405 suggests that
+  ;; plain "offset" and "v" may work as well.
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
+         (asm-expr [^int x] (+ x 0))))
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
+         (asm-expr [^int x] (+ 0 x))))
+  
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
+         (asm-expr [^long x] (+ x 0))))
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
+         (asm-expr [^long x] (+ 0 x))))
+
+  (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
+         (asm-expr [^float x] (+ x 0))))
+  (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
+         (asm-expr [^float x] (+ 0 x))))
+  
+  (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
+         (asm-expr [^double x] (+ x 0))))
+  (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
+         (asm-expr [^double x] (+ 0 x)))))
+
+(deftest multiply-by-one-test
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
+         (asm-expr [^int x] (* x 1))))
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
+         (asm-expr [^int x] (* 1 x))))
+  
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
+         (asm-expr [^long x] (* x 1))))
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
+         (asm-expr [^long x] (* 1 x))))
+
+  (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
+         (asm-expr [^float x] (* x 1))))
+  (is (= '[["LOCAL 0: float x"] (FLOAD_0) (FRETURN)]
+         (asm-expr [^float x] (* 1 x))))
+  
+  (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
+         (asm-expr [^double x] (* x 1))))
+  (is (= '[["LOCAL 0: double x"] (DLOAD_0) (DRETURN)]
+         (asm-expr [^double x] (* 1 x)))))

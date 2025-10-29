@@ -44,11 +44,11 @@ diff -Nru src/tcljx.compiler/tcljx/alpha/textflow__pp.cljt ../tcljx.compiler.pat
             (java.util Map$Entry)
             (clojure.lang IMeta)
             (java.util.function BiFunction IntUnaryOperator)
-diff -Nru src/tcljx.compiler/tcljx/classgen/primitive.cljt ../tcljx.compiler.patched/tcljx/classgen/primitive.cljt
---- src/tcljx.compiler/tcljx/classgen/primitive.cljt	2025-10-28 08:29:11.138586086 +0100
-+++ ../tcljx.compiler.patched/tcljx/classgen/primitive.cljt	2025-10-28 10:20:15.467385666 +0100
+diff -Nru src/tcljx.compiler/tcljx/nmspgen/primitive.cljt ../tcljx.compiler.patched/tcljx/nmspgen/primitive.cljt
+--- src/tcljx.compiler/tcljx/nmspgen/primitive.cljt	2025-10-28 08:29:11.138586086 +0100
++++ ../tcljx.compiler.patched/tcljx/nmspgen/primitive.cljt	2025-10-28 10:20:15.467385666 +0100
 @@ -5,7 +5,7 @@
-    (tcljx.classgen [classfile :as classfile] [constgen :as constgen]
+    (tcljx.nmspgen [classfile :as classfile] [constgen :as constgen]
                     [emit :as emit] [insn :as insn] [runtime :as rt]
                     [condgen :as condgen])
 -   [tinyclj.string :as str])
@@ -56,30 +56,30 @@ diff -Nru src/tcljx.compiler/tcljx/classgen/primitive.cljt ../tcljx.compiler.pat
    (:import
     (tcljx.data.type Wrapper)
     (tcljx.data.ir CodeEmitter Loadable Entity ImmediateEntity Constant)
-diff -Nru src/tcljx.compiler/tcljx/classgen/publics.cljt ../tcljx.compiler.patched/tcljx/classgen/publics.cljt
---- src/tcljx.compiler/tcljx/classgen/publics.cljt	2025-10-28 07:47:39.795661739 +0100
-+++ ../tcljx.compiler.patched/tcljx/classgen/publics.cljt	2025-10-28 10:20:15.467385666 +0100
+diff -Nru src/tcljx.compiler/tcljx/nmspgen/publics.cljt ../tcljx.compiler.patched/tcljx/nmspgen/publics.cljt
+--- src/tcljx.compiler/tcljx/nmspgen/publics.cljt	2025-10-28 07:47:39.795661739 +0100
++++ ../tcljx.compiler.patched/tcljx/nmspgen/publics.cljt	2025-10-28 10:20:15.467385666 +0100
 @@ -6,7 +6,7 @@
-    (tcljx.classgen [runtime :as rt] classfile [segment :as segment]
+    (tcljx.nmspgen [runtime :as rt] classfile [segment :as segment]
                     [insn :as insn] [constgen :as constgen] [defgen :as defgen]
                     [fngen :as fngen])
 -   [tinyclj.string :as str])
 +   [clojure.string :as str])
    (:import
     (tcljx.data.ir Entity ImmediateEntity ArityType MethodSpec ProvidedNamespace)
-    (tcljx.classgen.classfile Loader)
-diff -Nru src/tcljx.compiler/tcljx/classgen/typegen.cljt ../tcljx.compiler.patched/tcljx/classgen/typegen.cljt
---- src/tcljx.compiler/tcljx/classgen/typegen.cljt	2025-10-27 11:45:05.838645223 +0100
-+++ ../tcljx.compiler.patched/tcljx/classgen/typegen.cljt	2025-10-28 10:20:15.467385666 +0100
+    (tcljx.nmspgen.classfile Loader)
+diff -Nru src/tcljx.compiler/tcljx/nmspgen/typegen.cljt ../tcljx.compiler.patched/tcljx/nmspgen/typegen.cljt
+--- src/tcljx.compiler/tcljx/nmspgen/typegen.cljt	2025-10-27 11:45:05.838645223 +0100
++++ ../tcljx.compiler.patched/tcljx/nmspgen/typegen.cljt	2025-10-28 10:20:15.467385666 +0100
 @@ -4,7 +4,7 @@
                 [type :as type] [ir :as ir] [code :as code])
-    (tcljx.classgen segment [util :as util] [runtime :as rt] [emit :as emit]
+    (tcljx.nmspgen segment [util :as util] [runtime :as rt] [emit :as emit]
                     [constgen :as constgen] [insn :as insn] [fnenv :as fnenv])
 -   [tinyclj.string :as str])
 +   [clojure.string :as str])
    (:import
     (tcljx.data.ir CodeEmitter Entity MethodSpec FieldSpec NmspClass)
-    (tcljx.classgen.insn Insn)
+    (tcljx.nmspgen.insn Insn)
 diff -Nru src/tcljx.compiler/tcljx/data/config.cljt ../tcljx.compiler.patched/tcljx/data/config.cljt
 --- src/tcljx.compiler/tcljx/data/config.cljt	2025-10-23 09:22:09.332065720 +0200
 +++ ../tcljx.compiler.patched/tcljx/data/config.cljt	2025-10-28 10:20:15.468385681 +0100

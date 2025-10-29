@@ -1,0 +1,78 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.nmspgen.bits-test
+  (:require [tcljx.nmspgen.bootstrap :refer [asm-expr call-expr]]
+            [tcljx.alpha.ptest :refer :all]))
+
+(deftest int-and-test
+  (is (= '[(ICONST_0) #_(ICONST_1) #_(ICONST_2) #_(IAND) (IRETURN)]
+         (asm-expr (bit-and 1 2))))
+  (is (= '[(ICONST_0) #_(ICONST_1) #_(ICONST_2) #_(IAND) #_(ICONST_3) #_(IAND) (IRETURN)]
+         (asm-expr (bit-and 1 2 3)))))
+
+(deftest bit-not-test
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (ICONST_M1) (IXOR) (IRETURN)]
+         (asm-expr [^int x] (bit-not x))))
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LDC2_W -1) (LXOR) (LRETURN)]
+         (asm-expr [^long x] (bit-not x))))
+  
+  (is (= '[(BIPUSH -2) (IRETURN)]
+         (asm-expr (bit-not 1))))
+  (is (= '[(LDC2_W -2) (LRETURN)]
+         (asm-expr (bit-not (long 1))))))
+
+(deftest bit-shift-test
+  (is (= '[["LOCAL 0: int x"] ["LOCAL 1: int n"]
+           (ILOAD_0) (ILOAD_1) (ISHL) (IRETURN)]
+         (asm-expr ^int [^int x ^int n] (bit-shift-left x n))))
+  (is (= '[["LOCAL 0: long x"] ["LOCAL 2: int n"]
+           (LLOAD_0) (ILOAD_2) (LSHL) (LRETURN)]
+         (asm-expr ^long [^long x ^int n] (bit-shift-left x n))))
+  (is (= '[(BIPUSH 16) (IRETURN)]
+         (asm-expr (bit-shift-left 1 4))))
+  (is (= '[(LDC2_W 16) (LRETURN)]
+         (asm-expr (bit-shift-left (long 1) 4))))
+
+  (is (= '[["LOCAL 0: int x"] ["LOCAL 1: int n"]
+           (ILOAD_0) (ILOAD_1) (ISHR) (IRETURN)]
+         (asm-expr ^int [^int x ^int n] (bit-shift-right x n))))
+  (is (= '[["LOCAL 0: long x"] ["LOCAL 2: int n"]
+           (LLOAD_0) (ILOAD_2) (LSHR) (LRETURN)]
+         (asm-expr ^long [^long x ^int n] (bit-shift-right x n))))
+
+  (is (= '[["LOCAL 0: int x"] ["LOCAL 1: int n"]
+           (ILOAD_0) (ILOAD_1) (IUSHR) (IRETURN)]
+         (asm-expr ^int [^int x ^int n] (unsigned-bit-shift-right x n))))
+  (is (= '[["LOCAL 0: long x"] ["LOCAL 2: int n"]
+           (LLOAD_0) (ILOAD_2) (LUSHR) (LRETURN)]
+         (asm-expr ^long [^long x ^int n] (unsigned-bit-shift-right x n)))))
+
+(deftest zero-of-test
+  (is (= '[["LOCAL 0: int n"] (ICONST_0) (IRETURN)]
+         (asm-expr [^int n] (xdefault n))))
+  (is (= '[["LOCAL 0: byte n"] (ICONST_0) (IRETURN)]
+         (asm-expr ^byte [^byte n] (xdefault n))))
+  (is (= '[["LOCAL 0: char n"] (ICONST_0) (IRETURN)]
+         (asm-expr ^char [^char n] (xdefault n)))))
+
+(deftest bit-shift-by-zero-test
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
+         (asm-expr [^int x] (bit-shift-left x 0))))
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
+         (asm-expr [^long x] (bit-shift-left x 0)))))
+
+(deftest bit-or-by-zero-test
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
+         (asm-expr [^int x] (bit-or x 0))))
+  (is (= '[["LOCAL 0: int x"] (ILOAD_0) (IRETURN)]
+         (asm-expr [^int x] (bit-or 0 x))))
+  
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
+         (asm-expr [^long x] (bit-or x 0))))
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (LRETURN)]
+         (asm-expr [^long x] (bit-or 0 x)))))

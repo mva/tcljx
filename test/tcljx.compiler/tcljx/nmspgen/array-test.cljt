@@ -1,0 +1,135 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.nmspgen.array-test
+  (:require [tcljx.nmspgen.bootstrap :refer [asm-expr call-expr]]
+            [tcljx.alpha.ptest :refer :all]))
+
+(deftest array-type-syntax
+  ;; class values
+  (is (= '[(LDC "Object[]") (ARETURN)]
+         (asm-expr java.lang.Object/1)))
+  (is (= '[(LDC "Object[][]") (ARETURN)]
+         (asm-expr java.lang.Object/2)))
+
+  (is (= '[(LDC "Object[]") (ARETURN)]
+         (asm-expr Object/1)))
+  (is (= '[(LDC "Object[][]") (ARETURN)]
+         (asm-expr Object/2)))
+  
+  (is (= '[(LDC "int[]") (ARETURN)]
+         (asm-expr int/1)))
+  (is (= '[(LDC "int[][]") (ARETURN)]
+         (asm-expr int/2)))
+  
+  ;; array creation using (new <type> ...) syntax
+  (is (= '[(ICONST_2)
+           (ANEWARRAY "Object[]")
+           (ARETURN)]
+         (asm-expr (new java.lang.Object/1 2))))
+  (is (= '[(ICONST_2)
+           (ANEWARRAY "Object[][]")
+           (ARETURN)]
+         (asm-expr (new java.lang.Object/2 2))))
+
+  (is (= '[(ICONST_2)
+           (ANEWARRAY "Object[]")
+           (ARETURN)]
+         (asm-expr (new Object/1 2))))
+  (is (= '[(ICONST_2)
+           (ANEWARRAY "Object[][]")
+           (ARETURN)]
+         (asm-expr (new Object/2 2))))
+
+  (is (= '[(ICONST_2)
+           (NEWARRAY "int[]")
+           (ARETURN)]
+         (asm-expr (new int/1 2))))
+  (is (= '[(ICONST_2)
+           (ANEWARRAY "int[][]")
+           (ARETURN)]
+         (asm-expr (new int/2 2)))))
+
+
+(deftest make-array-test
+  (is (= '[(ICONST_2)
+           (ANEWARRAY "Object[]")
+           (ARETURN)]
+         (asm-expr (new Object/1 2)))))
+
+(deftest alength-test
+  (is (= '[["LOCAL 0: Object[] a"]
+           (ALOAD_0)
+           (ARRAYLENGTH)
+           (IRETURN)]
+         (asm-expr [^Object/1 a] (alength a))))
+  (is (= '[["LOCAL 0: boolean[] a"]
+           (ALOAD_0)
+           (ARRAYLENGTH)
+           (IRETURN)]
+         (asm-expr [^boolean/1 a] (alength a)))))
+
+(deftest array-get-test
+  (is (= '[["LOCAL 0: Object[] a"]
+           (ALOAD_0)
+           (ICONST_0)
+           (AALOAD)
+           (ARETURN)]
+         (asm-expr [^Object/1 a] (aget a 0))))
+  (is (= '[["LOCAL 0: double[] a"]
+           (ALOAD_0)
+           (ICONST_0)
+           (DALOAD)
+           (DRETURN)]
+         (asm-expr [^double/1 a] (aget a 0))))
+  
+  (is (= '[(ICONST_2)
+           (ICONST_3)
+           (MULTIANEWARRAY "Object[][]" 2)
+           (ICONST_0)
+           (AALOAD)
+           (ICONST_1)
+           (AALOAD)
+           (ARETURN)]
+         (asm-expr (aget (new Object/2 2 3) 0 1)))))
+
+(deftest array-set-test
+  (is (= '[["LOCAL 0: Object[] a"]
+           (ALOAD_0)
+           (ICONST_0)
+           (ACONST_NULL)
+           (DUP_X2)
+           (AASTORE)
+           (ARETURN)]
+         (asm-expr [^Object/1 a] (aset a 0 nil))))
+  (is (= '[["LOCAL 0: double[] a"]
+           (ALOAD_0)
+           (ICONST_0)
+           (DCONST_1)
+           (DUP2_X2)
+           (DASTORE)
+           (DRETURN)]
+         (asm-expr [^double/1 a] (aset a 0 1.0))))
+  (is (= '[["LOCAL 0: double[] a"]
+           (ALOAD_0)
+           (ICONST_0)
+           (DCONST_1)
+           (DASTORE)
+           (RETURN)]
+         (asm-expr ^void [^double/1 a] (aset a 0 1.0))))
+
+  (is (= '[(ICONST_2)
+           (ICONST_3)
+           (MULTIANEWARRAY "Object[][]" 2)
+           (ICONST_0)
+           (AALOAD)
+           (ICONST_1)
+           (ACONST_NULL)
+           (DUP_X2)
+           (AASTORE)
+           (ARETURN)]
+         (asm-expr (aset (new Object/2 2 3) 0 1 nil)))))

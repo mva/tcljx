@@ -8,7 +8,7 @@
 (ns tcljx.main.tclj0
   (:require
    (tcljx.data [config :as cfg] [files :as files] wrong [type :as type])
-   (tcljx.classgen [classfile :as classfile] [insn :as insn]
+   (tcljx.nmspgen [classfile :as classfile] [insn :as insn]
                    [primitive :as primitive] [universe :as universe])
    (tcljx.main [options :as options] [invoke :as invoke] [efmt :as efmt]))
   (:import

@@ -1,0 +1,136 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.nmspgen.unreachable-test
+  (:require
+   [tcljx.nmspgen.bootstrap :refer [nmsp asm-expr]]
+   [tcljx.alpha.ptest :refer :all])
+  (:import (tcljx.data.wrong WrongInfo)))
+
+(deftest def-with-throw-test
+  (is (thrown? Throwable                ;during namespace clinit
+               (nmsp '[(ns pkg.ns0)
+                       (def foo (throw (Throwable/new)))])))
+  (is (thrown? Throwable                ;during namespace clinit
+               (nmsp '[(ns pkg.ns0)
+                       (def foo (throw (Throwable/new)))
+                       (def bar 123)])))
+  (is (thrown? Throwable                ;during namespace clinit
+               (nmsp '[(ns pkg.ns0)
+                       (def foo (throw (Throwable/new)))
+                       (def bar (System/gc))]))))
+
+(deftest fn-body-with-throw-test
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (throw (Throwable/new))))))
+
+(deftest fn-body-with-throw-test
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (throw (Throwable/new))))))
+
+(deftest do-with-throw-test
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (do (throw (Throwable/new))))))
+  (is (= '[(INVOKESTATIC System "gc" "()V")
+           (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (do (System/gc)
+                       (throw (Throwable/new))))))
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (do (throw (Throwable/new))
+                       (System/gc))))))
+
+(deftest local-binding-with-throw-argument-test
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (let* [a (throw (Throwable/new))]
+                     "foo"))))
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (let* [a (throw (Throwable/new))]
+                     a))))
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (let* [x 123
+                          a (throw (Throwable/new))]
+                     a))))
+  (is (= '[(INVOKESTATIC System "gc" "()V") (ACONST_NULL)
+           (ASTORE_0)
+           ["LOCAL 0: Object x"]
+           (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (let* [x (System/gc)
+                          a (throw (Throwable/new))]
+                     a)))))
+
+;;; ------------------------------------------------------------------------
+
+(deftest throw-with-throw-test
+  (is (thrown-with-msg? WrongInfo #"expect instance of Throwable.*got:.*void"
+                        (asm-expr (throw (throw (Throwable/new)))))))
+
+(deftest type-conversion-with-throw-test
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (int (throw (Throwable/new)))))))
+
+(deftest binary-operator-with-throw-test
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (- (throw (Throwable/new)) 2))))
+  (is (= '[(INVOKESTATIC System "gc" "()V")
+           (ICONST_0)
+           (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (- (System/gc) (throw (Throwable/new)))))))
+
+(deftest string-concat-with-throw-test
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (str (throw (Throwable/new))))))
+  (is (= '[(NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (str "foo" (throw (Throwable/new)))))))
+
+(deftest vector-literal-with-throw-test
+  (is (= '[(ICONST_1) (ANEWARRAY "Object[]")
+           (DUP) (ICONST_0)
+           (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr [(throw (Throwable/new))])))
+  (is (= '[(ICONST_2) (ANEWARRAY "Object[]")
+           (DUP) (ICONST_0)
+           (LDC "foo")
+           (AASTORE)
+           (DUP) (ICONST_1)
+           (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr ["foo" (throw (Throwable/new))])))
+  (is (= '[(ICONST_2) (ANEWARRAY "Object[]")
+           (DUP) (ICONST_0)
+           (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr [(throw (Throwable/new)) "foo"]))))
+
+(deftest method-invoke-with-throw-argument-test
+  ;; fixed argument
+  (is (thrown-with-msg? WrongInfo #"multiple static methods matching"
+         (asm-expr (String/format (throw (Throwable/new))
+                                  "foo"))))
+  ;; variable argument
+  (is (= '[(LDC "%d")
+           (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
+           (ATHROW)]
+         (asm-expr (String/format "%d" (throw (Throwable/new))))))
+
+  ;; receiver
+  (is (thrown-with-msg? WrongInfo #"no virtual member matching"
+         (asm-expr (. (throw (Throwable/new)) toString)))))

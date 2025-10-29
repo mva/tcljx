@@ -1,0 +1,77 @@
+(ns tcljx.nmspgen.trygen
+  (:require
+   (tcljx.data [type :as type] [wrong :as wrong] [reflect :as reflect]
+               [ir :as ir])
+   (tcljx.nmspgen [emit :as emit] [insn :as insn]))
+  (:import
+   (tcljx.data.ir CodeEmitter)
+   (java.lang.classfile CodeBuilder Label)))
+
+(defn emit-b+cs? ^boolean [^CodeEmitter/1 body+catch-ces ^Class/1 catch-types
+                           ^CodeBuilder xb ^long fctx ^Class consumed-type
+                           ^boolean then-leave? ^Label target-end]
+  (let [body-start (.newLabel xb), body-end (.newLabel xb)
+        body (aget body+catch-ces 0)
+        n (alength body+catch-ces)
+        
+        continue-after-body?
+        (-> (.labelBinding xb body-start)
+            (emit/then-leave? fctx consumed-type body then-leave?))]
+    (when continue-after-body?
+      (.goto_ xb target-end))
+    (.labelBinding xb body-end)
+    ;; region body-start to body-end is not empty: either it contains
+    ;; the final goto after regular completion, or some athrow insn
+
+    (loop [reaches-end? continue-after-body?, i 1]
+      (if (< i n)
+        (let [handler (.newLabel xb)
+              catch-ce (aget body+catch-ces i)
+              cont? (-> (.labelBinding xb handler)
+                        (emit/then-leave? fctx consumed-type catch-ce then-leave?))
+              catch-type (reflect/describe-class (aget catch-types (dec i)))]
+          (cond-> (.exceptionCatch xb body-start body-end handler catch-type)
+            cont? (.goto_ target-end))
+          (recur (or reaches-end? cont?) (inc i)))
+
+        reaches-end?))))
+
+(defn try-catch ^CodeEmitter [^Class produced-type ^CodeEmitter/1 body+catch-ces
+                              ^Class/1 catch-types ^long fctx]
+  (emit/with-adaption-barrier produced-type
+    (^CodeEmitter fn [xb consumed-type then-leave?]
+     (let [try-end (.newLabel xb)]
+       (when (emit-b+cs? body+catch-ces catch-types xb fctx consumed-type
+                         then-leave? try-end)
+         (.labelBinding xb try-end)
+         consumed-type)))))
+
+(defn try-catch-finally ^CodeEmitter [^Class produced-type
+                                      ^CodeEmitter/1 body+catch-ces
+                                      ^Class/1 catch-types
+                                      ^CodeEmitter finally ^long fctx]
+  (emit/with-adaption-barrier produced-type
+    (^CodeEmitter fn [xb consumed-type then-leave?]
+     (let [body-start (.newLabel xb)
+           body-end (.newLabel xb)
+           target-finally (.newLabel xb)
+           
+           continue-after-body?
+           (do (.labelBinding xb body-start)
+               (emit-b+cs? body+catch-ces catch-types
+                           xb fctx consumed-type false target-finally))]
+       (.labelBinding xb body-end)
+       ;; region body-start to body-end is not empty: either it contains
+       ;; the final goto after regular completion, or some athrow insn
+       
+       (let [handler (.newLabel xb)] ;exceptional `finally` instructions
+         (.labelBinding xb handler)
+         (when (emit/insn? xb fctx Void/TYPE finally)
+           (.athrow xb))      ;line number of original exception applies
+         (.exceptionCatchAll xb body-start body-end handler)
+
+         (.labelBinding xb target-finally) ;regular `finally` instructions
+         (when (and continue-after-body?
+                    (emit/insn? xb fctx Void/TYPE finally))
+           consumed-type))))))
+ 

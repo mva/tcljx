@@ -1,0 +1,412 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.nmspgen.fn-member-test
+  (:require [tcljx.nmspgen.bootstrap :refer [asm-expr str-expr nmsp]]
+            [tcljx.alpha.ptest :refer :all])
+  (:import (tcljx.data.wrong WrongInfo)))
+
+;;; Note: Tests using `^[...]` syntax should use `str-expr` instead of
+;;; `asm-expr` to bypass the bootstrap compiler's meta syntax processing.
+
+(deftest value-of-virtual-Object-method-test
+  (let [exp '[(LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                    [[VIRTUAL Object "toString" "()Ljava/lang/String;"]]])
+              (ARETURN)]]
+    (is (= exp (asm-expr Object/.toString)))
+    (is (= exp (asm-expr ^{:param-tags []} Object/.toString)))
+    (is (= exp (str-expr "^[] Object/.toString"))))
+  
+  (let [exp '[(LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                    [[VIRTUAL Object "equals" "(Ljava/lang/Object;)Z"]]])
+              (ARETURN)]]
+    (is (= exp (asm-expr Object/.equals)))
+    (is (= exp (asm-expr ^{:param-tags [_]} Object/.equals)))
+    (is (= exp (asm-expr ^{:param-tags [Object]} Object/.equals)))
+    (is (= exp (str-expr "^[_] Object/.equals")))
+    (is (= exp (str-expr "^[Object] Object/.equals")))))
+
+(deftest value-of-static-Math-method-test
+  (let [exp '[(LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                    [[STATIC Math "cos" "(D)D"]]])
+              (ARETURN)]]
+    (is (= exp (asm-expr Math/cos)))
+    (is (= exp (asm-expr ^{:param-tags [double]} Math/cos)))
+    (is (= exp (str-expr "^[double] Math/cos"))))
+
+  (is (thrown-with-msg? WrongInfo #"multiple static members matching"
+                        (asm-expr Math/floorMod)))
+  (let [exp '[(LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                    [[STATIC Math "floorMod" "(JJ)J"]]])
+              (ARETURN)]]
+    (is (= exp (asm-expr ^{:param-tags [long long]} Math/floorMod)))
+    (is (= exp (asm-expr ^{:param-tags [_ long]} Math/floorMod)))
+    (is (= exp (str-expr "^[long long] Math/floorMod")))
+    (is (= exp (str-expr "^[_ long] Math/floorMod")))))
+
+(deftest method-value-errors-test
+  (is (thrown-with-msg? WrongInfo #"multiple static members matching"
+                        (asm-expr Math/floorMod)))
+  (is (thrown-with-msg? WrongInfo #"multiple static members matching"
+                        (asm-expr ^{:param-tags [_ _]} Math/floorMod)))
+  (is (thrown-with-msg? WrongInfo #"multiple static members matching"
+                        (asm-expr ^{:param-tags [long _]} Math/floorMod)))
+
+  (is (thrown-with-msg? WrongInfo #"no static member"
+                        (asm-expr ^{:param-tags [_]} Math/floorMod)))
+  (is (thrown-with-msg? WrongInfo #"no static member"
+                        (asm-expr ^{:param-tags [_ _ _]} Math/floorMod)))
+  (is (thrown-with-msg? WrongInfo #"no static member"
+                        (asm-expr ^{:param-tags [float _]} Math/floorMod)))
+  (is (thrown-with-msg? WrongInfo #"no static member"
+                        (asm-expr ^{:param-tags [float float]} Math/floorMod))))
+
+(deftest constructor-value-errors-test
+  ;; interface has no constructor
+  (is (thrown-with-msg? WrongInfo #"no constructor"
+                        (asm-expr Runnable/new))))
+
+(deftest value-of-Object-constructor-test
+  (let [exp '[(LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                    [[CONSTRUCTOR Object "<init>" "()V"]]])
+              (ARETURN)]]
+    (is (= exp (asm-expr Object/new)))
+    (is (= exp (asm-expr ^{:param-tags []} Object/new)))
+    (is (= exp (str-expr "^[] Object/new")))))
+
+(deftest value-of-BigInteger-constructor-test
+  (is (thrown-with-msg? WrongInfo #"multiple constructors matching"
+                        (asm-expr java.math.BigInteger/new)))
+
+  (let [exp '[(LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                    [[CONSTRUCTOR BigInteger "<init>"
+                      "(Ljava/lang/String;)V"]]])
+              (ARETURN)]]
+    (is (= exp (asm-expr ^{:param-tags [String]} java.math.BigInteger/new)))
+    (is (= exp (str-expr "^[String] java.math.BigInteger/new"))))
+
+  (let [exp '[(LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                    [[CONSTRUCTOR BigInteger "<init>"
+                      "(Ljava/lang/String;I)V"]]])
+              (ARETURN)]]
+    (is (= exp (asm-expr ^{:param-tags [String int]} java.math.BigInteger/new)))
+    (is (= exp (str-expr "^[String int] java.math.BigInteger/new")))))
+
+(deftest static-varargs-method-test
+  (is (thrown-with-msg? WrongInfo #"multiple static members matching"
+                        (asm-expr String/format)))
+  
+  (let [exp '[(LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                    [[STATIC String "format"
+                      "(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;"]]])
+              (ARETURN)]]
+    (is (= exp (asm-expr ^{:param-tags [_ _]} String/format)))
+    (is (= exp (str-expr "^[_ _] String/format"))))
+
+  (is (= '[(LDC "%10s")
+           (ICONST_1) (ANEWARRAY "Object[]")
+           (DUP) (ICONST_0) (LDC "123") (AASTORE)
+           (INVOKESTATIC String "format"
+                         "(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;")
+           (ARETURN)]
+         (asm-expr (let* [f ^{:param-tags [String Object/1]} String/format]
+                     (f "%10s" "123")))))
+
+  (is (= '[["LOCAL 0: Object[] arr"]
+           (LDC "%10s")
+           (ICONST_1) (ANEWARRAY "Object[]") ;must create varargs array
+           (DUP) (ICONST_0) (ALOAD_0) (AASTORE)
+           (INVOKESTATIC String "format"
+                         "(Ljava/lang/String;[Ljava/lang/Object;)Ljava/lang/String;")
+           (ARETURN)]
+         ;; Create a varargs function(!) `f` that takes an array of
+         ;; Object and then invoke it.  Check that this follows the
+         ;; Clojure calling convention.  That is, a varargs array
+         ;; wrapping the arguments is always created even if an array
+         ;; value matching the vararg array's type is provided.
+         (asm-expr [^Object/1 arr]
+                   (let* [f ^{:param-tags [String Object/1]} String/format]
+                     (f "%10s" arr))))))
+
+(deftest virtual-varargs-method-test
+  (let [exp '[(LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                    [[VIRTUAL String "formatted"
+                      "([Ljava/lang/Object;)Ljava/lang/String;"]]])
+              (ARETURN)]]
+    (is (= exp (asm-expr String/.formatted)))
+    (is (= exp (asm-expr ^{:param-tags [_]} String/.formatted)))
+    (is (= exp (str-expr "^[_] String/.formatted"))))
+
+  (is (= '[(LDC "%10s")
+           (ICONST_1) (ANEWARRAY "Object[]")
+           (DUP) (ICONST_0) (LDC "123") (AASTORE)
+           (INVOKEVIRTUAL String "formatted"
+                          "([Ljava/lang/Object;)Ljava/lang/String;")
+           (ARETURN)]
+         (asm-expr (let* [f ^{:param-tags [Object/1]} String/.formatted]
+                     (f "%10s" "123")))))
+
+  (is (= '[["LOCAL 0: Object[] arr"]
+           (LDC "%10s")
+           (ICONST_1) (ANEWARRAY "Object[]") ;must create varargs array
+           (DUP) (ICONST_0) (ALOAD_0) (AASTORE)
+           (INVOKEVIRTUAL String "formatted"
+                          "([Ljava/lang/Object;)Ljava/lang/String;")
+           (ARETURN)]
+         ;; like static test above: check Clojure calling convection
+         (asm-expr [^Object/1 arr]
+                   (let* [f ^{:param-tags [Object/1]} String/.formatted]
+                     (f "%10s" arr))))))
+
+(deftest let-value-of-executable-then-invoke-test
+  (is (= '[(LDC "123")
+           (INVOKEVIRTUAL Object "toString" "()Ljava/lang/String;")
+           (ARETURN)]
+         (asm-expr (let* [f Object/.toString]
+                     (f "123")))))
+  (is (= '[(LDC "123")
+           (INVOKESTATIC Integer "valueOf"
+                         "(Ljava/lang/String;)Ljava/lang/Integer;")
+           (ARETURN)]
+         (asm-expr (let* [f ^{:param-tags [String]} Integer/valueOf]
+                     (f "123")))))
+  (is (= '[(NEW BigInteger)
+           (DUP)
+           (LDC "123")
+           (INVOKESPECIAL BigInteger "<init>" "(Ljava/lang/String;)V")
+           (ARETURN)]
+         (asm-expr (let* [f ^{:param-tags [String]} BigInteger/new]
+                     (f "123"))))))
+
+(deftest invoke-value-of-executable-test
+  (is (= '[(LDC "123")
+           (INVOKEVIRTUAL Object "toString" "()Ljava/lang/String;")
+           (ARETURN)]
+         (asm-expr (Object/.toString "123"))))
+  (is (= '[(LDC "123")
+           (INVOKESTATIC Integer "valueOf"
+                         "(Ljava/lang/String;)Ljava/lang/Integer;")
+           (ARETURN)]
+         ;; note: without :param-tags this would use the regular
+         ;; static method invocation code path
+         (asm-expr (^{:param-tags [String]} Integer/valueOf "123"))))
+  (is (= '[(NEW BigInteger)
+           (DUP)
+           (LDC "123")
+           (INVOKESPECIAL BigInteger "<init>" "(Ljava/lang/String;)V")
+           (ARETURN)]
+         (asm-expr (^{:param-tags [String]} BigInteger/new "123")))))
+
+(deftest no-available-candidate-test
+  (is (thrown-with-msg? WrongInfo #"no static method"
+                        (asm-expr [^byte b]
+                                  (Integer/toUnsignedInt b))))
+  (is (thrown-with-msg? WrongInfo #"no virtual member matching"
+                        (asm-expr (System/.out 123))))
+  
+  (is (thrown-with-msg? WrongInfo #"no static member"
+                        (asm-expr System/no_such_field)))
+  (is (thrown-with-msg? WrongInfo #"no static member"
+                        (asm-expr System/-out)))
+  (is (thrown-with-msg? WrongInfo #"no static member"
+                        (asm-expr (System/-out)))))
+
+(deftest resolve-using-arguments-test
+  ;; different arity
+  (is (= '[(LDC "foo")
+           (INVOKEVIRTUAL String "toUpperCase"
+                          "()Ljava/lang/String;")
+           (ARETURN)]
+         (asm-expr (String/.toUpperCase "foo"))))
+  (is (= '[(LDC "foo")
+           (LDC "de")
+           (INVOKESTATIC Locale "of" "(Ljava/lang/String;)Ljava/util/Locale;")
+           (INVOKEVIRTUAL String "toUpperCase"
+                          "(Ljava/util/Locale;)Ljava/lang/String;")
+           (ARETURN)]
+         (asm-expr (String/.toUpperCase "foo" (java.util.Locale/of "de")))))
+
+  ;; same arity but different argument types
+  (is (= '[["LOCAL 0: byte x"]
+           (ILOAD_0)
+           (INVOKESTATIC Math "abs" "(I)I")
+           (IRETURN)]
+         (asm-expr [^byte x] (Math/abs (int x)))))
+  (is (= '[["LOCAL 0: byte x"]
+           (ILOAD_0)
+           (I2D)
+           (INVOKESTATIC Math "abs" "(D)D")
+           (DRETURN)]
+         (asm-expr [^byte x] (Math/abs (double x))))))
+
+(deftest invoked-virtual-method-owner-test
+  ;; owner is java.lang.String
+  (let [exp '[(LDC "foo")
+              (INVOKEVIRTUAL String "toString" "()Ljava/lang/String;")
+              (ARETURN)]]
+    (is (= exp (asm-expr (.toString "foo"))))
+    (is (= exp (asm-expr (String/.toString "foo"))))
+    (is (= exp (asm-expr (^{:param-tags []} String/.toString "foo"))))
+    (is (thrown-with-msg? WrongInfo #"no virtual member"
+                          (asm-expr (^{:param-tags [_]} String/.toString "foo"))))
+    (is (thrown-with-msg? WrongInfo #"no virtual member"
+                          (asm-expr (^{:param-tags [Object]} String/.toString "foo"))))
+    (is (thrown-with-msg? WrongInfo #"no virtual member"
+                          (asm-expr (^{:param-tags [String]} String/.toString "foo")))))
+  
+  ;; owner is java.lang.Object
+  (let [exp '[(LDC "foo")
+              (INVOKEVIRTUAL Object "toString" "()Ljava/lang/String;")
+              (ARETURN)]]
+    (is (= exp (asm-expr (.toString ^Object (do "foo")))))
+    (is (= exp (asm-expr (Object/.toString "foo"))))
+    (is (= exp (asm-expr (^{:param-tags []} Object/.toString "foo"))))
+    (is (thrown-with-msg? WrongInfo #"no virtual member"
+                          (asm-expr (^{:param-tags [_]} Object/.toString "foo"))))
+    (is (thrown-with-msg? WrongInfo #"no virtual member"
+                          (asm-expr (^{:param-tags [Object]} Object/.toString "foo"))))
+    (is (thrown-with-msg? WrongInfo #"no virtual member"
+                          (asm-expr (^{:param-tags [String]} Object/.toString "foo")))))
+
+  ;; owner is java.lang.String
+  (is (= '[["LOCAL 0: Object obj"]
+           (ALOAD_0)
+           (CHECKCAST String)
+           (INVOKEVIRTUAL String "toString" "()Ljava/lang/String;")
+           (ARETURN)]
+         (asm-expr [^Object obj] (String/.toString obj))))
+  (is (= '[["LOCAL 0: String s"]
+           (ALOAD_0)
+           (CHECKCAST String)
+           (INVOKEVIRTUAL String "toString" "()Ljava/lang/String;")
+           (ARETURN)]
+         (asm-expr [^String s] (String/.toString ^Object s)))))
+
+(deftest invoke-virtual-field-test
+  (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/R"
+                   nil "java/lang/Record" [IType])
+            [(FIELD [PRIVATE FINAL] "field" "I")]
+            
+            [(METHOD [PUBLIC SYNTHETIC] "<init>" "(I)V")
+             (ALOAD_0)
+             (ILOAD_1)
+             (PUTFIELD . "field" "I")
+             (ALOAD_0)
+             (INVOKESPECIAL Record "<init>" "()V")
+             (RETURN)]
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "toString" "()Ljava/lang/String;")
+             (ALOAD_0)
+             (INVOKEDYNAMIC "toString" "(Lpkg/ns0/R;)Ljava/lang/String;"
+                            :bsm-object-method
+                            [. "field" [GETTER . "field" "I"]])
+             (ARETURN)]
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "hashCode" "()I")
+             (ALOAD_0)
+             (INVOKEDYNAMIC "hashCode" "(Lpkg/ns0/R;)I"
+                            :bsm-object-method
+                            [. "field" [GETTER . "field" "I"]])
+             (IRETURN)]
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "equals" "(Ljava/lang/Object;)Z")
+             (ALOAD_0)
+             (ALOAD_1)
+             (INVOKEDYNAMIC "equals" "(Lpkg/ns0/R;Ljava/lang/Object;)Z"
+                            :bsm-object-method
+                            [. "field" [GETTER . "field" "I"]])
+             (IRETURN)]
+            
+            [(METHOD [PUBLIC SYNTHETIC] "field" "()I")
+             (ALOAD_0)
+             (GETFIELD . "field" "I")
+             (IRETURN)]
+            
+            [:RecordAttribute [field "I"]]]
+           
+           [(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"
+                   nil "java/lang/Object" [IType])
+            [(FIELD [PUBLIC FINAL] "field" "I")]
+            
+            [(METHOD [PUBLIC SYNTHETIC] "<init>" "(I)V")
+             (ALOAD_0)
+             (ILOAD_1)
+             (PUTFIELD . "field" "I")
+             (ALOAD_0)
+             (INVOKESPECIAL Object "<init>" "()V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "value-instance-field"
+                     "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[GETTER T "field" "I"]]])
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "value-accessor-method"
+                     "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[VIRTUAL R "field" "()I"]]])
+             (ARETURN)]
+
+            ;; fn method elided and replaced with invoked method handle:
+            ;; 
+            ;; [(METHOD [PUBLIC STATIC FINAL] "invoke-instance-field~1"
+            ;;          "(Lpkg/ns0/T;)I")
+            ;;  ["LOCAL 0: T x"]
+            ;;  (ALOAD_0)
+            ;;  (GETFIELD T "field" "I")
+            ;;  (IRETURN)]
+            ;; [(METHOD [PUBLIC STATIC FINAL] "invoke-accessor-method~1"
+            ;;          "(Lpkg/ns0/R;)I")
+            ;;  ["LOCAL 0: R x"]
+            ;;  (ALOAD_0)
+            ;;  (INVOKEVIRTUAL R "field" "()I")
+            ;;  (IRETURN)]
+
+            [(METHOD [PUBLIC STATIC FINAL] "cast-and-invoke-instance-field~1"
+                     "(Ljava/lang/Object;)I")
+             ["LOCAL 0: Object x"]
+             (ALOAD_0)
+             (CHECKCAST T)
+             (GETFIELD T "field" "I")
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "cast-and-invoke-accessor-method~1"
+                     "(Ljava/lang/Object;)I")
+             ["LOCAL 0: Object x"]
+             (ALOAD_0)
+             (CHECKCAST R)
+             (INVOKEVIRTUAL R "field" "()I")
+             (IRETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 
+                 (deftype* pkg.ns0/T pkg.ns0.T
+                   [^int field]
+                   :implements [clojure.lang.IType])
+                 
+                 (deftype* pkg.ns0/R pkg.ns0.R
+                   [^int field]
+                   :implements [java.lang.Record clojure.lang.IType])
+
+                 (def value-instance-field T/.field)
+                 (def value-accessor-method R/.field)
+
+                 (fn* invoke-instance-field ^int [^T x]
+                      (T/.field x))
+                 (fn* invoke-accessor-method ^int [^R x]
+                      (R/.field x))
+                 
+                 (fn* cast-and-invoke-instance-field ^int [^Object x]
+                      (T/.field x))
+                 (fn* cast-and-invoke-accessor-method ^int [^Object x]
+                      (R/.field x))]))))
