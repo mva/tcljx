@@ -567,3 +567,18 @@
                        (finally
                          (.close out))))))))
 
+(deftest inline-try-as-value-of-binding
+  (is (= '[[L:0]
+           (ICONST_1)
+           (GOTO L:2)
+           (EXCEPTION_CATCH L:0 L:1 L:1 any)
+           [L:1]
+           (ATHROW)
+           [L:2]
+           (ISTORE_0)
+           ["LOCAL 0: int x"]
+           (ILOAD_0)
+           (IRETURN)]
+         (asm-expr []
+                   (let* [x (try 1 (finally 2))]
+                     x)))))

@@ -1,6 +1,6 @@
 (ns tcljx.parser.let
   (:require
-   (tcljx.data [wrong :as wrong] [ir :as ir])
+   (tcljx.data [wrong :as wrong] [context :as context] [ir :as ir])
    (tcljx.parser [syntax :as syntax] [parse :as parse] [interop :as interop]))
   (:import
    (tcljx.data.ir Expr Entity Binding FnPromise ExprFactory EntityFactory Parser)))
@@ -45,8 +45,9 @@
                           (interop/lookup-class-entity parser init)))
                 bnd (if (some? ent)
                       (binding-for-entity etf fctx nm ent init)
-                      (binding-for-init etf fctx opt-type nm
-                                        (parse/arg parser fctx init)))]
+                      (let [fctx' (context/of-progn-prefix fctx)]
+                        (->> (parse/form parser fctx' init)
+                             (binding-for-init etf fctx opt-type nm))))]
             (aset bnds i bnd)
             (recur (ir/with-local-binding parser bnd) (inc i)))
           (.block-bindings xf fctx bnds false false
