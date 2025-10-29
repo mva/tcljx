@@ -41,20 +41,6 @@ run-jfr: compile
 #	@$(JFR) view hot-methods $(JFR_RECORDING)
 	@$(JFR) view method-timing $(JFR_RECORDING)
 
-# Both `test` and `watch-and-test` depend on STAGE1_MINFO_RT:
-STAGE1_MDIR=$(TMP_USER)/tcljx-stage1.mdir-xpl
-STAGE1_MINFO_RT=$(STAGE1_MDIR)/tcljx.rt/module-info.class
-
-# Call with "make test TEST=<scope>" (with <scope> being "ns-name" or
-# "ns-name/var-name") to only run tests from the given namespace or
-# var.  Only call this after compile, possibly while one of the
-# watch-and-xxx targets is running.
-test: support/DONE $(STAGE1_MINFO_RT)
-	$(JAVA) -p ../bootstrap-tcljc --add-modules tcljc.core -cp $(DEST_DIR) $(RUN_TESTS_NS).___
-#	$(COMPILER_BOOT) -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)/run
-watch-and-test: support/DONE $(STAGE1_MINFO_RT)
-	$(COMPILER_BOOT) --watch -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)/run
-
 
 clean:
 	rm -rf support/DONE support/*.class "$(DEST_DIR)"/* "/tmp/$(USER)"/tcljx* *.class textflow__termios.out hs_err_pid*.log replay_pid*.log
@@ -127,6 +113,9 @@ $(STAGE0_MDIR)/DONE: $(TCLJX_SOURCE_COMPILER) support/DONE
 # STAGE1_MINFO_RT must be defined before target `test` and
 # `watch-and-test`.
 
+STAGE1_MDIR=$(TMP_USER)/tcljx-stage1.mdir-xpl
+
+STAGE1_MINFO_RT=$(STAGE1_MDIR)/tcljx.rt/module-info.class
 $(STAGE1_MINFO_RT): $(TCLJX_SOURCE_RT)
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
@@ -164,8 +153,8 @@ $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm: $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_RTIOW)
 # Build the module directories in $(STAGE2_MDIR).(rt|core|compiler).
 
 STAGE2_MDIR=$(TMP_USER)/tcljx-stage2.mdir-xpl
-STAGE2_MINFO_RT=$(STAGE2_MDIR)/tcljx.rt/module-info.class
 
+STAGE2_MINFO_RT=$(STAGE2_MDIR)/tcljx.rt/module-info.class
 $(STAGE2_MINFO_RT): $(STAGE1_MINFO_RT)
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
@@ -180,6 +169,17 @@ $(STAGE2_MINFO_CORE): $(STAGE2_MINFO_RT) $(TCLJX_SOURCE_CORE) $(STAGE1_MINFO_COM
 	$(BUILD_JAVAC) -p $(STAGE2_MDIR) -d "$(dir $@)" src/tcljx.core/module-info.java
 
 ##########################################################################
+
+# Call with "make test TEST=<scope>" (with <scope> being "ns-name" or
+# "ns-name/var-name") to only run tests from the given namespace or
+# var.  Only call this after compile, possibly while one of the
+# watch-and-xxx targets is running.
+test: support/DONE $(STAGE1_MINFO_RT)
+	$(JAVA) -p ../bootstrap-tcljc --add-modules tcljc.core -cp $(DEST_DIR) $(RUN_TESTS_NS).___
+#	$(COMPILER_BOOT) -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)/run
+watch-and-test: support/DONE $(STAGE1_MINFO_RT)
+	$(COMPILER_BOOT) --watch -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)/run
+
 
 stage0-mdir: $(STAGE0_MDIR)/DONE
 stage1-rt: $(STAGE1_MINFO_RT)
