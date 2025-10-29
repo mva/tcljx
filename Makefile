@@ -167,6 +167,15 @@ $(STAGE2_MINFO_CORE): $(STAGE2_MINFO_RT) $(TCLJX_SOURCE_CORE) $(STAGE1_MINFO_COM
 	@rm -rf "$(dir $@)"
 	$(COMPILER_STAGE1) -d "$(dir $@)" -s src/tcljx.core clojure.core.all
 	$(BUILD_JAVAC) -p $(STAGE2_MDIR) -d "$(dir $@)" src/tcljx.core/module-info.java
+	diff -Nrq $(dir $(STAGE1_MINFO_CORE)) $(dir $@)
+
+STAGE2_MINFO_COMPILER=$(STAGE2_MDIR)/tcljx.compiler/module-info.class
+$(STAGE2_MINFO_COMPILER): $(STAGE2_MINFO_CORE) $(TCLJX_SOURCE_COMPILER)
+	@echo; echo "### $(dir $@)"
+	@rm -rf "$(dir $@)"
+	$(COMPILER_STAGE1) -d "$(dir $@)" -s $(dir $(STAGE2_MINFO_CORE)) -s "$(PATCHED_DIR)" $(TCLJX_MAIN_NS)
+	$(BUILD_JAVAC) -p $(STAGE2_MDIR) -d "$(dir $@)" "$(PATCHED_DIR)"/module-info.java
+	diff -Nrq $(dir $(STAGE1_MINFO_COMPILER)) $(dir $@)
 
 ##########################################################################
 
@@ -188,3 +197,5 @@ stage1-compiler: $(STAGE1_MINFO_COMPILER)
 stage1-rtiow: $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm
 stage2-rt: $(STAGE2_MINFO_RT)
 stage2-core: $(STAGE2_MINFO_CORE)
+stage2-compiler: $(STAGE2_MINFO_COMPILER)
+bootstrap-and-check: stage2-compiler
