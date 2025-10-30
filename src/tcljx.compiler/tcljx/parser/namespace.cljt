@@ -157,14 +157,14 @@
             (when (cfg/core-lib? (.ns-str nmsp))
               ;; namespaces required from clojure.core have access to
               ;; core's defs up to this point
-              (.commit-segment nmsp rdr))
+              (.flush-segment nmsp rdr))
             (process-requires nmsp (reverse rrequires))))
         (load-form ^NamespaceBuilder [^NamespaceBuilder nmsp
                                       ^FormReader rdr ^seq form]
           ;; emit pending classes with current SourceFile attribute;
           ;; also: hack for dependency chain core_print.cljt ->
           ;; MultiFn.java -> clojure.core fns
-          (.commit-segment nmsp rdr)
+          (.flush-segment nmsp rdr)
           (loop [nmsp nmsp, [arg & argr :as args] (next form)]
             (if (some? args)
               (do (when-not (string? arg)
@@ -172,7 +172,7 @@
                                       (wrong/got-q arg))))
                   (let [path-str (str arg files/source-suffix)
                         rdr' (.resolve rdr path-str)]
-                    (recur (-> nmsp (parse-all rdr') (.commit-segment rdr'))
+                    (recur (-> nmsp (parse-all rdr') (.flush-segment rdr'))
                            argr)))
               nmsp)))
         (in-ns-form ^NamespaceBuilder [^NamespaceBuilder nmsp

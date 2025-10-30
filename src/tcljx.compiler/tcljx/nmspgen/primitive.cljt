@@ -1,8 +1,9 @@
 (ns tcljx.nmspgen.primitive
   (:require
    (tcljx.data [config :as cfg] [type :as type] [resolve :as resolve]
-               [reflect :as reflect] [ir :as ir] [wrong :as wrong])
-   (tcljx.nmspgen [classfile :as classfile] [constgen :as constgen]
+               [reflect :as reflect] [ir :as ir] [code :as code]
+               [wrong :as wrong])
+   (tcljx.nmspgen [pkggen :as pkggen] [constgen :as constgen]
                    [emit :as emit] [insn :as insn] [runtime :as rt]
                    [condgen :as condgen])
    [tinyclj.string :as str])
@@ -141,7 +142,7 @@
             ;; [il]div and [il]rem can raise a division by zero
             ;; exception, so provide a line number for div & rem
             (emit/with-line-number xb fctx))
-          (classfile/with-operator xb bytecode)
+          (code/with-operator xb bytecode)
           tp0)))))
 
 (def ^:private no-iinc Integer/MIN_VALUE) ;outside range of IINC instruction

@@ -3,15 +3,16 @@
    (tcljx.data [config :as cfg] [context :as context] [member :as member]
                [type :as type] [reflect :as reflect] [resolve :as resolve]
                [ir :as ir] [code :as code])
-   (tcljx.nmspgen [classfile :as classfile] [runtime :as rt] segment
-                   [util :as util] [emit :as emit] [constgen :as constgen]
-                   [insn :as insn] [condgen :as condgen] [fnenv :as fnenv]))
+   (tcljx.nmspgen [runtime :as rt] env [pkggen :as pkggen]
+                  [util :as util] [emit :as emit] [constgen :as constgen]
+                  [insn :as insn] [condgen :as condgen] [envgen :as envgen]))
   (:import
    (tcljx.data.ir CodeEmitter Entity BindableEntity ImmediateEntity FnPromise
                   ArityType AritySpec MethodSpec FieldSpec NmspClass
                   Parser ExprFactory EntityFactory)
    (tcljx.data.member MemberHandle)
-   (tcljx.nmspgen.segment CodePromise Display StoredEnv SegmentBuilder)
+   (tcljx.nmspgen.env ClosureEntity Display StoredEnv)
+   (tcljx.nmspgen.pkggen CodePromise SegmentBuilder)
    (tcljx.nmspgen.insn Insn Insns PlainInvokeTest)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind Opcode Label
                         BootstrapMethodEntry)
@@ -22,7 +23,7 @@
                        DynamicConstantDesc DynamicCallSiteDesc)
    (java.lang.invoke MethodHandle)
    (java.lang.reflect Executable Method)
-   (java.util ArrayList HashMap)
+   (java.util ArrayList HashMap HashSet)
    (java.util.function Consumer)))
 
 (defn- source-order-idxs ^int/1 [^MethodSpec/1 mspecs]
@@ -48,7 +49,7 @@
             (.invokestatic xb (.owner mhd-iseq) (.methodName mhd-iseq) mtd-iseq))
           (.return_ xb (TypeKind/from (.returnType mtd-iseq))))
          (.withMethodBody cb (.methodName mhd-iseq) mtd-varargs
-                          (bit-or flags (ir/acc* bridge varargs synthetic))))))
+                          (bit-or flags (code/acc* bridge varargs synthetic))))))
 
 (defn- fn-entry-point
   (^DirectMethodHandleDesc [^DirectMethodHandleDesc mhd] ;pre: mhd is variadic
@@ -125,10 +126,10 @@
                                     ^ClassDesc segment-class]
   (let [mspecs (.child-methods fn-p)
         source-order (source-order-idxs mspecs)]
-    (fnenv/as-constants (.env-to-display fn-p))
+    (envgen/as-constants (.env-to-display ^ClosureEntity fn-p))
     (dotimes [j (alength mspecs)]
       (let [i (aget source-order j), mspec (aget mspecs i), mhd (aget mhds i)
-            flags (util/acc-varargs classfile/acc-method-static mspec)]
+            flags (util/acc-varargs code/acc-method-static mspec)]
         (when (-> mspec .at .variadic?)
           (bridge-to-iseq cb flags mhd))
         (when (identical? segment-class (.owner mhd))
@@ -204,7 +205,7 @@
                       ^HashMap owner-e2d]
   CodeEmitter
   (emit-insn* [_ xb consumed-type _] ;flyweight environment's prefix tuple
-    (fnenv/load-env xb owner-e2d aorigin) ;view from outside
+    (envgen/load-env xb owner-e2d aorigin) ;view from outside
     consumed-type)
   
   Entity
@@ -237,11 +238,11 @@
     (dotimes [j (alength mspecs)]
       (let [i (aget source-order j)
             mspec (aget mspecs i), mhd (.get-mhd fw-desc i)
-            flags (util/acc-varargs (ir/acc* static final) mspec)]
+            flags (util/acc-varargs (code/acc* static final) mspec)]
         (when (-> mspec .at .variadic?)
           (bridge-to-iseq cb flags mhd))
         (->> (^Consumer fn ^void [^CodeBuilder xb]
-              (let [first-param-no (fnenv/as-parameters xb env)]
+              (let [first-param-no (envgen/as-parameters xb env)]
                 (emit/body xb mspec first-param-no)))
              (.withMethodBody cb (.methodName mhd) (.invocationType mhd)
                               flags))))))
@@ -256,7 +257,7 @@
           (when (some? display-this) ;provide env prefix for recursive invoke
             (.set-emitter! display-this
                            (^CodeEmitter fn [xb consumed-type _]
-                            (fnenv/load-env xb (.aorigin env)) ;view from inside
+                            (envgen/load-env xb (.aorigin env)) ;view from inside
                             consumed-type)))
           (class-elements-flyweight cb mspecs fw-desc env))
          (.add-elements sb))
@@ -285,7 +286,7 @@
   CodeEmitter
   (emit-insn* [this xb consumed-type then-leave?]
     (if (neg? slot)
-      (-> (fnenv/load-env xb parent-e2d (feed-forward entity-id aorigin))
+      (-> (envgen/load-env xb parent-e2d (feed-forward entity-id aorigin))
           (.invokestatic this-class rt/name-factory-method
                          (util/mtd-factory this-class aorigin)))
       (.aload xb slot))
@@ -428,7 +429,7 @@
           (let [i (aget source-order j), mspec (aget mspecs i)
                 mhd (aget mhds i)
                 mtd (util/mtd-of-arity-type (.at mspec))
-                flags (util/acc-varargs (ir/acc* public final) mspec)]
+                flags (util/acc-varargs (code/acc* public final) mspec)]
             (when (-> mspec .at .variadic?)
               (bridge-to-iseq cb flags mhd))
             (->> (^Consumer fn ^void [^CodeBuilder xb]
@@ -449,7 +450,7 @@
                   (arity-fixed-n xb entry-mhds)))))
            (.withMethodBody cb rt/name-arity-method
                             rt/mtd-arity-method
-                            (ir/acc* public final synthetic)))
+                            (code/acc* public final synthetic)))
       ;; virtual method __directMethodHandles
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (-> (.loadConstant xb (alength entry-mhds))
@@ -459,9 +460,9 @@
             (.areturn xb))
            (.withMethodBody cb rt/name-dmh-method
                             rt/mtd-dmh-method
-                            (ir/acc* public final synthetic)))
+                            (code/acc* public final synthetic)))
       ;; private constructor <init>
-      (code/constructor cb fields rt/AFn (ir/acc* private synthetic)
+      (code/constructor cb fields rt/AFn (code/acc* private synthetic)
                         (doto (new ClassDesc/1 1) (aset 0 rt/map)))
       ;; public static factory method __create
       (->> (^Consumer fn ^void [^CodeBuilder xb]
@@ -470,9 +471,9 @@
                 (.invokespecial this-class ConstantDescs/INIT_NAME constr-mtd)
                 (.areturn)))
            (.withMethodBody cb rt/name-factory-method factory-mtd
-                            (ir/acc* public static final synthetic)))
+                            (code/acc* public static final synthetic)))
       ;; package-private virtual method __patch
-      (when-some [patch-mtd (fnenv/mtd-of-patch fields)]
+      (when-some [patch-mtd (envgen/mtd-of-patch fields)]
         (->> (^Consumer fn ^void [^CodeBuilder xb]
               (loop [param-no 0, i 0]
                 (when (< i (alength fields))
@@ -484,7 +485,7 @@
                            (inc i)))))
               (.return_ xb))
              (.withMethodBody cb rt/name-patch-method patch-mtd
-                              (ir/acc* final synthetic))))
+                              (code/acc* final synthetic))))
       ;; protected virtual method __withMetaImpl
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (-> (.new_ xb this-class) (.dup) (.aload (.parameterSlot xb 0)))
@@ -495,7 +496,7 @@
                 (.areturn)))
            (.withMethodBody cb rt/name-with-meta-impl
                             (MethodTypeDesc/of this-class rt/map)
-                            (ir/acc* protected final synthetic))))))
+                            (code/acc* protected final synthetic))))))
 
 (defn- as-fn-virtual ^Entity [^SegmentBuilder sb ^int entity-id
                               ^MethodSpec/1 mspecs ^ClassDesc this-class
@@ -509,10 +510,10 @@
                 constr-mtd (-> (.insertParameterTypes factory-mtd 0 rt/map)
                                (.changeReturnType ConstantDescs/CD_void))
                 
-                fields (fnenv/fields-exact 0 this-class env aforward)]
-            (fnenv/as-fields 0 fields env) ;picked up by all virtual arity methods below
+                fields (envgen/fields-exact 0 this-class env aforward)]
+            (envgen/as-fields 0 fields env) ;picked up by all virtual arity methods below
             (-> (cfg/with-class-version cb)
-                (.withFlags (ir/acc* public final))
+                (.withFlags (code/acc* public final))
                 (.withSuperclass super-class)
                 (class-elements-virtual mspecs mhds this-class factory-mtd
                                         fields))))
@@ -532,7 +533,7 @@
   (emit-insn* [this xb consumed-type then-leave?]
     (.emit-insn* __emit xb consumed-type then-leave?))
   
-  Entity
+  ClosureEntity
   (value-type [_]
     type/AFnMh)
   (value-type-exact [_]
@@ -551,6 +552,8 @@
           (insn/mk-insn (.return-type at)))))
   (emit-store [_ xb]                ;delegate letfn patching to __emit
     (.emit-store __emit xb))
+  (env-to-display [_]
+    env-to-display)
 
   BindableEntity
   (binding-mode-let [_]
@@ -574,8 +577,6 @@
     (insn/value-of* this))
   (child-methods [_]
     method-specs)
-  (env-to-display [_]
-    env-to-display)
   (!nested-parts [_]
     !nested-parts)
   (generate-and-deliver [this sb env-factory _]
@@ -600,7 +601,7 @@
                 ^Class itf-class ^Method method ^HashMap env-to-display
                 ^HashMap parent-e2d ^ArrayList !nested-parts
                 ^:unsynchronized-mutable ^Consumer __emit]
-  Entity
+  ClosureEntity
   (emit-insn* [this xb consumed-type then-leave?]
     (util/with-void-empty-if-requested consumed-type
       (.accept __emit xb)
@@ -613,14 +614,14 @@
     ir/invoke-methods-dynamic)
   (entity-id [_]
     entity-id)
+  (env-to-display [_]
+    env-to-display)
   
   CodePromise
   (expr-of [this]
     (insn/mk-insn this itf-class))
   (child-methods [_]
     method-specs)
-  (env-to-display [_]
-    env-to-display)
   (!nested-parts [_]
     !nested-parts)
   (generate-and-deliver [this sb env-factory _]
@@ -638,9 +639,62 @@
                   dcd (DynamicCallSiteDesc/of
                        rt/bsm-metafactory (.methodName mhd-itf) inv-type
                        mtd-lookup (.get-mhd fw-desc 0) d-mtd)]
-              (-> xb (fnenv/load-env parent-e2d aorigin) (.invokedynamic dcd))))
+              (-> xb (envgen/load-env parent-e2d aorigin) (.invokedynamic dcd))))
            (set! __emit))
       (->> (^Consumer fn ^void [^ClassBuilder cb]
             (class-elements-flyweight cb method-specs fw-desc env))
            (.add-elements sb)))))
 (def promise-itf-fn ItfFn/new)
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private not-function (byte -2))  ;deftype, reify, itf fn
+(def ^:private fn-without-runtime-value (byte -1)) ;to FnFlyweight
+(def ^:private fn-optimistically-empty (byte 0)) ;undecided, then to FnStatic
+(def ^:private fn-with-empty-env (byte 1)) ;to FnStatic
+(def ^:private fn-carrying-env (byte 2)) ;to FnVirtual
+(defn env-carrying-fns ^HashSet [^CodePromise/1 acp]
+  (let [marks (new byte/1 (alength acp))
+        carries-env-set (HashSet.)] ;set of `fn-carrying-env` functions
+    (dotimes [i (alength marks)]
+      (aset marks i (let [cp (aget acp i)]
+                      (if (instance? FnPromiseImpl cp)
+                        (let [fn-p ^FnPromiseImpl cp]
+                          (if (.value-use? fn-p)
+                            (if (.isEmpty (.env-to-display fn-p))
+                              fn-with-empty-env
+                              fn-optimistically-empty)
+                            fn-without-runtime-value))
+                        not-function))))
+
+    (letfn [(non-empty-env? ^boolean [^FnPromiseImpl fn-p]
+              (let [it (-> fn-p .env-to-display .keySet .iterator)]
+                (loop []
+                  (when (.hasNext it)
+                    (let [origin (.next it)]
+                      (cond
+                        (identical? origin fn-p) ;fn refers to itself?
+                        (recur)
+                        (instance? FnPromiseImpl origin)
+                        (or (and (FnPromiseImpl/.value-use? origin)
+                                 (.contains carries-env-set origin))
+                            (recur))
+                        :else true))))))
+            (pass-grows-set? ^boolean []
+              (loop [added? false, i (dec (alength marks))]
+                (if (neg? i)
+                  added?
+                  (recur (if (= (aget marks i) fn-optimistically-empty)
+                           (let [fn-p ^FnPromiseImpl (aget acp i)]
+                             (if (non-empty-env? fn-p)
+                               (do #_(prn :set-marks i fn-carrying-env)
+                                   (.add carries-env-set fn-p)
+                                   (aset marks i fn-carrying-env)
+                                   true)
+                               added?))
+                           added?)
+                         (dec i)))))]
+      ;; (prn :acp (map (comp Class/.getSimpleName class) acp))
+      ;; (prn :marks-0 (seq marks))
+      (loop [] (when (pass-grows-set?) (recur)))
+      carries-env-set)))

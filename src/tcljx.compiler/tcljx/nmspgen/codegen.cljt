@@ -4,7 +4,7 @@
     [config :as cfg] [wrong :as wrong] [context :as context] [member :as member]
     [type :as type] [ir :as ir] [resolve :as resolve] [reflect :as reflect])
    (tcljx.nmspgen
-    [classfile :as classfile] [runtime :as rt] [constgen :as constgen]
+    [pkggen :as pkggen] [runtime :as rt] [constgen :as constgen]
     [emit :as emit] [insn :as insn]
     [primitive :as primitive] [condgen :as condgen] [switchgen :as switchgen]
     [trygen :as trygen] [fngen :as fngen] defgen))

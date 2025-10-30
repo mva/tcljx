@@ -15,7 +15,7 @@
 
 (defn- with-abstract-method ^ClassBuilder [^ClassBuilder cb ^String name
                                            ^MethodTypeDesc mtd ^int flags]
-  (.withMethod cb name mtd (bit-or (ir/acc* abstract) flags)
+  (.withMethod cb name mtd (bit-or (code/acc* abstract) flags)
                (^Consumer fn ^void [^MethodBuilder mb] #_none)))
 
 (defn- parse-opts ^vector [^seq s]
@@ -86,9 +86,9 @@
                                   "method name")))
               (let [mnm (name mname)
                     mtd (method-lookup-type rsv msig)
-                    flags (cond-> (ir/acc* public)
+                    flags (cond-> (code/acc* public)
                             (< (.parameterCount mtd) (count msig))
-                            (bit-or (ir/acc* varargs)))]
+                            (bit-or (code/acc* varargs)))]
                 (^Consumer fn ^void [^ClassBuilder cb]
                  (with-abstract-method cb mnm mtd flags)))))]
     
@@ -100,7 +100,7 @@
           cbh (^Consumer fn ^void [^ClassBuilder cb]
                (-> (cfg/with-class-version cb)
                    (.withInterfaceSymbols ^List extends-itfs)
-                   (.withFlags (ir/acc* public interface abstract)))
+                   (.withFlags (code/acc* public interface abstract)))
                (doseq [^Consumer cbh method-cbhs]
                  (.accept cbh cb)))]
       (let [bs (.build (ClassFile/of) this-class cbh)
@@ -156,13 +156,13 @@
          (.withMethodBody cb ConstantDescs/INIT_NAME
                           (.dropParameterTypes mtd-0 (- (alength fields) n)
                                                (alength fields))
-                          (ir/acc* public synthetic)))))
+                          (code/acc* public synthetic)))))
 
 (defn- factory-create ^ClassBuilder [^ClassBuilder cb ^ClassDesc this-class]
   (let [mtd (MethodTypeDesc/of this-class (ClassDesc/of "clojure.lang.IPersistentMap"))]
     (->> (^Consumer fn ^void [^CodeBuilder xb]
           (-> xb (.aconst_null) (.areturn)))
-         (.withMethodBody cb "create" mtd (ir/acc* public static)))))
+         (.withMethodBody cb "create" mtd (code/acc* public static)))))
 
 (defn- record-attribute ^ClassBuilder [^ClassBuilder cb ^FieldSpec/1 fields]
   (let [a (new RecordComponentInfo/1 (alength fields))]
@@ -189,10 +189,10 @@
                   nm (name sym)
                   m (meta sym)
                   flags (cond
-                          (:unsynchronized-mutable m) (ir/acc* private)
-                          (:volatile-mutable m) (ir/acc* private volatile)
-                          java-record? (ir/acc* private final)
-                          :else (ir/acc* public final))]
+                          (:unsynchronized-mutable m) (code/acc* private)
+                          (:volatile-mutable m) (code/acc* private volatile)
+                          java-record? (code/acc* private final)
+                          :else (code/acc* public final))]
               (when java-record?
                 (when-not (member/acc-final? flags)
                   (wrong/other (str "java.lang.Record cannot have mutable field "
@@ -259,14 +259,14 @@
                (-> (cfg/with-class-version cb)
                    (.withSuperclass (.super-class supers))
                    (.withInterfaceSymbols (.interfaces supers))
-                   (.withFlags (cond-> (ir/acc* public final)
+                   (.withFlags (cond-> (code/acc* public final)
                                  (:abstract opts)
-                                 (bit-xor (ir/acc* final abstract)))))
+                                 (bit-xor (code/acc* final abstract)))))
                (when (.java-record? supers)
                  (record-attribute cb fields))
                (code/with-fields cb fields)
                (code/constructor cb fields (.super-class supers)
-                                 (ir/acc* public synthetic))
+                                 (code/acc* public synthetic))
                (when defrecord?
                  (constructor-n cb this-class fields 4)
                  (constructor-n cb this-class fields 2)))
@@ -317,7 +317,7 @@
              (-> (cfg/with-class-version cb)
                  (.withSuperclass (.super-class supers))
                  (.withInterfaceSymbols (.interfaces supers))
-                 (.withFlags (ir/acc* public final))))
+                 (.withFlags (code/acc* public final))))
         bs (.build (ClassFile/of) this-class cbh)
         eph-cl ^Class (.invokeExact (.ephemeral-factory rsv) bs)
         

@@ -45,6 +45,9 @@
 
 (def primitive-ns-str "clojure.core.primitive")
 
+(defn capstone-class ^ClassDesc [^String ns-str]
+  (ClassDesc/of ns-str "___"))
+
 ;;; ------------------------------------------------------------------------
 
 ;;; Because application and compiler can live in different class

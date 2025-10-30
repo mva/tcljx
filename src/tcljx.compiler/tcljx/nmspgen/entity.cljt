@@ -4,12 +4,11 @@
     [config :as cfg] [wrong :as wrong] [type :as type] [member :as member]
     [ir :as ir] [resolve :as resolve] [reflect :as reflect] [code :as code])
    (tcljx.nmspgen
-    [util :as util] [constgen :as constgen] [segment :as segment]
+    [util :as util] [constgen :as constgen] [env :as env] pkggen
     [emit :as emit] [insn :as insn] [fngen :as fngen] [typegen :as typegen]))
   (:import
    (tcljx.data.ir CodeEmitter Entity Assignable MethodSpec
                   EntityFactory BindableEntity)
-   (tcljx.nmspgen.segment Display)
    (tcljx.nmspgen.insn Insn Insns)
    (tcljx.nmspgen.fngen FnPromiseImpl)
    (java.lang.classfile CodeBuilder TypeKind)
@@ -33,7 +32,7 @@
       (and (>= origin ir/closure-level-clinit)
            (not= origin (.closure-level this)))))
   (display-of! [_ origin local-name]
-    (segment/display-of! env-to-display origin local-name))
+    (env/display-of! env-to-display origin local-name))
   (value-of [this ent form]
     (assert (some? form))
     (if-some [tp (.value-type ent)]
@@ -104,13 +103,13 @@
       (dotimes [i (alength method-specs)]
         (let [j (.source-idx (aget method-specs i))]
           (aset method-specs i (aget arity-methods j))))
-      (.stage-part! this fn-p)))
+      (.stage-code-promise! this fn-p)))
   (expr-itf-fn [this method-specs itf-e2d unique-nm itf-class method
                 !itf-parts]
     (let [p (fngen/promise-itf-fn (.next-entity-id this) method-specs unique-nm
                                   itf-class method itf-e2d env-to-display
                                   !itf-parts nil)]
-      (.stage-part! this p)))
+      (.stage-code-promise! this p)))
   (deftype-field [_ entity-id spec]
     (reify
       BindableEntity
@@ -147,17 +146,17 @@
       (throw (wrong/wr-info "cannot define class in this position")))
     (->> (typegen/promise-deftype eph-ncl field-specs method-specs
                                   java-record? defrecord? !dt-parts)
-         (.stage-part! this)))
+         (.stage-code-promise! this)))
   (expr-reify [this eph-ncl interfaces meta method-specs reify-e2d !reify-parts]
     (->> (typegen/promise-reify (.next-entity-id this) eph-ncl interfaces meta
                                 method-specs reify-e2d env-to-display
                                 !reify-parts nil)
-         (.stage-part! this)))
+         (.stage-code-promise! this)))
   (expr-definterface [this eph-ncl]
     (when (not= (.closure-level this) ir/closure-level-clinit)
       (throw (wrong/wr-info "cannot define class in this position")))
     (let [p (typegen/promise-definterface* eph-ncl)]
-      (.stage-part! this p)))
+      (.stage-code-promise! this p)))
   (class-name-for-reify [this]
     (ClassDesc/of pkg-name (.unique-name! this "reify")))
   
@@ -181,9 +180,9 @@
     (-> (ir/entity-id-of (inc (.closure-level this)) used-entity-ids)
         (EntityFactoryImpl. owner-e2d env-to-display
                             private-name-map pkg-name unique-nm nested-parts)))
-  (stage-part! [_ part]
-    (.add !nested-parts part)
-    (.expr-of ^tcljx.nmspgen.segment.CodePromise part)))
+  (stage-code-promise! [_ cp]
+    (.add !nested-parts cp)
+    (.expr-of ^tcljx.nmspgen.pkggen.CodePromise cp)))
 
 (defn mk-clinit-etf ^EntityFactory [^String pkg-name ^ArrayList segment-tasks]
   (EntityFactoryImpl. (ir/entity-id-of ir/closure-level-clinit) (HashMap.) nil

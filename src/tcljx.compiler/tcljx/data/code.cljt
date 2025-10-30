@@ -1,12 +1,21 @@
 (ns tcljx.data.code
-  (:require (tcljx.data [ir :as ir]))
+  (:require (tcljx.data ir))
   (:import
    (tcljx.data.ir FieldSpec)
-   (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
+   (java.lang.classfile ClassBuilder CodeBuilder Opcode Opcode$Kind TypeKind)
+   (java.lang.classfile.instruction OperatorInstruction)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
                        DirectMethodHandleDesc DirectMethodHandleDesc$Kind
                        ConstantDescs)
    (java.util.function Consumer)))
+
+(defmacro acc* [& flags]
+  (reduce #(bit-or ^int %1 (case %2
+                             public 0x0001, private 0x0002, protected 0x0004
+                             static 0x0008, final 0x0010, volatile 0x0040
+                             bridge 0x0040, varargs 0x0080, interface 0x0200,
+                             abstract 0x0400 synthetic 0x1000))
+          0 flags))
 
 (defn load-receiver ^CodeBuilder [^CodeBuilder xb]
   (.aload xb (.receiverSlot xb)))
@@ -38,7 +47,7 @@
   (->> (^Consumer fn ^void [^CodeBuilder xb]
         (-> xb (get-field fs) (.return_ (TypeKind/from (.type-desc fs)))))
        (.withMethodBody cb (.field-name fs) (MethodTypeDesc/of (.type-desc fs))
-                        (ir/acc* public synthetic))))
+                        (acc* public synthetic))))
 
 (defn mtd-of-fields ^MethodTypeDesc [^FieldSpec/1 fields]
   (->> ^java.util.List (map FieldSpec/.type-desc fields)
@@ -62,3 +71,41 @@
              (.invokespecial xb super-class ConstantDescs/INIT_NAME mtd-super)
              (.return_ xb)))
           (.withMethodBody cb ConstantDescs/INIT_NAME mtd flags)))))
+
+;;; ------------------------------------------------------------------------
+
+(def acc-method-virtual (acc* public final))
+(def acc-method-static (bit-or acc-method-virtual (acc* static)))
+
+(defmacro accept->
+  ([builder handler]
+   (if (symbol? builder)
+     (list 'do (list '.accept handler builder) builder)
+     `(let [builder# ~builder] (.accept ~handler builder#) builder#)))
+  ([builder handler arg]
+   (if  (symbol? builder)
+     (list 'do (list '.accept handler builder arg) builder)
+     `(let [builder# ~builder] (.accept ~handler builder# ~arg) builder#))))
+
+(defmacro with-method-body-> [cb [method-name lookup-type-desc flags] & body]
+  `(.withMethodBody ~cb ~method-name ~lookup-type-desc ~flags
+                    (^Consumer fn ^void [^CodeBuilder xb#]
+                     (-> xb# ~@body))))
+
+(def ^:private op-instr (new OperatorInstruction/1 (- #_ifeq 153 #_iadd 96)))
+(let [opcodes (Opcode/values)]
+  (dotimes [i (alength opcodes)]
+    (let [opcode (aget opcodes i)]
+      (when (and (<= #_iadd 96 (.bytecode opcode))
+                 (< (.bytecode opcode) #_ifeq 153)
+                 (= (.kind opcode) Opcode$Kind/OPERATOR))
+        (aset op-instr (- i #_iadd 96) (OperatorInstruction/of opcode))))))
+
+(defn with-operator ^CodeBuilder [^CodeBuilder xb ^int bytecode]
+  (.with xb (aget op-instr (- bytecode #_iadd 96))))
+
+(defn dup-and-store-local ^CodeBuilder [^CodeBuilder xb ^TypeKind tk ^int slot]
+  (case (.slotSize tk)
+    1 (.dup xb)
+    2 (.dup2 xb))
+  (.storeLocal xb tk slot))

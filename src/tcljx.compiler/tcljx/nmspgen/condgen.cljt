@@ -1,8 +1,8 @@
 (ns tcljx.nmspgen.condgen
   (:require
-   (tcljx.data [type :as type] [resolve :as resolve] [ir :as ir]
+   (tcljx.data [type :as type] [resolve :as resolve] [ir :as ir] [code :as code]
                [wrong :as wrong])
-   (tcljx.nmspgen [classfile :as classfile] [constgen :as constgen]
+   (tcljx.nmspgen [pkggen :as pkggen] [constgen :as constgen]
                    [insn :as insn] [emit :as emit]))
   (:import
    (tcljx.data.type Wrapper)
@@ -260,7 +260,7 @@
       (^CodeEmitter fn [xb _ _]
        (when (emit/insn? xb fctx arg-type ce0)
          (when (emit/insn? xb fctx arg-type ce1)
-           (classfile/with-operator xb bytecode)
+           (code/with-operator xb bytecode)
            Integer/TYPE))))))
 
 (letfn [(xcmp-2* ^Insn [^Wrapper wtop ^CodeEmitter ce0 ^CodeEmitter ce1
@@ -333,7 +333,7 @@
                            ce
                            (^CodeEmitter fn [xb _ _]
                             (when (emit/insn? xb fctx (.class-primitive wtop) ce)
-                              (classfile/dup-and-store-local xb (.type-kind wtop) temp)
+                              (code/dup-and-store-local xb (.type-kind wtop) temp)
                               (.class-primitive wtop)))))
                        (aset ce-right i)))
                 ce-right))]

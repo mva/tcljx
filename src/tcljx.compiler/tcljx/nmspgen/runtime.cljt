@@ -1,42 +1,164 @@
 (ns tcljx.nmspgen.runtime
+  (:require
+   (tcljx.data [config :as cfg] [files :as files] [ir :as ir])
+   [tinyclj.core :as cc])
   (:import
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc ConstantDescs
-                       DirectMethodHandleDesc$Kind))
+                       DirectMethodHandleDesc$Kind)
+   (java.lang.invoke MethodType MethodHandle MethodHandles MethodHandles$Lookup)
+   (java.lang.reflect Member)
+   (java.net URLClassLoader URL))
   (:refer-clojure :exclude [symbol vector map set list]))
+
+(def ^:private Class ConstantDescs/CD_Class)
+(def Object ConstantDescs/CD_Object)
+(def ObjectArray (.arrayType Object))
+(def ^:private String ConstantDescs/CD_String)
+(def StringArray (.arrayType String))
+(def MethodHandle ConstantDescs/CD_MethodHandle)
+(def MethodHandles ConstantDescs/CD_MethodHandles)
+(def ^:private MethodHandleArray (.arrayType MethodHandle))
+(def Lookup ConstantDescs/CD_MethodHandles_Lookup)
+(def ^:private Member (ClassDesc/of "java.lang.reflect.Member"))
+(def ^:private Function (ClassDesc/of "java.util.function.Function"))
+
+(def RT (ClassDesc/of "tinyclj.lang.RT"))
+(def AFn (ClassDesc/of "tinyclj.lang.AFnMh"))
+(def StaticFn (ClassDesc/of "tinyclj.lang.StaticFn"))
+
+(defmacro ^:private mtd [rtype ptypev]
+  `(MethodTypeDesc/of ~rtype ~(with-meta ptypev {:tag 'java.util.List})))
+
+(defmacro ^:private mhd-static [[owner name] rtype ptypev]
+  `(MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
+                              ~owner ~name (mtd ~rtype ~ptypev)))
+
+(def mhd-applyMacroMapped (mhd-static [RT "applyMacroMapped"] Object
+                                      [Function Function AFn Object Object]))
+
+;;; ------------------------------------------------------------------------
+
+;;; Compilation scenario "distinct runtimes".  The compiler is, for
+;;; example, a Clojure application running from `getSystemClassLoader`
+;;; with its own runtime.  On the other hand, the application being
+;;; compiled needs to see the Tinyclj runtime, plus any additional
+;;; classes imported by the application.  In this case, the
+;;; application can not be based on `getSystemClassLoader`, but only
+;;; on the neutral `getPlatformClassLoader`.  The Tinyclj runtime and
+;;; imported application classes must be installed manually into a
+;;; fresh application class loader.
+(defn app-class-loader ^URLClassLoader [parent class-paths]
+  (let [parent-ld (case parent
+                    :platform (ClassLoader/getPlatformClassLoader)
+                    :system (ClassLoader/getSystemClassLoader))
+        urls (into-array URL (cc/map files/path-url class-paths))]
+    (URLClassLoader. "tclj-app" urls parent-ld)))
+
+(defn class-loader-instance ^URLClassLoader [^ClassLoader parent ^String name
+                                              source-paths]
+  (let [dyn-cl-class (.loadClass parent "tinyclj.lang.DynamicClassLoader")
+        c (.getConstructor dyn-cl-class java.lang.String URL/1 ClassLoader)
+        urls (->> source-paths (cc/map files/path-url) (distinct))]
+    (.newInstance c name (into-array URL urls) parent)))
+
+(defn dyn-class-loader ^URLClassLoader [^ClassLoader app-ld source-paths]
+  (class-loader-instance app-ld "tclj-dyn" source-paths))
+
+
+(definterface IRuntime
+  (push-file-context ^void [^String ns-str])
+  (pop-file-context ^void [])
+  
+  (try-load-capstone ^Class [^String ns-str])
+  (public-def-info ^Object/1 [^Member member])
+  (fn-arities ^MethodHandle/1 [^Class tp ^Object value]))
+
+;;; The runtime environment is composed of the JVM instance, the class
+;;; loader used for compilation, and within it the classes provided by
+;;; the packages `clojure.lang` and `tinyclj.lang`.  Important: when
+;;; bootstrapping the compiler, the non-JVM classes from the runtime
+;;; are distinct from the ones used by the compiler application
+;;; itself.
+(deftype Runtime [^ClassLoader app-ld
+                  ^MethodHandles$Lookup lookup
+                  ^MethodHandles$Lookup public-lookup ;for tcljx.nmspgen.publics
+                  ^MethodHandle mh-push-file-context
+                  ^MethodHandle mh-pop-file-context
+                  ^MethodHandle mh-public-def-info ;for tcljx.nmspgen.publics
+                  ^MethodHandle mh-fn-arities ;for tcljx.nmspgen.publics
+                  ^MethodHandle apply-macro-mh ;for macro-expand
+                  ^ClassLoader dyn-ld]
+  IRuntime
+  (push-file-context [_ ns-str]
+    ^void (.invokeExact mh-push-file-context ns-str))
+  (pop-file-context [_]
+    ^void (.invokeExact mh-pop-file-context))
+  
+  (try-load-capstone [_ ns-str]
+    (try
+      (let [s (.descriptorString (cfg/capstone-class ns-str))]
+        (-> (.substring s 1 (dec (.length s)))
+            (.replace \/ \.)
+            (Class/forName true dyn-ld)))
+      (catch ClassNotFoundException _
+        nil)))
+  (public-def-info [_ member]
+    ^Object/1 (.invokeExact mh-public-def-info public-lookup member))
+  (fn-arities [_ tp value]
+    ^MethodHandle/1 (.invokeExact mh-fn-arities public-lookup tp value)))
+
+
+
+(def ^:private mhd-pushFileContext
+  (mhd-static [RT "pushFileContext"] ConstantDescs/CD_void [String]))
+(def ^:private mhd-popFileContext
+  (mhd-static [RT "popFileContext"] ConstantDescs/CD_void []))
+(def ^:private mhd-arityHandlesIfFn
+  (mhd-static [RT "arityHandlesIfFn"] MethodHandleArray [Lookup Class Object]))
+(def ^:private mhd-publicDefInfo
+  (mhd-static [RT "publicDefInfo"] ObjectArray [Lookup Member]))
+
+(letfn [(get-rt-lookup ^MethodHandles$Lookup [^ClassLoader app-ld]
+          (let [cl (Class/forName "tinyclj.lang.CljCljMapper" false app-ld)
+                f (.getDeclaredField cl "rtLookup")]
+            (.get f nil)))
+        (get-apply-macro ^MethodHandle [^MethodHandles$Lookup lookup]
+          (let [compiler-rt-witness tinyclj.lang.StaticFn
+                app-rt-witness (.resolveConstantDesc StaticFn lookup)
+                shared-runtime? (identical? compiler-rt-witness app-rt-witness)]
+            (if shared-runtime?
+              nil                    ;can use macro/apply-macro-direct
+              (.resolveConstantDesc mhd-applyMacroMapped lookup))))]
+  
+  (defn mk-runtime ^Runtime [^ClassLoader app-ld ^ClassLoader dyn-ld]
+    (let [cl (Class/forName "tinyclj.lang.CljCljMapper" false app-ld)
+          f (.getDeclaredField cl "rtLookup")
+          lookup (.get f nil)]
+      (Runtime. app-ld lookup (MethodHandles/publicLookup)
+                (.resolveConstantDesc mhd-pushFileContext lookup)
+                (.resolveConstantDesc mhd-popFileContext lookup)
+                (.resolveConstantDesc mhd-publicDefInfo lookup)
+                (.resolveConstantDesc mhd-arityHandlesIfFn lookup)
+                (get-apply-macro lookup) dyn-ld))))
 
 ;;; ------------------------------------------------------------------------
 
 (def Alias (ClassDesc/of "tinyclj.lang.Alias"))
 (def Macro (ClassDesc/of "tinyclj.lang.Macro"))
-(def RT (ClassDesc/of "tinyclj.lang.RT"))
 
 (def ClojureRT (ClassDesc/of "clojure.lang.RT"))
 (def Var (ClassDesc/of "clojure.lang.Var"))
 
 (def ^:private clnm-ifn "clojure.lang.IFn")
-(def ^:private clnm-abstract-fn "tinyclj.lang.AFnMh")
-(def ^:private clnm-static-fn "tinyclj.lang.StaticFn")
 
-(def MethodHandle ConstantDescs/CD_MethodHandle)
-(def ^:private MethodHandleArray (.arrayType MethodHandle))
-(def ^:private Lookup ConstantDescs/CD_MethodHandles_Lookup)
 (def ^:private MethodType ConstantDescs/CD_MethodType)
 (def ^:private CallSite ConstantDescs/CD_CallSite)
 (def ^:private TypeDescriptor (ClassDesc/of "java.lang.invoke.TypeDescriptor"))
 (def ^:private LambdaMetafactory (ClassDesc/of "java.lang.invoke.LambdaMetafactory"))
 (def ^:private ObjectMethods (ClassDesc/of "java.lang.runtime.ObjectMethods"))
-(def ^:private Member (ClassDesc/of "java.lang.reflect.Member"))
 
-(def ^:private Object ConstantDescs/CD_Object)
-(def ObjectArray (.arrayType Object))
-(def ^:private Class ConstantDescs/CD_Class)
-(def ^:private String ConstantDescs/CD_String)
-(def StringArray (.arrayType String))
-(def ^:private Function (ClassDesc/of "java.util.function.Function"))
 
 (def ^:private BootstrapMethod (ClassDesc/of "tinyclj.lang.BootstrapMethod"))
-(def AFn (ClassDesc/of clnm-abstract-fn))
-(def StaticFn (ClassDesc/of clnm-static-fn))
 (def ArraySeq (ClassDesc/of "clojure.lang.ArraySeq"))
 
 (def name-requires "requires~1")
@@ -52,13 +174,6 @@
 (def name-meta-method "meta")
 
 ;;; ------------------------------------------------------------------------
-
-(defmacro ^:private mtd [rtype ptypev]
-  `(MethodTypeDesc/of ~rtype ~(with-meta ptypev {:tag 'java.util.List})))
-
-(defmacro ^:private mhd-static [[owner name] rtype ptypev]
-  `(MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
-                              ~owner ~name (mtd ~rtype ~ptypev)))
 
 (def bsm-concat ;note: "makeConcat" delegates to ""makeConcatWithConstants"
   (mhd-static [(ClassDesc/of "java.lang.invoke.StringConcatFactory")
@@ -110,32 +225,21 @@
 (def mhd-set (mhd-static [Literal "set"] set [ObjectArray]))
 (def mhd-list (mhd-static [Literal "list"] list [ObjectArray]))
 
-(def mtd-apply (MethodTypeDesc/of ConstantDescs/CD_Object
-                                  ifn ConstantDescs/CD_Object))
+(def mtd-apply (MethodTypeDesc/of Object
+                                  ifn Object))
 (def mhd-apply (MethodHandleDesc/ofMethod DirectMethodHandleDesc$Kind/STATIC
                                           RT "apply" mtd-apply))
-(def mhd-applyMacroMapped
-  (mhd-static [RT "applyMacroMapped"] ConstantDescs/CD_Object
-              [Function Function AFn ConstantDescs/CD_Object ConstantDescs/CD_Object]))
-(def mhd-pushFileContext (mhd-static [RT "pushFileContext"]
-                                     ConstantDescs/CD_void [String]))
-(def mhd-popFileContext (mhd-static [RT "popFileContext"]
-                                    ConstantDescs/CD_void []))
-(def mhd-arityHandlesIfFn (mhd-static [RT "arityHandlesIfFn"]
-                                      MethodHandleArray [Lookup Class Object]))
-(def mhd-publicDefInfo (mhd-static [RT "publicDefInfo"]
-                                   ObjectArray [Lookup Member]))
 
 ;;; ------------------------------------------------------------------------
 
-(def mtd-Object-void (MethodTypeDesc/of ConstantDescs/CD_Object))
-(def mtd-Object-Object (MethodTypeDesc/of ConstantDescs/CD_Object
-                                          ConstantDescs/CD_Object))
+(def mtd-Object-void (MethodTypeDesc/of Object))
+(def mtd-Object-Object (MethodTypeDesc/of Object
+                                          Object))
 (def mtd-String-void (MethodTypeDesc/of ConstantDescs/CD_String))
 (def mtd-int-void (MethodTypeDesc/of ConstantDescs/CD_int))
 (def mtd-void-map (MethodTypeDesc/of ConstantDescs/CD_void map))
 (def mtd-void-Object (MethodTypeDesc/of ConstantDescs/CD_void
-                                        ConstantDescs/CD_Object))
+                                        Object))
 (def mtd-boolean-Object (MethodTypeDesc/of ConstantDescs/CD_boolean
-                                           ConstantDescs/CD_Object))
+                                           Object))
 (def mtd-ArraySeq-objects (MethodTypeDesc/of ArraySeq ObjectArray))

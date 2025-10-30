@@ -14,21 +14,20 @@
     [reader :as reader] [form :as form] [parse :as parse]
     [namespace :as namespace])
    (tcljx.nmspgen
-    [classfile :as classfile] [constgen :as constgen]
-    [segment :as segment] [emit :as emit] [insn :as insn] [macro :as macro]
-    [codegen :as codegen] [entity :as entity] [fnenv :as fnenv]
-    [defgen :as defgen] [primitive :as primitive] [publics :as publics]
-    [build :as build]))
+    [pkggen :as pkggen] [constgen :as constgen] [emit :as emit] [insn :as insn]
+    [macro :as macro] [codegen :as codegen] [entity :as entity]
+    [envgen :as envgen] [defgen :as defgen] [fngen :as fngen]
+    [primitive :as primitive]
+    [publics :as publics]))
   (:import
    (tcljx.data.ir Resolver FormReader NamespaceProvider ProvidedNamespace
                   NmspClass NamespaceBuilder Require
                   Expr Entity ImmediateEntity ExprFactory EntityFactory Parser)
-   (tcljx.nmspgen.classfile Loader PackageBuilder)
-   (tcljx.nmspgen.segment CodePromise Segment SegmentBuilder)
+   (tcljx.nmspgen.runtime Runtime)
+   (tcljx.nmspgen.destdir Destination)
+   (tcljx.nmspgen.pkggen PackageBuilder CodePromise)
    (tcljx.nmspgen.insn Insn)
-   (java.lang.classfile ClassFile ClassBuilder CodeBuilder)
    (java.lang.invoke MethodHandle)
-   (java.nio.file Path)
    (java.util ArrayList HashSet)))
 
 (defn- add-required-globals ^map [^map globals ^Require require ^map other]
@@ -59,18 +58,16 @@
 (deftype NmspBuilder [^NamespaceProvider universe
                       ^ExprFactory code-gen
                       ^:unsynchronized-mutable ^EntityFactory entity-gen
-                      ^:unsynchronized-mutable ^Segment segment
                       ^PackageBuilder pkg-build
                       ^:unsynchronized-mutable ^map globals
                       ^:unsynchronized-mutable ^map known-ns
                       ^:unsynchronized-mutable ^map ns-alias
                       ^:unsynchronized-mutable ^map imports
-                      ^HashSet require-strs ;implicitly mutable
                       ^MethodHandle apply-macro-mh
                       ^:unsynchronized-mutable ^MethodHandle ephemeral-of]
   Resolver
   (ns-str [_]
-    (.pkg-name segment))
+    (.pkg-name pkg-build))
   (expand-macro [this macro form]
     (let [f (.runtime-value ^CodePromise macro pkg-build)]
       (if (some? apply-macro-mh)
@@ -112,10 +109,9 @@
     universe)
   (require-namespaces [this ns-strs]
     (let [pn-core (when (cfg/core-lib? (.ns-str this))
-                    (let [last-segment (.super-class segment)]
-                      (->> (publics/insn-force-clinit last-segment)
-                           (ProvidedNamespace. cfg/core-lib globals
-                                               (new String/1 0) nil))))
+                    (->> (publics/insn-force-clinit (.last-segment pkg-build))
+                         (ProvidedNamespace. cfg/core-lib globals
+                                             (new String/1 0) nil)))
           all-ns (.require-namespaces* universe ns-strs pn-core)
           apn (new ProvidedNamespace/1 (alength ns-strs))]
 
@@ -145,8 +141,8 @@
       (set! ns-alias (cond-> (assoc ns-alias ns-str ns-str)
                        (some? (.alias-str require))
                        (assoc (.alias-str require) ns-str)))
-      (.add require-strs ns-str)
-      (segment/stage-segment-task! segment (.force-clinit provided))
+      (.add (.!require-strs pkg-build) ns-str)
+      (.stage-clinit-statement! pkg-build (.force-clinit provided))
       this))
   (process-imports [this import-strs]
     (doseq [^String nm import-strs]
@@ -158,45 +154,45 @@
   (new-def-mutable [_ private? nm init]
     #_(prn :new-def-mutable nm)
     (let [p (defgen/promise-def-mutable ir/entity-id-def private?
-              (.segment-class segment) nm init)
+              (.staged-segment pkg-build) nm init)
           ent (-> p .expr-of .emitter)
           bnd (ir/mk-binding ent nm false)]
-      (segment/stage-segment-task! segment p)
+      (.stage-code-promise! pkg-build p)
       (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/bind-then-value bnd ent)))
   (new-def-immutable [_ private? nm init]
     #_(prn :new-def-immutable nm)
     (let [p (defgen/promise-def-immutable ir/entity-id-def private?
-              (.segment-class segment) nm init)
+              (.staged-segment pkg-build) nm init)
           ent (-> p .expr-of .emitter)
           bnd (ir/mk-binding ent nm false)
           init-ce (.emitter init)]
-      (segment/stage-segment-task! segment p)
+      (.stage-code-promise! pkg-build p)
       (set! globals (assoc globals nm (if (constgen/const? init-ce)
                                         init-ce
                                         (.bound-to bnd))))
       (insn/bind-then-value bnd ent)))
   (new-def-macro [_ private? nm init fq-value ce-value]
     #_(prn :new-def-macro nm)
-    (let [p (defgen/promise-def-macro private? (.segment-class segment) nm init
-              fq-value ce-value)
+    (let [p (defgen/promise-def-macro private? (.staged-segment pkg-build)
+              nm init fq-value ce-value)
           ent (-> p .expr-of .emitter)
           bnd (ir/mk-binding ent nm true)]
-      (segment/stage-segment-task! segment p)
+      (.stage-code-promise! pkg-build p)
       (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/bind-then-value bnd ent)))
   (new-def-var [_ private? nm init tp-var dynamic? meta]
     #_(prn :new-def-var nm)
-    (let [p (defgen/promise-def-var private? (.segment-class segment) nm init
-              tp-var dynamic? meta)
+    (let [p (defgen/promise-def-var private? (.staged-segment pkg-build)
+              nm init tp-var dynamic? meta)
           bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)]
-      (segment/stage-segment-task! segment p)
+      (.stage-code-promise! pkg-build p)
       (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/bind-then-value bnd (.df p))))
   (new-def-alias [_ private? nm other-ent other-qname]
     #_(prn :new-def-alias nm)
     (let [p (defgen/promise-def-alias private? nm other-ent other-qname)]
-      (segment/stage-segment-task! segment p)
+      (.stage-code-promise! pkg-build p)
       (set! globals (assoc globals nm other-ent))
       insn/insn-empty)) ;alias can refer to macro or primitive function
   
@@ -204,74 +200,50 @@
     ;; This method is only called for expression forms that do not
     ;; manipulate `known-ns` or `ns-alias`.  The `globals` at start is
     ;; stored as part of of `scope`.
+    (.mark-end-of-segment! pkg-build)
     (let [globals-before globals
           imports-before imports
-          segm-size-before (segment/size-segment-tasks segment)
           expr (try
                  (-> (form/mk-parser code-gen entity-gen this globals-before)
                      (parse/form fctx form))
                  (catch tcljx.data.ir.ImplementationUnavailableException _
                    ;; flush current segment into a class file, revert
                    ;; state, and try again to parse `form`
-                   (.commit-segment-and-revert this rdr segm-size-before
-                                               globals-before imports-before)
+                   (.flush-segment-and-revert this rdr globals-before
+                                              imports-before)
                    (try
                      (-> (form/mk-parser code-gen entity-gen this globals-before)
                          (parse/form fctx form)) ;try again *once*
                      (catch tcljx.data.ir.ImplementationUnavailableException _
                        (wrong/other (str "cannot define and expand macro "
                                          "in same top-level form"))))))]
-      (segment/stage-segment-task! segment expr)
+      (.stage-clinit-statement! pkg-build expr)
       this))
 
   (finish [this rdr]
-    (.commit-segment this rdr)
-    (let [capstone-cld (segment/capstone-class (.pkg-name segment))
-          all-requires (-> (.sorted (.stream require-strs))
-                           (.collect (java.util.stream.Collectors/joining ",")))
-          ncl (->> (build/capstone pkg-build segment all-requires
-                                   (.lookup-def this nil "-main"))
-                   (ir/mk-nmsp-class capstone-cld (.super-class segment))
-                   (classfile/bwdi pkg-build))]
-      (.defined-class ncl)))
-  (commit-segment [this rdr]
-    (.commit-segment-and-revert this rdr (segment/size-segment-tasks segment)
-                                globals imports)
+    (.flush-segment this rdr)
+    (.install-capstone pkg-build (.lookup-def this nil "-main")))
+  (flush-segment [this rdr]
+    (.mark-end-of-segment! pkg-build)
+    (.flush-segment-and-revert this rdr globals imports)
     this)
-  (commit-segment-and-revert [this rdr end-of-segment
-                              then-globals then-imports]
-    (let [tasks (-> (.subList (.tasks segment) 0 end-of-segment)
-                    (fnenv/transitive-closure!))
-          clinit-statms (segment/clinit-statements tasks)
-          acp (segment/code-promises tasks)
-          class-elements (ArrayList.), other-classes (ArrayList.)
-          sb (SegmentBuilder. class-elements other-classes
-                              (.segment-class segment))
-          env-factory (fnenv/mk-env-factory (build/env-carrying-fns acp))]
-      (dotimes [i (alength acp)]
-        (.generate-and-deliver (aget acp i) sb env-factory nil))
-      (doseq [ncl other-classes]
-        (classfile/declare-class pkg-build ncl))
-      (doseq [^NmspClass ncl other-classes]
-        (->> (ir/with-class-handler ncl
-               (^java.util.function.Consumer fn ^void [^ClassBuilder cb]
-                (.accept (.class-handler ncl) cb)
-                (.with-source-file rdr cb)))
-             (classfile/bwdi pkg-build)))
-      (->> (build/segment rdr segment class-elements clinit-statms)
-           (ir/mk-nmsp-class (.segment-class segment) (.super-class segment))
-           (classfile/bwdi pkg-build)))
+  (flush-segment-and-revert [this rdr then-globals then-imports]
+    (let [segment (.extract-segment! pkg-build)
+          env-factory (-> (.code-promises segment)
+                          (fngen/env-carrying-fns)
+                          (envgen/mk-env-factory))]
+      (.install-segment pkg-build rdr segment env-factory))
     
     ;; revert back to requested state & move to next segment
     (set! ephemeral-of nil)             ;may contain stale classes
-    (set! segment (segment/next-segment segment))
-    (set! entity-gen (entity/mk-clinit-etf (.ns-str this) (.tasks segment)))
+    (set! entity-gen (entity/mk-clinit-etf (.ns-str this)
+                                           (.segment-tasks pkg-build)))
     (set! globals then-globals)
     (set! imports then-imports)))
 
 ;;; ------------------------------------------------------------------------
 
-(deftype Universe [^Loader loader
+(deftype Universe [^Runtime rt ^Destination dest
                    ^map reader-map
                    ^:unsynchronized-mutable ^map all-pns
                    ^map ns-alias]
@@ -282,40 +254,39 @@
                 (if (some? reader-map)
                   (get reader-map ns-str)
                   (let [nmsp-path (files/namespace-path ns-str)]
-                    (reader/mk-reader (.app-ld loader) nmsp-path)))))
+                    (reader/mk-reader (.app-ld rt) nmsp-path)))))
             (mk-nmsp-builder ^NmspBuilder [^String ns-str ^map known-ns
                                            ^PackageBuilder pkg-build]
-              (let [segment (segment/mk-first-segment ns-str)
-                    etf (entity/mk-clinit-etf ns-str (.tasks segment))
+              (let [etf (entity/mk-clinit-etf ns-str
+                                              (.segment-tasks pkg-build))
                     xf (codegen/mk-factory)
                     globals (if (some? reader-map)
                               primitive/primitive-nmsp-globals
                               (publics/initial-globals ns-str))
-                    imports (resolve/predefined-imports (.rt-lookup loader))
-                    require-strs (HashSet.)]
-                (NmspBuilder. this xf etf segment pkg-build
+                    imports (resolve/predefined-imports (.lookup rt))]
+                (NmspBuilder. this xf etf pkg-build
                               globals known-ns ns-alias imports
-                              require-strs (.apply-macro-mh loader) nil)))
+                              (.apply-macro-mh rt) nil)))
             (emit-nmsp ^Class [^String ns-str ^map provided-ns]
               (let [rdr (mk-nmsp-reader ns-str)
-                    pkg-build (classfile/mk-package-builder loader ns-str)]
-                (classfile/push-file-context pkg-build ns-str)
+                    pkg-build (pkggen/mk-package-builder rt dest ns-str)]
+                (.push-file-context rt ns-str)
                 (try
                   (-> (mk-nmsp-builder ns-str provided-ns pkg-build)
                       (namespace/parse-all rdr)
                       (.finish rdr))
                   (finally
-                    (classfile/pop-file-context pkg-build)))))
+                    (.pop-file-context rt)))))
             (compile-nmsp ^ProvidedNamespace [^String ns-str ^map provided-ns]
               (let [capstone (emit-nmsp ns-str provided-ns)
-                    globals (publics/import-globals loader all-pns capstone)
-                    req-strs (publics/require-strings loader capstone)]
+                    globals (publics/import-globals rt all-pns capstone)
+                    req-strs (publics/require-strings rt capstone)]
                 (ProvidedNamespace. ns-str globals req-strs capstone
                                     (publics/insn-force-clinit capstone))))
             (import-nmsp ^ProvidedNamespace [^String ns-str ^Class capstone]
-              (let [req-strs (publics/require-strings loader capstone)]
+              (let [req-strs (publics/require-strings rt capstone)]
                 (.require-namespaces* this req-strs nil)
-                (let [globals (publics/import-globals loader all-pns capstone)]
+                (let [globals (publics/import-globals rt all-pns capstone)]
                   (ProvidedNamespace. ns-str globals req-strs capstone
                                       (publics/insn-force-clinit capstone)))))]
       
@@ -326,13 +297,13 @@
             (when-not (contains? all-pns ns-str)
               (when (cfg/core-lib? ns-str) ;prevent cyclic import of core lib
                 (set! all-pns (assoc all-pns ns-str nil)))
-              (let [pn (if-some [cl (publics/try-load-capstone loader ns-str)]
+              (let [pn (if-some [cl (.try-load-capstone rt ns-str)]
                          (import-nmsp ns-str cl)
                          (compile-nmsp ns-str provided-ns))]
                 (set! all-pns (assoc all-pns ns-str pn)))))))
       all-pns)))
 
-(defn mk-universe ^NamespaceProvider [^map reader-map ^Loader loader
-                                      ^map provided-ns]
+(defn mk-universe ^NamespaceProvider [^map reader-map ^Runtime rt
+                                      ^Destination dest ^map provided-ns]
   (let [ns-alias {cfg/primitive-ns-str cfg/primitive-ns-str}]
-    (Universe. loader reader-map provided-ns ns-alias)))
+    (Universe. rt dest reader-map provided-ns ns-alias)))

@@ -2,14 +2,13 @@
   (:require
    (tcljx.data [config :as cfg] [wrong :as wrong] [reflect :as reflect]
                [type :as type] [resolve :as resolve] [member :as member]
-               [ir :as ir])
-   (tcljx.nmspgen [runtime :as rt] classfile [segment :as segment]
-                   [insn :as insn] [constgen :as constgen] [defgen :as defgen]
-                   [fngen :as fngen])
+               [code :as code] [ir :as ir])
+   (tcljx.nmspgen [runtime :as rt] [insn :as insn] [constgen :as constgen]
+                  [defgen :as defgen] [fngen :as fngen])
    [tinyclj.string :as str])
   (:import
    (tcljx.data.ir Entity ImmediateEntity ArityType MethodSpec ProvidedNamespace)
-   (tcljx.nmspgen.classfile Loader)
+   (tcljx.nmspgen.runtime Runtime)
    (tcljx.nmspgen.insn Insn)
    (tcljx.nmspgen.defgen DefMethod DefField DefMacro DefVarDeref)
    (tcljx.nmspgen.fngen FnStatic FnVirtual)
@@ -21,7 +20,7 @@
 
 (letfn [(conj-rt-var! [acc ^String field-mnm ^Class deref-tp ^String def-nm]
           (assoc! acc def-nm
-                  (-> (DefField. ir/entity-id-def (ir/acc* final) rt/ClojureRT
+                  (-> (DefField. ir/entity-id-def (code/acc* final) rt/ClojureRT
                         field-mnm type/Var nil)
                       (DefVarDeref. deref-tp))))
         (core-ns-globals []
@@ -48,8 +47,8 @@
     (insn/invoke-member resolve/ensure-initialized nil ensure-args)))
 
 ;; Note: This also initializes all segment classes of the namespace.
-(defn require-strings ^String/1 [^Loader loader ^Class capstone]
-  (let [mh (.findStatic (.public-lookup loader) capstone rt/name-requires
+(defn require-strings ^String/1 [^Runtime rt ^Class capstone]
+  (let [mh (.findStatic (.public-lookup rt) capstone rt/name-requires
                         (MethodType/methodType String))
         req-strs ^String (.invokeExact mh)
         al (ArrayList.)]
@@ -62,25 +61,28 @@
               (recur (inc j))))))
     (.toArray al (new String/1 0))))
 
-(defn try-load-capstone ^Class [^Loader loader ^String ns-str]
-  (try
-    (let [s (.descriptorString (segment/capstone-class ns-str))]
-      (-> (.substring s 1 (dec (.length s)))
-          (.replace \/ \.)
-          (Class/forName true (.dyn-ld loader))))
-    (catch ClassNotFoundException _
-      nil)))
-
 ;;; ------------------------------------------------------------------------
 
-(definterface PublicsBuilder
-  (public-def-info ^Object/1 [^Member member])
-  (fn-arities ^Object/1 [^Class tp ^Object value])
+(definterface IPublicsBuilder
   (lookup-symbol ^Entity [^symbol sym]) ;returns nil if local but missing
   
   (add-global ^void [^String mnm ^Entity ent])
   (finished-globals ^map []))
 
+(deftype PublicsBuilder [^Runtime rt ^map known-ns
+                         ^String this-ns-str ^HashMap this-globals]
+  IPublicsBuilder
+  (lookup-symbol [_ sym]
+    (let [nmsp (namespace sym), nm (name sym)]
+      (if-some [pn (.valAt known-ns nmsp nil)]
+        (.valAt (.globals ^ProvidedNamespace pn) nm nil)
+        (when (= nmsp this-ns-str)
+          (.getOrDefault this-globals nm nil)))))
+  
+  (add-global [_ mnm ent]
+    (.put this-globals (cfg/demunge-name mnm) ent))
+  (finished-globals [_]
+    (into (initial-globals this-ns-str) this-globals)))
 
 (letfn [(method-specs-of ^MethodSpec/1 [^boolean virtual? ^MethodHandle/1 mhs]
           (let [mspecs (new MethodSpec/1 (alength mhs))]
@@ -93,7 +95,7 @@
             mspecs))]
   
   (defn- import-fn ^Entity [^PublicsBuilder pb ^Class declared-tp ^Object value]
-    (when-some [mhs (.fn-arities pb declared-tp value)]
+    (when-some [mhs (.fn-arities (.rt pb) declared-tp value)]
       (let [static? (type/same-name? tinyclj.lang.StaticFn declared-tp)
             mspecs (method-specs-of (not static?) mhs)
             mhds (new DirectMethodHandleDesc/1 (alength mhs))]
@@ -131,7 +133,7 @@
         (number? value)   ;any non-ConstantDesc number: Byte and Short
         (constgen/constant (int ^Number value) tp)
         :else       ;keyword, symbol, pattern, collection, or FnStatic
-        (let [pdf (.public-def-info pb m)]
+        (let [pdf (.public-def-info (.rt pb) m)]
           (case (some-> pdf (aget 0))
             ":macro" (of-macro m value (aget pdf 2))
             #_else (DefMethod. ir/entity-id-def 0 (owner-of m) mnm tp
@@ -147,7 +149,7 @@
             (-> (DefField. ir/entity-id-def-macro (.getModifiers f)
                   (owner-of f) (.getName f) (.getType f) nil)
                 (mk-def-macro nil pb fq-value)))]
-    (let [mnm (.getName f), pdf (.public-def-info pb f)]
+    (let [mnm (.getName f), pdf (.public-def-info (.rt pb) f)]
       (case (some-> pdf (aget 0))
         ":var" (DefVarDeref. (of-def f nil) (aget pdf 1))
         ":alias" (of-alias (aget pdf 1))
@@ -204,28 +206,7 @@
     (segments-into! (.getSuperclass capstone))
     (.finished-globals pb)))
 
-(deftype PublicsBuilderImpl [^Loader loader, ^map known-ns
-                             ^String this-ns-str, ^HashMap this-globals]
-  PublicsBuilder
-  (public-def-info [_ member]
-    ^Object/1 (.invokeExact (.mh-public-def-info loader)
-                            (.public-lookup loader) member))
-  (fn-arities [_ tp value]
-    ^MethodHandle/1 (.invokeExact (.mh-fn-arities loader)
-                                  (.public-lookup loader) tp value))
-  (lookup-symbol [_ sym]
-    (let [nmsp (namespace sym), nm (name sym)]
-      (if-some [pn (.valAt known-ns nmsp nil)]
-        (.valAt (.globals ^ProvidedNamespace pn) nm nil)
-        (when (= nmsp this-ns-str)
-          (.getOrDefault this-globals nm nil)))))
-  
-  (add-global [_ mnm ent]
-    (.put this-globals (cfg/demunge-name mnm) ent))
-  (finished-globals [_]
-    (into (initial-globals this-ns-str) this-globals)))
-
-(defn import-globals ^map [^Loader loader ^map known-ns ^Class capstone]
+(defn import-globals ^map [^Runtime rt ^map known-ns ^Class capstone]
   (let [ns-str (.getPackageName capstone)]
-    (-> (PublicsBuilderImpl. loader known-ns ns-str (HashMap.))
+    (-> (PublicsBuilder. rt known-ns ns-str (HashMap.))
         (import-globals* capstone))))

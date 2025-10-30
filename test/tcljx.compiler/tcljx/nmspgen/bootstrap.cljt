@@ -9,30 +9,34 @@
   (:require
    (tcljx.data [config :as cfg] [files :as files] [meta :as meta]
                [type :as type] [reflect :as reflect])
-   (tcljx.nmspgen [classfile :as classfile] [insn :as insn] macro
-                   [universe :as universe] [primitive :as primitive])
+   (tcljx.nmspgen [runtime :as rt] [destdir :as destdir]
+                  [pkggen :as pkggen] [insn :as insn] macro
+                  [universe :as universe] [primitive :as primitive])
    [tcljx.parser.reader-test :as reader-test]
    [tcljx.nmspgen.classdata :as classdata] ;only available for unit tests
    [tcljx.alpha.ptest :as ptest]            ;for is
    [tcljx.alpha.ptest__impl :as ptest__impl]) ;for get-test-context-name
   (:import
    (tcljx.data.ir NmspClass FormReader NamespaceProvider ProvidedNamespace)
-   (tcljx.nmspgen.classfile Loader)
+   (tcljx.nmspgen.runtime Runtime)
+   (tcljx.nmspgen.destdir Destination)
    (java.lang.invoke MethodHandle MethodType)
    (java.lang.reflect Method)
    (java.nio.file Path)
    (java.util List)
+   (java.util.concurrent ConcurrentHashMap)
    (java.util.function Consumer Function)))
 
 (def app-ld
   (let [stage1-classes-rt (Path/of (System/getProperty "java.io.tmpdir")
                                    (System/getProperty "user.name")
                                    "tcljx-stage1.mdir-xpl" "tcljx.rt")]
-    (classfile/app-class-loader :platform [stage1-classes-rt])))
-(def ^:private rt-lookup (classfile/get-rt-lookup app-ld))
+    (rt/app-class-loader :platform [stage1-classes-rt])))
+(def rt-lookup (.lookup (rt/mk-runtime app-ld nil)))
 (type/fixup-runtime-types! rt-lookup)
 
-(defn mk-universe ^NamespaceProvider [^map reader-map ^Loader loader]
+(defn mk-universe ^NamespaceProvider [^map reader-map
+                                      ^Runtime rt ^Destination dest]
   (let [empty-req-strs (new String/1 0)
         pn-primitive (ProvidedNamespace. cfg/primitive-ns-str
                                          primitive/primitive-nmsp-globals
@@ -41,7 +45,7 @@
                                     nil insn/insn-empty)
         provided-ns {cfg/primitive-ns-str pn-primitive
                      cfg/core-lib pn-core}]
-    (universe/mk-universe reader-map loader
+    (universe/mk-universe reader-map rt dest
                           (reduce dissoc provided-ns (keys reader-map)))))
 
 
@@ -60,11 +64,27 @@
 (defn mk-reader-stub [forms]
   (ReaderStub. (seq forms)))
 
-;;; ------------------------------------------------------------------------
 
 (defn dest-dir-for-this-test ^Path []
   (let [nm (ptest__impl/get-test-context-name)]
     (files/tmp-dest-dir (str "tcljx.test" "/" (namespace nm) "/" (name nm)))))
+
+(deftype DestRenderTo [^Destination dest-files ^ConcurrentHashMap !render-to]
+  Destination
+  (prepare-package-directory [_ ns-str]
+    (.prepare-package-directory dest-files ns-str))
+  (write-class [_ ncl]
+    (.write-class dest-files ncl)
+    (.put !render-to (-> ncl .this-class .descriptorString)
+          (classdata/extract (.class-bytes ncl)))))
+
+(defn mk-dest-render-to ^DestRenderTo []
+  (let [nm (ptest__impl/get-test-context-name)
+        dest-dir (dest-dir-for-this-test)]
+    (DestRenderTo. (destdir/mk-dest-files dest-dir)
+                   (java.util.concurrent.ConcurrentHashMap.))))
+
+;;; ------------------------------------------------------------------------
 
 (defn- ns? ^boolean [form]
   (and (seq? form) (= (first form) 'ns)))
@@ -89,25 +109,20 @@
 
 (defn nmsp
   ([formv]
-   (nmsp (classfile/dyn-class-loader app-ld []) formv))
+   (nmsp (rt/dyn-class-loader app-ld []) formv))
   ([^ClassLoader dyn-ld formv]
-   (let [dest-dir (dest-dir-for-this-test)
-         !render-to (java.util.concurrent.ConcurrentHashMap.)
-         class-sink (^Consumer fn ^void [^NmspClass ncl]
-                     (.put !render-to
-                           (-> ncl .this-class .descriptorString)
-                           (classdata/extract (.class-bytes ncl))))
-         loader (classfile/mk-loader dest-dir app-ld dyn-ld class-sink)
+   (let [rt (rt/mk-runtime app-ld dyn-ld)
+         dest (mk-dest-render-to)
          ns-forms-seq (split-at-ns formv)]
      
      (let [ns-strs (->> (map nmsp-name-of ns-forms-seq)
                         ^String/1 (into-array String))]
        (-> (into {} (map (juxt nmsp-name-of mk-reader-stub))
                  ns-forms-seq)
-           (mk-universe loader)
+           (mk-universe rt dest)
            (.require-namespaces* ns-strs nil)))
      
-     (->> (sort-by key (seq !render-to))
+     (->> (sort-by key (seq (.!render-to dest)))
           (mapv (comp vec val))))))
 
 ;;; ------------------------------------------------------------------------
@@ -182,7 +197,7 @@
                       (str "found " (count ms) " matches for method name "
                            nm " in class " cl))
               (first ms)))]
-    (let [dyn-ld (classfile/dyn-class-loader app-ld [])]
+    (let [dyn-ld (rt/dyn-class-loader app-ld [])]
       (nmsp dyn-ld (ns-with-fnbody params form))
       (let [cl (Class/forName "pkg.ns0.___" true dyn-ld)
             m (get-method cl (method-name params))]

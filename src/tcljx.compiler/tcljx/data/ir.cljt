@@ -431,9 +431,9 @@
   (process-init-form ^NamespaceBuilder [^FormReader rdr ^long fctx form])
 
   (finish ^Class [^FormReader rdr])
-  (commit-segment ^NamespaceBuilder [^FormReader rdr])
-  (commit-segment-and-revert ^void [^FormReader rdr ^int end-of-segment
-                                    ^map then-globals ^map then-imports]))
+  (flush-segment ^NamespaceBuilder [^FormReader rdr])
+  (flush-segment-and-revert ^void [^FormReader rdr ^map then-globals
+                                   ^map then-imports]))
 
 (defn ns-sym ^symbol [^NamespaceBuilder nmsp]
   (symbol nil (.ns-str nmsp)))
@@ -512,7 +512,7 @@
   (unique-name! ^String [^String name-suffix])
   (method-etf ^EntityFactory [^String unique-nm ^int used-entity-ids
                               ^HashMap owner-e2d ^ArrayList nested-parts])
-  (stage-part! ^Expr [part]))
+  (stage-code-promise! ^Expr [cp])) ;type CodePromise not available here
 
 ;;; An ExprFactory provides an API to the parser to generate a
 ;;; representation of the namespace's entities and their executable
@@ -642,11 +642,3 @@
       (let [bnd (aget bnds i)]
         (recur (assoc! locals (.name bnd) (.bound-to bnd)) (inc i)))
       (.with-bindings* parser (persistent! locals)))))
-
-(defmacro acc* [& flags]
-  (reduce #(bit-or ^int %1 (case %2
-                             public 0x0001, private 0x0002, protected 0x0004
-                             static 0x0008, final 0x0010, volatile 0x0040
-                             bridge 0x0040, varargs 0x0080, interface 0x0200,
-                             abstract 0x0400 synthetic 0x1000))
-          0 flags))

@@ -8,13 +8,12 @@
 (ns tcljx.main.invoke
   (:require
    (tcljx.data [config :as cfg][wrong :as wrong] [type :as type] ir)
-   (tcljx.nmspgen [runtime :as rt] [classfile :as classfile] segment)
+   (tcljx.nmspgen [runtime :as rt] [pkggen :as pkggen])
    (tcljx.main [options :as options])
    [tcljx.alpha.ptest__style :as style])
   (:import
    (tcljx.data.ir Entity Resolver ProvidedNamespace)
-   (tcljx.nmspgen.classfile PackageBuilder)
-   (tcljx.nmspgen.segment CodePromise)
+   (tcljx.nmspgen.pkggen PackageBuilder CodePromise)
    (tcljx.main.options Options)
    (java.lang.invoke MethodType MethodHandle MethodHandles MethodHandles$Lookup)))
 
@@ -26,13 +25,13 @@
 (defn def-value ^Object [^ProvidedNamespace pn ^symbol var-name]
   (if-some [def (-> (get (.globals pn) (namespace var-name))
                     ^CodePromise (get (name var-name)))]
-    (.runtime-value def classfile/pkg-build-public)
+    (.runtime-value def pkggen/pkg-build-public)
     (wrong/other (str "[var-value] no public def " (wrong/q var-name)))))
 
 (defn- applicable ^MethodHandle [^map known-ns ^symbol fn-spec]
   (let [pn (namespace-of known-ns fn-spec)
         value (def-value pn fn-spec)
-        l (.lookup-in-pkg classfile/pkg-build-public)]
+        l (MethodHandles/publicLookup)]
     (.bindTo (.resolveConstantDesc rt/mhd-apply l) value)))
 
 (defn- result-style [^keyword res]

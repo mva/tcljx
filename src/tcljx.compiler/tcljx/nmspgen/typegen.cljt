@@ -2,13 +2,14 @@
   (:require
    (tcljx.data [config :as cfg] [context :as context] [resolve :as resolve]
                [type :as type] [ir :as ir] [code :as code])
-   (tcljx.nmspgen segment [util :as util] [runtime :as rt] [emit :as emit]
-                   [constgen :as constgen] [insn :as insn] [fnenv :as fnenv])
+   (tcljx.nmspgen [util :as util] [runtime :as rt] env pkggen [emit :as emit]
+                  [constgen :as constgen] [insn :as insn] [envgen :as envgen])
    [tinyclj.string :as str])
   (:import
    (tcljx.data.ir CodeEmitter Entity MethodSpec FieldSpec NmspClass)
+   (tcljx.nmspgen.env ClosureEntity Display StoredEnv)
+   (tcljx.nmspgen.pkggen CodePromise)
    (tcljx.nmspgen.insn Insn)
-   (tcljx.nmspgen.segment CodePromise Display StoredEnv)
    (clojure.lang IPersistentMap)
    (java.lang.classfile ClassBuilder CodeBuilder TypeKind BootstrapMethodEntry)
    (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
@@ -60,12 +61,12 @@
                               (code/mtd-of-fields fields))
               (.areturn))))
        (.withMethodBody cb "create" (MethodTypeDesc/of this-class rt/map)
-                        (ir/acc* public static synthetic))))
+                        (code/acc* public static synthetic))))
 
 (defn- dt-virtual-methods ^void [^ClassBuilder cb ^MethodSpec/1 method-specs]
   (dotimes [i (alength method-specs)]
     (let [spec (aget method-specs i)
-          flags (util/acc-varargs (ir/acc* public final) spec)]
+          flags (util/acc-varargs (code/acc* public final) spec)]
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (emit/body xb spec -1))
            (.withMethodBody cb (.name spec)
@@ -100,7 +101,7 @@
                                    (.nameAndTypeEntry cp nm)
                                    (.invokeDynamicEntry cp bsm-entry))))
             (.return_ (TypeKind/from (.returnType mtd)))))
-       (.withMethodBody cb nm mtd (ir/acc* public final synthetic))))
+       (.withMethodBody cb nm mtd (code/acc* public final synthetic))))
 
 (defn- dt-record-methods ^void [^ClassBuilder cb ^ClassDesc this-class
                                 ^FieldSpec/1 field-specs
@@ -120,7 +121,6 @@
             :when (contains? missing (.field-name spec))]
       (code/with-getter cb spec))))
 
-(def ^:private empty-env-to-display (HashMap/newHashMap 0))
 (defn promise-deftype ^CodePromise [^NmspClass eph-ncl ^FieldSpec/1 field-specs
                                     ^MethodSpec/1 method-specs
                                     ^boolean java-record? ^boolean defrecord?
@@ -130,8 +130,6 @@
       (insn/mk-insn (constgen/constant (.defined-class eph-ncl) Class) Class))
     (child-methods [_]
       method-specs)
-    (env-to-display [_]
-      empty-env-to-display)
     (!nested-parts [_]
       !nested-parts)
     (generate-and-deliver [_ sb _ _]
@@ -158,7 +156,7 @@
     ;; virtual methods provided by the reify* form
     (dotimes [i (alength specs)]
       (let [spec (aget specs i)
-            flags (util/acc-varargs (ir/acc* public final) spec)]
+            flags (util/acc-varargs (code/acc* public final) spec)]
         (->> (^Consumer fn ^void [^CodeBuilder xb]
               (emit/body xb spec -1))
              (.withMethodBody cb (.name spec)
@@ -166,7 +164,7 @@
                                   (.dropParameterTypes 0 1)) flags))))
     ;; private constructor <init>
     (code/constructor cb fields super-class
-                      (ir/acc* private synthetic))
+                      (code/acc* private synthetic))
     ;; public static factory method __create
     (->> (^Consumer fn ^void [^CodeBuilder xb]
           (-> xb (.new_ this-class) (.dup))
@@ -177,7 +175,7 @@
               (.areturn)))
          (.withMethodBody cb rt/name-factory-method
                           (-> constr-mtd (.changeReturnType this-class))
-                          (ir/acc* public static final synthetic)))
+                          (code/acc* public static final synthetic)))
     ;; protected method __withMetaImpl
     (->> (^Consumer fn ^void [^CodeBuilder xb]
           (-> xb (.new_ this-class) (.dup)
@@ -189,20 +187,20 @@
               (.areturn)))
          (.withMethodBody cb rt/name-with-meta-impl
                           (MethodTypeDesc/of this-class rt/map)
-                          (ir/acc* protected final synthetic)))
+                          (code/acc* protected final synthetic)))
     ;; public method meta
     (->> (^Consumer fn ^void [^CodeBuilder xb]
           (-> xb (code/get-field (aget fields 0)) (.areturn)))
          (.withMethodBody cb rt/name-meta-method
                           (MethodTypeDesc/of rt/map)
-                          (ir/acc* public final synthetic)))))
+                          (code/acc* public final synthetic)))))
 
 (deftype Reify [^int entity-id ^NmspClass eph-ncl ^ClassDesc/1 interfaces
                 ^CodeEmitter meta ^MethodSpec/1 method-specs
                 ^HashMap env-to-display ^HashMap parent-e2d
                 ^ArrayList !nested-parts
                 ^:unsynchronized-mutable ^Consumer __emit]
-  Entity
+  ClosureEntity
   (emit-insn* [this xb consumed-type then-leave?]
     (.accept __emit xb)     ;assume that `meta` is not safe to discard
     (.defined-class eph-ncl))
@@ -214,14 +212,14 @@
     ir/invoke-methods-dynamic)
   (entity-id [_]
     entity-id)
+  (env-to-display [_]
+    env-to-display)
   
   CodePromise
   (expr-of [this]
     (insn/mk-insn this (.defined-class eph-ncl)))
   (child-methods [_]
     method-specs)
-  (env-to-display [_]
-    env-to-display)
   (!nested-parts [_]
     !nested-parts)
   (generate-and-deliver [this sb env-factory _]
@@ -230,20 +228,20 @@
       (->> (^Consumer fn ^void [^CodeBuilder xb]
             (when (emit/insn? xb context/fctx-none type/map meta)
               (let [mtd (util/mtd-factory (.this-class eph-ncl) aorigin)]
-                (-> (fnenv/load-env xb parent-e2d aorigin)
+                (-> (envgen/load-env xb parent-e2d aorigin)
                     (.invokestatic (.this-class eph-ncl) rt/name-factory-method
                                    (.insertParameterTypes mtd 0 rt/map))))))
            (set! __emit))
       (->> (^Consumer fn ^void [^ClassBuilder cb]
             (let [this-class (.this-class eph-ncl)
                   field-meta (FieldSpec. this-class "__meta" nil
-                                         (ir/acc* private final)
+                                         (code/acc* private final)
                                          rt/map type/map)
-                  fields (doto (fnenv/fields-exact 1 this-class env (.aorigin env))
+                  fields (doto (envgen/fields-exact 1 this-class env (.aorigin env))
                            (aset 0 field-meta))]
-              (fnenv/as-fields 1 fields env) ;picked up by all virtual methods below
+              (envgen/as-fields 1 fields env) ;picked up by all virtual methods below
               (-> (cfg/with-class-version cb)
-                  (.withFlags (ir/acc* public final))
+                  (.withFlags (code/acc* public final))
                   (.withSuperclass (.super-if-class eph-ncl))
                   (.withInterfaceSymbols interfaces)
                   (class-elements-reify this this-class

@@ -2,14 +2,15 @@
   (:require
    (tcljx.data
     [config :as cfg] [reflect :as reflect] [resolve :as resolve] [type :as type]
-    [member :as member] [context :as context] [wrong :as wrong] [ir :as ir])
+    [member :as member] [context :as context] [wrong :as wrong] [ir :as ir]
+    [code :as code])
    (tcljx.nmspgen
-    [classfile :as classfile] [util :as util] segment [runtime :as rt]
+    [runtime :as rt] [util :as util] [pkggen :as pkggen]
     [constgen :as constgen] [insn :as insn] [emit :as emit]))
   (:import
    (tcljx.data.ir CodeEmitter Entity FnPromise BindableEntity ImmediateEntity
                   Assignable Binding)
-   (tcljx.nmspgen.segment CodePromise)
+   (tcljx.nmspgen.pkggen CodePromise)
    (tcljx.nmspgen.insn Insn)
    (java.lang.classfile ClassBuilder ClassFileBuilder FieldBuilder MethodBuilder
                         CodeBuilder ClassFileElement AnnotationElement
@@ -20,7 +21,7 @@
    (java.util.function Consumer)))
 
 (defn apply-private ^int [^int flags ^boolean private?]
-  (cond-> flags private? (bit-and-not (ir/acc* public))))
+  (cond-> flags private? (bit-and-not (code/acc* public))))
 
 (deftype DefField [^int entity-id ^int flags ^ClassDesc owner ^String mnm
                    ^Class tp ^CodeEmitter init-ce]
@@ -137,7 +138,7 @@
 (defn- promise-method ^CodePromise [^int entity-id ^boolean private?
                                     ^ClassDesc owner ^String nm ^Class tp
                                     ^Entity init-ce]
-  (let [flags (apply-private classfile/acc-method-static private?)]
+  (let [flags (apply-private code/acc-method-static private?)]
     (DefMethod. entity-id flags owner (cfg/munge-name nm) tp init-ce)))
 (defn- wrap-loadable-as-method? ^boolean [^CodeEmitter ce]
   (when (instance? ImmediateEntity ce) ;want JvmConstant or FnStatic only
@@ -181,7 +182,7 @@
     (let [ce* (.get-emit-entity init-ce)
           p (if (wrap-loadable-as-method? ce*)
               (promise-method entity-id private? owner nm tp ce*)
-              (let [flags (apply-private (ir/acc* public static final) private?)]
+              (let [flags (apply-private (code/acc* public static final) private?)]
                 (promise-field entity-id flags owner nm tp ce*)))]
       (set! __entity (-> p .expr-of .emitter))
       (.generate-and-deliver p sb env-factory ann-elem)))
@@ -193,7 +194,7 @@
 (defn promise-def-mutable ^CodePromise [^int entity-id ^boolean private?
                                         ^ClassDesc owner ^String nm ^Insn init]
   (let [tp (insn/logical-type init), init-ce (insn/emitter init)
-        flags (apply-private (ir/acc* public static volatile) private?)]
+        flags (apply-private (code/acc* public static volatile) private?)]
     (promise-field entity-id flags owner nm tp init-ce)))
 
 (defn promise-def-immutable ^CodePromise [^int entity-id ^boolean private?
@@ -205,7 +206,7 @@
       (instance? FnPromise init-ce)
       (DefOfPromise. entity-id private? owner nm tp init-ce nil)
       :else
-      (let [flags (apply-private (ir/acc* public static final) private?)]
+      (let [flags (apply-private (code/acc* public static final) private?)]
         (promise-field entity-id flags owner nm tp init-ce)))))
 
 (defn promise-def-alias ^CodePromise [^boolean private? ^String nm
@@ -222,7 +223,7 @@
         (->> (^Consumer fn ^void [^ClassBuilder cb]
               (->> (^Consumer fn ^void [^FieldBuilder fb]
                     (let [ae (AnnotationElement/ofString "of" other-qname)
-                          flags (apply-private (ir/acc* public static final)
+                          flags (apply-private (code/acc* public static final)
                                                private?)]
                       (-> (.withFlags fb flags)
                           (.with (RuntimeVisibleAnnotationsAttribute/of
@@ -370,7 +371,7 @@
     (let [init (cond-> (create-var)
                  (some? x-meta) (set-meta)
                  dynamic? (set-dynamic))
-          flags (apply-private (ir/acc* public static final) private?)]
+          flags (apply-private (code/acc* public static final) private?)]
       (-> (promise-field ir/entity-id-def flags owner nm (.expr-type init)
                          (.emitter init))
           (DefVarDeref. tp-var)))))

@@ -41,13 +41,6 @@
 (defn create-directories ^Path [^Path p]
   (Files/createDirectories p create-directory-permissions))
 
-(defn package-directory ^Path [^Path dest-dir ^String ns-str]
-  (.resolve dest-dir (path-of (.replace ns-str "." "/"))))
-
-(defn prepare-package-directory ^Path [^Path dest-dir ^String ns-str]
-  (when (some? dest-dir)
-    (create-directories (package-directory dest-dir ns-str))))
-
 ;;; ------------------------------------------------------------------------
 
 (defn- path-seq [^Path p ^int max-depth ^Predicate pred]

@@ -9,7 +9,8 @@
   (:require
    (tcljx.data [config :as cfg] [files :as files])
    (tcljx.parser [reader :as reader])
-   (tcljx.nmspgen [classfile :as classfile] [bootstrap :as bootstrap])
+   (tcljx.nmspgen [runtime :as rt] [destdir :as destdir]
+                  [pkggen :as pkggen] [bootstrap :as bootstrap])
    [tcljx.alpha.ptest :refer [deftest]]))
 
 (deftest compile-rtiow-nocore-test
@@ -22,9 +23,8 @@
                       (reader/mk-reader))
         dest-dir (bootstrap/dest-dir-for-this-test)
         app-ld bootstrap/app-ld
-        dyn-ld (classfile/dyn-class-loader app-ld [])
-        class-sink nil
-        loader (classfile/mk-loader dest-dir app-ld dyn-ld class-sink)
+        dyn-ld (rt/dyn-class-loader app-ld [])
+        rt (rt/mk-runtime app-ld dyn-ld)
         ns-strs (doto (new String/1 1) (aset 0 ns-str))]
-    (-> (bootstrap/mk-universe {ns-str ns-reader} loader)
+    (-> (bootstrap/mk-universe {ns-str ns-reader} rt destdir/dest-none)
         (.require-namespaces* ns-strs nil))))

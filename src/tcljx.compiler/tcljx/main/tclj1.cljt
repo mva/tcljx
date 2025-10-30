@@ -105,7 +105,7 @@
    (options/print-options opts)
    (when (nil? (.dest-dir opts))
      (options/abort "error: mode `--watch` requires a destination directory"))
-   (tclj0/wipe-dest-dir opts)
+   (tclj0/prepare-destination (.dest-dir opts) false) ;wipe destination dir
    (assert false)
    #_
    (loop [w (watcher/new-watcher (.sourcev opts))

@@ -1,0 +1,466 @@
+(ns tcljx.nmspgen.pkggen
+  (:require
+   (tcljx.data [config :as cfg] [code :as code] [context :as context]
+               [type :as type] [ir :as ir])
+   (tcljx.nmspgen [runtime :as rt] destdir [env :as env] [emit :as emit]
+                  [insn :as insn]))
+  (:import
+   (tcljx.data.ir CodeEmitter Expr Entity FnPromise MethodSpec NmspClass
+                  FormReader)
+   (tcljx.nmspgen.runtime Runtime)
+   (tcljx.nmspgen.destdir Destination)
+   (tcljx.nmspgen.env ClosureEntity Display StoredEnv EnvFactory)
+   (java.lang.classfile ClassFile ClassBuilder CodeBuilder ClassHierarchyResolver
+                        ClassHierarchyResolver$ClassHierarchyInfo
+                        ClassFileElement)
+   (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
+   (java.lang.invoke MethodType MethodHandle MethodHandles MethodHandles$Lookup)
+   (java.util List ArrayList HashSet HashMap Map$Entry)
+   (java.util.concurrent ConcurrentHashMap)
+   (java.util.function Consumer BiConsumer)))
+
+(definterface ISegmentBuilder
+  (segment-class ^ClassDesc [])
+  (namespace-class ^ClassDesc [^String class-name])
+  (add-elements ^void [^Consumer class-handler])
+  (add-class-file ^void [^NmspClass ncl]))
+
+(deftype SegmentBuilder [^ArrayList class-elements ;of Consumer
+                         ^ArrayList other-classes  ;of NmspClass
+                         ^ClassDesc segment-class]
+  ISegmentBuilder
+  (segment-class [_]
+    segment-class)
+  (namespace-class [_ class-name]
+    ;; FIXME... drop this? the pkg-name is availabe by other means
+    (ClassDesc/of (.packageName segment-class) class-name))
+  (add-elements [_ class-handler]
+    (.add class-elements class-handler))
+  (add-class-file [_ ncl]
+    (.add other-classes ncl)))
+
+;;; Created during the parsing phase.  `generate-and-deliver` is
+;;; called before the emit phase, to add elements to the segment class
+;;; under construction, or whole classes accompanying it.  Note:
+;;; `!nested-parts` may be filled in by a thread other than the one
+;;; that created this object.
+(definterface CodePromise
+  (expr-of ^Expr [])
+  (child-methods ^MethodSpec/1 [])      ;nil if lacking methods
+  (!nested-parts ^ArrayList []) ;of CodePromises, nil if lacking methods
+  (generate-and-deliver ^void [^SegmentBuilder sb ^EnvFactory env-factory
+                               ^ClassFileElement ann-elem])
+  (runtime-value ^Object [^IPackageBuilder pkg-build]))
+
+(deftype Segment [^ClassDesc segment-class
+                  ^CodePromise/1 code-promises
+                  ^CodeEmitter/1 clinit-statements
+                  ^String pkg-name
+                  ^ClassDesc super-class
+                  ^int segment-id])
+
+(definterface IPackageBuilder
+  (class-for-name ^Class [^String nm])
+  (ephemeral-factory ^MethodHandle [])
+  (get-static-field ^Object [^ClassDesc owner ^String name
+                             ^ClassDesc value-type-exact])
+  (get-static-method ^Object [^ClassDesc owner ^String name
+                              ^ClassDesc value-type-exact])
+
+  (staged-segment ^ClassDesc [])
+  (last-segment ^ClassDesc [])
+  (stage-code-promise! ^void [^CodePromise cp])
+  (stage-clinit-statement! ^void [^Expr x])
+  (mark-end-of-segment! ^void [])
+  (extract-segment! ^Segment [])
+
+  (install-capstone ^Class [^Entity entry-main])
+  (install-segment ^void [^FormReader rdr ^Segment segment
+                          ^EnvFactory env-factory]))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private segment-class-flags (code/acc* public abstract))
+
+(defn- with-requires ^ClassBuilder [^ClassBuilder cb ^String req-str]
+  (code/with-method-body->
+    cb [rt/name-requires (MethodTypeDesc/of ConstantDescs/CD_String)
+        (bit-or code/acc-method-static (code/acc* synthetic))]
+    (-> (.ldc req-str) (.areturn))))
+
+(def ^:private mtd-void-String
+  (MethodTypeDesc/of ConstantDescs/CD_void ConstantDescs/CD_String))
+(defn- clinit-body ^void [^CodeBuilder xb ^Segment segm
+                          ^CodeEmitter/1 clinit-statms]
+  (letfn [(invoke-create-nmsp ^void [^CodeBuilder xb]
+            (-> xb
+                (.ldc (.pkg-name segm))
+                (.invokestatic rt/RT "createNamespace" mtd-void-String)))
+          (invoke-mark-core-init ^void [^CodeBuilder xb]
+            (-> xb
+                (.ldc (str (.pkg-name segm) "."
+                           (-> segm .segment-class .displayName)))
+                (.invokestatic rt/RT "markCoreInitialization"
+                               mtd-void-String)))]
+    (when (identical? ConstantDescs/CD_Object (.super-class segm))
+      (invoke-create-nmsp xb))
+    (emit/statms? xb clinit-statms)
+    (when (cfg/core-lib? (.pkg-name segm))
+      (invoke-mark-core-init xb))
+    (.return_ xb)))
+
+(defn- segment-handler ^Consumer [^FormReader rdr ^Segment segm
+                                  ^ArrayList class-elements
+                                  ^CodeEmitter/1 clinit-statms]
+  (^Consumer fn ^void [^ClassBuilder cb]
+   (-> (cfg/with-class-version cb)
+       (.withSuperclass (.super-class segm))
+       (.withFlags segment-class-flags))
+   (.with-source-file rdr cb)
+   (let [al class-elements]
+     (dotimes [i (.size al)]
+       (.accept ^Consumer (.get al i) cb)))
+   (.withMethodBody
+    cb ConstantDescs/CLASS_INIT_NAME ConstantDescs/MTD_void
+    (code/acc* public static)
+    (^Consumer fn ^void [^CodeBuilder xb]
+     (clinit-body xb segm clinit-statms)))))
+
+(defn- invoke-main? ^boolean [^Entity entry-main]
+  (when-some [mspecs (.invoke-methods entry-main)]
+    (let [at (-> mspecs (aget 0) .at)]
+      (and (= (alength mspecs) 1) (= (.parameter-count at) 1)
+           (ir/translates-to-varargs? at)
+           (or (.variadic? at)    ;String/1 converted to seq of String
+               (.isAssignableFrom (.parameter-type at 0) String/1))))))
+
+(def ^:private acc-main (code/acc* public static final synthetic))
+(def ^:private mtd-main
+  (MethodTypeDesc/of ConstantDescs/CD_void rt/StringArray))
+(defn- with-main-invoke ^ClassBuilder [^ClassBuilder cb ^Entity entry-main]
+  (->> (^Consumer fn ^void [^CodeBuilder xb]
+        (let [x (.invoke* entry-main context/fctx-none nil entry-main 0
+                          insn/insns-main-args)] ;magical arguments instance
+          (emit/then-leave? xb context/fctx-none Void/TYPE (.emitter x) true)))
+       (.withMethodBody cb "main" mtd-main acc-main)))
+(defn- with-main-apply ^ClassBuilder [^ClassBuilder cb ^Entity entry-main]
+  (->> (^Consumer fn ^void [^CodeBuilder xb]
+        (emit/insn? xb context/fctx-none type/ifn entry-main)
+        (-> (.aload xb (.parameterSlot xb 0))
+            (.invokestatic rt/RT "apply" rt/mtd-apply)
+            (.pop)
+            (.return_)))
+       (.withMethodBody cb "main" mtd-main acc-main)))
+
+(defn- capstone-handler ^Consumer [^ClassDesc super-class ^String all-requires
+                                   ^Entity entry-main]
+  (^Consumer fn ^void [^ClassBuilder cb]
+   (-> (cfg/with-class-version cb)
+       (.withFlags segment-class-flags)
+       (.withSuperclass super-class)
+       (with-requires all-requires))
+   (when entry-main
+     (if (invoke-main? entry-main)
+       (with-main-invoke cb entry-main)
+       (with-main-apply cb entry-main)))))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private empty-code-promises (new CodePromise/1 0))
+
+;;; Computes a map of [succ, array of preds] pairs, where every `pred`
+;;; must provide the complete set of environment values that `succ`
+;;; closes over.  This is the input for a fixpoint iteration that
+;;; grows the `env-to-display` maps of preds using the one from
+;;; `succ`, until saturation is reached.
+(defn- dataflow-predecessors ^HashMap [^HashMap acc ^HashSet dirty ^List tasks]
+  (letfn [(add-edge! ^void [^CodePromise pred ^CodePromise succ]
+            ;; environment values are passed from `pred` to `succ`
+            (if-some [preds (.get acc succ)]
+              (.add ^HashSet preds pred)
+              (.put acc succ (doto (HashSet.) (.add pred)))))
+          (invoke-only-fn? ^boolean [x]
+            (and (instance? FnPromise x) (not (FnPromise/.value-use? x))))
+          (register-flyweight-invokes ^void [^CodePromise cp]
+            ;; if `cp` closes over an "invoke-only-fn", then this
+            ;; means that it invokes it and must provide its
+            ;; environment as part of the calling sequence
+            (doseq [o (-> ^ClosureEntity cp .env-to-display .keySet)
+                    :when (invoke-only-fn? o)]
+              (add-edge! cp o)))
+          (process-cp ^void [^CodePromise cp ^CodePromise parent]
+            ;; pre: `cp` has methods
+            (when (instance? ClosureEntity cp)
+              (when-not (-> ^ClosureEntity cp .env-to-display .isEmpty)
+                (.add dirty cp))
+              (register-flyweight-invokes cp))
+            (when (some? parent)
+              ;; all entities (incl. flyweight) take their environment
+              ;; from the parent or transitively from any ancestor
+              (add-edge! parent cp))
+            (doseq [cp' (.!nested-parts cp)]
+              (process-cp cp' cp)))]
+    (doseq [task tasks
+            :when (instance? CodePromise task)
+            :let [cp ^CodePromise task]
+            :when (some? (.child-methods cp))]
+      (process-cp cp nil))
+    (let [acc' (HashMap/newHashMap (.size acc))]
+      (.forEach acc (^BiConsumer fn ^void [k ^HashSet preds]
+                     (.put acc' k (.toArray preds empty-code-promises))))
+      acc')))
+
+(letfn [(propagated-to? ^boolean [^CodePromise cp ^CodePromise pred]
+          (when (instance? ClosureEntity pred) ;`pred` may be a deftype
+            (let [pred-level (ir/closure-level ^Entity pred)
+                  pred-env-to-display (.env-to-display ^ClosureEntity pred)
+                  size-before (.size pred-env-to-display)]
+              (doseq [^Map$Entry e
+                      (-> ^ClosureEntity cp .env-to-display .entrySet)
+                      :let [o ^Entity (.getKey e)] 
+                      :when (<= (ir/closure-level o) pred-level)]
+                (env/display-of! pred-env-to-display o
+                                 (.local-name ^Display (.getValue e))))
+              (not= (.size pred-env-to-display) size-before))))
+        (propagate! ^void [^HashSet dirty' ^HashMap preds-map ^HashSet dirty]
+          (doseq [cp dirty
+                  :let [^CodePromise/1 preds (.get preds-map cp)]
+                  :when (some? preds)]
+            (loop [i (dec (alength preds))]
+              (when-not (neg? i)
+                (let [pred (aget preds i)]
+                  (when (propagated-to? cp pred)
+                    (.add dirty' pred)))
+                (recur (dec i))))))]
+
+  ;; Computes transitive closure of data dependencies between
+  ;; environments.  Extends `env-to-display` maps accordingly.
+  (defn- complete-environments! ^List [^List tasks]
+    (let [!dirty-0 (HashSet.)
+          preds-map (dataflow-predecessors (HashMap.) !dirty-0 tasks)]
+      (loop [dirty !dirty-0]
+        (when-not (.isEmpty dirty)
+          (let [!dirty' (HashSet.)]
+            (propagate! !dirty' preds-map dirty)
+            (recur !dirty')))))
+    tasks))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private first-segment-id 10)
+
+(defn- segment-cld ^ClassDesc [^String pkg-name ^int segm-id]
+  (ClassDesc/of pkg-name (str "_" segm-id)))
+
+(letfn [(code-promises ^CodePromise/1 [^List tasks]
+          (let [acc-cps (ArrayList.), it (.iterator tasks)]
+            (letfn [(add-part! ^void [^CodePromise part]
+                      (when-some [nested (.!nested-parts part)]
+                        (let [it* (.iterator nested)]
+                          (loop [] (when (.hasNext it*) (add-part! (.next it*))
+                                         (recur)))))
+                      (.add acc-cps part))]
+              (loop [] (when (.hasNext it)
+                         (let [task (.next it)]
+                           (when (instance? CodePromise task) (add-part! task)))
+                         (recur)))
+              (.toArray acc-cps (new CodePromise/1 0)))))
+
+        (clinit-statements ^CodeEmitter/1 [^List tasks]
+          (let [al (ArrayList.), it (.iterator tasks)]
+            (loop [] (when (.hasNext it)
+                       (let [task (.next it)]
+                         (when-not (instance? CodePromise task)
+                           (.add al (.emitter ^Expr task)))
+                         (recur))))
+            (.toArray al (new CodeEmitter/1 0))))]
+  
+  (defn- mk-segment ^Segment [^String pkg-name ^int segm-id
+                              ^ClassDesc segment-class ^ClassDesc super-class
+                              ^List tasks]
+    (Segment. segment-class (code-promises tasks) (clinit-statements tasks)
+              pkg-name super-class segm-id)))
+
+;;; ------------------------------------------------------------------------
+
+(defn- class-file-of ^ClassFile [^ClassHierarchyResolver dyn-chr]
+  ;; *Not* setting KEEP_DEAD_CODE, because the code generator cannot
+  ;; track unreachable code across instances of CodeBuilder.block().
+  (ClassFile/of
+   (java.lang.classfile.ClassFile$ClassHierarchyResolverOption/of dyn-chr)))
+(defn- build ^NmspClass [^NmspClass ncl ^ClassHierarchyResolver dyn-chr]
+  (assert (nil? (.class-bytes ncl)))
+  (let [bs (-> (class-file-of dyn-chr)
+               (.build (.this-class ncl) (.class-handler ncl)))]
+    (NmspClass. (.this-class ncl) (.super-if-class ncl) nil bs nil)))
+
+(defn- define ^NmspClass [^NmspClass ncl ^MethodHandles$Lookup lookup]
+  #_                                   ;FIXME... is this still true?  
+  (-> (try
+        (.defineClass l bs)
+        (catch NoClassDefFoundError _
+          ;; happens for example
+          ;; with "pkg/ns0/n2$n2-n1$n2-n1-n0" from test case
+          ;; tcljx.nmspgen.closure-test/nested
+          (.findClass l (.replace (internal-name this-class) "/" ".")))))
+  (let [cl (.defineClass lookup (.class-bytes ncl))]
+    (NmspClass. (.this-class ncl) (.super-if-class ncl) nil
+                (.class-bytes ncl) cl)))
+
+(defn- initialize ^NmspClass [^NmspClass ncl]
+  (let [cl (.defined-class ncl)
+        nm (.getName cl)
+        cl* (Class/forName nm true (.getClassLoader cl))]
+    (when-not (identical? cl cl*)
+      (throw (IllegalStateException.
+              (str "failed to define class " nm
+                   " over existing class from classpath"))))
+    ncl))
+
+(defn- bwdi* ^NmspClass [^ClassHierarchyResolver dyn-chr
+                         ^Destination dest
+                         ^MethodHandles$Lookup lookup
+                         ^NmspClass ncl]
+  (let [ncl (build ncl dyn-chr)]
+    (.write-class dest ncl)
+    (-> ncl (define lookup) (initialize))))
+
+(def ^:private mt-Class-bytes (MethodType/methodType Class byte/1))
+
+;;; Note: `segment-tasks` is shared with the top-level EntityFactory
+;;; serving the clinit level, and indirectly mutated through it.
+(deftype PackageBuilder [^String pkg-name ^MethodHandles$Lookup lookup
+                         ^ConcurrentHashMap chr-class-map ^Destination dest
+                         ^ArrayList segment-tasks
+                         ^:unsynchronized-mutable ^int end-of-segment
+                         ^:unsynchronized-mutable ^int segment-id
+                         ^:unsynchronized-mutable ^ClassDesc staged-segment
+                         ^:unsynchronized-mutable ^ClassDesc last-segment
+                         ^HashSet !require-strs] ;implicitly mutable
+  IPackageBuilder
+  (class-for-name [_ nm]
+    (when (pos? (.indexOf nm (int \.))) ;format must be pkgName.className
+      (try
+        (.resolveConstantDesc (ClassDesc/of nm) lookup)
+        (catch ClassNotFoundException _
+          nil))))  
+  (ephemeral-factory [_]
+    (let [ld (-> lookup .lookupClass .getClassLoader
+                 (rt/class-loader-instance "tclj-eph" nil))]
+      (-> (MethodHandles/lookup)
+          (.findVirtual (class ld) "ephemeralClass" mt-Class-bytes)
+          (.bindTo ld))))
+  (get-static-field [_ owner mangled-name value-type-exact]
+    (let [owner* (.resolveConstantDesc owner lookup)
+          type* (.resolveConstantDesc value-type-exact lookup)]
+      (.invoke (->> type*
+                    (.findStaticGetter lookup owner* mangled-name)))))
+  (get-static-method [_ owner mangled-name value-type-exact]
+    (let [owner* (.resolveConstantDesc owner lookup)
+          type* (.resolveConstantDesc value-type-exact lookup)]
+      (.invoke (->> (MethodType/methodType type*)
+                    (.findStatic lookup owner* mangled-name)))))
+
+  (staged-segment [_]
+    staged-segment)
+  (last-segment [_]
+    last-segment)
+  (stage-code-promise! [ _ cp]
+    (.add segment-tasks cp))
+  (stage-clinit-statement! [ _ x]
+    (.add segment-tasks x))
+  (mark-end-of-segment! [_]
+    (set! end-of-segment (.size segment-tasks)))
+  (extract-segment! [_]
+    (let [segm (->> (.subList segment-tasks 0 end-of-segment)
+                    (complete-environments!)
+                    (mk-segment pkg-name segment-id staged-segment
+                                last-segment))]
+      (.clear segment-tasks)
+      (set! end-of-segment 0)
+      (set! segment-id (inc segment-id))
+      (set! last-segment staged-segment)
+      (set! staged-segment (segment-cld pkg-name segment-id))
+      segm))
+
+  (install-capstone [this entry-main]
+    (let [capstone-cld (cfg/capstone-class pkg-name)
+          all-requires (if (cfg/core-lib? pkg-name)
+                         ""     ;suppress internal details of core lib
+                         (-> (.sorted (.stream !require-strs))
+                             (.collect (java.util.stream.Collectors/joining ","))))
+          ncl (->> (capstone-handler last-segment all-requires entry-main)
+                   (ir/mk-nmsp-class capstone-cld last-segment)
+                   (bwdi* this dest lookup))]
+      (.defined-class ncl)))
+  (install-segment [this rdr segment env-factory]
+    (let [clinit-statms (.clinit-statements segment)
+          acp (.code-promises segment)
+          class-elements (ArrayList.), other-classes (ArrayList.)
+          sb (SegmentBuilder. class-elements other-classes
+                              (.segment-class segment))]
+      (dotimes [i (alength acp)]
+        (.generate-and-deliver (aget acp i) sb env-factory nil))
+      (doseq [^NmspClass ncl other-classes]
+        ;; For future class building, declare that `ncl` extends some
+        ;; superclass or is an interface class.
+        (.put chr-class-map (.this-class ncl)
+              (if-some [super-class (.super-if-class ncl)]
+                (ClassHierarchyResolver$ClassHierarchyInfo/ofClass super-class)
+                (ClassHierarchyResolver$ClassHierarchyInfo/ofInterface))))
+      (doseq [^NmspClass ncl other-classes]
+        (->> (ir/with-class-handler ncl
+               (^java.util.function.Consumer fn ^void [^ClassBuilder cb]
+                (.accept (.class-handler ncl) cb)
+                (.with-source-file rdr cb)))
+             (bwdi* this dest lookup)))
+      (->> (segment-handler rdr segment class-elements clinit-statms)
+           (ir/mk-nmsp-class (.segment-class segment) (.super-class segment))
+           (bwdi* this dest lookup))))
+  
+  ClassHierarchyResolver
+  (getClassInfo [_ class-desc]
+    (letfn [(lookup-chi ^ClassHierarchyResolver$ClassHierarchyInfo []
+              (let [cl (.resolveConstantDesc class-desc lookup)]
+                (if (.isInterface cl)
+                  (ClassHierarchyResolver$ClassHierarchyInfo/ofInterface)
+                  (-> (when-some [super (.getSuperclass cl)]
+                        (.get (.describeConstable super)))
+                      (ClassHierarchyResolver$ClassHierarchyInfo/ofClass)))))]
+      (or (.get chr-class-map class-desc)
+          (let [chi (lookup-chi)]
+            (.put chr-class-map class-desc chi)
+            chi)))))
+
+(def pkg-build-public
+  (PackageBuilder. nil (MethodHandles/publicLookup) nil nil nil
+                   0 -1 nil nil nil))
+
+(letfn [(mk-lookup-in-pkg ^MethodHandles$Lookup [^Runtime rt ^String ns-str]
+          (let [bs (.build
+                    (ClassFile/of) (ClassDesc/of ns-str "__beachhead")
+                    (^Consumer fn ^void [^ClassBuilder cb]
+                     (let [mtd (MethodTypeDesc/of rt/Lookup)]
+                       (-> cb         ;use ClassFile's default version
+                           (.withFlags (code/acc* public abstract))
+                           (.withMethodBody
+                            "beachheadLookup" mtd (code/acc* public static)
+                            (^Consumer fn ^void [^CodeBuilder xb]
+                             (-> (.invokestatic xb rt/MethodHandles "lookup" mtd)
+                                 (.areturn))))))))
+                mt (MethodType/methodType MethodHandles$Lookup byte/1)
+                ld-cl (class (.dyn-ld rt))
+                mh (.findVirtual (.lookup rt) ld-cl "lookupInPackage" mt)]
+            ^MethodHandles$Lookup (.invokeExact (.bindTo mh (.dyn-ld rt)) bs)))]
+  
+  ;; Coordinates cross cutting concerns for building and defining
+  ;; classes.  For the Class-File API it provides the class hierarchy
+  ;; resolver, and for class definition a mechanism to enforce "super
+  ;; class is defined before extending class".
+  (defn mk-package-builder ^PackageBuilder [^Runtime rt ^Destination dest
+                                            ^String pkg-name]
+    (.prepare-package-directory dest pkg-name)
+    (PackageBuilder. pkg-name (mk-lookup-in-pkg rt pkg-name)
+                     (ConcurrentHashMap.) dest (ArrayList.) 0 first-segment-id
+                     (segment-cld pkg-name first-segment-id) rt/Object
+                     (HashSet.))))
