@@ -224,4 +224,4 @@ stage2-rt: $(STAGE2_MINFO_RT)
 stage2-core: $(STAGE2_MINFO_CORE)
 stage2-alpha: $(STAGE2_MINFO_ALPHA)
 stage2-compiler: $(STAGE2_MINFO_COMPILER)
-bootstrap-and-check: stage2-compiler
+bootstrap-and-check: stage2-compiler stage1-rtiow
