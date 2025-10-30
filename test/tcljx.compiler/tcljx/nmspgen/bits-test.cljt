@@ -13,7 +13,37 @@
   (is (= '[(ICONST_0) #_(ICONST_1) #_(ICONST_2) #_(IAND) (IRETURN)]
          (asm-expr (bit-and 1 2))))
   (is (= '[(ICONST_0) #_(ICONST_1) #_(ICONST_2) #_(IAND) #_(ICONST_3) #_(IAND) (IRETURN)]
-         (asm-expr (bit-and 1 2 3)))))
+         (asm-expr (bit-and 1 2 3))))
+
+  ;; not valid in Clojure 1.12.0:
+  (is (= '[(ICONST_M1) (IRETURN)]
+         (asm-expr (bit-and))))
+  (is (= '[(ICONST_2) (IRETURN)]
+         (asm-expr (bit-and 2)))))
+
+(deftest int-or-test
+  (is (= '[(ICONST_3) (IRETURN)]
+         (asm-expr (bit-or 1 2))))
+  (is (= '[(ICONST_3) (IRETURN)]
+         (asm-expr (bit-or 1 2 3))))
+
+  ;; not valid in Clojure 1.12.0:
+  (is (= '[(ICONST_0) (IRETURN)]
+         (asm-expr (bit-or))))
+  (is (= '[(ICONST_2) (IRETURN)]
+         (asm-expr (bit-or 2)))))
+
+(deftest int-xor-test
+  (is (= '[(ICONST_3) (IRETURN)]
+         (asm-expr (bit-xor 1 2))))
+  (is (= '[(ICONST_0) (IRETURN)]
+         (asm-expr (bit-xor 1 2 3))))
+
+  ;; not valid in Clojure 1.12.0:
+  (is (= '[(ICONST_0) (IRETURN)]
+         (asm-expr (bit-xor))))
+  (is (= '[(ICONST_2) (IRETURN)]
+         (asm-expr (bit-xor 2)))))
 
 (deftest bit-not-test
   (is (= '[["LOCAL 0: int x"] (ILOAD_0) (ICONST_M1) (IXOR) (IRETURN)]
