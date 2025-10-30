@@ -57,9 +57,13 @@
            (ILOAD_1)
            (ILOAD_0) (ICONST_3) (IADD)
            (IF_ICMPGE L:0)
-           (ICONST_0) (IRETURN)
+           (ICONST_1) (GOTO L:1)
            [L:0]
-           (ICONST_1) (IRETURN)]
+           (ICONST_0)
+           [L:1]
+           (ICONST_1)
+           (IXOR)
+           (IRETURN)]
          (asm-expr [^int i] (not (< (+ i 1) (+ i 2) (+ i 3))))))
 
   (is (= '[#_(BIPUSH 99)
