@@ -1,0 +1,46 @@
+diff -Nru src/tcljx.alpha/module-info.java ../tcljx.alpha.patched/module-info.java
+--- src/tcljx.alpha/module-info.java	2025-10-30 06:50:06.492136999 +0100
++++ ../tcljx.alpha.patched/module-info.java	2025-10-30 07:26:15.414265280 +0100
+@@ -1,5 +1,5 @@
+  module tcljx.alpha {
+-   requires transitive tcljc.core;
++   requires transitive tcljx.core;
+ 
+    exports tcljx.alpha.ptest;
+    exports tcljx.alpha.ptest__align;
+diff -Nru src/tcljx.alpha/tcljx/alpha/ptest.cljt ../tcljx.alpha.patched/tcljx/alpha/ptest.cljt
+--- src/tcljx.alpha/tcljx/alpha/ptest.cljt	2025-10-30 06:40:31.251406039 +0100
++++ ../tcljx.alpha.patched/tcljx/alpha/ptest.cljt	2025-10-30 07:25:47.720936439 +0100
+@@ -42,7 +42,7 @@
+     (assert (some? line) "form of `is` macro has no :line meta")
+     `(when-some [~ctx (impl/is-context-if-selected ~line)]
+        ~(case (when (seq? form) (first form))
+-          (= tinyclj.core/= tinyclj.lang.primitive/equiv-nary)
++          (= clojure.core/= clojure.lang.primitive/equiv-nary)
+           `(impl/equiv-test ~ctx ~form)
+           
+           (thrown? tcljx.alpha.ptest/thrown?)
+@@ -65,7 +65,7 @@
+ (defn run-and-report ^keyword [^vector nmspv]
+   (let [rep (-> (impl/run-tests nmspv) (time))]
+     ;; Note: Print single string to avoid "failed to resolve runtime
+-    ;; fn tinyclj.core/isa?" error in some rare bootstrap scenarios.
++    ;; fn clojure.core/isa?" error in some rare bootstrap scenarios.
+     (println (str "\nRan " (.tests rep) " tests containing "
+                   (impl/is-count rep) " assertions."))
+     (println (str (.is-fail rep) " failures, " (.is-error rep) " errors."))
+diff -Nru src/tcljx.alpha/tcljx/alpha/textflow__pp.cljt ../tcljx.alpha.patched/tcljx/alpha/textflow__pp.cljt
+--- src/tcljx.alpha/tcljx/alpha/textflow__pp.cljt	2025-10-30 06:40:31.251406039 +0100
++++ ../tcljx.alpha.patched/tcljx/alpha/textflow__pp.cljt	2025-10-30 07:25:38.150822931 +0100
+@@ -8,9 +8,9 @@
+ (ns tcljx.alpha.textflow__pp
+   (:require [tcljx.alpha.textflow :as tf]
+             [tcljx.alpha.textflow__insn :as insn]
+-            [tinyclj.core.protocols :refer [datafy]])
++            [clojure.core.protocols :refer [datafy]])
+   (:import (tcljx.alpha.textflow Cursor BufferedCursor)
+-           (tinyclj.core.protocols Datafiable)
++           (clojure.core.protocols Datafiable)
+            (java.util Map$Entry)
+            (clojure.lang IMeta)
+            (java.util.function BiFunction IntUnaryOperator)

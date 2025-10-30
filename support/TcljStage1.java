@@ -4,9 +4,9 @@ import java.net.URLClassLoader;
 import java.nio.file.Path;
 
 // Setup of compiler: Stage1 compiler is an application in the world
-// of the bootstrap compiler.  It uses the modules tcljc-(rt|core) and
-// tcljx-compiler from STAGE1_MDIR running in a dedicated class
-// loader.
+// of the bootstrap compiler.  It uses the modules
+// tcljx-(rt|core|alpha|compiler) from STAGE1_MDIR running in a
+// dedicated class loader.
 //
 // Setup for application being compiled: Starts with an empty class
 // loader into which only the module STAGE2/tcljc.rt is installed.
@@ -31,6 +31,7 @@ class TcljStage1 {
     var urls = new URL[] {
       stage1Module("tcljx.rt"),
       stage1Module("tcljx.core"),
+      stage1Module("tcljx.alpha"),
       stage1Module("tcljx.compiler") };
     var parent = ClassLoader.getPlatformClassLoader();
     return Shared.mainMethodOf(new URLClassLoader(stageName, urls, parent),

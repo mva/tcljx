@@ -5,8 +5,8 @@ import java.nio.file.Path;
 
 // Setup of compiler: Stage0 compiler is an application in the world
 // of the bootstrap compiler.  It uses the modules tcljc-(rt|core) and
-// tcljx-compiler from STAGE0_MDIR running in a dedicated class
-// loader.
+// tcljx-(alpha|compiler) from STAGE0_MDIR running in a dedicated
+// class loader.
 //
 // Setup for application being compiled: Starts with an empty class
 // loader into which only the module STAGE1/tcljc.rt is installed.
@@ -31,6 +31,7 @@ class TcljStage0 {
     var urls = new URL[] {
       stage0Module("tcljc.rt"),
       stage0Module("tcljc.core"),
+      stage0Module("tcljx.alpha"),
       stage0Module("tcljx.compiler") };
     var parent = ClassLoader.getPlatformClassLoader();
     return Shared.mainMethodOf(new URLClassLoader(stageName, urls, parent),

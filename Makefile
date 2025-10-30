@@ -70,6 +70,8 @@ TCLJX_SOURCE_RT := src/tcljx.rt/module-info.java \
   $(sort $(wildcard src/tcljx.rt/*/lang/*.java))
 TCLJX_SOURCE_CORE := src/tcljx.core/module-info.java \
   $(sort $(wildcard src/tcljx.core/*/*.cljt src/tcljx.core/*/*/*.cljt)) 
+TCLJX_SOURCE_ALPHA := src/tcljx.core/module-info.java \
+  $(sort $(wildcard src/tcljx.alpha/*/*.cljt src/tcljx.alpha/*/*/*.cljt)) 
 TCLJX_SOURCE_COMPILER := src/tcljx.compiler/module-info.java \
   $(sort $(wildcard src/tcljx.compiler/*/*.cljt src/tcljx.compiler/*/*/*.cljt)) 
 TCLJX_SOURCE_RTIOW := test/tcljx.compiler/tcljx/nmspgen/rtiow-ref.cljt
@@ -94,8 +96,11 @@ $(STAGE0_MDIR)/DONE: $(TCLJX_SOURCE_COMPILER) support/DONE
 	cp -r $(BOOTSTRAP_MDIR)/tcljc.rt $(STAGE0_MDIR)
 # tcljc.core / tcljc-core.jar
 	cp -r $(BOOTSTRAP_MDIR)/tcljc.core $(STAGE0_MDIR)
+# tcljx.alpha / tcljx-alpha.jar
+	$(COMPILER_BOOT) -d $(STAGE0_MDIR)/tcljx.alpha -s src/tcljx.alpha tcljx.alpha.all
+	$(BUILD_JAVAC) -p $(STAGE0_MDIR) -d $(STAGE0_MDIR)/tcljx.alpha src/tcljx.alpha/module-info.java
 # tcljx.compiler / tcljx-compiler.jar
-	$(COMPILER_BOOT) -d $(STAGE0_MDIR)/tcljx.compiler -s src/tcljx.compiler $(TCLJX_MAIN_NS)
+	$(COMPILER_BOOT) -d $(STAGE0_MDIR)/tcljx.compiler -s $(STAGE0_MDIR)/tcljx.alpha -s src/tcljx.compiler $(TCLJX_MAIN_NS)
 	$(BUILD_JAVAC) -p $(STAGE0_MDIR) -d $(STAGE0_MDIR)/tcljx.compiler src/tcljx.compiler/module-info.java
 	touch $@
 
@@ -122,17 +127,29 @@ $(STAGE1_MINFO_CORE): $(STAGE1_MINFO_RT) $(TCLJX_SOURCE_CORE) $(STAGE0_MDIR)/DON
 	$(COMPILER_STAGE0) -d "$(dir $@)" -s src/tcljx.core clojure.core.all
 	$(BUILD_JAVAC) -p $(STAGE1_MDIR) -d "$(dir $@)" src/tcljx.core/module-info.java
 
-# diff -Nru src/tcljx.compiler ../tcljx.compiler.patched >compiler.patch
-PATCHED_DIR=$(TMP_USER)/tcljx.compiler.patched
-STAGE1_MINFO_COMPILER=$(STAGE1_MDIR)/tcljx.compiler/module-info.class
-$(STAGE1_MINFO_COMPILER): $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_COMPILER)
+# diff -Nru src/tcljx.alpha ../tcljx.alpha.patched >alpha.patch
+ALPHA_PATCHED=$(TMP_USER)/tcljx.alpha.patched
+STAGE1_MINFO_ALPHA=$(STAGE1_MDIR)/tcljx.alpha/module-info.class
+$(STAGE1_MINFO_ALPHA): $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_ALPHA) $(STAGE0_MDIR)/DONE
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
-	rm -rf "$(PATCHED_DIR)"
-	cp -r src/tcljx.compiler "$(PATCHED_DIR)"
-	patch -p2 -d "$(PATCHED_DIR)" <compiler.patch
-	$(COMPILER_STAGE0) -d "$(dir $@)" -s $(dir $(STAGE1_MINFO_CORE)) -s "$(PATCHED_DIR)" $(TCLJX_MAIN_NS)
-	$(BUILD_JAVAC) -p $(STAGE1_MDIR) -d "$(dir $@)" "$(PATCHED_DIR)"/module-info.java
+	rm -rf "$(ALPHA_PATCHED)"
+	cp -r src/tcljx.alpha "$(ALPHA_PATCHED)"
+	patch -p2 -d "$(ALPHA_PATCHED)" <alpha.patch
+	$(COMPILER_STAGE0) -d "$(dir $@)" -s $(dir $(STAGE1_MINFO_CORE)) -s "$(ALPHA_PATCHED)" tcljx.alpha.all
+	$(BUILD_JAVAC) -p $(STAGE1_MDIR) -d "$(dir $@)" "$(ALPHA_PATCHED)"/module-info.java
+
+# diff -Nru src/tcljx.compiler ../tcljx.compiler.patched >compiler.patch
+COMPILER_PATCHED=$(TMP_USER)/tcljx.compiler.patched
+STAGE1_MINFO_COMPILER=$(STAGE1_MDIR)/tcljx.compiler/module-info.class
+$(STAGE1_MINFO_COMPILER): $(STAGE1_MINFO_ALPHA) $(TCLJX_SOURCE_COMPILER)
+	@echo; echo "### $(dir $@)"
+	@rm -rf "$(dir $@)"
+	rm -rf "$(COMPILER_PATCHED)"
+	cp -r src/tcljx.compiler "$(COMPILER_PATCHED)"
+	patch -p2 -d "$(COMPILER_PATCHED)" <compiler.patch
+	$(COMPILER_STAGE0) -d "$(dir $@)" -s $(dir $(STAGE1_MINFO_CORE)) -s $(dir $(STAGE1_MINFO_ALPHA)) -s "$(COMPILER_PATCHED)" $(TCLJX_MAIN_NS)
+	$(BUILD_JAVAC) -p $(STAGE1_MDIR) -d "$(dir $@)" "$(COMPILER_PATCHED)"/module-info.java
 
 $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm: $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_RTIOW)
 	@echo; echo "### $(dir $@)"
@@ -162,20 +179,28 @@ $(STAGE2_MINFO_CORE): $(STAGE2_MINFO_RT) $(TCLJX_SOURCE_CORE) $(STAGE1_MINFO_COM
 	$(BUILD_JAVAC) -p $(STAGE2_MDIR) -d "$(dir $@)" src/tcljx.core/module-info.java
 	diff -Nrq $(dir $(STAGE1_MINFO_CORE)) $(dir $@)
 
-STAGE2_MINFO_COMPILER=$(STAGE2_MDIR)/tcljx.compiler/module-info.class
-$(STAGE2_MINFO_COMPILER): $(STAGE2_MINFO_CORE) $(TCLJX_SOURCE_COMPILER)
+STAGE2_MINFO_ALPHA=$(STAGE2_MDIR)/tcljx.alpha/module-info.class
+$(STAGE2_MINFO_ALPHA): $(STAGE2_MINFO_CORE) $(TCLJX_SOURCE_ALPHA) $(STAGE1_MINFO_COMPILER)
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
-	$(COMPILER_STAGE1) -d "$(dir $@)" -s $(dir $(STAGE2_MINFO_CORE)) -s "$(PATCHED_DIR)" $(TCLJX_MAIN_NS)
-	$(BUILD_JAVAC) -p $(STAGE2_MDIR) -d "$(dir $@)" "$(PATCHED_DIR)"/module-info.java
+	$(COMPILER_STAGE1) -d "$(dir $@)" -s $(dir $(STAGE2_MINFO_CORE)) -s "$(ALPHA_PATCHED)" tcljx.alpha.all
+	$(BUILD_JAVAC) -p $(STAGE2_MDIR) -d "$(dir $@)" "$(ALPHA_PATCHED)"/module-info.java
+	diff -Nrq $(dir $(STAGE1_MINFO_ALPHA)) $(dir $@)
+
+STAGE2_MINFO_COMPILER=$(STAGE2_MDIR)/tcljx.compiler/module-info.class
+$(STAGE2_MINFO_COMPILER): $(STAGE2_MINFO_ALPHA) $(TCLJX_SOURCE_COMPILER)
+	@echo; echo "### $(dir $@)"
+	@rm -rf "$(dir $@)"
+	$(COMPILER_STAGE1) -d "$(dir $@)" -s $(dir $(STAGE2_MINFO_CORE)) -s $(dir $(STAGE2_MINFO_ALPHA)) -s "$(COMPILER_PATCHED)" $(TCLJX_MAIN_NS)
+	$(BUILD_JAVAC) -p $(STAGE2_MDIR) -d "$(dir $@)" "$(COMPILER_PATCHED)"/module-info.java
 	diff -Nrq $(dir $(STAGE1_MINFO_COMPILER)) $(dir $@)
 
 ##########################################################################
 
 compile: support/DONE $(STAGE1_MINFO_RT)
-	$(COMPILER_BOOT) -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)
+	$(COMPILER_BOOT) -s src/tcljx.alpha -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)
 watch-and-compile: support/DONE $(STAGE1_MINFO_RT)
-	$(COMPILER_BOOT) --watch -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)
+	$(COMPILER_BOOT) --watch -s src/tcljx.alpha -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)
 
 
 # Call with "make test TEST=<scope>" (with <scope> being "ns-name" or
@@ -184,17 +209,19 @@ watch-and-compile: support/DONE $(STAGE1_MINFO_RT)
 # watch-and-xxx targets is running.
 test: support/DONE $(STAGE1_MINFO_RT)
 	$(JAVA) -p ../bootstrap-tcljc --add-modules tcljc.core -cp $(DEST_DIR) $(RUN_TESTS_NS).___
-#	$(COMPILER_BOOT) -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)/run
+#	$(COMPILER_BOOT) -s src/tcljx.alpha -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)/run
 watch-and-test: support/DONE $(STAGE1_MINFO_RT)
-	$(COMPILER_BOOT) --watch -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)/run
+	$(COMPILER_BOOT) --watch -s src/tcljx.alpha -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)/run
 
 
 stage0-mdir: $(STAGE0_MDIR)/DONE
 stage1-rt: $(STAGE1_MINFO_RT)
 stage1-core: $(STAGE1_MINFO_CORE)
+stage1-alpha: $(STAGE1_MINFO_ALPHA)
 stage1-compiler: $(STAGE1_MINFO_COMPILER)
 stage1-rtiow: $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm
 stage2-rt: $(STAGE2_MINFO_RT)
 stage2-core: $(STAGE2_MINFO_CORE)
+stage2-alpha: $(STAGE2_MINFO_ALPHA)
 stage2-compiler: $(STAGE2_MINFO_COMPILER)
 bootstrap-and-check: stage2-compiler
