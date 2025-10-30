@@ -41,36 +41,40 @@
 
 ;;; Turn a branching instruction IFXXX into a complete conditional
 ;;; expression with a "true" path and a "false" path.
-(defn- conditional
-  (^CodeEmitter [^Branching branch ^long fctx]
-   (conditional branch Boolean/TYPE constgen/entity-true constgen/entity-false
-                fctx))
-  (^CodeEmitter [^Branching branch ^Class produced-type
-                 ^CodeEmitter if-true ^CodeEmitter if-false ^long fctx]
-   (emit/with-adaption-barrier produced-type
-     (^CodeEmitter fn [xb consumed-type then-leave?]
-      (let [start-false (.newLabel xb), end-false (.newLabel xb)]
-        (if (some-code? if-true consumed-type)
-          (when (.emit-branch-on? branch xb false start-false)
-            (let [return-t? (emit/then-leave? xb fctx consumed-type if-true
-                                              then-leave?)]
-              (when (and return-t? (some-code? if-false consumed-type))
-                (.goto_ xb end-false))
-              
-              (.labelBinding xb start-false)
-              (let [return-f? (emit/then-leave? xb fctx consumed-type if-false
-                                                then-leave?)]
-                (.labelBinding xb end-false)
-                (when (or return-t? return-f?)
-                  consumed-type))))
+(defn- conditional ^CodeEmitter [^Branching branch ^Class produced-type
+                                 ^CodeEmitter if-true ^CodeEmitter if-false
+                                 ^long fctx]
+  (emit/with-adaption-barrier produced-type
+    (^CodeEmitter fn [xb consumed-type then-leave?]
+     (let [start-false (.newLabel xb), end-false (.newLabel xb)]
+       (if (some-code? if-true consumed-type)
+         (when (.emit-branch-on? branch xb false start-false)
+           (let [return-t? (emit/then-leave? xb fctx consumed-type if-true
+                                             then-leave?)]
+             (when (and return-t? (some-code? if-false consumed-type))
+               (.goto_ xb end-false))
+             
+             (.labelBinding xb start-false)
+             (let [return-f? (emit/then-leave? xb fctx consumed-type if-false
+                                               then-leave?)]
+               (.labelBinding xb end-false)
+               (when (or return-t? return-f?)
+                 consumed-type))))
 
-          ;; here holds: consumed-type is `void`
-          (when (.emit-branch-on? branch xb true end-false)
-            ;; FIXME... when-not to (list 'if test (list 'do) (cons 'do body))
-            ;; FIXME... related: maybe if should require exactly 3 args?
-            (emit/insn? xb fctx Void/TYPE if-false)
-            (.labelBinding xb end-false)
-            Void/TYPE)))))))
+         ;; here holds: consumed-type is `void`
+         (when (.emit-branch-on? branch xb true end-false)
+           ;; FIXME... when-not to (list 'if test (list 'do) (cons 'do body))
+           ;; FIXME... related: maybe if should require exactly 3 args?
+           (emit/insn? xb fctx Void/TYPE if-false)
+           (.labelBinding xb end-false)
+           Void/TYPE))))))
+(defn- predicate ^CodeEmitter [^Branching branch ^boolean negate-result?
+                               ^long fctx]
+  (if negate-result?
+    (conditional branch Boolean/TYPE constgen/entity-false constgen/entity-true 
+                 fctx)
+    (conditional branch Boolean/TYPE constgen/entity-true constgen/entity-false
+                 fctx)))
 
 (defn negation ^CodeEmitter [^CodeEmitter ce ^long fctx]
   ;; pre: `ce` is boolean
@@ -85,7 +89,7 @@
     (.negate ^Negatable ce)
     
     (instance? Branching ce)
-    (conditional ce Boolean/TYPE constgen/entity-false constgen/entity-true fctx)
+    (predicate ce true fctx)
 
     :else
     (reify CodeEmitter Negatable
@@ -100,7 +104,7 @@
                                ^CodeEmitter/1 args ^long fctx]
           (reify Branching Negatable
             (emit-insn* [this xb consumed-type then-leave?] ;standalone insn
-              (.emit-insn* (conditional this fctx)
+              (.emit-insn* (predicate this false fctx)
                            xb consumed-type then-leave?))
             (emit-branch-on? [_ xb outcome? target] ;test of an if expression
               (when (emit/insns? xb fctx arg-type args)
@@ -340,7 +344,7 @@
       (let [ces (.emitters args)]
         (-> (reify Branching ;produces dead code if the whole thing is constant
               (emit-insn* [this xb consumed-type then-leave?]
-                (-> (conditional this fctx)
+                (-> (predicate this false fctx)
                     (.emit-insn* xb consumed-type then-leave?)))
               (emit-branch-on? [_ xb outcome? target]
                 (->> (^java.util.function.Consumer fn ^void [^CodeBuilder xb]
