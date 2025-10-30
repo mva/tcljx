@@ -2,7 +2,7 @@
   (:require
    (tcljx.data [type :as type] [ir :as ir])
    (tcljx.nmspgen [util :as util] [emit :as emit] [insn :as insn]
-                  [condgen :as condgen]))
+                  [constgen :as constgen] [condgen :as condgen]))
   (:import
    (tcljx.data.ir CodeEmitter Entity Binding)
    (tcljx.nmspgen.insn Insn Insns)
@@ -39,36 +39,49 @@
   (-> (condgen/join-type (.expr-types args) 0 (.length args))
       (type/expr-to-logical)))
 
+(defn- boolean-temp? ^boolean [^Insns args ^int i]
+  (type/same? Boolean/TYPE (insn/expr-type args i)))
+
 ;;; Straightforward translation of macro clojure.core/and.
 (defn nary-and ^Insn [^long fctx ^Insns args]
   (if (pos? (.length args))
     (let [tp (logical-join-type args)]
-      ((fn expand ^Insn [^int i]
-         (if (< i (dec (.length args)))
-           (let [bnd (binding-of tp args i)
-                 x-temp (bound-value tp bnd args i)
-                 x-if (-> (.emitter (condgen/logical-truth x-temp fctx))
-                          (condgen/mk-if tp (.emitter (expand (inc i)))
-                                         (.emitter x-temp) fctx)
-                          (insn/mk-insn tp))]
-             (block-binding fctx bnd x-if))
-           (.get args i)))
-       0))
+      (letfn [(test-for-and ^Insn [^int i ^Insn x-test ^CodeEmitter on-false]
+                (-> (.emitter (condgen/logical-truth x-test fctx))
+                    (condgen/mk-if tp (.emitter (expand (inc i))) on-false fctx)
+                    (insn/mk-insn tp)))
+              (expand ^Insn [^int i]
+                (cond (>= i (dec (.length args)))
+                      (.get args i)
+                      
+                      (boolean-temp? args i)
+                      (test-for-and i (.get args i) constgen/entity-false)
+                      
+                      :else (let [bnd (binding-of tp args i)
+                                  x-temp (bound-value tp bnd args i)]
+                              (->> (test-for-and i x-temp (.emitter x-temp))
+                                   (block-binding fctx bnd)))))]
+        (expand 0)))
     insn/insn-true))
 
 ;;; Straightforward translation of macro clojure.core/or.
 (defn nary-or ^Insn [^long fctx ^Insns args]
   (if (pos? (.length args))
     (let [tp (logical-join-type args)]
-      ((fn expand ^Insn [^int i]
-         (if (< i (dec (.length args)))
-           (let [bnd (binding-of tp args i)
-                 x-temp (bound-value tp bnd args i)
-                 x-if (-> (.emitter (condgen/logical-truth x-temp fctx))
-                          (condgen/mk-if tp (.emitter x-temp)
-                                         (.emitter (expand (inc i))) fctx)
-                          (insn/mk-insn tp))]
-             (block-binding fctx bnd x-if))
-           (.get args i)))
-       0))
+      (letfn [(test-for-or ^Insn [^int i ^Insn x-test ^CodeEmitter on-true]
+                (-> (.emitter (condgen/logical-truth x-test fctx))
+                    (condgen/mk-if tp on-true (.emitter (expand (inc i))) fctx)
+                    (insn/mk-insn tp)))
+              (expand ^Insn [^int i]
+                (cond (>= i (dec (.length args)))
+                      (.get args i)
+
+                      (boolean-temp? args i)
+                      (test-for-or i (.get args i) constgen/entity-true)
+
+                      :else (let [bnd (binding-of tp args i)
+                                  x-temp (bound-value tp bnd args i)]
+                              (->> (test-for-or i x-temp (.emitter x-temp))
+                                   (block-binding fctx bnd)))))]
+        (expand 0)))
     insn/insn-null))

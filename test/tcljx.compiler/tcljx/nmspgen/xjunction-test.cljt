@@ -234,6 +234,80 @@
                  (fn* and-3 []
                       (and arg-0 arg-1 arg-2))]))))
 
+(deftest basic-nary-and-of-boolean
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(I)Z")
+             ["LOCAL 0: int i"]
+             (ICONST_0)
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+               [[STATIC . "f~1" "(I)Z"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "and-0~0" "()Ljava/lang/Object;")
+             (ICONST_1)
+             (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "and-1~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "and-2~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             (IFEQ L:0)
+             (ICONST_1)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             (GOTO L:1)
+             [L:0]
+             (ICONST_0)
+             [L:1]
+             (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "and-3~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             (IFEQ L:2)
+             (ICONST_1)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             (IFEQ L:0)
+             (ICONST_2)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             (GOTO L:1)
+             [L:0]
+             (ICONST_0)
+             [L:1]
+             (GOTO L:3)
+             [L:2]
+             (ICONST_0)
+             [L:3]
+             (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def f (fn* f ^boolean [^int i] false))
+                 (fn* and-0 []
+                      (and))
+                 (fn* and-1 []
+                      (and (f 0)))
+                 (fn* and-2 []
+                      (and (f 0) (f 1)))
+                 (fn* and-3 []
+                      (and (f 0) (f 1) (f 2)))]))))
+
 
 (deftest basic-nary-or
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
@@ -367,3 +441,75 @@
                  (fn* some [^seq xs]
                       (or (recur (clojure.lang.RT/next xs))
                           (clojure.lang.RT/first xs)))]))))
+
+(deftest basic-nary-or-of-boolean
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(I)Z")
+             ["LOCAL 0: int i"]
+             (ICONST_0)
+             (IRETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+               [[STATIC . "f~1" "(I)Z"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "or-0~0" "()Ljava/lang/Object;")
+             (ACONST_NULL)
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "or-1~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "or-2~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             (IFEQ L:0)
+             (ICONST_1)
+             (GOTO L:1)
+             [L:0]
+             (ICONST_1)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             [L:1]
+             (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "or-3~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             (IFEQ L:0)
+             (ICONST_1)
+             (GOTO L:2)
+             [L:0]
+             (ICONST_1)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             (IFEQ L:1)
+             (ICONST_1)
+             (GOTO L:2)
+             [L:1]
+             (ICONST_2)
+             (INVOKESTATIC . "f~1" "(I)Z")
+             [L:2]
+             (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def f (fn* f ^boolean [^int i] false))
+                 (fn* or-0 []
+                      (or))
+                 (fn* or-1 []
+                      (or (f 0)))
+                 (fn* or-2 []
+                      (or (f 0) (f 1)))
+                 (fn* or-3 []
+                      (or (f 0) (f 1) (f 2)))]))))
