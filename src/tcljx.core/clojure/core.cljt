@@ -2838,7 +2838,7 @@
    :static true}
   ([^int n]
      (fn [rf]
-       (let [nv (volatile! (object n))]
+       (let [nv (volatile! n)]
          (fn
            ([] (rf))
            ([result] (rf result))
@@ -2885,7 +2885,7 @@
    :static true}
   ([^int n]
      (fn [rf]
-       (let [nv (volatile! (object n))]
+       (let [nv (volatile! n)]
          (fn
            ([] (rf))
            ([result] (rf result))
@@ -4243,7 +4243,7 @@
    :static true}
   ([^int n]
      (fn [rf]
-       (let [iv (volatile! (object -1))]
+       (let [iv (volatile! -1)]
          (fn
            ([] (rf))
            ([result] (rf result))
@@ -5048,7 +5048,7 @@
   {:added "1.0"
    :static true}
   ([]
-   (iterate (fn [x] (clojure.lang.Numbers/incP x)) (object (long 0)))) ;inc' + 0
+   (iterate (fn [x] (clojure.lang.Numbers/incP x)) (long 0))) ;inc' + 0
   ([& ^Object/1 args]
    (case* (alength args)
           1 (let [end (aget args 0)]
@@ -5438,7 +5438,7 @@
   producer."
   {:added "1.0"
    :static true}
-  ([s] (seque (object 100) s))
+  ([s] (seque 100 s))
   ([n-or-q s]
    (let [^BlockingQueue q (if (instance? BlockingQueue n-or-q)
                              n-or-q
@@ -6718,7 +6718,7 @@
   (let [buckets (loop [m {} ks tests vs thens]
                   (if (and ks vs)
                     (recur
-                      (update m (object (clojure.lang.Util/hash (first ks))) (fnil conj []) [(first ks) (first vs)])
+                      (update m (clojure.lang.Util/hash (first ks)) (fnil conj []) [(first ks) (first vs)])
                       (next ks) (next vs))
                     m))
         assoc-multi (fn [m h bucket]
@@ -6908,7 +6908,7 @@
 
 (extend-protocol Inst
   java.util.Date
-  (inst-ms* [inst] (object (.getTime ^java.util.Date inst))))
+  (inst-ms* [inst] (.getTime ^java.util.Date inst)))
 
 (defn inst-ms
   "Return the number of milliseconds since January 1, 1970, 00:00:00 GMT"
@@ -6924,7 +6924,7 @@
 
 (extend-protocol clojure.core/Inst
   java.time.Instant
-  (inst-ms* [inst] (object (.toEpochMilli ^java.time.Instant inst))))
+  (inst-ms* [inst] (.toEpochMilli ^java.time.Instant inst)))
 
 (require 'clojure.string)
 (require 'clojure.uuid)         ; -> clojure.java.io -> clojure.string
@@ -7346,7 +7346,7 @@
           (cons run (partition-by f (lazy-seq (drop (count run) s)))))))))
 
 (defn- unchecked-inc-int [i]
-  (object (+ ^int i 1)))
+  (+ ^int i 1))
 
 (defn frequencies
   "Returns a map from distinct items in coll to the number of times
@@ -7356,7 +7356,7 @@
   [coll]
   (persistent!
    (reduce (fn [counts x]
-             (assoc! counts x (unchecked-inc-int (get counts x (object 0)))))
+             (assoc! counts x (unchecked-inc-int (get counts x 0))))
            (transient {}) coll)))
 
 (defn reductions
@@ -7482,7 +7482,7 @@
    :static true}
   ([f]
    (fn [rf]
-     (let [i (volatile! (object -1))]
+     (let [i (volatile! -1)]
        (fn
          ([] (rf))
          ([result] (rf result))
@@ -7544,7 +7544,7 @@
    :static true}
   ([f]
    (fn [rf]
-     (let [iv (volatile! (object -1))]
+     (let [iv (volatile! -1)]
        (fn
          ([] (rf))
          ([result] (rf result))
@@ -8207,8 +8207,8 @@
   ^Boolean [^String s]
   (if (string? s)
     (case s
-      "true" (object true)
-      "false" (object false)
+      "true" true
+      "false" false
       nil)
     (throw (IllegalArgumentException. (parsing-err s)))))
 
