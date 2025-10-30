@@ -217,7 +217,8 @@
               (.flags spec) (.type-desc spec) type))
 
 
-(def invoke-methods-primitive-fn nil) ;not invoked as a regular function
+(def invoke-methods-primitive-recur nil) ;primitive fn that can recur from args
+(def invoke-methods-primitive-fn (new MethodSpec/1 0)) ;not invoked as a regular function
 (def invoke-methods-dynamic (new MethodSpec/1 0)) ;runtime invoke only
 
 (defn entity? ^boolean [^CodeEmitter ce]

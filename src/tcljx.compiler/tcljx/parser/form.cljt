@@ -173,9 +173,15 @@
                  ;; namespace exists: def lookup must have failed
                  (str "no public def " (wrong/q op))
                  (str "no namespace or class " (wrong/q-namespace op)))))
-            (invoke-entity ^Expr [^long fctx ^seq form ^Entity inv ^Exprs args]
-              (let [specs (.invoke-methods inv)]
+            (invoke-entity ^Expr [^long fctx ^seq form ^Entity inv]
+              (let [specs (.invoke-methods inv)
+                    fctx' (cond-> fctx
+                            (not (identical? specs ir/invoke-methods-primitive-recur))
+                            (context/of-arg))
+                    args (parse/args* this fctx' (rest form))]
                 (condp identical? specs
+                  ir/invoke-methods-primitive-recur
+                  (.invoke* inv fctx form nil -1 args)
                   ir/invoke-methods-primitive-fn
                   (.invoke* inv fctx form nil -1 args)
                   ir/invoke-methods-dynamic
@@ -188,8 +194,7 @@
                 (if (ir/def-macro? inv)
                   (->> (.expand-macro resolver inv form)
                        (.parse-form this fctx))
-                  (->> (parse/args this fctx (rest form))
-                       (invoke-entity fctx form inv)))
+                  (invoke-entity fctx form inv))
                 (throw (wrong/info-unresolved op))))
             (parse-invocation-qname ^Expr [^symbol op ^long fctx ^seq form
                                            ^String nmsp ^String nm]
@@ -199,8 +204,7 @@
               (if-some [cl (parse/lookup-class this nmsp)]
                 (if-some [ent (when (some? (interop/param-tags-of op))
                                 (interop/lookup-class-entity this op))]
-                  (invoke-entity fctx form ent
-                                 (parse/args this fctx (rest form)))
+                  (invoke-entity fctx form ent)
                   (if (= (.charAt nm 0) \.) ;syntax is Class/.member
                     (.invoke-virtual-member
                      expr-factory fctx
@@ -214,13 +218,13 @@
             (parse-invocation-other ^Expr [op ^long fctx ^seq form]
               ;; any non-symbol `op`
               (let [op (parse/arg this fctx (first form))
-                    ce (.emitter op)
-                    args (parse/args this fctx (rest form))]
+                    ce (.emitter op)]
                 (if (ir/entity? ce)
                   (do (when (instance? FnPromise ce)
                         (FnPromise/.count-value-use! ce -1))
-                      (invoke-entity fctx form ce args))
-                  (.invoke-value expr-factory fctx op args))))
+                      (invoke-entity fctx form ce))
+                  (->> (parse/args this fctx (rest form))
+                       (.invoke-value expr-factory fctx op)))))
             (parse-try-or-extract ^Expr [^long fctx ^seq form]
               (if (context/can-inline-tcf? fctx)
                 (trycatch/parse-try this fctx form)

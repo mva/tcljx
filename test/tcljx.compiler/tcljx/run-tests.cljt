@@ -14,7 +14,7 @@
                    arith-test let-test quote-test meta-test str-test bits-test
                    array-test clone-test switch-test cond-test logic-test
                    xcmp-test try-test loop-test unboxing-test boxing-test
-                   fn-member-test fn-test definterface-test itf-fn-test
+                   fn-member-test fn-test definterface-test itf-fn-test xjunction-test
                    deftype-test record-test reify-test letfn-test closure-test
                    variadic-test main-test macro-test rtiow-nocore-test
                    namespace-test set-test line-test require-test)
@@ -55,6 +55,7 @@
     tcljx.nmspgen.fn-test
     tcljx.nmspgen.definterface-test
     tcljx.nmspgen.itf-fn-test
+    tcljx.nmspgen.xjunction-test
     tcljx.nmspgen.deftype-test
     tcljx.nmspgen.record-test
     tcljx.nmspgen.reify-test

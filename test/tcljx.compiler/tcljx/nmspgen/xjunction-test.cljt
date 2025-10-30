@@ -1,0 +1,369 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.nmspgen.xjunction-test ;primitive forms for `and` and `or`
+  (:require [tcljx.nmspgen.bootstrap :refer [asm-expr nmsp]]
+            [tcljx.alpha.ptest :refer :all]))
+
+(deftest basic-nary-and
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(I)Ljava/lang/String;")
+             ["LOCAL 0: int i"]
+             (ACONST_NULL)
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~1" "(I)Ljava/lang/String;"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "and-0~0" "()Ljava/lang/Object;")
+             (ICONST_1)
+             (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "and-1~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ARETURN)]
+
+            [(METHOD [PUBLIC STATIC FINAL] "and-2~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ASTORE_0)
+             ["LOCAL 0: String temp"]
+             (ALOAD_0)
+             (IFNULL L:0)
+             (ICONST_1)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ARETURN)
+             [L:0]
+             (ALOAD_0)
+             (ARETURN)]
+
+            [(METHOD [PUBLIC STATIC FINAL] "and-3~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ASTORE_0)
+             ["LOCAL 0: String temp"]
+             (ALOAD_0)
+             (IFNULL L:1)
+             (ICONST_1)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ASTORE_1)
+             ["LOCAL 1: String temp"]
+             (ALOAD_1)
+             (IFNULL L:0)
+             (ICONST_2)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ARETURN)
+             [L:0]
+             (ALOAD_1)
+             (ARETURN)
+             [L:1]
+             (ALOAD_0)
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def f (fn* f ^String [^int i] nil))
+                 (fn* and-0 []
+                      (and))
+                 (fn* and-1 []
+                      (and (f 0)))
+                 (fn* and-2 []
+                      (and (f 0) (f 1)))
+                 (fn* and-3 []
+                      (and (f 0) (f 1) (f 2)))]))))
+
+(deftest aliasing-nary-and
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(I)Ljava/lang/String;")
+             ["LOCAL 0: int i"]
+             (ACONST_NULL)
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~1" "(I)Ljava/lang/String;"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ASTORE_0)
+             ["LOCAL 0: String arg-0"]
+             (ICONST_1)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ASTORE_1)
+             ["LOCAL 1: String arg-1"]
+             (ALOAD_0)
+             (ALOAD_1)
+             (INVOKESTATIC and-2 "__create"
+                           "(Ljava/lang/String;Ljava/lang/String;)Lpkg/ns0/and-2;")
+             (POP)
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]
+           
+           [(CLASS Vx [PUBLIC FINAL] "pkg/ns0/and-2" nil "tinyclj/lang/AFnMh")
+            [(FIELD [PRIVATE FINAL] "arg-0" "Ljava/lang/String;")]
+            [(FIELD [PRIVATE FINAL] "arg-1" "Ljava/lang/String;")]
+            
+            [(METHOD [PUBLIC FINAL] "fn0" "()Ljava/lang/Object;")
+             ["LOCAL 0: and-2 and-2"]
+             (ALOAD_0)
+             (GETFIELD . "arg-0" "Ljava/lang/String;")
+             (IFNULL L:0)
+             (ALOAD_0)
+             (GETFIELD . "arg-1" "Ljava/lang/String;")
+             (ARETURN)
+             [L:0]
+             (ALOAD_0)
+             (GETFIELD . "arg-0" "Ljava/lang/String;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__arityOrNull" "(I)Ljava/lang/invoke/MethodHandle;")
+             (ILOAD_1)
+             (IFNE L:0)
+             (LDC [VIRTUAL . "fn0" "()Ljava/lang/Object;"])
+             (ARETURN)
+             [L:0]
+             (ACONST_NULL)
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC FINAL SYNTHETIC] "__directMethodHandles" "()[Ljava/lang/invoke/MethodHandle;")
+             (ICONST_1)
+             (ANEWARRAY "MethodHandle[]") (DUP)
+             (ICONST_0)
+             (LDC [VIRTUAL . "fn0" "()Ljava/lang/Object;"])
+             (AASTORE)
+             (ARETURN)]
+            [(METHOD [PRIVATE SYNTHETIC] "<init>" "(Lclojure/lang/IPersistentMap;Ljava/lang/String;Ljava/lang/String;)V")
+             (ALOAD_0)
+             (ALOAD_2)
+             (PUTFIELD . "arg-0" "Ljava/lang/String;")
+             (ALOAD_0)
+             (ALOAD_3)
+             (PUTFIELD . "arg-1" "Ljava/lang/String;")
+             (ALOAD_0)
+             (ALOAD_1)
+             (INVOKESPECIAL AFnMh "<init>" "(Lclojure/lang/IPersistentMap;)V")
+             (RETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "__create" "(Ljava/lang/String;Ljava/lang/String;)Lpkg/ns0/and-2;")
+             (NEW and-2) (DUP)
+             (ACONST_NULL)
+             (ALOAD_0)
+             (ALOAD_1)
+             (INVOKESPECIAL . "<init>" "(Lclojure/lang/IPersistentMap;Ljava/lang/String;Ljava/lang/String;)V")
+             (ARETURN)]
+            
+            [(METHOD [PROTECTED FINAL SYNTHETIC] "__withMetaImpl" "(Lclojure/lang/IPersistentMap;)Lpkg/ns0/and-2;")
+             (NEW and-2) (DUP)
+             (ALOAD_1)
+             (ALOAD_0)
+             (GETFIELD . "arg-0" "Ljava/lang/String;")
+             (ALOAD_0)
+             (GETFIELD . "arg-1" "Ljava/lang/String;")
+             (INVOKESPECIAL . "<init>" "(Lclojure/lang/IPersistentMap;Ljava/lang/String;Ljava/lang/String;)V")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def f (fn* f ^String [^int i] nil))
+                 (let* [arg-0 (f 0), arg-1 (f 1)]
+                   (fn* and-2 []
+                        (and arg-0 arg-1)))]))))
+
+(deftest constant-folded-nary-and
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "arg-0" "()Ljava/lang/String;")
+             (LDC "arg-0") (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "arg-1" "()Ljava/lang/String;")
+             (LDC "arg-1") (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "arg-2" "()Ljava/lang/String;")
+             (LDC "arg-2") (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "and-0~0" "()Ljava/lang/Object;")
+             (ICONST_1)
+             (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "and-1~0" "()Ljava/lang/Object;")
+             (LDC "arg-0")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "and-2~0" "()Ljava/lang/Object;")
+             (LDC "arg-1")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "and-3~0" "()Ljava/lang/Object;")
+             (LDC "arg-2")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def arg-0 "arg-0")
+                 (def arg-1 "arg-1")
+                 (def arg-2 "arg-2")
+                 (fn* and-0 []
+                      (and))
+                 (fn* and-1 []
+                      (and arg-0))
+                 (fn* and-2 []
+                      (and arg-0 arg-1))
+                 (fn* and-3 []
+                      (and arg-0 arg-1 arg-2))]))))
+
+
+(deftest basic-nary-or
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(I)Ljava/lang/String;")
+             ["LOCAL 0: int i"]
+             (ACONST_NULL)
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "f~1" "(I)Ljava/lang/String;"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "or-0~0" "()Ljava/lang/Object;")
+             (ACONST_NULL)
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "or-1~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "or-2~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ASTORE_0)
+             ["LOCAL 0: String temp"]
+             (ALOAD_0)
+             (IFNULL L:0)
+             (ALOAD_0)
+             (ARETURN)
+             [L:0]
+             (ICONST_1)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "or-3~0" "()Ljava/lang/Object;")
+             (ICONST_0)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ASTORE_0)
+             ["LOCAL 0: String temp"]
+             (ALOAD_0)
+             (IFNULL L:0)
+             (ALOAD_0)
+             (ARETURN)
+             [L:0]
+             (ICONST_1)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ASTORE_1)
+             ["LOCAL 1: String temp"]
+             (ALOAD_1)
+             (IFNULL L:1)
+             (ALOAD_1)
+             (ARETURN)
+             [L:1]
+             (ICONST_2)
+             (INVOKESTATIC . "f~1" "(I)Ljava/lang/String;")
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (def f (fn* f ^String [^int i] nil))
+                 (fn* or-0 []
+                      (or))
+                 (fn* or-1 []
+                      (or (f 0)))
+                 (fn* or-2 []
+                      (or (f 0) (f 1)))
+                 (fn* or-3 []
+                      (or (f 0) (f 1) (f 2)))]))))
+
+(deftest some-using-recur-from-or
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "some~1"
+                     "(Lclojure/lang/ISeq;)Ljava/lang/Object;")
+             ["LOCAL 0: ISeq xs"]
+             [L:0]
+             (ALOAD_0)
+             (INVOKESTATIC RT "first" "(Ljava/lang/Object;)Ljava/lang/Object;")
+             (ASTORE_1)
+             ["LOCAL 1: Object temp"]
+             (ALOAD_1)
+             (INVOKESTATIC RT "booleanCast" "(Ljava/lang/Object;)Z")
+             (IFEQ L:1)
+             (ALOAD_1)
+             (ARETURN)
+             [L:1]
+             (ALOAD_0)
+             (INVOKESTATIC RT "next" "(Ljava/lang/Object;)Lclojure/lang/ISeq;")
+             (ASTORE_0)
+             (GOTO L:0)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (fn* some [^seq xs]
+                      (or (clojure.lang.RT/first xs)
+                          (recur (clojure.lang.RT/next xs))))]))))
+
+(deftest degenerate-recur-from-or
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "some~1" "(Lclojure/lang/ISeq;)Ljava/lang/Object;")
+             ["LOCAL 0: ISeq xs"]
+             [L:0]
+             (ALOAD_0)
+             (INVOKESTATIC RT "next" "(Ljava/lang/Object;)Lclojure/lang/ISeq;")
+             (ASTORE_0)
+             (GOTO L:0)]
+            
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.ns0)
+                 (fn* some [^seq xs]
+                      (or (recur (clojure.lang.RT/next xs))
+                          (clojure.lang.RT/first xs)))]))))

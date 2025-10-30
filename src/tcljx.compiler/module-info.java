@@ -13,6 +13,7 @@
    exports tcljx.nmspgen.envgen;
    exports tcljx.nmspgen.fngen;
    exports tcljx.nmspgen.insn;
+   exports tcljx.nmspgen.junctgen;
    exports tcljx.nmspgen.macro;
    exports tcljx.nmspgen.pkggen;
    exports tcljx.nmspgen.primitive;

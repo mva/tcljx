@@ -145,9 +145,9 @@ diff -Nru src/tcljx.compiler/tcljx/nmspgen/primitive.cljt ../tcljx.compiler.patc
 --- src/tcljx.compiler/tcljx/nmspgen/primitive.cljt	2025-10-29 16:04:59.919073913 +0100
 +++ ../tcljx.compiler.patched/tcljx/nmspgen/primitive.cljt	2025-10-30 07:33:25.522427940 +0100
 @@ -6,7 +6,7 @@
-    (tcljx.nmspgen [pkggen :as pkggen] [constgen :as constgen]
-                    [emit :as emit] [insn :as insn] [runtime :as rt]
-                    [condgen :as condgen])
+    (tcljx.nmspgen [pkggen :as pkggen] [constgen :as constgen] [emit :as emit]
+                   [insn :as insn] [runtime :as rt] [condgen :as condgen]
+                   [junctgen :as junctgen])
 -   [tinyclj.string :as str])
 +   [clojure.string :as str])
    (:import

@@ -3,9 +3,9 @@
    (tcljx.data [config :as cfg] [type :as type] [resolve :as resolve]
                [reflect :as reflect] [ir :as ir] [code :as code]
                [wrong :as wrong])
-   (tcljx.nmspgen [pkggen :as pkggen] [constgen :as constgen]
-                   [emit :as emit] [insn :as insn] [runtime :as rt]
-                   [condgen :as condgen])
+   (tcljx.nmspgen [pkggen :as pkggen] [constgen :as constgen] [emit :as emit]
+                  [insn :as insn] [runtime :as rt] [condgen :as condgen]
+                  [junctgen :as junctgen])
    [tinyclj.string :as str])
   (:import
    (tcljx.data.type Wrapper)
@@ -28,9 +28,24 @@
     ir/invoke-methods-primitive-fn)
   (namespace-if-def [_]
     nil))
-
 (defmacro with-primitive-invoke [^vector paramv & body]
   `(reify PrimitiveFnEntity (~'invoke* ~paramv ~@body)))
+
+(deftype PrimitiveFnRecurEntity []
+  :abstract true
+  ImmediateEntity
+  (emit-insn* [_ _ _ _]
+    (throw (IllegalStateException.)))
+  (value-type [_]
+    nil)
+  (entity-id [_]
+    ir/entity-id-def-primitive)
+  (invoke-methods [ _]
+    ir/invoke-methods-primitive-recur)
+  (namespace-if-def [_]
+    nil))
+(defmacro with-primitive-invoke-recur [^vector paramv & body]
+  `(reify PrimitiveFnRecurEntity (~'invoke* ~paramv ~@body)))
 
 (defn take-args
   (^Insns [^seq form ^Insns xs ^int n]
@@ -484,7 +499,13 @@
       (let [arg (take-arg form args)]
         (-> (.emitter (condgen/logical-truth arg fctx))
             (condgen/negation fctx)
-            (insn/mk-insn Boolean/TYPE))))))
+            (insn/mk-insn Boolean/TYPE)))))
+  (def nary-and
+    (with-primitive-invoke-recur [_ fctx form _ _ args]
+      (junctgen/nary-and fctx args)))
+  (def nary-or
+    (with-primitive-invoke-recur [_ fctx form _ _ args]
+      (junctgen/nary-or fctx args))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -660,6 +681,8 @@
         ;; values of arbitrary types.  Which unfortunately means 2*2
         ;; different code paths in total.
         (primitive "not" unary-not)
+        (primitive "and" nary-and)
+        (primitive "or" nary-or)
         (primitive "identical?" binary-identical)
         (primitive "list" list-primitive)
         (primitive "str" string-concat))))
