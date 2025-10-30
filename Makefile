@@ -8,17 +8,10 @@ JAVAP=$(JAVA_BIN)javap
 
 # Note: only textflow__terminal requires --enable-native-access
 JAVA_OPTS=-p $(BOOTSTRAP_MDIR) --add-modules tcljc.core --enable-native-access=ALL-UNNAMED
-TCLJC_OPTS=$(JAVA_OPTS) -m tcljc.compiler -s src/tcljx.compiler -s test/tcljx.compiler
 
 #MAIN_NS=tcljx.alpha.textflow__terminal
 MAIN_NS=tcljx.main
 RUN_TESTS_NS=tcljx.run-tests
-
-compile: support/DONE
-	$(COMPILER_BOOT) -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)
-watch-and-compile: support/DONE
-	$(COMPILER_BOOT) --watch -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)
-
 
 # $(DEST_DIR) matches the bootstrap(!) compiler's default destination
 # directory
@@ -178,6 +171,12 @@ $(STAGE2_MINFO_COMPILER): $(STAGE2_MINFO_CORE) $(TCLJX_SOURCE_COMPILER)
 	diff -Nrq $(dir $(STAGE1_MINFO_COMPILER)) $(dir $@)
 
 ##########################################################################
+
+compile: support/DONE $(STAGE1_MINFO_RT)
+	$(COMPILER_BOOT) -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)
+watch-and-compile: support/DONE $(STAGE1_MINFO_RT)
+	$(COMPILER_BOOT) --watch -s src/tcljx.compiler -s test/tcljx.compiler $(RUN_TESTS_NS)
+
 
 # Call with "make test TEST=<scope>" (with <scope> being "ns-name" or
 # "ns-name/var-name") to only run tests from the given namespace or
