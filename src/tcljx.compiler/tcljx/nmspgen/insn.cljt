@@ -53,6 +53,16 @@
 (defn constant ^Insn [^Object value ^Class type]
   (value-of* (constgen/constant value type)))
 
+;; mark code boundaries for debugging:
+(defn wrap-nop ^Insn [^Insn x]
+  (mk-insn (^CodeEmitter fn [xb consumed-type then-leave?]
+            (when-some [res (.emit-insn* (.emitter x) (.nop xb)
+                                         consumed-type then-leave?)]
+              (prn :wrap-nop*-emitted-type res :expr-type (.expr-type x))
+              (.nop xb)
+              res))
+           (.expr-type x)))
+
 
 ;;; This indicates an error regarding the type *of* an expression.
 (defn wr-type ^Throwable [^String msg-prefix ^Insn x]

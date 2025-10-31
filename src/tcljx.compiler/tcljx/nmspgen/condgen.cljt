@@ -2,8 +2,8 @@
   (:require
    (tcljx.data [type :as type] [resolve :as resolve] [ir :as ir] [code :as code]
                [wrong :as wrong])
-   (tcljx.nmspgen [pkggen :as pkggen] [constgen :as constgen]
-                   [insn :as insn] [emit :as emit]))
+   (tcljx.nmspgen [util :as util] [pkggen :as pkggen] [constgen :as constgen]
+                  [insn :as insn] [emit :as emit]))
   (:import
    (tcljx.data.type Wrapper)
    (tcljx.data.ir CodeEmitter)
@@ -41,14 +41,14 @@
 
 ;;; Turn a branching instruction IFXXX into a complete conditional
 ;;; expression with a "true" path and a "false" path.
-(defn- conditional ^CodeEmitter [^Branching branch ^boolean negate-test?
-                                 ^Class produced-type ^CodeEmitter if-true
-                                 ^CodeEmitter if-false ^long fctx]
+(defn- conditional ^CodeEmitter [^Branching branch ^Class produced-type
+                                 ^CodeEmitter if-true ^CodeEmitter if-false
+                                 ^long fctx]
   (emit/with-adaption-barrier produced-type
     (^CodeEmitter fn [xb consumed-type then-leave?]
      (let [start-false (.newLabel xb), end-false (.newLabel xb)]
        (if (some-code? if-true consumed-type)
-         (when (.emit-branch-on? branch xb negate-test? start-false)
+         (when (.emit-branch-on? branch xb false start-false)
            (let [return-t? (emit/then-leave? xb fctx consumed-type if-true
                                              then-leave?)]
              (when (and return-t? (some-code? if-false consumed-type))
@@ -62,7 +62,7 @@
                  consumed-type))))
 
          ;; here holds: consumed-type is `void`
-         (when (.emit-branch-on? branch xb (not negate-test?) end-false)
+         (when (.emit-branch-on? branch xb true end-false)
            ;; FIXME... when-not to (list 'if test (list 'do) (cons 'do body))
            ;; FIXME... related: maybe if should require exactly 3 args?
            (emit/insn? xb fctx Void/TYPE if-false)
@@ -70,8 +70,14 @@
            Void/TYPE))))))
 (defn- predicate ^CodeEmitter [^Branching branch ^boolean negate-result?
                                ^long fctx]
-  (conditional branch negate-result? Boolean/TYPE
-               constgen/entity-true constgen/entity-false fctx))
+  (if negate-result?
+    ;; note: for complex boolean expressions like `and` and `or`, the
+    ;; whole expression's value can not be negated by only flipping
+    ;; the opcodes of branches
+    (conditional branch Boolean/TYPE
+                 constgen/entity-false constgen/entity-true fctx)
+    (conditional branch Boolean/TYPE
+                 constgen/entity-true constgen/entity-false fctx)))
 
 (defn negation ^CodeEmitter [^CodeEmitter ce ^long fctx]
   ;; pre: `ce` is boolean
@@ -179,7 +185,7 @@
                            (aset 0 test) ;the boolean value to test
                            (aset 1 constgen/entity-false))
                          fctx)) 
-          (conditional false expr-type if-true if-false fctx)))))
+          (conditional expr-type if-true if-false fctx)))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -261,7 +267,7 @@
       (^CodeEmitter fn [xb _ _]
        (when (emit/insn? xb fctx arg-type ce0)
          (when (emit/insn? xb fctx arg-type ce1)
-           (code/with-operator xb bytecode)
+           (util/with-operator xb bytecode)
            Integer/TYPE))))))
 
 (letfn [(xcmp-2* ^Insn [^Wrapper wtop ^CodeEmitter ce0 ^CodeEmitter ce1
@@ -309,56 +315,7 @@
     (if (and (neg? cmp-opcd)        ;negative `cmp-opcd` maps to equiv
              (or (singleton-type? arg0) (singleton-type? arg1)))
       (acmp arg0 arg1 cmp-eq fctx)
-      (xcmp-2* wtop (.emitter arg0) (.emitter arg1) cmp-opcd fctx)))
-  
-  (defn xcmp-n ^Insn [^Wrapper wtop ^Insns args ^int cmp-opcd ^long fctx]
-    ;; pre: there are at least two arguments
-    (letfn [(load-left ^CodeEmitter/1 [^CodeEmitter/1 ces ^int temp]
-              (let [n (dec (alength ces))
-                    ce-left (new CodeEmitter/1 n)]
-                (dotimes [i n]
-                  (->> (let [ce (aget ces i)]
-                         (if (or (zero? i) (constgen/const? ce))
-                           ce
-                           (^CodeEmitter fn [xb _ _]
-                            (.loadLocal xb (.type-kind wtop) temp)
-                            (.class-primitive wtop))))
-                       (aset ce-left i)))
-                ce-left))
-            (load-right ^CodeEmitter/1 [^CodeEmitter/1 ces ^int temp]
-              (let [n (dec (alength ces))
-                    ce-right (new CodeEmitter/1 n)]
-                (dotimes [i n]
-                  (->> (let [ce (aget ces (inc i))]
-                         (if (or (= i (dec n)) (constgen/const? ce))
-                           ce
-                           (^CodeEmitter fn [xb _ _]
-                            (when (emit/insn? xb fctx (.class-primitive wtop) ce)
-                              (code/dup-and-store-local xb (.type-kind wtop) temp)
-                              (.class-primitive wtop)))))
-                       (aset ce-right i)))
-                ce-right))
-            (branching-on-false ^Branching []
-              (let [ces (.emitters args)]
-                (reify Branching ;produces dead code if the whole thing is constant
-                  (emit-branch-on? [_ xb outcome? target]
-                    (when outcome?
-                      ;; Would need to apply proper De Morgan here
-                      ;; when outcome? was true.  Just flipping the
-                      ;; cmp-opcd is not enough!
-                      (throw (IllegalArgumentException.)))
-                    (->> (^java.util.function.Consumer fn ^void [^CodeBuilder xb]
-                          (let [temp (.allocateLocal xb (.type-kind wtop))]
-                            (xcmp-n-branch-if-false wtop (load-left ces temp)
-                                                    (load-right ces temp)
-                                                    cmp-opcd xb fctx target)))
-                         (.block xb))
-                    true))))] ;nested block: must assume control doesn't leave method
-      (-> (^CodeEmitter fn [xb consumed-type then-leave?]
-           (-> (branching-on-false)
-               (predicate false fctx)
-               (.emit-insn* xb consumed-type then-leave?)))
-          (insn/mk-insn Boolean/TYPE)))))
+      (xcmp-2* wtop (.emitter arg0) (.emitter arg1) cmp-opcd fctx))))
 
 ;;; ------------------------------------------------------------------------
 

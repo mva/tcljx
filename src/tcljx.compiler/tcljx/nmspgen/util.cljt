@@ -2,10 +2,24 @@
   (:require (tcljx.data [type :as type] [reflect :as reflect] [code :as code]
                         [ir :as ir]))
   (:import (tcljx.data.ir CodeEmitter Entity ArityType MethodSpec)
-           (java.lang.classfile CodeBuilder TypeKind)
+           (java.lang.classfile CodeBuilder Opcode Opcode$Kind TypeKind)
+           (java.lang.classfile.instruction OperatorInstruction)
            (java.lang.constant ClassDesc MethodTypeDesc)
            (java.util Map)
            (java.util.function BiFunction)))
+
+(def ^:private op-instr (new OperatorInstruction/1 (- #_ifeq 153 #_iadd 96)))
+(let [opcodes (Opcode/values)]
+  (dotimes [i (alength opcodes)]
+    (let [opcode (aget opcodes i)]
+      (when (and (<= #_iadd 96 (.bytecode opcode))
+                 (< (.bytecode opcode) #_ifeq 153)
+                 (= (.kind opcode) Opcode$Kind/OPERATOR))
+        (aset op-instr (- i #_iadd 96) (OperatorInstruction/of opcode))))))
+
+(defn with-operator ^CodeBuilder [^CodeBuilder xb ^int bytecode]
+  (.with xb (aget op-instr (- bytecode #_iadd 96))))
+
 
 (letfn [(two-slots? ^boolean [^Class tp] ;aka "is of category 2?"
           (or (identical? Long/TYPE tp) (identical? Double/TYPE tp)))]

@@ -1,0 +1,173 @@
+(ns tcljx.nmspgen.opgen
+  (:require 
+   (tcljx.data [type :as type] [wrong :as wrong] [ir :as ir])
+   (tcljx.nmspgen [util :as util] [constgen :as constgen] [emit :as emit]
+                  [insn :as insn]))
+  (:import
+   (tcljx.data.type Wrapper)
+   (tcljx.data.ir CodeEmitter)
+   (tcljx.nmspgen.insn Insn Insns)
+   (java.lang.classfile Opcode)))
+
+(deftype OpSpec [^Wrapper bottom-type ;arguments are at least widened to this
+                 ^Wrapper top-type    ;... and at most widened to this
+                 ^Opcode base-opcode
+                 ^Number left-identity
+                 ^Number right-identity]
+  java.lang.Record)
+(defn- left-identity? [^OpSpec op ^Object const]
+  (and (some? const) (= const (.left-identity op))))
+(defn- right-identity? [^OpSpec op ^Object const]
+  (and (some? const) (= const (.right-identity op))))
+
+(defn numeric-op ^OpSpec [^Wrapper bottom-type ^Opcode base-opcode
+                          ^Insn left-identity ^Insn right-identity]
+  (OpSpec. bottom-type type/double base-opcode
+           (when left-identity (insn/const-value left-identity))
+           (insn/const-value right-identity)))
+
+(letfn [(bitset-op ^OpSpec [^Opcode base-opcode ^Insn identity]
+          (OpSpec. type/int type/long base-opcode
+                   (insn/const-value identity) (insn/const-value identity)))]
+  (def op-xand (bitset-op Opcode/IAND insn/insn-int-m1))
+  (def op-xor (bitset-op Opcode/IOR insn/insn-int-zero))
+  (def op-xxor (bitset-op Opcode/IXOR insn/insn-int-zero)))
+
+
+(defn- op-type ^Class [^int opcd]
+  (case opcd
+    0 Integer/TYPE
+    1 Long/TYPE
+    2 Float/TYPE
+    3 Double/TYPE))
+        
+
+;;; Arithmetic operations export their internals to enable IINC
+;;; rewrite when generating code for `recur`.  `ce1` is optional.
+(deftype Op2 [^int bytecode ^int opcd0 ^int opcd1
+              ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
+  java.lang.Record
+  CodeEmitter
+  (emit-insn* [_ xb _ then-leave?]
+    (let [tp0 (op-type opcd0), tp1 (op-type opcd1)]
+      (when (emit/insn? xb fctx tp0 ce0)
+        (when (or (nil? ce1) (emit/insn? xb fctx tp1 ce1))
+          (when (<= #_idiv 108 bytecode #_drem 115)
+            ;; [il]div and [il]rem can raise a division by zero
+            ;; exception, so provide a line number for div & rem
+            (emit/with-line-number xb fctx))
+          (util/with-operator xb bytecode)
+          tp0)))))
+
+
+(letfn [(const-fold-int ^int [^int bytecode ^Number c0 ^Number c1]
+          (let [a0 (.intValue c0), a1 (.intValue c1)]
+            (case bytecode
+              #_iadd 96 (+ a0 a1)
+              #_isub 100 (- a0 a1)
+              #_imul 104 (* a0 a1)
+              #_idiv 108 (quot a0 a1)
+              #_irem 112 (rem a0 a1)
+              #_ishl 120 (bit-shift-left a0 a1)
+              #_ishr 122 (bit-shift-right a0 a1)
+              #_iushr 124 (unsigned-bit-shift-right a0 a1)
+              #_iand 126 (bit-and a0 a1)
+              #_ior 128 (bit-or a0 a1)
+              #_ixor 130 (bit-xor a0 a1))))
+        (const-fold-long ^long [^int bytecode ^Number arg0 ^Number arg1]
+          (let [a0 (.longValue arg0), a1 (.longValue arg1)]
+            (case bytecode
+              #_ladd 97 (+ a0 a1)
+              #_lsub 101 (- a0 a1)
+              #_lmul 105 (* a0 a1)
+              #_ldiv 109 (quot a0 a1)
+              #_lrem 113 (rem a0 a1)
+              #_lshl 121 (bit-shift-left a0 (int a1))
+              #_lshr 123 (bit-shift-right a0 (int a1))
+              #_lushr 125 (unsigned-bit-shift-right a0 (int a1))
+              #_land 127 (bit-and a0 a1)
+              #_lor 129 (bit-or a0 a1)
+              #_lxor 131 (bit-xor a0 a1))))
+        (const-fold-float ^float [^int bytecode ^Number arg0 ^Number arg1]
+          (let [a0 (.floatValue arg0), a1 (.floatValue arg1)]
+            (case bytecode
+              #_fadd 98 (+ a0 a1)
+              #_fsub 102 (- a0 a1)
+              #_fmul 106 (* a0 a1)
+              #_fdiv 110 (/ a0 a1)
+              #_frem 114 (rem a0 a1))))
+        (const-fold-double ^double [^int bytecode ^Number arg0 ^Number arg1]
+          (let [a0 (.doubleValue arg0), a1 (.doubleValue arg1)]
+            (case bytecode
+              #_dadd 99 (+ a0 a1)
+              #_dsub 103 (- a0 a1)
+              #_dmul 107 (* a0 a1)
+              #_ddiv 111 (/ a0 a1)
+              #_drem 115 (rem a0 a1))))]
+
+  (defn folded-constant ^CodeEmitter [^OpSpec op ^int opcd0
+                                      ^Number c0 ^Number c1]
+    (-> (let [bytecode (+ (-> op .base-opcode .bytecode) opcd0)]
+          (case opcd0
+            #_int 0 (object (const-fold-int bytecode c0 c1))
+            #_long 1 (object (const-fold-long bytecode c0 c1))
+            #_float 2 (object (const-fold-float bytecode c0 c1))
+            #_double 3 (object (const-fold-double bytecode c0 c1))))
+        (constgen/constant (op-type opcd0)))))
+
+(defn op-2 ^CodeEmitter [^OpSpec op ^int opcd0 ^int opcd1
+                         ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
+  (let [c0 (constgen/const-value ce0), c1 (constgen/const-value ce1)]
+    (cond
+      (left-identity? op c0)
+      ce1
+      (right-identity? op c1)
+      ce0
+      (and (some? c0) (some? c1))
+      (folded-constant op opcd0 c0 c1)
+      :else
+      (Op2. (+ (-> op .base-opcode .bytecode) opcd0)
+            opcd0 opcd1 ce0 ce1 fctx))))
+
+(defn op-n ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter/1 ces ^long fctx]
+  (loop [acc (aget ces 0), i 1]
+    (if (< i (alength ces))
+      (recur (op-2 op opcd opcd acc (aget ces i) fctx) (inc i))
+      acc)))
+
+
+;;; Not sure if this helper is a good idea.
+(defn boolean-and ^Insn [^Insn arg0 ^Insn arg1 ^long fctx]
+  (-> (^CodeEmitter fn [xb consumed-type then-leave?]
+       (when (-> (op-2 op-xand 0 0 (.emitter arg0) (.emitter arg1) fctx)
+                 (.emit-insn* xb consumed-type then-leave?))
+         Boolean/TYPE))
+      (insn/mk-insn Boolean/TYPE)))
+
+;;; ------------------------------------------------------------------------
+
+(defn info-type-mismatch ^Throwable [form ^Insns args ^int i ^String exp]
+  (-> (str (wrong/q (first form)) " expects " exp " type for argument #"
+           (inc i) (wrong/got-types (insn/expr-types args)))
+      (wrong/wr-info)))
+(defn info-top-type ^Throwable [^Wrapper top-type form ^Insns args ^int i]
+  (info-type-mismatch form args i (if (identical? type/double top-type)
+                                    "numeric"
+                                    "integral")))
+(defn top-type-of ^Wrapper [^Wrapper bottom-type ^Wrapper top-type
+                            form ^Insns args]
+  (loop [acc bottom-type, i (dec (alength (.expr-types args)))]
+    (if (neg? i)
+      acc
+      (let [tp (aget (.expr-types args) i)]
+        (if (.isPrimitive tp)
+          (let [wtp (type/of tp)]
+            (if (type/primitive-assignable-from? top-type wtp)
+              (recur (if (type/primitive-assignable-from? acc wtp)
+                       acc
+                       wtp)
+                     (dec i))
+              (throw (info-top-type top-type form args i))))
+          (throw (info-top-type top-type form args i)))))))
+(defn top-numeric-of ^Wrapper [form ^Insns args]
+  (top-type-of type/int type/double form args))

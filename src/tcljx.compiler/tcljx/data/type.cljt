@@ -214,15 +214,10 @@
               #_double 3 nil
               #_else_void (-> xb .dconst_0)))
           (convert-to-boolean ^void [^int from]
-            (letfn [#_(mask-int ^CodeBuilder [^CodeBuilder xb]
-                        (-> xb (.iconst_1) (.iand)))]
-              (case from
-                #_boolean 4 nil
-                ;; #_float 2 (-> xb .f2i (mask-int))
-                ;; #_double 3 (-> xb .d2i (mask-int))
-                ;; (#_char 6 #_byte 5 #_short 7 #_int 0) (-> xb (mask-int))
-                ;; #_long 1 (-> xb .l2i (mask-int))
-                #_else_void (-> xb .iconst_0))))
+            (case from
+              #_boolean 4 nil
+              #_void 8 (-> xb .iconst_0)
+              #_else (throw (IllegalStateException.))))
           (convert-to-byte ^void [^int from]
             (case from
               (#_int 0 #_char 6 #_short 7) (-> xb .i2b)

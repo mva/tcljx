@@ -2,8 +2,7 @@
   (:require (tcljx.data ir))
   (:import
    (tcljx.data.ir FieldSpec)
-   (java.lang.classfile ClassBuilder CodeBuilder Opcode Opcode$Kind TypeKind)
-   (java.lang.classfile.instruction OperatorInstruction)
+   (java.lang.classfile ClassBuilder CodeBuilder TypeKind)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc
                        DirectMethodHandleDesc DirectMethodHandleDesc$Kind
                        ConstantDescs)
@@ -91,21 +90,3 @@
   `(.withMethodBody ~cb ~method-name ~lookup-type-desc ~flags
                     (^Consumer fn ^void [^CodeBuilder xb#]
                      (-> xb# ~@body))))
-
-(def ^:private op-instr (new OperatorInstruction/1 (- #_ifeq 153 #_iadd 96)))
-(let [opcodes (Opcode/values)]
-  (dotimes [i (alength opcodes)]
-    (let [opcode (aget opcodes i)]
-      (when (and (<= #_iadd 96 (.bytecode opcode))
-                 (< (.bytecode opcode) #_ifeq 153)
-                 (= (.kind opcode) Opcode$Kind/OPERATOR))
-        (aset op-instr (- i #_iadd 96) (OperatorInstruction/of opcode))))))
-
-(defn with-operator ^CodeBuilder [^CodeBuilder xb ^int bytecode]
-  (.with xb (aget op-instr (- bytecode #_iadd 96))))
-
-(defn dup-and-store-local ^CodeBuilder [^CodeBuilder xb ^TypeKind tk ^int slot]
-  (case (.slotSize tk)
-    1 (.dup xb)
-    2 (.dup2 xb))
-  (.storeLocal xb tk slot))

@@ -78,17 +78,17 @@
 (deftest three-arg-compare-test
   (is (= '[["LOCAL 0: int n"]
            (GETSTATIC Short "MIN_VALUE" "S")
-           (ILOAD_0)
-           (DUP)
            (ISTORE_1)
-           (IF_ICMPGT L:0)              ;if MIN_VALUE > n: false
+           ["LOCAL 1: int temp"]
            (ILOAD_1)
-           (GETSTATIC Short "MAX_VALUE" "S")
-           (IF_ICMPGT L:0)              ;if n > MAX_VALUE: false
-           (ICONST_1)    ;true if (MIN_VALUE <= n) && (n <= MAX_VALUE)
-           (IRETURN)
-           [L:0]
-           (ICONST_0)
+           (ILOAD_0)
+           (IF_ICMPGT L:0) (ICONST_1) (GOTO L:1) ;if MIN_VALUE > n: false
+           [L:0] (ICONST_0)
+           [L:1]
+           (ILOAD_0) (GETSTATIC Short "MAX_VALUE" "S")
+           (IF_ICMPGT L:2) (ICONST_1) (GOTO L:3) ;if n > MAX_VALUE: false
+           [L:2] (ICONST_0)
+           [L:3] (IAND)           ;combine first and second comparison
            (IRETURN)]
          (asm-expr [^int n] (<= Short/MIN_VALUE n Short/MAX_VALUE))))
   #_

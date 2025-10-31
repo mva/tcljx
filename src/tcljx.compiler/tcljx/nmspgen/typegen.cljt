@@ -56,7 +56,7 @@
             (insn/emit-logical? xb (aget kws i))
             (.invokeinterface xb rt/map "without" mtd-without))
           (-> (.invokestatic xb rt/RT "seqOrElse" mtd-seqOrElse)
-              (.iconst_0) (.iconst_0 )
+              (.iconst_0) (.iconst_0)
               (.invokespecial this-class ConstantDescs/INIT_NAME
                               (code/mtd-of-fields fields))
               (.areturn))))

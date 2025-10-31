@@ -1,9 +1,10 @@
 (ns tcljx.nmspgen.junctgen
   (:require
-   (tcljx.data [type :as type] [ir :as ir])
+   (tcljx.data [type :as type] [wrong :as wrong] [ir :as ir])
    (tcljx.nmspgen [util :as util] [emit :as emit] [insn :as insn]
-                  [constgen :as constgen] [condgen :as condgen]))
+                  [constgen :as constgen] [condgen :as condgen] [opgen :as opgen]))
   (:import
+   (tcljx.data.type Wrapper)
    (tcljx.data.ir CodeEmitter Entity Binding)
    (tcljx.nmspgen.insn Insn Insns)
    (java.lang.classfile CodeBuilder)
@@ -85,3 +86,30 @@
                                    (block-binding fctx bnd)))))]
         (expand 0)))
     insn/insn-null))
+
+
+(defn nary-compare ^Insn [^int cmp-opcd ^long fctx ^Insns args form]
+  (let [wtop (when-not (neg? cmp-opcd)  ;`wtop` of equiv is nil
+               (or (when (= cmp-opcd condgen/cmp-eq)
+                     (type/of-all (.expr-types args)))
+                   (opgen/top-numeric-of form args)))]
+    (case (.length args)
+      0 (throw (wrong/wr-info "missing argument"))
+      1 (insn/progn args insn/insn-true)
+      2 (condgen/xcmp-2 wtop (.get args 0) (.get args 1) cmp-opcd fctx)
+      #_else     ;all but the last argument get bindings left-to-right
+      (letfn [(expand ^Insn [^Insn opnd-left ^int i-right]
+                (if (>= i-right (dec (.length args)))
+                  (condgen/xcmp-2 wtop opnd-left (.get args i-right)
+                                  cmp-opcd fctx)
+                  (let [tp (.class-primitive wtop)
+                        bnd (binding-of tp args i-right)
+                        x-temp (bound-value tp bnd args i-right)]
+                    (->> (if (pos? i-right)
+                           (-> (condgen/xcmp-2 wtop opnd-left x-temp cmp-opcd
+                                               fctx) 
+                               (opgen/boolean-and (expand x-temp (inc i-right))
+                                                  fctx))
+                           (expand x-temp 1))
+                         (block-binding fctx bnd)))))]
+        (expand nil 0)))))

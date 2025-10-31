@@ -5,12 +5,13 @@
                [wrong :as wrong])
    (tcljx.nmspgen [pkggen :as pkggen] [constgen :as constgen] [emit :as emit]
                   [insn :as insn] [runtime :as rt] [condgen :as condgen]
-                  [junctgen :as junctgen])
+                  [opgen :as opgen] [junctgen :as junctgen])
    [tinyclj.string :as str])
   (:import
    (tcljx.data.type Wrapper)
    (tcljx.data.ir CodeEmitter Loadable Entity ImmediateEntity Constant)
    (tcljx.nmspgen.insn Insn Insns)
+   (tcljx.nmspgen.opgen Op2 OpSpec)
    (java.lang.classfile Opcode CodeBuilder TypeKind)
    (java.lang.classfile.constantpool ConstantPoolBuilder)
    (java.lang.constant ConstantDescs MethodTypeDesc)))
@@ -113,53 +114,6 @@
 
 ;;; ------------------------------------------------------------------------
 
-(deftype OpSpec [^Wrapper bottom-type ;arguments are at least widened to this
-                 ^Wrapper top-type    ;... and at most widened to this
-                 ^Opcode base-opcode
-                 ^Number left-identity
-                 ^Number right-identity]
-  java.lang.Record)
-(defn left-identity? [^OpSpec op ^Object const]
-  (and (some? const) (= const (.left-identity op))))
-(defn right-identity? [^OpSpec op ^Object const]
-  (and (some? const) (= const (.right-identity op))))
-
-(defn- numeric-op ^OpSpec [^Wrapper bottom-type ^Opcode base-opcode
-                           ^Insn left-identity ^Insn right-identity]
-  (OpSpec. bottom-type type/double base-opcode
-           (when left-identity (insn/const-value left-identity))
-           (insn/const-value right-identity)))
-
-(defn- bitset-op ^OpSpec [^Opcode base-opcode ^Insn identity]
-  (OpSpec. type/int type/long base-opcode
-           (insn/const-value identity) (insn/const-value identity)))
-
-
-(defn- op-type ^Class [^int opcd]
-  (case opcd
-    0 Integer/TYPE
-    1 Long/TYPE
-    2 Float/TYPE
-    3 Double/TYPE))
-        
-        
-;;; Arithmetic operations export their internals to enable IINC
-;;; rewrite when generating code for `recur`.  `ce1` is optional.
-(deftype Op2 [^int bytecode ^int opcd0 ^int opcd1
-              ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
-  java.lang.Record
-  CodeEmitter
-  (emit-insn* [_ xb _ then-leave?]
-    (let [tp0 (op-type opcd0), tp1 (op-type opcd1)]
-      (when (emit/insn? xb fctx tp0 ce0)
-        (when (or (nil? ce1) (emit/insn? xb fctx tp1 ce1))
-          (when (<= #_idiv 108 bytecode #_drem 115)
-            ;; [il]div and [il]rem can raise a division by zero
-            ;; exception, so provide a line number for div & rem
-            (emit/with-line-number xb fctx))
-          (code/with-operator xb bytecode)
-          tp0)))))
-
 (def ^:private no-iinc Integer/MIN_VALUE) ;outside range of IINC instruction
 (defn iinc-delta ^int [^CodeEmitter entity ^CodeEmitter ce]
   (letfn [(delta ^int [^CodeEmitter arg]
@@ -186,89 +140,7 @@
 (defn valid-iinc-const? ^boolean [^int c]
   (= (short c) c))
 
-(letfn [(const-fold-int ^int [^int bytecode ^Number c0 ^Number c1]
-          (let [a0 (.intValue c0), a1 (.intValue c1)]
-            (case bytecode
-              #_iadd 96 (+ a0 a1)
-              #_isub 100 (- a0 a1)
-              #_imul 104 (* a0 a1)
-              #_idiv 108 (quot a0 a1)
-              #_irem 112 (rem a0 a1)
-              #_ishl 120 (bit-shift-left a0 a1)
-              #_ishr 122 (bit-shift-right a0 a1)
-              #_iushr 124 (unsigned-bit-shift-right a0 a1)
-              #_iand 126 (bit-and a0 a1)
-              #_ior 128 (bit-or a0 a1)
-              #_ixor 130 (bit-xor a0 a1))))
-        (const-fold-long ^long [^int bytecode ^Number arg0 ^Number arg1]
-          (let [a0 (.longValue arg0), a1 (.longValue arg1)]
-            (case bytecode
-              #_ladd 97 (+ a0 a1)
-              #_lsub 101 (- a0 a1)
-              #_lmul 105 (* a0 a1)
-              #_ldiv 109 (quot a0 a1)
-              #_lrem 113 (rem a0 a1)
-              #_lshl 121 (bit-shift-left a0 (int a1))
-              #_lshr 123 (bit-shift-right a0 (int a1))
-              #_lushr 125 (unsigned-bit-shift-right a0 (int a1))
-              #_land 127 (bit-and a0 a1)
-              #_lor 129 (bit-or a0 a1)
-              #_lxor 131 (bit-xor a0 a1))))
-        (const-fold-float ^float [^int bytecode ^Number arg0 ^Number arg1]
-          (let [a0 (.floatValue arg0), a1 (.floatValue arg1)]
-            (case bytecode
-              #_fadd 98 (+ a0 a1)
-              #_fsub 102 (- a0 a1)
-              #_fmul 106 (* a0 a1)
-              #_fdiv 110 (/ a0 a1)
-              #_frem 114 (rem a0 a1))))
-        (const-fold-double ^double [^int bytecode ^Number arg0 ^Number arg1]
-          (let [a0 (.doubleValue arg0), a1 (.doubleValue arg1)]
-            (case bytecode
-              #_dadd 99 (+ a0 a1)
-              #_dsub 103 (- a0 a1)
-              #_dmul 107 (* a0 a1)
-              #_ddiv 111 (/ a0 a1)
-              #_drem 115 (rem a0 a1))))
-        (folded-constant ^CodeEmitter [^OpSpec op ^int opcd0
-                                       ^Number c0 ^Number c1]
-          (-> (let [bytecode (+ (-> op .base-opcode .bytecode) opcd0)]
-                (case opcd0
-                  #_int 0 (object (const-fold-int bytecode c0 c1))
-                  #_long 1 (object (const-fold-long bytecode c0 c1))
-                  #_float 2 (object (const-fold-float bytecode c0 c1))
-                  #_double 3 (object (const-fold-double bytecode c0 c1))))
-              (constgen/constant (op-type opcd0))))
-
-        (info-type-mismatch ^Throwable [form ^Insns args ^int i ^String exp]
-          (-> (str (wrong/q (first form)) " expects " exp " type for argument #"
-                   (inc i) (wrong/got-types (insn/expr-types args)))
-              (wrong/wr-info)))
-        (info-top-type ^Throwable [^Wrapper top-type form ^Insns args ^int i]
-          (info-type-mismatch form args i (if (identical? type/double top-type)
-                                            "numeric"
-                                            "integral")))
-        (top-type-of
-          (^Wrapper [^OpSpec op form ^Insns args]
-           (top-type-of (.bottom-type op) (.top-type op) form args))
-          (^Wrapper [^Wrapper bottom-type ^Wrapper top-type form ^Insns args]
-           (loop [acc bottom-type, i (dec (alength (.expr-types args)))]
-             (if (neg? i)
-               acc
-               (let [tp (aget (.expr-types args) i)]
-                 (if (.isPrimitive tp)
-                   (let [wtp (type/of tp)]
-                     (if (type/primitive-assignable-from? top-type wtp)
-                       (recur (if (type/primitive-assignable-from? acc wtp)
-                                acc
-                                wtp)
-                              (dec i))
-                       (throw (info-top-type top-type form args i))))
-                   (throw (info-top-type top-type form args i))))))))
-        (top-numeric-of ^Wrapper [form ^Insns args]
-          (top-type-of type/int type/double form args))
-        
-        (consumed-as-numeric ^Wrapper [^Wrapper target ^Insns args ^int i]
+(letfn [(consumed-as-numeric ^Wrapper [^Wrapper target ^Insns args ^int i]
           ;; pre: `target` is numeric type
           (let [tp (insn/expr-type args i)]
             (when (.isPrimitive tp)
@@ -279,59 +151,39 @@
                     wtp))))))  ;int, long, float, or double
         (integral-type ^Wrapper [form ^Insns args ^int i]
           (or (consumed-as-numeric type/long args i)
-              (throw (info-type-mismatch form args i "integral"))))
+              (throw (opgen/info-type-mismatch form args i "integral"))))
         (integer-type ^Wrapper [form ^Insns args ^int i]
           (or (consumed-as-numeric type/int args i)
-              (throw (info-type-mismatch form args i "integer"))))
+              (throw (opgen/info-type-mismatch form args i "integer"))))
         (array-type-at-0 ^Class [form ^Insns args]
           (if (zero? (.length args))
             (throw (wrong/wr-info "expect array argument"))
             (let [tp (insn/expr-type args 0)]
               (if (.isArray tp)
                 tp
-                (throw (info-type-mismatch form args 0 "array"))))))
+                (throw (opgen/info-type-mismatch form args 0 "array"))))))
         (info-two-reference-args ^Throwable [form ^Insns args]
           (-> (str (wrong/q (first form)) " expects two reference arguments"
                    (wrong/got-types (insn/expr-types args)))
               (wrong/wr-info)))
         
-        (op-2 ^CodeEmitter [^OpSpec op ^int opcd0 ^int opcd1
-                            ^CodeEmitter ce0 ^CodeEmitter ce1 ^long fctx]
-          (let [c0 (constgen/const-value ce0)
-                c1 (constgen/const-value ce1)]
-            (cond
-              (left-identity? op c0)
-              ce1
-              (right-identity? op c1)
-              ce0
-              (and (some? c0) (some? c1))
-              (folded-constant op opcd0 c0 c1)
-              :else
-              (Op2. (+ (-> op .base-opcode .bytecode) opcd0)
-                    opcd0 opcd1 ce0 ce1 fctx))))
-        (op-n ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter/1 ces ^long fctx]
-          (loop [acc (aget ces 0), i 1]
-            (if (< i (alength ces))
-              (recur (op-2 op opcd opcd acc (aget ces i) fctx) (inc i))
-              acc)))
-
         (unary ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter ce ^long fctx]
           (condp identical? (.base-opcode op)
             Opcode/ISUB
             (if-some [c (constgen/const-value ce)]
-              (folded-constant op opcd (.right-identity op) c)
+              (opgen/folded-constant op opcd (.right-identity op) c)
               (Op2. (+ (.bytecode Opcode/INEG) opcd) opcd opcd ce nil fctx))
             Opcode/IDIV
             (if-some [c (constgen/const-value ce)]
-              (folded-constant op opcd (.right-identity op) c)
-              (op-2 op opcd opcd (.emitter insn/insn-int-one) ce fctx))
+              (opgen/folded-constant op opcd (.right-identity op) c)
+              (opgen/op-2 op opcd opcd (.emitter insn/insn-int-one) ce fctx))
             #_else ce))
         (binary-numeric-insn ^Insn [^OpSpec op form ^Insns args ^long fctx]
           (let [args (take-args form args 2)
-                wop-type (top-numeric-of form args)
+                wop-type (opgen/top-numeric-of form args)
                 opcd (.computational-id wop-type)]
-            (-> (op-2 op opcd opcd (insn/emitter args 0) (insn/emitter args 1)
-                      fctx)
+            (-> (opgen/op-2 op opcd opcd
+                            (insn/emitter args 0) (insn/emitter args 1) fctx)
                 (insn/mk-insn (.class-primitive wop-type)))))
 
         (emit-array-gets ^Class [^CodeBuilder xb ^long fctx ^Insns args ^int n]
@@ -349,12 +201,13 @@
   (defn mk-nary-numeric ^Entity [^OpSpec op]
     (with-primitive-invoke [_ fctx form _ _ args]
       (let [args ^Insns args
-            wop-type (top-type-of op form args)
+            wop-type (opgen/top-type-of (.bottom-type op) (.top-type op)
+                                           form args)
             op-type (.class-primitive wop-type)]
         (-> (case (.length args)
               0 (constgen/constant (.right-identity op) op-type)
               1 (unary op (.computational-id wop-type) (insn/emitter args 0) fctx)
-              #_else (op-n op (.computational-id wop-type) (.emitters args) fctx))
+              #_else (opgen/op-n op (.computational-id wop-type) (.emitters args) fctx))
             (insn/mk-insn op-type)))))
 
   (defn mk-binary-numeric ^Entity [^OpSpec op]
@@ -381,8 +234,8 @@
       (let [arg (take-arg form args)
             wop-type (integral-type form args 0)
             opcd (.computational-id wop-type)]
-        (-> (op-2 (bitset-op Opcode/IXOR insn/insn-int-zero)
-                  opcd opcd (.emitter arg) (.emitter insn/insn-int-m1) fctx)
+        (-> (opgen/op-2 opgen/op-xxor opcd opcd
+                        (.emitter arg) (.emitter insn/insn-int-m1) fctx)
             (insn/mk-insn (.class-primitive wop-type))))))
 
   ;; FIXME... Only used for shifted-one.  Better alternative: add
@@ -403,21 +256,13 @@
         (let [args (take-args form args 2)
               warg0 (integral-type form args 0)
               warg1 (integer-type form args 1)]
-          (-> (op-2 op (.computational-id warg0) (.computational-id warg1)
-                    (insn/emitter args 0) (insn/emitter args 1) fctx)
+          (-> (opgen/op-2 op (.computational-id warg0) (.computational-id warg1)
+                          (insn/emitter args 0) (insn/emitter args 1) fctx)
               (insn/mk-insn (.class-primitive warg0)))))))
   
   (defn mk-nary-compare ^Entity [^int cmp-opcd]
     (with-primitive-invoke [_ fctx form _ _ args]
-      (let [args ^Insns args
-            wtop (or (when (= cmp-opcd condgen/cmp-eq)
-                       (type/of-all (.expr-types args)))
-                     (top-numeric-of form args))]
-        (case (.length args)
-          0 (throw (wrong/wr-info "missing argument"))
-          1 (insn/progn args insn/insn-true) ;FIXME... drop unary?
-          2 (condgen/xcmp-2 wtop (.get args 0) (.get args 1) cmp-opcd fctx)
-          #_ else (condgen/xcmp-n wtop args cmp-opcd fctx)))))
+      (junctgen/nary-compare cmp-opcd fctx args form)))
 
   (def nary-equiv
     (with-primitive-invoke [_ fctx form _ _ args]
@@ -425,12 +270,7 @@
         (if (type/all-monomorphic-primitive? (.expr-types args))
           ;; all arguments are non-void primitive: fall back to number compare
           (.invoke* (mk-nary-compare condgen/cmp-eq) fctx form nil -1 args)
-         
-          (case (.length args)
-            0 (throw (wrong/wr-info "missing argument"))
-            1 (insn/progn args insn/insn-true) ;FIXME... drop unary?
-            2 (condgen/xcmp-2 nil (.get args 0) (.get args 1) -1 fctx)
-            #_ else (condgen/xcmp-n nil args -1 fctx))))))
+          (junctgen/nary-compare -1 fctx args form)))))
   
   (def binary-identical
     (with-primitive-invoke [_ fctx form _ _ args]
@@ -618,24 +458,26 @@
                 (primitive "object" convert-to-object)))]
     (-> {}
         (conversions)
-        (nary-numeric "+" (numeric-op type/int Opcode/IADD
-                                      insn/insn-int-zero insn/insn-int-zero))
-        (nary-numeric "-" (numeric-op type/int Opcode/ISUB
-                                      nil insn/insn-int-zero))
-        (nary-numeric "*" (numeric-op type/int Opcode/IMUL
-                                      insn/insn-int-one insn/insn-int-one))
-        (nary-numeric "/" (numeric-op type/float Opcode/IDIV
-                                      nil insn/insn-float-one))
-        (primitive "quot" (-> (numeric-op type/int Opcode/IDIV
-                                          nil insn/insn-int-one)
+        (nary-numeric "+" (opgen/numeric-op type/int Opcode/IADD
+                                            insn/insn-int-zero
+                                            insn/insn-int-zero))
+        (nary-numeric "-" (opgen/numeric-op type/int Opcode/ISUB
+                                            nil insn/insn-int-zero))
+        (nary-numeric "*" (opgen/numeric-op type/int Opcode/IMUL
+                                            insn/insn-int-one
+                                            insn/insn-int-one))
+        (nary-numeric "/" (opgen/numeric-op type/float Opcode/IDIV
+                                            nil insn/insn-float-one))
+        (primitive "quot" (-> (opgen/numeric-op type/int Opcode/IDIV
+                                                nil insn/insn-int-one)
                               (mk-binary-xdiv-integral)))
-        (primitive "rem" (-> (numeric-op type/int Opcode/IREM
-                                         nil insn/insn-int-one)
+        (primitive "rem" (-> (opgen/numeric-op type/int Opcode/IREM
+                                               nil insn/insn-int-one)
                              (mk-binary-numeric)))
 
-        (nary-numeric "bit-and" (bitset-op Opcode/IAND insn/insn-int-m1))
-        (nary-numeric "bit-or" (bitset-op Opcode/IOR insn/insn-int-zero))
-        (nary-numeric "bit-xor" (bitset-op Opcode/IXOR insn/insn-int-zero))
+        (nary-numeric "bit-and" opgen/op-xand)
+        (nary-numeric "bit-or" opgen/op-xor)
+        (nary-numeric "bit-xor" opgen/op-xxor)
         (primitive "bit-not" unary-bit-not)
         (primitive "xdefault" unary-xdefault)
         (primitive "bit-shift-left" (mk-binary-shift Opcode/ISHL))
@@ -654,25 +496,9 @@
         (primitive "aset" nary-array-store)
         (primitive "aclone" array-clone)
 
-        ;; FIXME... Add dedicated implementations of "and"/"or", both
-        ;; for the "all boolean" case, as well as the unconstrained
-        ;; arguments version?  Experience with nary compare shows that
-        ;; they can be encoded in a more concise way.  These must be
-        ;; special forms, because it is possible to use recur in tail
-        ;; position.
-        ;;
+        ;; FIXME... Tune implementations of "and"/"or" further.
         ;; The "all boolean" variant should be able to encode the
-        ;; result via control flow, in which case no temporary storage
-        ;; is required.  Small difference from compare: the general
-        ;; implementation needs to deal with arguments of a common
-        ;; join type, similar to cond.  Still, it might be possible to
-        ;; use a single temporary local of join type, adapting tested
-        ;; values to the join type *before* computing their logical
-        ;; truth value.  Small wrinkle: `logical-truth` should work on
-        ;; the basis of the original type of the value, not the join
-        ;; type of the temporary local.  But this may be solved by
-        ;; testing a properly typed DUP, instead of a more generally
-        ;; typed LOAD.
+        ;; result via simpler control flow.
         ;;
         ;; The control flow of "and" seems to fit the branch-if-false
         ;; setup nicely.  For the boolean case, replacing "(or ...)"
