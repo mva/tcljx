@@ -321,6 +321,12 @@
       Void/TYPE)))
 (def mk-binding Binding/new)
 
+(defn every-binding-alias? ^boolean [^Binding/1 bindings]
+  (loop [i (dec (alength bindings))]
+    (cond (neg? i) true
+          (.alias? (aget bindings i)) (recur (dec i))
+          :else false)))
+
 ;;; ------------------------------------------------------------------------
 
 ;;; Any entity that can be turned into either an LDC instruction as

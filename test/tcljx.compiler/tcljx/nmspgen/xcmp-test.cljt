@@ -80,21 +80,34 @@
            (GETSTATIC Short "MIN_VALUE" "S")
            (ISTORE_1)
            ["LOCAL 1: int temp"]
+           (GETSTATIC Short "MAX_VALUE" "S")
+           (ISTORE_2)
+           ["LOCAL 2: int temp"]
            (ILOAD_1)
            (ILOAD_0)
-           (IF_ICMPGT L:0) (ICONST_1) (GOTO L:1) ;if MIN_VALUE > n: false
-           [L:0] (ICONST_0)
-           [L:1]
-           (ILOAD_0) (GETSTATIC Short "MAX_VALUE" "S")
-           (IF_ICMPGT L:2) (ICONST_1) (GOTO L:3) ;if n > MAX_VALUE: false
-           [L:2] (ICONST_0)
-           [L:3] (IAND)           ;combine first and second comparison
-           (IRETURN)]
+           (IF_ICMPGT L:1)              ;if MIN_VALUE > n: false
+           (ILOAD_0)
+           (ILOAD_2)
+           (IF_ICMPGT L:0)              ;if n > MAX_VALUE: false
+           (ICONST_1) (IRETURN)         ;otherwise: true
+           [L:0] (ICONST_0) (IRETURN)
+           [L:1] (ICONST_0) (IRETURN)]
          (asm-expr [^int n] (<= Short/MIN_VALUE n Short/MAX_VALUE))))
   #_
   (true? (call-expr (#(<= Short/MIN_VALUE ^int % Short/MAX_VALUE) Short/MIN_VALUE)))
   #_
   (false? (call-expr (#(<= Short/MIN_VALUE ^int % Short/MAX_VALUE) (dec Short/MIN_VALUE)))))
+
+(deftest no-temps-three-arg-compare-test
+  (is (= '[["LOCAL 0: int a"]
+           ["LOCAL 1: int b"]
+           ["LOCAL 2: int c"]
+           (ILOAD_0) (ILOAD_1) (IF_ICMPGT L:1) ;if a > b: false
+           (ILOAD_1) (ILOAD_2) (IF_ICMPGT L:0) ;if b > c: false
+           (ICONST_1) (IRETURN)                ;otherwise: true
+           [L:0] (ICONST_0) (IRETURN)
+           [L:1] (ICONST_0) (IRETURN)]
+         (asm-expr [^int a ^int b ^int c] (<= a b c)))))
 
 (deftest short-predicate-via-narrow-test
   (is (= '[["LOCAL 0: int n"]

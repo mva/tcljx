@@ -72,12 +72,6 @@
       (aset atypes i Object))
     atypes))
 
-(defn- every-binding-alias? ^boolean [^Binding/1 bindings]
-  (loop [i (dec (alength bindings))]
-    (cond (neg? i) true
-          (.alias? (aget bindings i)) (recur (dec i))
-          :else false)))
-
 (definterface InsnFactory
   :extends [ExprFactory]
   (get-recur-target ^Label [])
@@ -191,7 +185,7 @@
                              f)))))
   
   (block-bindings [this fctx bindings patch-letfn? recur-to-body? body]
-    (if (and (not recur-to-body?) (every-binding-alias? bindings))
+    (if (and (not recur-to-body?) (ir/every-binding-alias? bindings))
       body ;none of the bindings emits any code, nor is there a recur target
       (-> (^CodeEmitter fn [xb consumed-type then-leave?]
            (.block xb (^Consumer fn ^void [^CodeBuilder xb]

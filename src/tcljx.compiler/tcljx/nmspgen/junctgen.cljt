@@ -24,17 +24,19 @@
     (insn/mk-insn (.bound-to bnd) tp)))
 
 ;;; Simplified version of `block-bindings` from tcljx.nmspgen.codegen:
-(defn- block-binding ^Insn [^long fctx ^Binding bnd ^Insn body]
-  (if (.alias? bnd)
+(defn block-bindings [^long fctx ^Binding/1 bnds ^Insn body]
+  (if (ir/every-binding-alias? bnds)
     body
     (-> (^CodeEmitter fn [xb consumed-type then-leave?]
          (.block xb (^Consumer fn ^void [^CodeBuilder xb]
-                     (when (emit/statm? xb bnd)
+                     (when (emit/statms? xb bnds)
                        (emit/then-leave? xb fctx consumed-type (.emitter body)
                                          then-leave?))))
-         (when-not then-leave? ;can the then-leave? above return true?
+         (when-not then-leave?
            consumed-type))
-        (insn/mk-insn (.expr-type body)))))
+        (insn/mk-insn (insn/expr-type body)))))
+(defn- block-binding ^Insn [^long fctx ^Binding bnd ^Insn body]
+  (block-bindings fctx (doto (new Binding/1 1) (aset 0 bnd)) body))
 
 (defn- logical-join-type ^Class [^Insns args]
   (-> (condgen/join-type (.expr-types args) 0 (.length args))
@@ -97,19 +99,16 @@
       0 (throw (wrong/wr-info "missing argument"))
       1 (insn/progn args insn/insn-true)
       2 (condgen/xcmp-2 wtop (.get args 0) (.get args 1) cmp-opcd fctx)
-      #_else     ;all but the last argument get bindings left-to-right
-      (letfn [(expand ^Insn [^Insn opnd-left ^int i-right]
-                (if (>= i-right (dec (.length args)))
-                  (condgen/xcmp-2 wtop opnd-left (.get args i-right)
-                                  cmp-opcd fctx)
-                  (let [tp (.class-primitive wtop)
-                        bnd (binding-of tp args i-right)
-                        x-temp (bound-value tp bnd args i-right)]
-                    (->> (if (pos? i-right)
-                           (-> (condgen/xcmp-2 wtop opnd-left x-temp cmp-opcd
-                                               fctx) 
-                               (opgen/boolean-and (expand x-temp (inc i-right))
-                                                  fctx))
-                           (expand x-temp 1))
-                         (block-binding fctx bnd)))))]
-        (expand nil 0)))))
+      #_else (let [tp (.class-primitive wtop)
+                   n (.length args)
+                   bnds (new Binding/1 n)
+                   xs (insn/mk-insns* n)
+                   cmps (insn/mk-insns* (dec n))]
+               (dotimes [i n]
+                 (let [bnd (binding-of tp args i)]
+                   (aset bnds i bnd)
+                   (.set xs i (bound-value tp bnd args i))))
+               (dotimes [i (dec n)]
+                 (.set cmps i (condgen/xcmp-2 wtop (.get xs i) (.get xs (inc i))
+                                              cmp-opcd fctx)))
+               (block-bindings fctx bnds (nary-and fctx cmps))))))
