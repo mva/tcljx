@@ -46,10 +46,11 @@
      (let [start-false (.newLabel xb), end-false (.newLabel xb)]
        (if (some-code? if-true consumed-type)
          (let [return-t? (when (.emit-branch-on? branch xb false start-false)
-                           (emit/then-leave? xb fctx consumed-type if-true
-                                             then-leave?))]
-           (when (and return-t? (some-code? if-false consumed-type))
-             (.goto_ xb end-false))
+                           (when (emit/then-leave? xb fctx consumed-type if-true
+                                                   then-leave?)
+                             (when (some-code? if-false consumed-type)
+                               (.goto_ xb end-false))
+                             true))]
            
            (.labelBinding xb start-false)
            (let [return-f? (emit/then-leave? xb fctx consumed-type if-false

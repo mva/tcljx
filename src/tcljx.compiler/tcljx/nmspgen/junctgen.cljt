@@ -59,13 +59,14 @@
   (loop [i 0]
     (if (< i (alength ces))
       (let [ce (aget ces i)]
-        (when (if (instance? Branching ce)
-                (.emit-branch-on? ^Branching ce xb false target-f)
-                (or (identical? constgen/entity-true ce)
-                    (when (emit/insn? xb fctx Boolean/TYPE ce)
-                      (.ifeq xb target-f)
-                      true)))
-          (recur (inc i))))
+        (if (identical? constgen/entity-false ce)
+          (do (.goto_ xb target-f) false)
+          (when (if (instance? Branching ce)
+                  (.emit-branch-on? ^Branching ce xb false target-f)
+                  (or (identical? constgen/entity-true ce)
+                      (when (emit/insn? xb fctx Boolean/TYPE ce)
+                        (.ifeq xb target-f) true)))
+            (recur (inc i)))))
       true)))
 (defn- branching-and ^Branching [^long fctx ^Insns args] ;pre: 2+ boolean args
   (reify Branching
@@ -73,11 +74,11 @@
       (.emit-insn* (condgen/predicate this fctx) xb consumed-type then-leave?))
     (emit-branch-on? [_ xb outcome? target-o]
       (if outcome?
-        (let [target-f (.newLabel xb)
-              ret? (branch-on-false? xb fctx (.emitters args) target-f)]
-          (when ret? (.goto_ xb target-o))
+        (let [target-f (.newLabel xb)]
+          (when (branch-on-false? xb fctx (.emitters args) target-f)
+            (.goto_ xb target-o))
           (.labelBinding xb target-f)
-          ret?)
+          true)             ;dead code if there is no jump to target-f
         (branch-on-false? xb fctx (.emitters args) target-o)))))
 (defn nary-and* ^Insn [^long fctx ^Insns args] ;pre: 2+ args
   (let [tp (logical-join-type args)]
@@ -106,13 +107,14 @@
   (loop [i 0]
     (if (< i (alength ces))
       (let [ce (aget ces i)]
-        (when (if (instance? Branching ce)
-                (.emit-branch-on? ^Branching ce xb true target-t)
-                (or (identical? constgen/entity-false ce)
-                    (when (emit/insn? xb fctx Boolean/TYPE ce)
-                      (.ifne xb target-t)
-                      true)))
-          (recur (inc i))))
+        (if (identical? constgen/entity-true ce)
+          (do (.goto_ xb target-t) false)
+          (when (if (instance? Branching ce)
+                  (.emit-branch-on? ^Branching ce xb true target-t)
+                  (or (identical? constgen/entity-false ce)
+                      (when (emit/insn? xb fctx Boolean/TYPE ce)
+                        (.ifne xb target-t) true)))
+            (recur (inc i)))))
       true)))
 (defn- branching-or ^Branching [^long fctx ^Insns args] ;pre: 2+ boolean args
   (reify Branching
@@ -121,11 +123,11 @@
     (emit-branch-on? [_ xb outcome? target-o]
       (if outcome?
         (branch-on-true? xb fctx (.emitters args) target-o)
-        (let [target-t (.newLabel xb)
-              ret? (branch-on-true? xb fctx (.emitters args) target-t)]
-          (when ret? (.goto_ xb target-o))
+        (let [target-t (.newLabel xb)]
+          (when (branch-on-true? xb fctx (.emitters args) target-t)
+            (.goto_ xb target-o))
           (.labelBinding xb target-t)
-          ret?)))))
+          true)))))         ;dead code if there is no jump to target-t
 (defn nary-or* ^Insn [^long fctx ^Insns args] ;pre: 2+ args
   (let [tp (logical-join-type args)]
     ;; straightforward translation of macro clojure.core/or
