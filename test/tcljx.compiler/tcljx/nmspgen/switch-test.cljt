@@ -34,30 +34,26 @@
             (IRETURN)]
            (asm-expr [^int c] (< (/ c 1)))))
 
-  (is (= '[(ICONST_1)
-           (IRETURN)]
+  (is (= '[(ICONST_1) (IRETURN) (NOP) (ATHROW)]
          (asm-expr (< 1 2 3))))
   (is (= '[["LOCAL 0: int i"]
            (ILOAD_0) (ICONST_1) (IADD) (ISTORE_1) ["LOCAL 1: int temp"]
            (ILOAD_0) (ICONST_2) (IADD) (ISTORE_2) ["LOCAL 2: int temp"]
            (ILOAD_0) (ICONST_3) (IADD) (ISTORE_3) ["LOCAL 3: int temp"]
-           (ILOAD_1) (ILOAD_2) (IF_ICMPGE L:1)
+           (ILOAD_1) (ILOAD_2) (IF_ICMPGE L:0)
            (ILOAD_2) (ILOAD_3) (IF_ICMPGE L:0)
            (ICONST_1) (IRETURN)
-           [L:0] (ICONST_0) (IRETURN)
-           [L:1] (ICONST_0) (IRETURN)]
+           [L:0] (ICONST_0) (IRETURN)]
          (asm-expr [^int i] (< (+ i 1) (+ i 2) (+ i 3)))))
   (is (= '[["LOCAL 0: int i"]
            (ILOAD_0) (ICONST_1) (IADD) (ISTORE_1) ["LOCAL 1: int temp"]
            (ILOAD_0) (ICONST_2) (IADD) (ISTORE_2) ["LOCAL 2: int temp"]
            (ILOAD_0) (ICONST_3) (IADD) (ISTORE_3) ["LOCAL 3: int temp"]
-           (ILOAD_1) (ILOAD_2) (IF_ICMPGE L:2)
+           (ILOAD_1) (ILOAD_2) (IF_ICMPGE L:0)
            (ILOAD_2) (ILOAD_3) (IF_ICMPGE L:0)
            (ICONST_1) (GOTO L:1)
            [L:0] (ICONST_0)
-           [L:1] (GOTO L:3)
-           [L:2] (ICONST_0)
-           [L:3] (ICONST_1) (IXOR) (IRETURN)]
+           [L:1] (ICONST_1) (IXOR) (IRETURN)]
          (asm-expr [^int i] (not (< (+ i 1) (+ i 2) (+ i 3))))))
 
   (is (= '[#_(BIPUSH 99)

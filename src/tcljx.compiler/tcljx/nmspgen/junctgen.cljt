@@ -7,7 +7,8 @@
    (tcljx.data.type Wrapper)
    (tcljx.data.ir CodeEmitter Entity Binding)
    (tcljx.nmspgen.insn Insn Insns)
-   (java.lang.classfile CodeBuilder)
+   (tcljx.nmspgen.condgen Branching)
+   (java.lang.classfile CodeBuilder Label)
    (java.util.function Consumer)))
 
 (defn- binding-of ^Binding [^Class tp ^Insns xs ^int i]
@@ -24,7 +25,7 @@
     (insn/mk-insn (.bound-to bnd) tp)))
 
 ;;; Simplified version of `block-bindings` from tcljx.nmspgen.codegen:
-(defn block-bindings [^long fctx ^Binding/1 bnds ^Insn body]
+(defn- block-bindings [^long fctx ^Binding/1 bnds ^Insn body]
   (if (ir/every-binding-alias? bnds)
     body
     (-> (^CodeEmitter fn [xb consumed-type then-leave?]
@@ -45,49 +46,109 @@
 (defn- boolean-temp? ^boolean [^Insns args ^int i]
   (type/same? Boolean/TYPE (insn/expr-type args i)))
 
-;;; Straightforward translation of macro clojure.core/and.
-(defn nary-and ^Insn [^long fctx ^Insns args]
-  (if (pos? (.length args))
-    (let [tp (logical-join-type args)]
-      (letfn [(test-for-and ^Insn [^int i ^Insn x-test ^CodeEmitter on-false]
-                (-> (.emitter (condgen/logical-truth x-test fctx))
-                    (condgen/mk-if tp (.emitter (expand (inc i))) on-false fctx)
-                    (insn/mk-insn tp)))
-              (expand ^Insn [^int i]
-                (cond (>= i (dec (.length args)))
-                      (.get args i)
-                      
-                      (boolean-temp? args i)
-                      (test-for-and i (.get args i) constgen/entity-false)
-                      
-                      :else (let [bnd (binding-of tp args i)
-                                  x-temp (bound-value tp bnd args i)]
-                              (->> (test-for-and i x-temp (.emitter x-temp))
-                                   (block-binding fctx bnd)))))]
-        (expand 0)))
-    insn/insn-true))
+(defn- strict-boolean? ^boolean [^Class join-type ^Class/1 expr-types]
+  (when (type/same? Boolean/TYPE join-type) ;cheap test does not reject recur
+    (loop [i (dec (alength expr-types))]
+      (cond (< i 0) true
+            (type/same? Boolean/TYPE (aget expr-types i)) (recur (dec i))
+            :else false))))
 
-;;; Straightforward translation of macro clojure.core/or.
-(defn nary-or ^Insn [^long fctx ^Insns args]
-  (if (pos? (.length args))
-    (let [tp (logical-join-type args)]
-      (letfn [(test-for-or ^Insn [^int i ^Insn x-test ^CodeEmitter on-true]
-                (-> (.emitter (condgen/logical-truth x-test fctx))
-                    (condgen/mk-if tp on-true (.emitter (expand (inc i))) fctx)
-                    (insn/mk-insn tp)))
-              (expand ^Insn [^int i]
-                (cond (>= i (dec (.length args)))
-                      (.get args i)
 
-                      (boolean-temp? args i)
-                      (test-for-or i (.get args i) constgen/entity-true)
+(defn- branch-on-false? ^boolean [^CodeBuilder xb ^long fctx ^CodeEmitter/1 ces
+                                  ^Label target-f]
+  (loop [i 0]
+    (if (< i (alength ces))
+      (let [ce (aget ces i)]
+        (when (if (instance? Branching ce)
+                (.emit-branch-on? ^Branching ce xb false target-f)
+                (or (identical? constgen/entity-true ce)
+                    (when (emit/insn? xb fctx Boolean/TYPE ce)
+                      (.ifeq xb target-f)
+                      true)))
+          (recur (inc i))))
+      true)))
+(defn- branching-and ^Branching [^long fctx ^Insns args] ;pre: 2+ boolean args
+  (reify Branching
+    (emit-insn* [this xb consumed-type then-leave?]
+      (.emit-insn* (condgen/predicate this false fctx)
+                   xb consumed-type then-leave?))
+    (emit-branch-on? [_ xb outcome? target-o]
+      (if outcome?
+        (let [target-f (.newLabel xb)
+              ret? (branch-on-false? xb fctx (.emitters args) target-f)]
+          (when ret? (.goto_ xb target-o))
+          (.labelBinding xb target-f)
+          ret?)
+        (branch-on-false? xb fctx (.emitters args) target-o)))))
+(defn nary-and* ^Insn [^long fctx ^Insns args] ;pre: 2+ args
+  (let [tp (logical-join-type args)]
+    ;; straightforward translation of macro clojure.core/and
+    (letfn [(test-for-and ^Insn [^int i ^Insn x-test ^CodeEmitter on-false]
+              (-> (.emitter (condgen/logical-truth x-test fctx))
+                  (condgen/mk-if tp (.emitter (expand (inc i))) on-false fctx)
+                  (insn/mk-insn tp)))
+            (expand ^Insn [^int i]
+              (cond (>= i (dec (.length args)))
+                    (.get args i)
+                    
+                    (boolean-temp? args i)
+                    (test-for-and i (.get args i) constgen/entity-false)
+                    
+                    :else (let [bnd (binding-of tp args i)
+                                x-temp (bound-value tp bnd args i)]
+                            (->> (test-for-and i x-temp (.emitter x-temp))
+                                 (block-binding fctx bnd)))))]
+      (if (strict-boolean? tp (.expr-types args))
+        (insn/mk-insn (branching-and fctx args) Boolean/TYPE)
+        (expand 0)))))
 
-                      :else (let [bnd (binding-of tp args i)
-                                  x-temp (bound-value tp bnd args i)]
-                              (->> (test-for-or i x-temp (.emitter x-temp))
-                                   (block-binding fctx bnd)))))]
-        (expand 0)))
-    insn/insn-null))
+(defn- branch-on-true? ^boolean [^CodeBuilder xb ^long fctx ^CodeEmitter/1 ces
+                                 ^Label target-t]
+  (loop [i 0]
+    (if (< i (alength ces))
+      (let [ce (aget ces i)]
+        (when (if (instance? Branching ce)
+                (.emit-branch-on? ^Branching ce xb true target-t)
+                (or (identical? constgen/entity-false ce)
+                    (when (emit/insn? xb fctx Boolean/TYPE ce)
+                      (.ifne xb target-t)
+                      true)))
+          (recur (inc i))))
+      true)))
+(defn- branching-or ^Branching [^long fctx ^Insns args] ;pre: 2+ boolean args
+  (reify Branching
+    (emit-insn* [this xb consumed-type then-leave?]
+      (.emit-insn* (condgen/predicate this false fctx)
+                   xb consumed-type then-leave?))
+    (emit-branch-on? [_ xb outcome? target-o]
+      (if outcome?
+        (branch-on-true? xb fctx (.emitters args) target-o)
+        (let [target-t (.newLabel xb)
+              ret? (branch-on-true? xb fctx (.emitters args) target-t)]
+          (when ret? (.goto_ xb target-o))
+          (.labelBinding xb target-t)
+          ret?)))))
+(defn nary-or* ^Insn [^long fctx ^Insns args] ;pre: 2+ args
+  (let [tp (logical-join-type args)]
+    ;; straightforward translation of macro clojure.core/or
+    (letfn [(test-for-or ^Insn [^int i ^Insn x-test ^CodeEmitter on-true]
+              (-> (.emitter (condgen/logical-truth x-test fctx))
+                  (condgen/mk-if tp on-true (.emitter (expand (inc i))) fctx)
+                  (insn/mk-insn tp)))
+            (expand ^Insn [^int i]
+              (cond (>= i (dec (.length args)))
+                    (.get args i)
+
+                    (boolean-temp? args i)
+                    (test-for-or i (.get args i) constgen/entity-true)
+
+                    :else (let [bnd (binding-of tp args i)
+                                x-temp (bound-value tp bnd args i)]
+                            (->> (test-for-or i x-temp (.emitter x-temp))
+                                 (block-binding fctx bnd)))))]
+      (if (strict-boolean? tp (.expr-types args))
+        (insn/mk-insn (branching-or fctx args) Boolean/TYPE)
+        (expand 0)))))
 
 
 (defn nary-compare ^Insn [^int cmp-opcd ^long fctx ^Insns args form]
@@ -103,7 +164,7 @@
                    n (.length args)
                    bnds (new Binding/1 n)
                    xs (insn/mk-insns* n)
-                   cmps (insn/mk-insns* (dec n))]
+                   cmps (insn/mk-insns* (dec n))] ;length is at least two
                (dotimes [i n]
                  (let [bnd (binding-of tp args i)]
                    (aset bnds i bnd)
@@ -111,4 +172,4 @@
                (dotimes [i (dec n)]
                  (.set cmps i (condgen/xcmp-2 wtop (.get xs i) (.get xs (inc i))
                                               cmp-opcd fctx)))
-               (block-bindings fctx bnds (nary-and fctx cmps))))))
+               (block-bindings fctx bnds (nary-and* fctx cmps))))))

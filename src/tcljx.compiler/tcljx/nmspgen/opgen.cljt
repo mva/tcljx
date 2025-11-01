@@ -135,15 +135,6 @@
       (recur (op-2 op opcd opcd acc (aget ces i) fctx) (inc i))
       acc)))
 
-
-;;; Not sure if this helper is a good idea.
-(defn boolean-and ^Insn [^Insn arg0 ^Insn arg1 ^long fctx]
-  (-> (^CodeEmitter fn [xb consumed-type then-leave?]
-       (when (-> (op-2 op-xand 0 0 (.emitter arg0) (.emitter arg1) fctx)
-                 (.emit-insn* xb consumed-type then-leave?))
-         Boolean/TYPE))
-      (insn/mk-insn Boolean/TYPE)))
-
 ;;; ------------------------------------------------------------------------
 
 (defn info-type-mismatch ^Throwable [form ^Insns args ^int i ^String exp]

@@ -48,18 +48,18 @@
     (^CodeEmitter fn [xb consumed-type then-leave?]
      (let [start-false (.newLabel xb), end-false (.newLabel xb)]
        (if (some-code? if-true consumed-type)
-         (when (.emit-branch-on? branch xb false start-false)
-           (let [return-t? (emit/then-leave? xb fctx consumed-type if-true
+         (let [return-t? (when (.emit-branch-on? branch xb false start-false)
+                           (emit/then-leave? xb fctx consumed-type if-true
+                                             then-leave?))]
+           (when (and return-t? (some-code? if-false consumed-type))
+             (.goto_ xb end-false))
+           
+           (.labelBinding xb start-false)
+           (let [return-f? (emit/then-leave? xb fctx consumed-type if-false
                                              then-leave?)]
-             (when (and return-t? (some-code? if-false consumed-type))
-               (.goto_ xb end-false))
-             
-             (.labelBinding xb start-false)
-             (let [return-f? (emit/then-leave? xb fctx consumed-type if-false
-                                               then-leave?)]
-               (.labelBinding xb end-false)
-               (when (or return-t? return-f?)
-                 consumed-type))))
+             (.labelBinding xb end-false)
+             (when (or return-t? return-f?)
+               consumed-type)))
 
          ;; here holds: consumed-type is `void`
          (when (.emit-branch-on? branch xb true end-false)
@@ -68,8 +68,8 @@
            (emit/insn? xb fctx Void/TYPE if-false)
            (.labelBinding xb end-false)
            Void/TYPE))))))
-(defn- predicate ^CodeEmitter [^Branching branch ^boolean negate-result?
-                               ^long fctx]
+(defn predicate ^CodeEmitter [^Branching branch ^boolean negate-result?
+                              ^long fctx]
   (if negate-result?
     ;; note: for complex boolean expressions like `and` and `or`, the
     ;; whole expression's value can not be negated by only flipping

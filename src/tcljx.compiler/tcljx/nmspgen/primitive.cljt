@@ -342,10 +342,16 @@
             (insn/mk-insn Boolean/TYPE)))))
   (def nary-and
     (with-primitive-invoke-recur [_ fctx form _ _ args]
-      (junctgen/nary-and fctx args)))
+      (case (.length args)
+        0 insn/insn-true
+        1 (.get args 0)
+        #_else (junctgen/nary-and* fctx args))))
   (def nary-or
     (with-primitive-invoke-recur [_ fctx form _ _ args]
-      (junctgen/nary-or fctx args))))
+      (case (.length args)
+        0 insn/insn-null
+        1 (.get args 0)
+        #_else (junctgen/nary-or* fctx args)))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -496,16 +502,6 @@
         (primitive "aset" nary-array-store)
         (primitive "aclone" array-clone)
 
-        ;; FIXME... Tune implementations of "and"/"or" further.
-        ;; The "all boolean" variant should be able to encode the
-        ;; result via simpler control flow.
-        ;;
-        ;; The control flow of "and" seems to fit the branch-if-false
-        ;; setup nicely.  For the boolean case, replacing "(or ...)"
-        ;; with "(not (not (and ...))" and using De Morgan is an
-        ;; option.  But not for the general case, because it produces
-        ;; values of arbitrary types.  Which unfortunately means 2*2
-        ;; different code paths in total.
         (primitive "not" unary-not)
         (primitive "and" nary-and)
         (primitive "or" nary-or)
