@@ -70,8 +70,7 @@
 (defn- branching-and ^Branching [^long fctx ^Insns args] ;pre: 2+ boolean args
   (reify Branching
     (emit-insn* [this xb consumed-type then-leave?]
-      (.emit-insn* (condgen/predicate this false fctx)
-                   xb consumed-type then-leave?))
+      (.emit-insn* (condgen/predicate this fctx) xb consumed-type then-leave?))
     (emit-branch-on? [_ xb outcome? target-o]
       (if outcome?
         (let [target-f (.newLabel xb)
@@ -118,8 +117,7 @@
 (defn- branching-or ^Branching [^long fctx ^Insns args] ;pre: 2+ boolean args
   (reify Branching
     (emit-insn* [this xb consumed-type then-leave?]
-      (.emit-insn* (condgen/predicate this false fctx)
-                   xb consumed-type then-leave?))
+      (.emit-insn* (condgen/predicate this fctx) xb consumed-type then-leave?))
     (emit-branch-on? [_ xb outcome? target-o]
       (if outcome?
         (branch-on-true? xb fctx (.emitters args) target-o)

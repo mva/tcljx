@@ -15,9 +15,6 @@
   :extends [CodeEmitter]
   (emit-branch-on? ^boolean [^CodeBuilder xb ^boolean outcome? ^Label target]))
 
-(definterface Negatable
-  (negate ^CodeEmitter []))
-
 ;;; Values for `cmp-opcd`.
 (def cmp-eq 0)
 (def cmp-ne 1)
@@ -68,16 +65,9 @@
            (emit/insn? xb fctx Void/TYPE if-false)
            (.labelBinding xb end-false)
            Void/TYPE))))))
-(defn predicate ^CodeEmitter [^Branching branch ^boolean negate-result?
-                              ^long fctx]
-  (if negate-result?
-    ;; note: for complex boolean expressions like `and` and `or`, the
-    ;; whole expression's value can not be negated by only flipping
-    ;; the opcodes of branches
-    (conditional branch Boolean/TYPE
-                 constgen/entity-false constgen/entity-true fctx)
-    (conditional branch Boolean/TYPE
-                 constgen/entity-true constgen/entity-false fctx)))
+(defn predicate ^CodeEmitter [^Branching branch ^long fctx]
+  (conditional branch Boolean/TYPE
+               constgen/entity-true constgen/entity-false fctx))
 
 (defn negation ^CodeEmitter [^CodeEmitter ce ^long fctx]
   ;; pre: `ce` is boolean
@@ -88,27 +78,24 @@
     (identical? constgen/entity-true ce)
     constgen/entity-false
     
-    (instance? Negatable ce)
-    (.negate ^Negatable ce)
-    
     (instance? Branching ce)
-    (predicate ce true fctx)
-
+    (reify Branching
+      (emit-insn* [this xb consumed-type then-leave?]
+        (.emit-insn* (predicate this fctx) xb consumed-type then-leave?))
+      (emit-branch-on? [_ xb outcome? target]
+        (.emit-branch-on? ^Branching ce xb (not outcome?) target)))
+    
     :else
-    (reify CodeEmitter Negatable
-      (emit-insn* [_ xb _ _]
-        (when (emit/insn? xb fctx Boolean/TYPE ce)
-          (-> xb (.loadConstant 1) (.ixor))
-          Boolean/TYPE))
-      (negate [_]
-        ce))))
+    (^CodeEmitter fn [xb _ _]
+      (when (emit/insn? xb fctx Boolean/TYPE ce)
+        (-> xb (.loadConstant 1) (.ixor))
+        Boolean/TYPE))))
 
 (letfn [(mk-ifpred ^Branching [^int opcode-eq ^int cmp-opcd ^Class arg-type
                                ^CodeEmitter/1 args ^long fctx]
-          (reify Branching Negatable
+          (reify Branching
             (emit-insn* [this xb consumed-type then-leave?] ;standalone insn
-              (.emit-insn* (predicate this false fctx)
-                           xb consumed-type then-leave?))
+              (.emit-insn* (predicate this fctx) xb consumed-type then-leave?))
             (emit-branch-on? [_ xb outcome? target] ;test of an if expression
               (when (emit/insns? xb fctx arg-type args)
                 (case (+ opcode-eq
@@ -129,10 +116,7 @@
                   166 (.if_acmpne xb target)
                   198 (.ifnull xb target)
                   199 (.ifnonnull xb target))
-                true))
-            (negate [_]
-              (mk-ifpred opcode-eq (negate-test cmp-opcd) arg-type args
-                         fctx))))]
+                true))))]
   ;; Creates a comparison predicate from the IFXXX family of opcodes.
   ;; It can appear either as a standalone boolean predicate (with the
   ;; conditional paths delivering `true` and `false` respectively),

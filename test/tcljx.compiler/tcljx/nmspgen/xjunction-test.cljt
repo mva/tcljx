@@ -240,8 +240,10 @@
            [L:0] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean x] (and true x))))
   (is (= '[["LOCAL 0: boolean x"]
-           (ILOAD_0) (IFEQ L:0) (ICONST_0) (IRETURN)
-           [L:0] (ICONST_1) (IRETURN)]
+           (ILOAD_0) (IFEQ L:0)
+           (GOTO L:1)
+           [L:0] (ICONST_1) (IRETURN)
+           [L:1] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean x] (not (and true x)))))
 
   (is (= '[["LOCAL 0: boolean x"]
@@ -249,8 +251,10 @@
            [L:0] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean x] (and x true))))
   (is (= '[["LOCAL 0: boolean x"]
-           (ILOAD_0) (IFEQ L:0) (ICONST_0) (IRETURN)
-           [L:0] (ICONST_1) (IRETURN)]
+           (ILOAD_0) (IFEQ L:0)
+           (GOTO L:1)
+           [L:0] (ICONST_1) (IRETURN)
+           [L:1] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean x] (not (and x true)))))
 
   (is (= '[["LOCAL 0: boolean x"]
@@ -262,8 +266,9 @@
   (is (= '[["LOCAL 0: boolean x"]
            (ICONST_0) (IFEQ L:0)
            (ILOAD_0) (IFEQ L:0)
-           (ICONST_0) (IRETURN)
-           [L:0] (ICONST_1) (IRETURN)]
+           (GOTO L:1)
+           [L:0] (ICONST_1) (IRETURN)
+           [L:1] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean x] (not (and false x)))))
   
   (is (= '[["LOCAL 0: boolean x"]
@@ -275,8 +280,9 @@
   (is (= '[["LOCAL 0: boolean x"]
            (ILOAD_0) (IFEQ L:0)
            (ICONST_0) (IFEQ L:0)
-           (ICONST_0) (IRETURN)
-           [L:0] (ICONST_1) (IRETURN)]
+           (GOTO L:1)
+           [L:0] (ICONST_1) (IRETURN)
+           [L:1] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean x] (not (and x false))))))
 
 (deftest basic-nary-and-of-boolean
@@ -427,8 +433,9 @@
            (ILOAD_0) (IFEQ L:0)
            (ILOAD_1) (IFEQ L:0)
            (ILOAD_2) (IFEQ L:0)
-           (ICONST_0) (IRETURN)
-           [L:0] (ICONST_1) (IRETURN)]
+           (GOTO L:1)
+           [L:0] (ICONST_1) (IRETURN)
+           [L:1] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean a ^boolean b ^boolean c]
                    (not (and a b c)))))
   (is (= '[["LOCAL 0: boolean a"]
@@ -437,10 +444,9 @@
            (ILOAD_0) (IFEQ L:0)
            (ILOAD_1) (IFEQ L:0)
            (ILOAD_2) (IFEQ L:0)
-           (ICONST_0) (GOTO L:1)
-           [L:0] (ICONST_1)
-           [L:1] (IFEQ L:2) (LDC "true") (ARETURN)
-           [L:2] (LDC "false") (ARETURN)]
+           (GOTO L:1)
+           [L:0] (LDC "true") (ARETURN)
+           [L:1] (LDC "false") (ARETURN)]
          (asm-expr ^String [^boolean a ^boolean b ^boolean c]
                    (if (not (and a b c)) "true" "false")))))
 
@@ -589,9 +595,8 @@
   (is (= '[["LOCAL 0: boolean x"]
            (ICONST_1) (IFNE L:0)
            (ILOAD_0) (IFNE L:0)
-           (GOTO L:1)
-           [L:0] (ICONST_0) (IRETURN)
-           [L:1] (ICONST_1) (IRETURN)]
+           (ICONST_1) (IRETURN)
+           [L:0] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean x] (not (or true x)))))
 
   (is (= '[["LOCAL 0: boolean x"]
@@ -604,9 +609,8 @@
   (is (= '[["LOCAL 0: boolean x"]
            (ILOAD_0) (IFNE L:0)
            (ICONST_1) (IFNE L:0)
-           (GOTO L:1)
-           [L:0] (ICONST_0) (IRETURN)
-           [L:1] (ICONST_1) (IRETURN)]
+           (ICONST_1) (IRETURN)
+           [L:0] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean x] (not (or x true)))))
 
   (is (= '[["LOCAL 0: boolean x"]
@@ -617,9 +621,8 @@
          (asm-expr ^boolean [^boolean x] (or false x))))
   (is (= '[["LOCAL 0: boolean x"]
            (ILOAD_0) (IFNE L:0)
-           (GOTO L:1)
-           [L:0] (ICONST_0) (IRETURN)
-           [L:1] (ICONST_1) (IRETURN)]
+           (ICONST_1) (IRETURN)
+           [L:0] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean x] (not (or false x)))))
   
   (is (= '[["LOCAL 0: boolean x"]
@@ -630,9 +633,8 @@
          (asm-expr ^boolean [^boolean x] (or x false))))
   (is (= '[["LOCAL 0: boolean x"]
            (ILOAD_0) (IFNE L:0)
-           (GOTO L:1)
-           [L:0] (ICONST_0) (IRETURN)
-           [L:1] (ICONST_1) (IRETURN)]
+           (ICONST_1) (IRETURN)
+           [L:0] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean x] (not (or x false))))))
 
 (deftest basic-nary-or-of-boolean
@@ -765,9 +767,8 @@
            (ILOAD_0) (IFNE L:0)
            (ILOAD_1) (IFNE L:0)
            (ILOAD_2) (IFNE L:0)
-           (GOTO L:1)
-           [L:0] (ICONST_0) (IRETURN)
-           [L:1] (ICONST_1) (IRETURN)]
+           (ICONST_1) (IRETURN)
+           [L:0] (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean a ^boolean b ^boolean c]
                    (not (or a b c)))))
   (is (= '[["LOCAL 0: boolean a"]
@@ -776,11 +777,8 @@
            (ILOAD_0) (IFNE L:0)
            (ILOAD_1) (IFNE L:0)
            (ILOAD_2) (IFNE L:0)
-           (GOTO L:1)
-           [L:0] (ICONST_0) (GOTO L:2)
-           [L:1] (ICONST_1)
-           [L:2] (IFEQ L:3) (LDC "true") (ARETURN)
-           [L:3] (LDC "false") (ARETURN)]
+           (LDC "true") (ARETURN)
+           [L:0] (LDC "false") (ARETURN)]
          (asm-expr ^String [^boolean a ^boolean b ^boolean c]
                    (if (not (or a b c)) "true" "false")))))
 
@@ -814,9 +812,8 @@
            (ILOAD_2) (IFEQ L:1)
            (ILOAD_3) (IFEQ L:1)
            (GOTO L:2)
-           [L:1] (GOTO L:3)
-           [L:2] (ICONST_0) (IRETURN)
-           [L:3] (ICONST_1) (IRETURN)]
+           [L:1] (ICONST_1) (IRETURN)
+           [L:2] (ICONST_0) (IRETURN)]
          (asm-expr [^boolean a ^boolean b ^boolean c ^boolean d]
                    (not (or (and a b) (and c d)))))))
 
@@ -847,7 +844,8 @@
            (ILOAD_2) (IFNE L:1)
            (ILOAD_3) (IFNE L:1)
            (GOTO L:2)
-           [L:1] (ICONST_0) (IRETURN)
-           [L:2] (ICONST_1) (IRETURN)]
+           [L:1] (GOTO L:3)
+           [L:2] (ICONST_1) (IRETURN)
+           [L:3] (ICONST_0) (IRETURN)]
          (asm-expr [^boolean a ^boolean b ^boolean c ^boolean d]
                    (not (and (or a b) (or c d)))))))
