@@ -54,31 +54,31 @@
             :else false))))
 
 
-(defn- branch-on-false? ^boolean [^CodeBuilder xb ^long fctx ^CodeEmitter/1 ces
-                                  ^Label target-f]
+(defn- branch-on-false ^void [^CodeBuilder xb ^long fctx ^CodeEmitter/1 ces
+                              ^Label target-f]
   (loop [i 0]
-    (if (< i (alength ces))
+    (when (< i (alength ces))
       (let [ce (aget ces i)]
         (when (if (instance? Branching ce)
                 (.emit-branch-on? ^Branching ce xb false target-f)
                 (or (identical? constgen/entity-true ce)
                     (when (emit/insn? xb fctx Boolean/TYPE ce)
                       (.ifeq xb target-f) true)))
-          (recur (inc i))))
-      true)))
-(defn- branching-and ^Branching [^long fctx ^Insns args] ;pre: 2+ boolean args
+          (recur (inc i)))))))
+(defn- branching-and ^Branching [^long fctx ^Insns args]
+  ;; pre: 2+ boolean arguments, none of them false
   (reify Branching
     (emit-insn* [this xb consumed-type then-leave?]
       (.emit-insn* (condgen/predicate this fctx) xb consumed-type then-leave?))
     (emit-branch-on? [_ xb outcome? target-o]
       (if outcome?
         (let [target-f (.newLabel xb)]
-          (when (branch-on-false? xb fctx (.emitters args) target-f)
-            (.goto_ xb target-o))
-          (.labelBinding xb target-f)
-          true)             ;dead code if there is no jump to target-f
-        (branch-on-false? xb fctx (.emitters args) target-o)))))
-(defn nary-and* ^Insn [^long fctx ^Insns args] ;pre: 2+ args
+          (branch-on-false xb fctx (.emitters args) target-f)
+          (.goto_ xb target-o)
+          (.labelBinding xb target-f))
+        (branch-on-false xb fctx (.emitters args) target-o))
+      true)))
+(defn nary-and* ^Insn [^long fctx ^Insns args] ;pre: 2+ args & none are false
   (let [tp (logical-join-type args)]
     ;; straightforward translation of macro clojure.core/and
     (letfn [(test-for-and ^Insn [^int i ^Insn x-test ^CodeEmitter on-false]
@@ -100,31 +100,31 @@
         (insn/mk-insn (branching-and fctx args) Boolean/TYPE)
         (expand 0)))))
 
-(defn- branch-on-true? ^boolean [^CodeBuilder xb ^long fctx ^CodeEmitter/1 ces
-                                 ^Label target-t]
+(defn- branch-on-true ^void [^CodeBuilder xb ^long fctx ^CodeEmitter/1 ces
+                             ^Label target-t]
   (loop [i 0]
-    (if (< i (alength ces))
+    (when (< i (alength ces))
       (let [ce (aget ces i)]
         (when (if (instance? Branching ce)
                 (.emit-branch-on? ^Branching ce xb true target-t)
                 (or (identical? constgen/entity-false ce)
                     (when (emit/insn? xb fctx Boolean/TYPE ce)
                       (.ifne xb target-t) true)))
-          (recur (inc i))))
-      true)))
-(defn- branching-or ^Branching [^long fctx ^Insns args] ;pre: 2+ boolean args
+          (recur (inc i)))))))
+(defn- branching-or ^Branching [^long fctx ^Insns args]
+  ;; pre: 2+ boolean arguments, none of them true
   (reify Branching
     (emit-insn* [this xb consumed-type then-leave?]
       (.emit-insn* (condgen/predicate this fctx) xb consumed-type then-leave?))
     (emit-branch-on? [_ xb outcome? target-o]
       (if outcome?
-        (branch-on-true? xb fctx (.emitters args) target-o)
+        (branch-on-true xb fctx (.emitters args) target-o)
         (let [target-t (.newLabel xb)]
-          (when (branch-on-true? xb fctx (.emitters args) target-t)
-            (.goto_ xb target-o))
-          (.labelBinding xb target-t)
-          true)))))         ;dead code if there is no jump to target-t
-(defn nary-or* ^Insn [^long fctx ^Insns args] ;pre: 2+ args
+          (branch-on-true xb fctx (.emitters args) target-t)
+          (.goto_ xb target-o)
+          (.labelBinding xb target-t)))
+      true)))
+(defn nary-or* ^Insn [^long fctx ^Insns args] ;pre: 2+ args & none are true
   (let [tp (logical-join-type args)]
     ;; straightforward translation of macro clojure.core/or
     (letfn [(test-for-or ^Insn [^int i ^Insn x-test ^CodeEmitter on-true]
