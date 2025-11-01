@@ -11,7 +11,7 @@
    (java.lang.classfile CodeBuilder Label)
    (java.util.function Consumer)))
 
-(defn- binding-of ^Binding [^Class tp ^Insns xs ^int i]
+(defn binding-of ^Binding [^Class tp ^Insns xs ^int i]
   ;; pre: `x` is non-environment value
   (let [ce (insn/emitter xs i)]
     (if (= (ir/binding-mode-let ce) ir/bound-as-alias)
@@ -19,13 +19,13 @@
       (-> (util/entity-local tp 0 ce)
           (ir/mk-binding "temp" false)))))
 
-(defn- bound-value ^Insn [^Class tp ^Binding bnd ^Insns args ^int i]
+(defn bound-value ^Insn [^Class tp ^Binding bnd ^Insns args ^int i]
   (if (.alias? bnd)
     ^Insn (.get args i)
     (insn/mk-insn (.bound-to bnd) tp)))
 
 ;;; Simplified version of `block-bindings` from tcljx.nmspgen.codegen:
-(defn- block-bindings [^long fctx ^Binding/1 bnds ^Insn body]
+(defn block-bindings [^long fctx ^Binding/1 bnds ^Insn body]
   (if (ir/every-binding-alias? bnds)
     body
     (-> (^CodeEmitter fn [xb consumed-type then-leave?]
@@ -149,27 +149,3 @@
       (if (strict-boolean? tp (.expr-types args))
         (insn/mk-insn (branching-or fctx args) Boolean/TYPE)
         (expand 0)))))
-
-
-(defn nary-compare ^Insn [^int cmp-opcd ^long fctx ^Insns args form]
-  (let [wtop (when-not (neg? cmp-opcd)  ;`wtop` of equiv is nil
-               (or (when (= cmp-opcd condgen/cmp-eq)
-                     (type/of-all (.expr-types args)))
-                   (opgen/top-numeric-of form args)))]
-    (case (.length args)
-      0 (throw (wrong/wr-info "missing argument"))
-      1 (insn/progn args insn/insn-true)
-      2 (condgen/xcmp-2 wtop (.get args 0) (.get args 1) cmp-opcd fctx)
-      #_else (let [tp (.class-primitive wtop)
-                   n (.length args)
-                   bnds (new Binding/1 n)
-                   xs (insn/mk-insns* n)
-                   cmps (insn/mk-insns* (dec n))] ;length is at least two
-               (dotimes [i n]
-                 (let [bnd (binding-of tp args i)]
-                   (aset bnds i bnd)
-                   (.set xs i (bound-value tp bnd args i))))
-               (dotimes [i (dec n)]
-                 (.set cmps i (condgen/xcmp-2 wtop (.get xs i) (.get xs (inc i))
-                                              cmp-opcd fctx)))
-               (block-bindings fctx bnds (nary-and* fctx cmps))))))

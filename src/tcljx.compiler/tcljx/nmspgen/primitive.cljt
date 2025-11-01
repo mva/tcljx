@@ -9,7 +9,7 @@
    [tinyclj.string :as str])
   (:import
    (tcljx.data.type Wrapper)
-   (tcljx.data.ir CodeEmitter Loadable Entity ImmediateEntity Constant)
+   (tcljx.data.ir CodeEmitter Loadable Entity ImmediateEntity Constant Binding)
    (tcljx.nmspgen.insn Insn Insns)
    (tcljx.nmspgen.opgen Op2 OpSpec)
    (java.lang.classfile Opcode CodeBuilder TypeKind)
@@ -260,18 +260,6 @@
                           (insn/emitter args 0) (insn/emitter args 1) fctx)
               (insn/mk-insn (.class-primitive warg0)))))))
   
-  (defn mk-nary-compare ^Entity [^int cmp-opcd]
-    (with-primitive-invoke [_ fctx form _ _ args]
-      (junctgen/nary-compare cmp-opcd fctx args form)))
-
-  (def nary-equiv
-    (with-primitive-invoke [_ fctx form _ _ args]
-      (let [args ^Insns args]
-        (if (type/all-monomorphic-primitive? (.expr-types args))
-          ;; all arguments are non-void primitive: fall back to number compare
-          (.invoke* (mk-nary-compare condgen/cmp-eq) fctx form nil -1 args)
-          (junctgen/nary-compare -1 fctx args form)))))
-  
   (def binary-identical
     (with-primitive-invoke [_ fctx form _ _ args]
       (let [args (take-args form args 2)]
@@ -352,6 +340,40 @@
         0 insn/insn-null
         1 (.get args 0)
         #_else (junctgen/nary-or* fctx args)))))
+
+(defn mk-nary-compare ^Entity [^int cmp-opcd]
+  (with-primitive-invoke [_ fctx form _ _ args]
+    (let [args ^Insns args
+          wtop (when-not (neg? cmp-opcd) ;`wtop` of equiv is nil
+                 (or (when (= cmp-opcd condgen/cmp-eq)
+                       (type/of-all (.expr-types args)))
+                     (opgen/top-numeric-of form args)))]
+      (case (.length args)
+        0 (throw (wrong/wr-info "missing argument"))
+        1 (insn/progn args insn/insn-true)
+        2 (condgen/xcmp-2 wtop (.get args 0) (.get args 1) cmp-opcd fctx)
+        #_else (let [tp (.class-primitive wtop)
+                     n (.length args)
+                     bnds (new Binding/1 n)
+                     xs (insn/mk-insns* n)
+                     cmps (insn/mk-insns* (dec n))] ;length is at least two
+                 (dotimes [i n]
+                   (let [bnd (junctgen/binding-of tp args i)]
+                     (aset bnds i bnd)
+                     (.set xs i (junctgen/bound-value tp bnd args i))))
+                 (dotimes [i (dec n)]
+                   (.set cmps i (condgen/xcmp-2 wtop (.get xs i)
+                                                (.get xs (inc i)) cmp-opcd fctx)))
+                 (->> (.invoke* nary-and fctx form nil -1 cmps)
+                      (junctgen/block-bindings fctx bnds)))))))
+
+(def nary-equiv
+  (with-primitive-invoke [_ fctx form _ _ args]
+    (let [args ^Insns args]
+      (if (type/all-monomorphic-primitive? (.expr-types args))
+        ;; all arguments are non-void primitive: fall back to number compare
+        (.invoke* (mk-nary-compare condgen/cmp-eq) fctx form nil -1 args)
+        (.invoke* (mk-nary-compare -1) fctx form nil -1 args)))))
 
 ;;; ------------------------------------------------------------------------
 
