@@ -48,6 +48,7 @@
   (set ^Expr [^int i ^Expr x])
   (emitter ^CodeEmitter [^int i])
   (emitters ^CodeEmitter/1 [])
+  (take ^Exprs [^int n])
   (drop ^Exprs [^int n]))
 
 ;;; ------------------------------------------------------------------------

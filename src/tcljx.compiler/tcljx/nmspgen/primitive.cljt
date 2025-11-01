@@ -196,13 +196,22 @@
                       (emit/with-line-number xb fctx)
                       (.arrayLoad xb (TypeKind/from ctp))
                       (recur ctp (inc i))))
-                  tp)))))]
+                  tp)))))
+
+        (take-until ^Insns [^Insns xs ^CodeEmitter match]
+          (let [ces (.emitters xs)]
+            (loop [i 0]
+              (if (< i (alength ces))
+                (if (identical? match (aget ces i))
+                  (.take xs i)
+                  (recur (inc i)))
+                xs))))]
   
   (defn mk-nary-numeric ^Entity [^OpSpec op]
     (with-primitive-invoke [_ fctx form _ _ args]
       (let [args ^Insns args
             wop-type (opgen/top-type-of (.bottom-type op) (.top-type op)
-                                           form args)
+                                        form args)
             op-type (.class-primitive wop-type)]
         (-> (case (.length args)
               0 (constgen/constant (.right-identity op) op-type)
@@ -330,16 +339,22 @@
             (insn/mk-insn Boolean/TYPE)))))
   (def nary-and
     (with-primitive-invoke-recur [_ fctx form _ _ args]
-      (case (.length args)
-        0 insn/insn-true
-        1 (.get args 0)
-        #_else (junctgen/nary-and* fctx args))))
+      (let [args* (take-until args constgen/entity-false)]
+        (cond-> (case (.length args*)
+                  0 insn/insn-true
+                  1 (.get args* 0)
+                  #_else (junctgen/nary-and* fctx args*))
+          (not (identical? args* args))
+          (insn/prog2 insn/insn-false)))))
   (def nary-or
     (with-primitive-invoke-recur [_ fctx form _ _ args]
-      (case (.length args)
-        0 insn/insn-null
-        1 (.get args 0)
-        #_else (junctgen/nary-or* fctx args)))))
+      (let [args* (take-until args constgen/entity-true)]
+        (cond-> (case (.length args*)
+                  0 insn/insn-null
+                  1 (.get args* 0)
+                  #_else (junctgen/nary-or* fctx args*))
+          (not (identical? args* args))
+          (insn/prog2 insn/insn-true))))))
 
 (defn mk-nary-compare ^Entity [^int cmp-opcd]
   (with-primitive-invoke [_ fctx form _ _ args]

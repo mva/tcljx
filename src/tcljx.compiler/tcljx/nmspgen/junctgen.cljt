@@ -59,14 +59,12 @@
   (loop [i 0]
     (if (< i (alength ces))
       (let [ce (aget ces i)]
-        (if (identical? constgen/entity-false ce)
-          (do (.goto_ xb target-f) false)
-          (when (if (instance? Branching ce)
-                  (.emit-branch-on? ^Branching ce xb false target-f)
-                  (or (identical? constgen/entity-true ce)
-                      (when (emit/insn? xb fctx Boolean/TYPE ce)
-                        (.ifeq xb target-f) true)))
-            (recur (inc i)))))
+        (when (if (instance? Branching ce)
+                (.emit-branch-on? ^Branching ce xb false target-f)
+                (or (identical? constgen/entity-true ce)
+                    (when (emit/insn? xb fctx Boolean/TYPE ce)
+                      (.ifeq xb target-f) true)))
+          (recur (inc i))))
       true)))
 (defn- branching-and ^Branching [^long fctx ^Insns args] ;pre: 2+ boolean args
   (reify Branching
@@ -107,14 +105,12 @@
   (loop [i 0]
     (if (< i (alength ces))
       (let [ce (aget ces i)]
-        (if (identical? constgen/entity-true ce)
-          (do (.goto_ xb target-t) false)
-          (when (if (instance? Branching ce)
-                  (.emit-branch-on? ^Branching ce xb true target-t)
-                  (or (identical? constgen/entity-false ce)
-                      (when (emit/insn? xb fctx Boolean/TYPE ce)
-                        (.ifne xb target-t) true)))
-            (recur (inc i)))))
+        (when (if (instance? Branching ce)
+                (.emit-branch-on? ^Branching ce xb true target-t)
+                (or (identical? constgen/entity-false ce)
+                    (when (emit/insn? xb fctx Boolean/TYPE ce)
+                      (.ifne xb target-t) true)))
+          (recur (inc i))))
       true)))
 (defn- branching-or ^Branching [^long fctx ^Insns args] ;pre: 2+ boolean args
   (reify Branching

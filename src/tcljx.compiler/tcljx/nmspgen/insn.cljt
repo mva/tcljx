@@ -95,6 +95,9 @@
     x)
   (emitter [_ i]
     (aget emitters i))
+  (take [_ n]
+    (Insns. (Arrays/copyOfRange emitters 0 n)
+            (Arrays/copyOfRange expr-types 0 n)))
   (drop [_ n]
     (Insns. (Arrays/copyOfRange emitters n (alength emitters))
             (Arrays/copyOfRange expr-types n (alength expr-types)))))
