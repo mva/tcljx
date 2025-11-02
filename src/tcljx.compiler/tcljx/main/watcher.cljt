@@ -22,12 +22,12 @@
 (deftype WatchedPath [^WatchKey wk
                       ^Path root])
 
-;;; `modified` is a possibly empty set of Path pairs [root rel-path],
-;;; where `rel-path` is either a file (created, deleted, or modified)
-;;; or a directory (created or deleted).
-(defrecord Watcher [watches        ;maps directory Path to WatchedPath
+;;; `modified` is a possibly empty set of URIs, denoting a either a
+;;; file (created, deleted, or modified) or a directory (created or
+;;; deleted).
+(defrecord Watcher [^map watches   ;maps directory Path to WatchedPath
                     ^WatchService watch-service
-                    modified])
+                    ^set modified])
 
 (defn- watched-path ^WatchedPath [^Watcher w ^Path path]
   ((.watches w) path))
@@ -72,10 +72,9 @@
     w))
 
 
-(defn- file-changed ^Watcher [^Watcher w ^Path root ^Path path]
-  (let [rel-path (.relativize root path)]
-    (report :watcher/changed-file [(str root) (str rel-path)])
-    (update w :modified conj [root rel-path])))
+(defn- file-changed ^Watcher [^Watcher w ^Path path]
+  (report :watcher/changed-file (str path))
+  (update w :modified conj (.toUri path)))
 
 (defn- track-name? ^boolean [^WatchEvent we]
   ;; disregard Emacs temporary files starting with "#" or ".#", and
@@ -89,15 +88,12 @@
     (throw (IllegalStateException. "file watcher directory overflow"))
 
     (track-name? we)
-    (let [path (.resolve dir-path ^Path (.context we))
-          dir-wp (watched-path w dir-path)]
-      (assert (some? dir-wp) (str "no WatchedPath entry for directory "
-                                  dir-path))
-      (cond-> (file-changed w (.root dir-wp) path)
+    (let [path (.resolve dir-path ^Path (.context we))]
+      (cond-> (file-changed w path)
         (identical? (.kind we) StandardWatchEventKinds/ENTRY_DELETE)
         (remove-directories path)
         (identical? (.kind we) StandardWatchEventKinds/ENTRY_CREATE)
-        (add-directories (.root dir-wp) path)))
+        (add-directories (.root (watched-path w dir-path)) path)))
 
     :else w))
 
@@ -118,12 +114,10 @@
         w))))
 
 (defn mk-modified? [^Watcher w]
-  (letfn [(load-path ^URI [[^Path root ^Path rel-path :as entry]]
-            (-> root (.resolve rel-path) (.toAbsolutePath) (.toUri)))]
-    (let [mod-paths (map load-path (.modified w))]
-      (println "### Modified:" (str/join " " (sort mod-paths)))
-      (fn modified? ^boolean [^URI ruri]
-        ;; use startsWith() to detect both a modified file and a file
-        ;; whose directory was moved or deleted
-        (boolean (some #(.startsWith (Path/of ruri) (Path/of ^URI %))
-                       mod-paths))))))
+  (println "### Modified:" (str/join " " (sort (.modified w))))
+  (fn modified? ^boolean [^URI ruri]
+    ;; use startsWith() to detect both a modified file and a file
+    ;; whose directory was moved or deleted
+    (let [ruri-path (Path/of ruri)]
+      (boolean (some #(.startsWith ruri-path (Path/of ^URI %))
+                     (.modified w))))))
