@@ -123,14 +123,18 @@
 (deftest method-invoke-with-throw-argument-test
   ;; fixed argument
   (is (thrown-with-msg? WrongInfo #"multiple static methods matching"
-         (asm-expr (String/format (throw (Throwable/new))
-                                  "foo"))))
+                        (asm-expr (String/format (throw (Throwable/new))
+                                                 "foo"))))
   ;; variable argument
   (is (= '[(LDC "%d")
+           (ICONST_1)
+           (ANEWARRAY "Object[]")
+           (DUP)
+           (ICONST_0)
            (NEW Throwable) (DUP) (INVOKESPECIAL Throwable "<init>" "()V")
            (ATHROW)]
          (asm-expr (String/format "%d" (throw (Throwable/new))))))
 
   ;; receiver
   (is (thrown-with-msg? WrongInfo #"no virtual member matching"
-         (asm-expr (. (throw (Throwable/new)) toString)))))
+                        (asm-expr (. (throw (Throwable/new)) toString)))))

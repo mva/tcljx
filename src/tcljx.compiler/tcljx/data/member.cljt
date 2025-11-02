@@ -23,7 +23,7 @@
 
 (defn with-invocation-mode ^MemberHandle [^MemberHandle m ^int invocation-mode]
   (MemberHandle. (.owner m) (.member m) (.parameter-types m) (.return-type m)
-          invocation-mode))
+                 invocation-mode))
 
 (defn field? ^boolean [^MemberHandle m]
   (instance? Field (.member m)))

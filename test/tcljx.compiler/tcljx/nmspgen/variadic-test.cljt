@@ -680,7 +680,7 @@
                         (f items)))
                  (def l1 (apply-1 (mk-as-list "") 1))]))))
 
-(deftest varargs-array-to-iseq
+(deftest variadic-array-to-iseq
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "callee-gets-iseq~1"
                      "([Ljava/lang/Object;)Ljava/lang/Object;")
@@ -717,7 +717,7 @@
                    (fn* callee-gets-iseq [& items]
                         ))]))))
 
-(deftest varargs-array-to-iseq-apply
+(deftest variadic-array-to-iseq-apply
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "callee-gets-iseq~2"
                      "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
@@ -757,7 +757,7 @@
                    (fn* callee-gets-iseq [item & items]
                         ))]))))
 
-(deftest varargs-array-to-iseq-apply-2
+(deftest variadic-array-to-iseq-apply-2
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL] "callee-gets-iseq~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object item"]
@@ -806,7 +806,7 @@
                         ([item & items]
                          nil)))]))))
 
-(deftest varargs-array-to-iseq-apply-3
+(deftest variadic-array-to-iseq-apply-3
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             
             [(METHOD [PUBLIC STATIC FINAL] "and~0" "()Ljava/lang/Object;")
@@ -862,7 +862,7 @@
                         ([x & next]
                          nil)))]))))
 
-(deftest varargs-array-to-iseq-flyweight
+(deftest variadic-array-to-iseq-flyweight
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(METHOD [STATIC FINAL BRIDGE VARARGS SYNTHETIC] "f$callee-gets-iseq~1" "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
              #_["LOCAL 0: Object x"]
@@ -905,7 +905,7 @@
                  (def f (fn* f [x]
                              ((fn* callee-gets-iseq [& items] x))))]))))
 
-(deftest varargs-array-to-iseq-closure
+(deftest variadic-array-to-iseq-closure
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(METHOD [PUBLIC STATIC FINAL] "fn~1" "(Ljava/lang/Object;)Ltinyclj/lang/AFnMh;")
              ["LOCAL 0: Object a"]
@@ -1057,7 +1057,94 @@
                                 (new Object/1 0)
                                 (new Integer/1 0)))]))))
 
-(deftest void-as-variadic-arg
+(deftest object-to-varargs-parameter
+  (is (= '[["LOCAL 0: Object fname"]
+           (LDC "resources")
+           (ICONST_1)
+           (ANEWARRAY "String[]")
+           (DUP)
+           (ICONST_0)
+           (ALOAD_0)
+           (CHECKCAST String)
+           (AASTORE)
+           (INVOKESTATIC Path "of"
+                         "(Ljava/lang/String;[Ljava/lang/String;)Ljava/nio/file/Path;"
+                         :itf)
+           (ARETURN)]
+         (asm-expr [fname]
+                   (java.nio.file.Path/of "resources" fname)))))
+
+(deftest object-to-variadic-parameter
+  (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/exp/_10")
+            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "println~1"
+                     "([Ljava/lang/Object;)Ljava/lang/Object;")
+             (ALOAD_0)
+             (INVOKESTATIC ArraySeq "create"
+                           "([Ljava/lang/Object;)Lclojure/lang/ArraySeq;")
+             (INVOKESTATIC . "println~1" "(Lclojure/lang/ISeq;)Ljava/lang/Object;")
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "println~1"
+                     "(Lclojure/lang/ISeq;)Ljava/lang/Object;")
+             ["LOCAL 0: ISeq more"]
+             (ACONST_NULL)
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC FINAL] "println" "()Ltinyclj/lang/StaticFn;")
+             (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
+                   [[STATIC . "println~1"
+                     "([Ljava/lang/Object;)Ljava/lang/Object;"]]])
+             (ARETURN)]
+            
+            [(METHOD [PUBLIC STATIC FINAL] "fn~1"
+                     "(Ljava/lang/Object;)Ljava/lang/Object;")
+             ["LOCAL 0: Object x"]
+             (ICONST_1)
+             (ANEWARRAY "Object[]")
+             (DUP)
+             (ICONST_0)
+             (ALOAD_0)
+             (AASTORE)
+             (INVOKESTATIC . "println~1"
+                           "([Ljava/lang/Object;)Ljava/lang/Object;")
+             (ARETURN)]
+
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.exp")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/exp/___" nil "pkg/exp/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core")
+             (ARETURN)]]
+           
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL] "fn~1"
+                     "(Ljava/lang/Object;)Ljava/lang/Object;")
+             ["LOCAL 0: Object x"]
+             (ICONST_1)
+             (ANEWARRAY "Object[]")
+             (DUP)
+             (ICONST_0)
+             (ALOAD_0)
+             (AASTORE)
+             (INVOKESTATIC _10 "println~1" "([Ljava/lang/Object;)Ljava/lang/Object;")
+             (ARETURN)]
+            [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
+             (LDC "pkg.ns0")
+             (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
+             (LDC ___)
+             (INVOKESTATIC RT "ensureInitialized" "(Ljava/lang/Class;)V")
+             (RETURN)]]
+           [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/___" nil "pkg/ns0/_10")
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "requires~1" "()Ljava/lang/String;")
+             (LDC "clojure.core,pkg.exp")
+             (ARETURN)]]]
+         (nmsp '[(ns pkg.exp)
+                 (def println (fn* println [& more] nil))
+                 (fn* [x] (println x))  ;call local fn def
+                 (ns pkg.ns0 (:require pkg.exp))
+                 (fn* [x] (pkg.exp/println x))])))) ;call imported fn def
+
+(deftest void-as-vararg
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(FIELD [PUBLIC STATIC FINAL] "x" "Ljava/util/List;")]
             

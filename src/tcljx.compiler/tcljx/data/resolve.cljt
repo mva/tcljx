@@ -278,8 +278,7 @@
           
           (and (= (inc fixed) an)     ;directly pass array to varargs?
                (= (.invocation-mode candidate) member/invoke-tail-into-array)
-               (argument-compatible? (aget ptypes fixed)
-                                     (aget atypes fixed)))
+               (.isAssignableFrom (aget ptypes fixed) (aget atypes fixed)))
           (cons (member/with-invocation-mode candidate member/invoke-standard) acc)
 
           (let [varargs-type (member/varargs-parameter-type candidate)]

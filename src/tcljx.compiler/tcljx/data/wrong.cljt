@@ -35,7 +35,7 @@
    (wr-info msg map nil))
   (^WrongInfo [^String msg ^map map ^Throwable cause]
    #_(prn :error msg map)
-   #_(.printStackTrace (Throwable.) (java.io.PrintWriter. *out*))
+   #_(.printStackTrace (or cause (Throwable.)) (java.io.PrintWriter. *out*))
    (WrongInfo. msg cause (or map clojure.lang.PersistentArrayMap/EMPTY))))
 
 (defn wr-data ^map [ex]
