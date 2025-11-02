@@ -11,16 +11,18 @@
    (tcljx.parser [reader :as reader])
    (tcljx.nmspgen [runtime :as rt] [destdir :as destdir]
                   [pkggen :as pkggen] [bootstrap :as bootstrap])
-   [tcljx.alpha.ptest :refer [deftest]]))
+   [tcljx.alpha.ptest :refer [deftest]])
+  (:import (java.util HashSet)))
 
 (deftest compile-rtiow-nocore-test
   (let [ns-str "tcljx.nmspgen.rtiow-nocore-ref"
         ns-path (files/namespace-path ns-str)
-        ns-reader (-> (files/path-of "test/tcljx.compiler")
-                      (.resolve ns-path)
-                      (files/path-url)
-                      (slurp)
-                      (reader/mk-reader))
+        cs (-> (files/path-of "test/tcljx.compiler")
+               (.resolve ns-path)
+               (files/path-url)
+               (slurp))
+        all-uris (HashSet.)
+        ns-reader (reader/mk-reader all-uris cs)
         dest-dir (bootstrap/dest-dir-for-this-test)
         app-ld bootstrap/app-ld
         dyn-ld (rt/dyn-class-loader app-ld [])

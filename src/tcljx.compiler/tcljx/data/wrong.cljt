@@ -94,13 +94,13 @@
     (not (contains? (wr-data e) k))
     (update-wr-data assoc k v)))
 
-;; (defn assoc-dep-map ^WrongInfo [^Throwable t ^map dep-map]
-;;   #_(.printStackTrace t)
-;;   (-> (if (instance? WrongInfo t)
-;;         ^WrongInfo t
-;;         (do (.printStackTrace t)
-;;             (wr-info "unhandled exception" {} t)))
-;;       (update-wr-data assoc :emitter/namespaces dep-map)))
+(defn assoc-dep-map ^WrongInfo [^Throwable t ^map dep-map]
+  #_(.printStackTrace t)
+  (-> (if (instance? WrongInfo t)
+        ^WrongInfo t
+        (do (.printStackTrace t)
+            (wr-info "unhandled exception" {} t)))
+      (update-wr-data assoc :emitter/namespaces dep-map)))
 
 ;;; If `t` has a compiler error as one of its causes, then return the
 ;;; WrongInfo instance.  Otherwise, return nil.

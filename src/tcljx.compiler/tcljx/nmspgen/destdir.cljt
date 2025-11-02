@@ -21,6 +21,15 @@
 (defn- package-directory ^Path [^Path dest-dir ^String ns-str]
   (.resolve dest-dir (.replace ns-str "." "/")))
 
+(defn delete-package-classes
+  (^void [^Path pkg-dir]
+   #_(prn :delete-package-classes (str pkg-dir "/*.class"))
+   (doseq [^Path x (files/directory-file-seq pkg-dir)
+           :when (files/class-file? x)]
+     (Files/delete x)))
+  (^void [^Path dest-dir ^String ns-str]
+   (delete-package-classes (package-directory dest-dir ns-str))))
+
 (deftype DestFiles [^Path dest-dir]
   Destination
   (prepare-package-directory [_ ns-str]

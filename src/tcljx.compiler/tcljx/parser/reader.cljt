@@ -16,7 +16,7 @@
    (clojure.lang IMapEntry IRecord Named)
    (java.net URI URL)
    (java.nio.file Path)
-   (java.util Arrays ArrayList)
+   (java.util Arrays ArrayList HashSet)
    (java.util.regex Matcher Pattern PatternSyntaxException)))
 
 (def ^:private sym-unquote (symbol cfg/core-lib "unquote"))
@@ -959,8 +959,9 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- read-resource ^String [^URI ruri]
+(defn- read-resource ^String [^HashSet !all-uris ^URI ruri]
   (prn :read-resource (str ruri))
+  (.add !all-uris ruri)
   (-> (.toURL ruri)
       (.openStream)
       (java.io.InputStreamReader.)
@@ -972,7 +973,7 @@
     (wrong/other (str "no such file " (wrong/q path)))))
 
 (deftype Reader [^FormBuilder fb ^:unsynchronized-mutable ^int pos
-                 ^ClassLoader app-ld ^URI ruri]
+                 ^ClassLoader app-ld ^URI ruri ^HashSet !all-uris]
   FormReader
   (read [_ resolver]
     (if (neg? (set! pos (push-1 pos fb resolver)))
@@ -981,11 +982,11 @@
         #_(prn :form form)
         form)))
   (resolve [_ path-str]
-    (let [path' (if (.startsWith path-str "/")
+    (let [ruri' (if (.startsWith path-str "/")
                   (resource-uri app-ld (Path/of path-str))
                   (.resolve ruri path-str))]
-      (-> (mk-form-builder (read-resource path'))
-          (Reader. 0 app-ld path'))))
+      (-> (mk-form-builder (read-resource !all-uris ruri'))
+          (Reader. 0 app-ld ruri' !all-uris))))
   (resource-url [_]
     (.toURL ruri))
   (with-source-file [_ cb]
@@ -995,10 +996,10 @@
                    (.substring path (inc i))))))
     cb))
 (defn mk-reader
-  (^FormReader [^String cs]
-   (mk-reader cs nil nil))
-  (^FormReader [^ClassLoader app-ld ^Path path]
+  (^FormReader [^HashSet !all-uris ^String cs]
+   (mk-reader !all-uris cs nil nil))
+  (^FormReader [^HashSet !all-uris ^ClassLoader app-ld ^Path path]
    (let [ruri (resource-uri app-ld path)]
-     (mk-reader (read-resource ruri) app-ld ruri)))
-  (^FormReader [^String cs ^ClassLoader app-ld ^URI ruri]
-   (Reader. (mk-form-builder cs) 0 app-ld ruri)))
+     (mk-reader !all-uris (read-resource !all-uris ruri) app-ld ruri)))
+  (^FormReader [^HashSet !all-uris ^String cs ^ClassLoader app-ld ^URI ruri]
+   (Reader. (mk-form-builder cs) 0 app-ld ruri !all-uris)))

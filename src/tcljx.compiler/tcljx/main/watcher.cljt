@@ -8,7 +8,8 @@
 (ns tcljx.main.watcher
   (:require (tcljx.data [files :as files])
             [tinyclj.string :as str])
-  (:import (java.nio.file Path Paths FileSystems WatchService WatchKey
+  (:import (java.net URI)
+           (java.nio.file Path Paths FileSystems WatchService WatchKey
                           WatchEvent StandardWatchEventKinds)
            (java.util.concurrent TimeUnit)))
 
@@ -117,11 +118,12 @@
         w))))
 
 (defn mk-modified? [^Watcher w]
-  (letfn [(load-path ^Path [[_ ^Path rel-path]]
-            rel-path)]
+  (letfn [(load-path ^URI [[^Path root ^Path rel-path :as entry]]
+            (-> root (.resolve rel-path) (.toAbsolutePath) (.toUri)))]
     (let [mod-paths (map load-path (.modified w))]
       (println "### Modified:" (str/join " " (sort mod-paths)))
-      (fn modified? ^boolean [^Path rpath]
+      (fn modified? ^boolean [^URI ruri]
         ;; use startsWith() to detect both a modified file and a file
         ;; whose directory was moved or deleted
-        (boolean (some #(.startsWith rpath ^Path %) mod-paths))))))
+        (boolean (some #(.startsWith (Path/of ruri) (Path/of ^URI %))
+                       mod-paths))))))

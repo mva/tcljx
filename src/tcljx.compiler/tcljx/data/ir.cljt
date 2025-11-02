@@ -368,9 +368,12 @@
 
 ;;; ------------------------------------------------------------------------
 
+;;; `all-uris` is nil if the namespace was imported from class files.
 (deftype ProvidedNamespace [^String ns-str ^map globals ^String/1 require-strs
-                            ^Class capstone ^Expr force-clinit]
+                            ^set all-uris ^Class capstone ^Expr force-clinit]
   java.lang.Record)
+(defn pn-imported? ^boolean [^ProvidedNamespace pn]
+  (nil? (.all-uris pn)))
 
 ;;; Provides access to source files that make up the namespace.  Keeps
 ;;; track of all source files that contribute to the namespace.
@@ -390,7 +393,9 @@
   ;; Adds the namespace represented by the given capstone class to the
   ;; map of known namespaces.  Transitively adds any required
   ;; namespaces, which may be referred to by macro or alias expansion.
-  (import-namespace ^map [^map known-ns ^Class capstone]))
+  (import-namespace ^map [^map known-ns ^Class capstone])
+  
+  (all-provided-namespaces ^map []))
 
 (deftype Require [^String ns-str
                   ^String alias-str     ;nil if no alias

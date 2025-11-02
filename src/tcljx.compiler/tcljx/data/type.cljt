@@ -356,26 +356,27 @@
 (def ^:redef ^Class AFnMh)
 (def ^:redef ^Class StaticFn)
 
-(defn fixup-runtime-types! [^MethodHandles$Lookup rt-lookup]
+(defn fixup-runtime-types-once! ^void [^MethodHandles$Lookup rt-lookup]
   (letfn [(find-class ^Class [^Class compiler-type]
             (.findClass rt-lookup (.getName compiler-type)))]
-    (when (some? symbol)
-      (throw (IllegalStateException.)))
-    (def symbol (find-class clojure.lang.Symbol))
-    (def keyword (find-class clojure.lang.Keyword))
-    (def vector (find-class clojure.lang.IPersistentVector))
-    (def map (find-class clojure.lang.IPersistentMap))
-    (def set (find-class clojure.lang.IPersistentSet))
-    (def list (find-class clojure.lang.IPersistentList))
-    (def seq (find-class clojure.lang.ISeq))
-    (def ifn (find-class clojure.lang.IFn))
-    (def iobj (find-class clojure.lang.IObj))
-    
-    (def ClojureRT (find-class clojure.lang.RT))
-    (def Var (find-class clojure.lang.Var))
-    (def Namespace (find-class clojure.lang.Namespace))
-    (def Agent (find-class clojure.lang.Agent))
-    
-    (def Literal (find-class tinyclj.lang.Literal))
-    (def AFnMh (find-class tinyclj.lang.AFnMh))
-    (def StaticFn (find-class tinyclj.lang.StaticFn))))
+    (when (nil? symbol) ;only do this once, even within a watch-and-compile
+      (def symbol (find-class clojure.lang.Symbol))
+      (def keyword (find-class clojure.lang.Keyword))
+      (def vector (find-class clojure.lang.IPersistentVector))
+      (def map (find-class clojure.lang.IPersistentMap))
+      (def set (find-class clojure.lang.IPersistentSet))
+      (def list (find-class clojure.lang.IPersistentList))
+      (def seq (find-class clojure.lang.ISeq))
+      (def ifn (find-class clojure.lang.IFn))
+      (def iobj (find-class clojure.lang.IObj))
+      
+      (def ClojureRT (find-class clojure.lang.RT))
+      (def Var (find-class clojure.lang.Var))
+      (def Namespace (find-class clojure.lang.Namespace))
+      (def Agent (find-class clojure.lang.Agent))
+      
+      (def Literal (find-class tinyclj.lang.Literal))
+      (def AFnMh (find-class tinyclj.lang.AFnMh))
+      (def StaticFn (find-class tinyclj.lang.StaticFn)))))
+
+

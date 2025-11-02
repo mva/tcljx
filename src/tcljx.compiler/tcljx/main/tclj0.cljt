@@ -19,12 +19,10 @@
    (tcljx.main.options Options)
    (java.nio.file Path Files)))
 
-(defn- class-file? ^boolean [^Path x]
-  (.endsWith (.toString x) files/class-suffix))
 (defn prepare-destination ^Destination [^Path path ^boolean keep-files?]
   (if (some? path)         ;wipe *before* any classloaders are created
     (do (when-not keep-files?
-          (doseq [^Path x (files/file-seq path) :when (class-file? x)]
+          (doseq [^Path x (files/file-seq path) :when (files/class-file? x)]
             #_(prn :wipe-dest-dir (.toString x))
             (Files/delete x)))
         (destdir/mk-dest-files path))
@@ -36,23 +34,23 @@
         dyn-sourcev (if load-from-dest-dir? [(.dest-dir opts)] [])
         dyn-ld (rt/dyn-class-loader app-ld dyn-sourcev)
         rt (rt/mk-runtime app-ld dyn-ld)
-        _ (type/fixup-runtime-types! (.lookup rt))
+        _ (type/fixup-runtime-types-once! (.lookup rt))
         
         pn-primitive (ProvidedNamespace. cfg/primitive-ns-str
                                          primitive/primitive-nmsp-globals
-                                         (new String/1 0) nil insn/insn-empty)
+                                         (new String/1 0) nil nil
+                                         insn/insn-empty)
         provided-ns {cfg/primitive-ns-str pn-primitive}
 
         ;; All namespaces required by clojure.core are part of cyclic
         ;; dependencies, but only clojure.core is allowed to initiate
         ;; the cycle.  So *always* require it first, to prevent the
         ;; other namespaces from initiating the cycle.
-        preload-ns-strs (doto (new String/1 1) (aset 0 cfg/core-lib))
-        ns-strs (options/target-ns-strs opts)
-        all-pns (-> (doto (universe/mk-universe nil rt dest provided-ns)
-                      (.require-namespaces* preload-ns-strs nil))
-                    (.require-namespaces* ns-strs nil))]
-    (into {} (map (juxt identity all-pns)) ns-strs)))
+        preload-ns-strs (doto (new String/1 1) (aset 0 cfg/core-lib))]
+    (-> (doto (universe/mk-universe nil rt dest provided-ns)
+          (.require-namespaces* preload-ns-strs nil)
+          (.require-namespaces* (options/target-ns-strs opts) nil))
+        (.all-provided-namespaces))))
 
 (defn run ^boolean [^Options opts]
   (options/print-options opts)

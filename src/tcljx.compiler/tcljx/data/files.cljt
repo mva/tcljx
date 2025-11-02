@@ -9,6 +9,9 @@
 (def source-suffix ".cljt")
 (def class-suffix ".class")
 
+(defn class-file? ^boolean [^Path x]
+  (.endsWith (.toString x) class-suffix))
+
 (defn path-url ^URL [^Path p]
   (-> p (.toUri) (.toURL)))
 
@@ -52,6 +55,8 @@
 (def ^:private file? (^Predicate fn [x] (Files/isRegularFile x)))
 (defn file-seq [^Path p]
   (path-seq p Integer/MAX_VALUE file?))
+(defn directory-file-seq [^Path p]
+  (path-seq p 1 file?))
 
 (def ^:private dir? (^Predicate fn [x] (Files/isDirectory x)))
 (defn recursive-directory-seq [^Path p]

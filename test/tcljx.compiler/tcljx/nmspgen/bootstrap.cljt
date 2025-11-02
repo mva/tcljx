@@ -33,15 +33,15 @@
                                    "tcljx-stage1.mdir-xpl" "tcljx.rt")]
     (rt/app-class-loader :platform [stage1-classes-rt])))
 (def rt-lookup (.lookup (rt/mk-runtime app-ld nil)))
-(type/fixup-runtime-types! rt-lookup)
+(type/fixup-runtime-types-once! rt-lookup)
 
 (defn mk-universe ^NamespaceProvider [^map reader-map
                                       ^Runtime rt ^Destination dest]
   (let [empty-req-strs (new String/1 0)
         pn-primitive (ProvidedNamespace. cfg/primitive-ns-str
                                          primitive/primitive-nmsp-globals
-                                         empty-req-strs nil insn/insn-empty)
-        pn-core (ProvidedNamespace. cfg/core-lib {} empty-req-strs
+                                         empty-req-strs nil nil insn/insn-empty)
+        pn-core (ProvidedNamespace. cfg/core-lib {} empty-req-strs nil
                                     nil insn/insn-empty)
         provided-ns {cfg/primitive-ns-str pn-primitive
                      cfg/core-lib pn-core}]

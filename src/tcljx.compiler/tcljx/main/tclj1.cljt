@@ -7,91 +7,118 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.main.tclj1
   (:require
-   #_[tcljx.config :as cfg]
-   #_[tcljx.wrong :as wrong]
-   #_[tcljx.emitter :as em]
+   (tcljx.data [config :as cfg] [wrong :as wrong] [ir :as ir])
+   (tcljx.nmspgen [destdir :as destdir])
    (tcljx.main [options :as options] [invoke :as invoke] [tclj0 :as tclj0]
-               [watcher :as watcher])
-   #_[tcljx.main.efmt :as efmt]
-   #_[tcljx.main.builder :as builder])
+               [watcher :as watcher] [efmt :as efmt]))
   (:import
+   (tcljx.data.ir ProvidedNamespace)
    (tcljx.main.options Options)
    (java.util Optional)
    (java.util.function Consumer)))
 
-;; ;;; Transitively remove all namespaces from `dep-map` for which
-;; ;;; `pred-good` returns false, and delete all of their associated
-;; ;;; class files.
-;; (defn- drop-bad-namespaces! ^map [^map dep-map ^Options opts pred-good]
-;;   (let [!known-good (java.util.HashMap.)]
-;;     (letfn [(known-good? [ns-str]
-;;               (if-some [x (.get !known-good ns-str)] ;do not use `or` here
-;;                 x                        
-;;                 (let [dep-info (get dep-map ns-str)
-;;                       good? (object (and ^boolean (pred-good dep-info)
-;;                                          (every? known-good?
-;;                                                  (:req-strs dep-info))))]
-;;                   ;; note: imported class files have no req-strs and
-;;                   ;; are implicitly "good"
-;;                   (.put !known-good ns-str good?)
-;;                   good?)))
-;;             (concurrent-delete-error ^void [^Exception e]
-;;               (println)
-;;               (println "Is a second `--watch` process running for this project?")
-;;               (println "Failed to delete" (.getMessage e)) ;assumes NoSuchFileException
-;;               (println "Exiting...")
-;;               (System/exit 1))]
-;;       (reduce-kv (fn [acc ns-str _]
-;;                    (if (known-good? ns-str)
-;;                      acc
-;;                      (try 
-;;                        (cfg/delete-package-classes (.dest-dir opts) ns-str)
-;;                        (dissoc acc ns-str)
-;;                        (catch java.io.UncheckedIOException e
-;;                          (concurrent-delete-error (.getCause e)))
-;;                        (catch java.nio.file.NoSuchFileException e
-;;                          (concurrent-delete-error e)))))
-;;                  dep-map dep-map))))
+(defn- completed-namespace? ^boolean [^map dependency-info]
+  (some? dependency-info))
+(defn- imported-namespace? ^boolean [^map dependency-info]
+  (= dependency-info {}))               ;implies completed-namespace?
 
-;; ;; Returns the dependency map of all completed(!) namespaces.  On
-;; ;; return, there is no class file output from namespaces that were not
-;; ;; compiled successfully.
-;; (defn build-pass ^map [^Options opts ^Consumer on-completion
-;;                                   ^map prior-completed-map]
-;;   (letfn [(report-success ^map [^map nmsp-map]
-;;             ;; returns `dep-map` or throws an WrongInfo with
-;;             ;; embedded `dep-map`
-;;             (let [dep-map (builder/dependency-map ^java.util.Map nmsp-map)]
-;;               (try
-;;                 (.accept on-completion (Optional/of nmsp-map)) ;not dep-map!
-;;                 dep-map
-;;                 (catch Throwable t
-;;                   (throw (wrong/assoc-dep-map t dep-map))))))
-;;           (report-failure ^void []
-;;             (.accept on-completion (Optional/empty)))
-;;           (try-build-and-report ^map []
-;;             (try
-;;               (-> (tclj0/build-all opts true)
-;;                   (time)
-;;                   (report-success))
-;;               (catch tcljx.wrong.WrongInfo e
-;;                 (report-failure)
-;;                 (efmt/print-emap e)
-;;                 (:emitter/namespaces (wrong/wr-data e)))
-;;               (catch Throwable t
-;;                 (report-failure)
-;;                 (throw t))
-;;               (finally                 ;use finally to preserve result
-;;                 (println))))
-;;           (keep-across-import [prior build]
-;;             ;; preserve old rpaths and req-strs info if this namespace
-;;             ;; was imported from class files instead of being compiled
-;;             (if (builder/imported-namespace? build)
-;;               (or prior {})  ;we may already know about this namespace
-;;               build))]
-;;     (let [dep-map (try-build-and-report)]
-;;       (-> (merge-with keep-across-import prior-completed-map dep-map)
-;;           (drop-bad-namespaces! opts builder/completed-namespace?)))))
+;;; Returns a map of namespaces that have been reached by the build
+;;; attempt.  Key is the name of the namespace (a string).  Value is a
+;;; map {:rpaths :req-strs} for a compiled & completed namespace, nil
+;;; if the namespace was not compiled successfully, and the empty map
+;;; {} for a namespace imported from class files.
+(defn- dependency-map ^map [^map known-ns]
+  (letfn [(dependency-info ^map [^ProvidedNamespace pn]
+            (if (ir/pn-imported? pn)
+              {}     ;rpaths and req-strs unchanged from prior compile
+              {:rpaths (.all-uris pn), :req-strs (set (.require-strs pn))}))
+          (fixup-core-deps ^map [^map dep-map]
+            (let [req-strs (get-in dep-map [cfg/core-lib :req-strs])]
+              (cond-> dep-map
+                (seq req-strs)    ;any recorded dependencies for core?
+                (assoc cfg/core-lib
+                       {:rpaths (into (get-in dep-map [cfg/core-lib :rpaths])
+                                      (mapcat #(get-in dep-map [% :rpaths]))
+                                      req-strs)
+                        :req-strs #{}}))))]
+    (-> (reduce-kv #(assoc %1 %2 (dependency-info %3)) {} known-ns)
+        (fixup-core-deps))))
+
+;;; ------------------------------------------------------------------------
+
+;;; Transitively remove all namespaces from `dep-map` for which
+;;; `pred-good` returns false, and delete all of their associated
+;;; class files.
+(defn- drop-bad-namespaces! ^map [^map dep-map ^Options opts pred-good]
+  (let [!known-good (java.util.HashMap.)]
+    (letfn [(known-good? [ns-str]
+              (if-some [x (.get !known-good ns-str)] ;do not use `or` here
+                x                        
+                (let [dep-info (get dep-map ns-str)
+                      good? (object (and ^boolean (pred-good dep-info)
+                                         (every? known-good?
+                                                 (:req-strs dep-info))))]
+                  ;; note: imported class files have no req-strs and
+                  ;; are implicitly "good"
+                  (.put !known-good ns-str good?)
+                  good?)))
+            (concurrent-delete-error ^void [^Exception e]
+              (println)
+              (println "Is a second `--watch` process running for this project?")
+              (println "Failed to delete" (.getMessage e)) ;assumes NoSuchFileException
+              (println "Exiting...")
+              (System/exit 1))]
+      (reduce-kv (fn [acc ns-str _]
+                   (if (known-good? ns-str)
+                     acc
+                     (try 
+                       (destdir/delete-package-classes (.dest-dir opts) ns-str)
+                       (dissoc acc ns-str)
+                       (catch java.io.UncheckedIOException e
+                         (concurrent-delete-error (.getCause e)))
+                       (catch java.nio.file.NoSuchFileException e
+                         (concurrent-delete-error e)))))
+                 dep-map dep-map))))
+
+;; Returns the dependency map of all completed(!) namespaces.  On
+;; return, there is no class file output from namespaces that were not
+;; compiled successfully.
+(defn build-pass ^map [^Options opts ^Consumer on-completion
+                       ^map prior-completed-map]
+  (letfn [(report-success ^map [^map known-ns]
+            ;; returns `dep-map` or throws a WrongInfo with embedded
+            ;; `dep-map`
+            (let [dep-map (dependency-map known-ns)]
+              (try
+                (.accept on-completion (Optional/of known-ns)) ;not dep-map!
+                dep-map
+                (catch Throwable t
+                  (throw (wrong/assoc-dep-map t dep-map))))))
+          (report-failure ^void []
+            (.accept on-completion (Optional/empty)))
+          (try-build-and-report ^map []
+            (try
+              (-> (tclj0/build-all opts true)
+                  (time)
+                  (report-success))
+              (catch tcljx.data.wrong.WrongInfo e
+                (report-failure)
+                (efmt/print-emap e)
+                (:emitter/namespaces (wrong/wr-data e)))
+              (catch Throwable t
+                (report-failure)
+                (throw t))
+              (finally                 ;use finally to preserve result
+                (println))))
+          (keep-across-import [prior build]
+            ;; preserve old rpaths and req-strs info if this namespace
+            ;; was imported from class files instead of being compiled
+            (if (imported-namespace? build)
+              (or prior {})  ;we may already know about this namespace
+              build))]
+    (let [dep-map (try-build-and-report)]
+      (-> (merge-with keep-across-import prior-completed-map dep-map)
+          (drop-bad-namespaces! opts completed-namespace?)))))
 
 (defn run
   (^boolean [^Options opts]
@@ -106,13 +133,11 @@
    (when (nil? (.dest-dir opts))
      (options/abort "error: mode `--watch` requires a destination directory"))
    (tclj0/prepare-destination (.dest-dir opts) false) ;wipe destination dir
-   (assert false)
-   #_
    (loop [w (watcher/new-watcher (.sourcev opts))
           dep-map (build-pass opts on-completion {})]
      (let [w (watcher/wait-for-changes w (.wait-after-change-ms opts))
            pred-modified (watcher/mk-modified? w)
-           dep-map (->> (fn ^boolean [dep-info]
+           dep-map (->> (fn ^boolean [^map dep-info]
                           (not (some pred-modified (:rpaths dep-info))))
                         (drop-bad-namespaces! dep-map opts))]
        (recur w (build-pass opts on-completion dep-map))))
