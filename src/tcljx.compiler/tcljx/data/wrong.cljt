@@ -15,10 +15,10 @@
 ;;; compiler turns such an exception into a readable error message,
 ;;; without confronting the user with its long and confusing stack
 ;;; trace.
-(deftype WrongInfo [^:pass-to-super-constructor ^String message
-                    ^:pass-to-super-constructor ^Throwable cause
-                    ^map data]
+(deftype WrongInfo [^String message ^map data]
   RuntimeException
+  (getMessage [_] ;problem: cannot set message after RuntimeException()
+    message)
   (toString [this]
     ;; For some reason, "make test" crashes in prn or println
     ;; with "IllegalStateException: failed to resolve runtime fn
@@ -36,7 +36,9 @@
   (^WrongInfo [^String msg ^map map ^Throwable cause]
    #_(prn :error msg map)
    #_(.printStackTrace (or cause (Throwable.)) (java.io.PrintWriter. *out*))
-   (WrongInfo. msg cause (or map clojure.lang.PersistentArrayMap/EMPTY))))
+   (let [ex (WrongInfo. msg (or map clojure.lang.PersistentArrayMap/EMPTY))]
+     (.initCause ex cause)              ;can be called only once
+     ex)))
 
 (defn wr-data ^map [ex]
   (when (instance? WrongInfo ex)

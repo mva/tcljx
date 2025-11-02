@@ -432,8 +432,8 @@
             (.put chr-class-map class-desc chi)
             chi)))))
 
-(def pkg-build-public
-  (PackageBuilder. nil (MethodHandles/publicLookup) nil nil nil
+(defn mk-pkg-importer ^PackageBuilder [^Class capstone]
+  (PackageBuilder. nil (.in (MethodHandles/publicLookup) capstone) nil nil nil
                    0 -1 nil nil nil))
 
 (letfn [(mk-lookup-in-pkg ^MethodHandles$Lookup [^Runtime rt ^String ns-str]

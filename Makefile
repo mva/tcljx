@@ -163,6 +163,7 @@ $(STAGE1_MDIR)/tcljx.rtiow/ray.ppm: $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_RTIOW)
 # Build the module directories in $(STAGE2_MDIR).(rt|core|compiler).
 
 STAGE2_MDIR=$(TMP_USER)/tcljx-stage2.mdir-xpl
+STAGE2_MDIR_JAR=$(TMP_USER)/tcljx-stage2.mdir-jar
 
 STAGE2_MINFO_RT=$(STAGE2_MDIR)/tcljx.rt/module-info.class
 $(STAGE2_MINFO_RT): $(STAGE1_MINFO_RT)
@@ -195,6 +196,15 @@ $(STAGE2_MINFO_COMPILER): $(STAGE2_MINFO_ALPHA) $(TCLJX_SOURCE_COMPILER)
 	$(BUILD_JAVAC) -p $(STAGE2_MDIR) -d "$(dir $@)" "$(COMPILER_PATCHED)"/module-info.java
 	diff -Nrq $(dir $(STAGE1_MINFO_COMPILER)) $(dir $@)
 
+$(STAGE2_MDIR_JAR)/DONE: $(STAGE2_MINFO_COMPILER)
+	@echo; echo "### $(dir $@)"
+	@rm -rf "$(dir $@)"
+	$(BUILD_JAR) --create --file=$(dir $@)/tcljx-rt.jar -C "$(dir $(STAGE2_MINFO_RT))" .
+	$(BUILD_JAR) --create --file=$(dir $@)/tcljx-core.jar -C "$(dir $(STAGE2_MINFO_CORE))" .
+	$(BUILD_JAR) --create --file=$(dir $@)/tcljx-alpha.jar -C "$(dir $(STAGE2_MINFO_ALPHA))" .
+	$(BUILD_JAR) --create --file=$(dir $@)/tcljx-compiler.jar --main-class=$(TCLJX_MAIN_NS).___ -C "$(dir $(STAGE2_MINFO_COMPILER))" .
+	touch $@
+
 ##########################################################################
 
 compile: support/DONE $(STAGE1_MINFO_RT)
@@ -225,3 +235,4 @@ stage2-core: $(STAGE2_MINFO_CORE)
 stage2-alpha: $(STAGE2_MINFO_ALPHA)
 stage2-compiler: $(STAGE2_MINFO_COMPILER)
 bootstrap-and-check: stage2-compiler stage1-rtiow
+bootstrap-mdir: bootstrap-and-check $(STAGE2_MDIR_JAR)/DONE

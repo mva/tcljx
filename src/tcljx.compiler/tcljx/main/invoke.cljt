@@ -22,17 +22,19 @@
       (wrong/other (str "[namespace] no such namespace: "
                         (wrong/q (namespace var-name))))))
 
-(defn def-value ^Object [^ProvidedNamespace pn ^symbol var-name]
-  (if-some [def (-> (get (.globals pn) (namespace var-name))
-                    ^CodePromise (get (name var-name)))]
-    (.runtime-value def pkggen/pkg-build-public)
-    (wrong/other (str "[var-value] no public def " (wrong/q var-name)))))
+(defn def-value
+  (^Object [^ProvidedNamespace pn ^symbol var-name]
+   (def-value (pkggen/mk-pkg-importer (.capstone pn)) pn var-name))
+  (^Object [^PackageBuilder pkg-build ^ProvidedNamespace pn ^symbol var-name]
+   (if-some [def ^CodePromise (get (.globals pn) (name var-name))]
+     (.runtime-value def pkg-build)
+     (wrong/other (str "[var-value] no public def " (wrong/q var-name))))))
 
 (defn- applicable ^MethodHandle [^map known-ns ^symbol fn-spec]
   (let [pn (namespace-of known-ns fn-spec)
-        value (def-value pn fn-spec)
-        l (MethodHandles/publicLookup)]
-    (.bindTo (.resolveConstantDesc rt/mhd-apply l) value)))
+        pkg-build (pkggen/mk-pkg-importer (.capstone pn))
+        value (def-value pkg-build pn fn-spec)]
+    (.bindTo (.resolveConstantDesc rt/mhd-apply (.lookup pkg-build)) value)))
 
 (defn- result-style [^keyword res]
   (case res
