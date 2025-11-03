@@ -130,7 +130,7 @@ $(STAGE1_MINFO_CORE): $(STAGE1_MINFO_RT) $(TCLJX_SOURCE_CORE) $(STAGE0_MDIR)/DON
 # diff -Nru src/tcljx.alpha ../tcljx.alpha.patched >alpha.patch
 ALPHA_PATCHED=$(TMP_USER)/tcljx.alpha.patched
 STAGE1_MINFO_ALPHA=$(STAGE1_MDIR)/tcljx.alpha/module-info.class
-$(STAGE1_MINFO_ALPHA): $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_ALPHA) $(STAGE0_MDIR)/DONE
+$(STAGE1_MINFO_ALPHA): $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_ALPHA) $(STAGE0_MDIR)/DONE alpha.patch
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
 	rm -rf "$(ALPHA_PATCHED)"
@@ -142,7 +142,7 @@ $(STAGE1_MINFO_ALPHA): $(STAGE1_MINFO_CORE) $(TCLJX_SOURCE_ALPHA) $(STAGE0_MDIR)
 # diff -Nru src/tcljx.compiler ../tcljx.compiler.patched >compiler.patch
 COMPILER_PATCHED=$(TMP_USER)/tcljx.compiler.patched
 STAGE1_MINFO_COMPILER=$(STAGE1_MDIR)/tcljx.compiler/module-info.class
-$(STAGE1_MINFO_COMPILER): $(STAGE1_MINFO_ALPHA) $(TCLJX_SOURCE_COMPILER)
+$(STAGE1_MINFO_COMPILER): $(STAGE1_MINFO_ALPHA) $(TCLJX_SOURCE_COMPILER) compiler.patch
 	@echo; echo "### $(dir $@)"
 	@rm -rf "$(dir $@)"
 	rm -rf "$(COMPILER_PATCHED)"
