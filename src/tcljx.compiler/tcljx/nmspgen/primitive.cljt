@@ -1,8 +1,8 @@
 (ns tcljx.nmspgen.primitive
   (:require
    (tcljx.data [config :as cfg] [type :as type] [resolve :as resolve]
-               [reflect :as reflect] [ir :as ir] [code :as code]
-               [wrong :as wrong])
+               [reflect :as reflect] [context :as context] [ir :as ir]
+               [code :as code] [wrong :as wrong])
    (tcljx.nmspgen [pkggen :as pkggen] [constgen :as constgen] [emit :as emit]
                   [insn :as insn] [runtime :as rt] [condgen :as condgen]
                   [opgen :as opgen] [junctgen :as junctgen])
@@ -207,7 +207,7 @@
                   (recur (inc i)))
                 xs))))]
   
-  (defn mk-nary-numeric ^Entity [^OpSpec op]
+  (defn- mk-nary-numeric ^Entity [^OpSpec op]
     (with-primitive-invoke [_ fctx form _ _ args]
       (let [args ^Insns args
             wop-type (opgen/top-type-of (.bottom-type op) (.top-type op)
@@ -218,12 +218,15 @@
               1 (unary op (.computational-id wop-type) (insn/emitter args 0) fctx)
               #_else (opgen/op-n op (.computational-id wop-type) (.emitters args) fctx))
             (insn/mk-insn op-type)))))
+  (def ^:private nary-bit-and (mk-nary-numeric opgen/op-xand))
+  (def ^:private nary-bit-or (mk-nary-numeric opgen/op-xor))
+  (def ^:private nary-bit-xor (mk-nary-numeric opgen/op-xxor))
 
-  (defn mk-binary-numeric ^Entity [^OpSpec op]
+  (defn- mk-binary-numeric ^Entity [^OpSpec op]
     (with-primitive-invoke [_ fctx form _ _ args]
       (binary-numeric-insn op form args fctx)))
   
-  (defn mk-binary-xdiv-integral [^OpSpec op] ;aka 'quot
+  (defn- mk-binary-xdiv-integral [^OpSpec op] ;aka 'quot
     (with-primitive-invoke [_ fctx form _ _ args]
       (let [insn (binary-numeric-insn op form args fctx)
             op-type (.expr-type insn)]
@@ -247,19 +250,7 @@
                         (.emitter arg) (.emitter insn/insn-int-m1) fctx)
             (insn/mk-insn (.class-primitive wop-type))))))
 
-  ;; FIXME... Only used for shifted-one.  Better alternative: add
-  ;; primitive implementations of bit-set, bit-clear, bit-flip, and
-  ;; bit-test.  Then get rid of shifted-one and xdefault.
-  (def unary-xdefault 
-    (with-primitive-invoke [_ fctx form _ _ args]
-      (let [arg (take-arg form args)
-            tp (.expr-type arg)]
-        (cond
-          (type/void? tp) insn/insn-empty
-          (.isPrimitive tp) (-> 0 (constgen/constant tp) (insn/mk-insn tp))
-          :else insn/insn-null))))
-  
-  (defn mk-binary-shift ^Entity [^Opcode base-opc]
+  (defn- mk-binary-shift ^Entity [^Opcode base-opc]
     (let [op (OpSpec. type/int type/long base-opc nil 0)]
       (with-primitive-invoke [_ fctx form _ _ args]
         (let [args (take-args form args 2)
@@ -268,6 +259,9 @@
           (-> (opgen/op-2 op (.computational-id warg0) (.computational-id warg1)
                           (insn/emitter args 0) (insn/emitter args 1) fctx)
               (insn/mk-insn (.class-primitive warg0)))))))
+  (def ^:private binary-shift-left (mk-binary-shift Opcode/ISHL))
+  (def ^:private binary-shift-right (mk-binary-shift Opcode/ISHR))
+  (def ^:private binary-unsigned-shift-right (mk-binary-shift Opcode/IUSHR))
   
   (def binary-identical
     (with-primitive-invoke [_ fctx form _ _ args]
@@ -356,7 +350,7 @@
           (not (identical? args* args))
           (insn/prog2 insn/insn-true))))))
 
-(defn mk-nary-compare ^Entity [^int cmp-opcd]
+(defn- mk-nary-compare ^Entity [^int cmp-opcd]
   (with-primitive-invoke [_ fctx form _ _ args]
     (let [args ^Insns args
           wtop (when-not (neg? cmp-opcd) ;`wtop` of equiv is nil
@@ -389,6 +383,41 @@
         ;; all arguments are non-void primitive: fall back to number compare
         (.invoke* (mk-nary-compare condgen/cmp-eq) fctx form nil -1 args)
         (.invoke* (mk-nary-compare -1) fctx form nil -1 args)))))
+
+(letfn [(invoke-2 ^Insn [^Entity primitive ^seq form ^Insn arg0 ^Insn arg1]
+          (->> (insn/insns-of arg0 arg1)
+               (.invoke* primitive context/fctx-none form nil -1)))
+        (mask-all ^Insn [^Class tp]
+          (insn/mk-insn constgen/entity-int-minus-one tp))
+        (typed-one ^Insn [^Class tp]
+          (insn/mk-insn constgen/entity-int-one tp))
+        (shifted-one ^Insn [^Class tp ^seq form ^Insns args]
+          (invoke-2 binary-shift-left form (typed-one tp) (.get args 1)))]
+
+  ;; Note: Argument types are checked by the primitive functions to
+  ;; which these compound expressions delegate.
+  (def binary-bit-clear
+    (with-primitive-invoke [_ _ form _ _ args]
+      (let [args ^Insns args, tp (insn/expr-type args 0)
+            x-one (shifted-one tp form args) ; <-- checks types
+            x-mask (invoke-2 nary-bit-xor nil x-one (mask-all tp))]
+        (invoke-2 nary-bit-and nil (.get args 0) x-mask))))
+  (def binary-bit-set
+    (with-primitive-invoke [_ _ form _ _ args]
+      (let [args ^Insns args, tp (insn/expr-type args 0)
+            x-one (shifted-one tp form args)] ; <-- checks types
+        (invoke-2 nary-bit-or nil (.get args 0) x-one))))
+  (def binary-bit-flip
+    (with-primitive-invoke [_ _ form _ _ args]
+      (let [args ^Insns args, tp (insn/expr-type args 0)
+            x-one (shifted-one tp form args)] ; <-- checks types
+        (invoke-2 nary-bit-xor nil (.get args 0) x-one))))
+  (def binary-bit-test
+    (with-primitive-invoke [_ fctx form _ _ args]
+      (let [args ^Insns args, tp (insn/expr-type args 0)
+            x-shr (.invoke* binary-unsigned-shift-right fctx form nil -1 args)]
+        ;; note: tcljx.data.type's convert-to-boolean masks bit 0
+        (insn/mk-insn (.emitter x-shr) Boolean/TYPE)))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -518,14 +547,18 @@
                                                nil insn/insn-int-one)
                              (mk-binary-numeric)))
 
-        (nary-numeric "bit-and" opgen/op-xand)
-        (nary-numeric "bit-or" opgen/op-xor)
-        (nary-numeric "bit-xor" opgen/op-xxor)
+        (primitive "bit-and" nary-bit-and)
+        (primitive "bit-or" nary-bit-or)
+        (primitive "bit-xor" nary-bit-xor)
         (primitive "bit-not" unary-bit-not)
-        (primitive "xdefault" unary-xdefault)
-        (primitive "bit-shift-left" (mk-binary-shift Opcode/ISHL))
-        (primitive "bit-shift-right" (mk-binary-shift Opcode/ISHR))
-        (primitive "unsigned-bit-shift-right" (mk-binary-shift Opcode/IUSHR))
+        (primitive "bit-shift-left" binary-shift-left)
+        (primitive "bit-shift-right" binary-shift-right)
+        (primitive "unsigned-bit-shift-right" binary-unsigned-shift-right)
+
+        (primitive "bit-clear" binary-bit-clear)
+        (primitive "bit-set" binary-bit-set)
+        (primitive "bit-flip" binary-bit-flip)
+        (primitive "bit-test" binary-bit-test)
         
         (primitive "=" nary-equiv)
         (primitive "==" (mk-nary-compare condgen/cmp-eq))

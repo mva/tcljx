@@ -1261,29 +1261,20 @@
   {:added "1.0"}
   [x] (list 'clojure.core.primitive/bit-xor x -1))
 
-(defn ^:private nary-bits [op x y more]
-  (loop [val (list op x y), r (seq more)]
-    (if r
-      (recur (list op val (first r)) (next r))
-      val)))
+(def
+  ^{:doc "Bitwise and"
+    :added "1.0"}
+  bit-and clojure.core.primitive/bit-and)
 
-(defmacro bit-and
-  "Bitwise and"
-  {:added "1.0"}
-  [x y & more]
-  (nary-bits 'clojure.core.primitive/bit-and x y more))
+(def
+  ^{:doc "Bitwise or"
+    :added "1.0"}
+  bit-or clojure.core.primitive/bit-or)
 
-(defmacro bit-or
-  "Bitwise or"
-  {:added "1.0"}
-  [x y & more]
-  (nary-bits 'clojure.core.primitive/bit-or x y more))
-
-(defmacro bit-xor
-  "Bitwise exclusive or"
-  {:added "1.0"}
-  [x y & more]
-  (nary-bits 'clojure.core.primitive/bit-xor x y more))
+(def
+  ^{:doc "Bitwise exclusive or"
+    :added "1.0"}
+  bit-xor clojure.core.primitive/bit-xor)
 
 (defmacro bit-and-not
   "Bitwise and with complement"
@@ -1297,46 +1288,41 @@
       val)))
 
 
-(defn ^:private shifted-one [discard n-form]
-  `(clojure.core.primitive/bit-shift-left
-    (clojure.core.primitive/+ (clojure.core.primitive/xdefault ~discard) 1)
-    ~n-form))
+(def
+  ^{:doc "Clear bit at index n"
+    :added "1.0"}
+  bit-clear clojure.core.primitive/bit-clear)
 
-(defmacro bit-clear
-  "Clear bit at index n"
-  {:added "1.0"}
-  [x n] `(bit-and-not ~x ~(shifted-one x n)))
+(def
+  ^{:doc "Set bit at index n"
+   :added "1.0"}
+  bit-set clojure.core.primitive/bit-set)
 
-(defmacro bit-set
-  "Set bit at index n"
-  {:added "1.0"}
-  [x n] `(bit-or ~x ~(shifted-one x n)))
+(def
+  ^{:doc "Flip bit at index n"
+    :added "1.0"}
+  bit-flip clojure.core.primitive/bit-flip)
 
-(defmacro bit-flip
-  "Flip bit at index n"
-  {:added "1.0"}
-  [x n] `(bit-xor ~x ~(shifted-one x n)))
-
-(defmacro bit-test
-  "Test bit at index n"
-  {:added "1.0"}
-  [x n] `(not (zero? (bit-and ~x ~(shifted-one x n)))))
+(def
+  ^{:doc "Test bit at index n"
+    :added "1.0"}
+  bit-test clojure.core.primitive/bit-test)
 
 
-(defmacro bit-shift-left
-  "Bitwise shift left"
-  {:added "1.0"}
-  [x n] (list 'clojure.core.primitive/bit-shift-left x n))
+(def
+  ^{:doc "Bitwise shift left"
+    :added "1.0"}
+  bit-shift-left clojure.core.primitive/bit-shift-left)
 
-(defmacro bit-shift-right
-  "Bitwise shift right"
-  {:added "1.0"}
-  [x n] (list 'clojure.core.primitive/bit-shift-right x n))
+(def
+  ^{:doc "Bitwise shift right"
+    :added "1.0"}
+  bit-shift-right clojure.core.primitive/bit-shift-right)
 
-(defmacro unsigned-bit-shift-right
-  "Bitwise shift right, without sign-extension."
-  {:added "1.6"}
-  [x n] (list 'clojure.core.primitive/unsigned-bit-shift-right x n))
+(def
+  ^{:doc "Bitwise shift right, without sign-extension."
+    :added "1.6"}
+  unsigned-bit-shift-right clojure.core.primitive/unsigned-bit-shift-right)
 
 (defn integer?
   "Returns true if n is an integer"

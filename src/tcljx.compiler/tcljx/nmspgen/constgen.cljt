@@ -230,5 +230,7 @@
     (JvmConstant/.computational-value ce)))
 
 (def entity-int-zero (constant 0 Integer/TYPE))
+(def entity-int-one (constant 1 Integer/TYPE))
+(def entity-int-minus-one (constant -1 Integer/TYPE))
 (defn entity-number-zero? ^boolean [^CodeEmitter ce]
   (and (const? ce) (number-zero? (const-value ce))))

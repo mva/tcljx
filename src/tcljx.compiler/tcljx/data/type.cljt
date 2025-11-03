@@ -215,6 +215,8 @@
               #_else_void (-> xb .dconst_0)))
           (convert-to-boolean ^void [^int from]
             (case from
+              #_int 0 (-> xb .iconst_1 .iand)       ;mask bit 0
+              #_long 1 (-> xb .l2i .iconst_1 .iand) ;mask bit 0
               #_boolean 4 nil
               #_void 8 (-> xb .iconst_0)
               #_else (throw (IllegalStateException.))))
