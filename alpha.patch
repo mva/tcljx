@@ -16,7 +16,7 @@ diff -Nru src/tcljx.alpha/tcljx/alpha/ptest.cljt ../tcljx.alpha.patched/tcljx/al
      `(when-some [~ctx (impl/is-context-if-selected ~line)]
         ~(case (when (seq? form) (first form))
 -          (= tinyclj.core/= tinyclj.lang.primitive/equiv-nary)
-+          (= clojure.core/= clojure.lang.primitive/equiv-nary)
++          (= clojure.core/= clojure.core.primitive/=)
            `(impl/equiv-test ~ctx ~form)
            
            (thrown? tcljx.alpha.ptest/thrown?)
