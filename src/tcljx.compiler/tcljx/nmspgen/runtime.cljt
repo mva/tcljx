@@ -1,7 +1,7 @@
 (ns tcljx.nmspgen.runtime
   (:require
    (tcljx.data [config :as cfg] [files :as files] [ir :as ir])
-   [tinyclj.core :as cc])
+   [clojure.core :as cc])
   (:import
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc ConstantDescs
                        DirectMethodHandleDesc$Kind)

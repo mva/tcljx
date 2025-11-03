@@ -6,7 +6,7 @@
    (tcljx.nmspgen [pkggen :as pkggen] [constgen :as constgen] [emit :as emit]
                   [insn :as insn] [runtime :as rt] [condgen :as condgen]
                   [opgen :as opgen] [junctgen :as junctgen])
-   [tinyclj.string :as str])
+   [clojure.string :as str])
   (:import
    (tcljx.data.type Wrapper)
    (tcljx.data.ir CodeEmitter Loadable Entity ImmediateEntity Constant Binding)

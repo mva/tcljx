@@ -5,7 +5,7 @@
                [code :as code] [ir :as ir])
    (tcljx.nmspgen [runtime :as rt] [insn :as insn] [constgen :as constgen]
                   [defgen :as defgen] [fngen :as fngen])
-   [tinyclj.string :as str])
+   [clojure.string :as str])
   (:import
    (tcljx.data.ir Entity ImmediateEntity ArityType MethodSpec ProvidedNamespace)
    (tcljx.nmspgen.runtime Runtime)

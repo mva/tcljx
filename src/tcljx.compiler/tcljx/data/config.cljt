@@ -7,7 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.data.config
   (:require
-   [tinyclj.string :as str])
+   [clojure.string :as str])
   (:import
    (java.lang.classfile ClassFile ClassBuilder)
    (java.lang.constant ClassDesc)))

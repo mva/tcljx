@@ -9,7 +9,7 @@
   (:require
    (tcljx.data [wrong :as wrong])
    [tcljx.alpha.ptest__style :as style]
-   [tinyclj.string :as str])
+   [clojure.string :as str])
   (:import
    (tcljx.data.wrong WrongInfo)
    (java.lang.constant ClassDesc ConstantDescs)

@@ -1,5 +1,5 @@
 (ns tcljx.data.type
-  (:require [tinyclj.core :as cc])
+  (:require [clojure.core :as cc])
   (:import (java.lang.classfile CodeBuilder TypeKind)
            (java.lang.constant ConstantDesc)
            (java.lang.invoke MethodHandles$Lookup))

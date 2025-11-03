@@ -8,7 +8,7 @@
 (ns tcljx.main.options
   (:require
    (tcljx.data [config :as cfg] [files :as files])
-   [tinyclj.string :as str])
+   [clojure.string :as str])
   (:import
    (java.nio.file Path Files)))
 

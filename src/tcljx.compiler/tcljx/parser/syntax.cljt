@@ -1,6 +1,6 @@
 (ns tcljx.parser.syntax
   (:require (tcljx.data [config :as cfg] [wrong :as wrong])
-            [tinyclj.core :as cc])
+            [clojure.core :as cc])
   (:refer-clojure :exclude [vector list map symbol first second]))
 
 (defn info

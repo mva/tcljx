@@ -8,7 +8,7 @@
 (ns tcljx.parser.reader
   (:require
    (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong] [ir :as ir])
-   [tinyclj.string :as str])
+   [clojure.string :as str])
   (:import
    (tcljx.data.ir Resolver FormReader)
    (tcljx.data.wrong WrongInfo)
