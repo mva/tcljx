@@ -234,15 +234,15 @@
               ;; don't use `compare` in this case.
               (case bytecode
                 #_lcmp 148
-                (signum (Long/compare ^long c0 ^long c1))
+                (signum (Long/compare (long c0) (long c1)))
                     
                 (#_fcmpl 149 #_fcmpg 150)
-                (let [n0 ^float c0, n1 ^float c1]
+                (let [n0 (float c0), n1 (float c1)]
                   (when-not (or (Float/isNaN n0) (Float/isNaN n1))
                     (signum (if (== n0 n1) 0 (Float/compare n0 n1)))))
                     
                 (#_dcmpl 151 #_dcmpg 152)
-                (let [n0 ^double c0, n1 ^double c1]
+                (let [n0 (double c0), n1 (double c1)]
                   (when-not (or (Double/isNaN n0) (Double/isNaN n1))
                     (signum (if (== n0 n1) 0 (Double/compare n0 n1))))))))]
     

@@ -292,6 +292,12 @@
            (LRETURN)]
          (asm-expr [^Number n] (long n)))))
 
+(deftest long-to-int-to-long-test
+  (is (= '[["LOCAL 0: long x"] (LLOAD_0) (L2I) (I2L) (LRETURN)]
+         (asm-expr ^long [^long x] (int x))))
+  (is (= '[(LDC2_W -2147483648l) (LRETURN)]
+         (asm-expr ^long [] (int 2147483648l)))))
+
 (deftest cast-to-void-test
   ;; local variable in void context
   (is (= '[["LOCAL 0: Object x"] (ACONST_NULL) (ARETURN)]
