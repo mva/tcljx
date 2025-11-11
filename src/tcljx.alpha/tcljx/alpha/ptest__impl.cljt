@@ -14,16 +14,16 @@
    (java.io StringWriter)
    (java.util ArrayList)
    (java.util.concurrent CountDownLatch StructuredTaskScope
-                         StructuredTaskScope$Subtask StructuredTaskScope$Joiner
+                         StructuredTaskScope$Joiner
                          StructuredTaskScope$Configuration)
-   (java.util.function Function IntPredicate)))
+   (java.util.function UnaryOperator IntPredicate)))
 
 (def ^:private run-tests-as-concurrent-tasks? true)
 (def ^:private test-var-sts-configuration
-  (^Function fn [^StructuredTaskScope$Configuration cfg]
+  (^UnaryOperator fn [^StructuredTaskScope$Configuration cfg]
    (.withTimeout cfg (java.time.Duration/ofSeconds (* 1 60)))))
 (def ^:private namespace-sts-configuration
-  (^Function fn [^StructuredTaskScope$Configuration cfg]
+  (^UnaryOperator fn [^StructuredTaskScope$Configuration cfg]
    (.withTimeout cfg (java.time.Duration/ofSeconds (* 2 60)))))
 
 (letfn [(nmsp-of ^String [^String spec]
@@ -282,8 +282,7 @@
                   (doseq [var vars]
                     (with-fork scope binding-frame
                       (run-var-with-pred var-line-map var)))
-                  (stream-into! [] (map StructuredTaskScope$Subtask/.get)
-                                (.join scope)))
+                  (into [] (.join scope)))
                 
                 ;; alternative: sequential execution
                 (mapv (partial run-var-with-pred var-line-map) vars))))
@@ -321,8 +320,7 @@
                        ;; unlock next task's output even if this task
                        ;; fails for the join below
                        (.countDown (aget alatch (inc i)))))))
-               (stream-into! [] (map StructuredTaskScope$Subtask/.get)
-                             (.join scope))))
+               (into [] (.join scope))))
 
            ;; alternative: sequential execution
            (mapv #(.call (run-nmsp %)) nmspv))
