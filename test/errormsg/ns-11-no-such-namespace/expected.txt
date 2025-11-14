@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0mno such file: [1mpkg/not-there.cljt
+[22;31m@@@ [0mtest/errormsg/ns-11-no-such-namespace/src/pkg/ns0.cljt:[1m1[0m

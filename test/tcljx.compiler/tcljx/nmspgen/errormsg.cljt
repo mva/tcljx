@@ -1,0 +1,81 @@
+(ns tcljx.nmspgen.errormsg
+  (:require (tcljx.data [files :as files] [error :as error])
+            (tcljx.nmspgen [runtime :as rt] [bootstrap :as bootstrap])
+            (tcljx.main [options :as options] [tclj0 :as tclj0]))
+  (:import (tcljx.main.options Options)
+           (java.nio.file Files Path)))
+
+(def stub-sources-core (files/path-of "test" "errormsg" "clojure.core" "src"))
+
+(def parent-ld (rt/app-class-loader (ClassLoader/getPlatformClassLoader)
+                                    [bootstrap/stage1-classes-rt]))
+
+(defn- mk-opts ^Options [^Path p]
+  (letfn [(namespace-name ^String [^Path f]
+            (let [n (.getNameCount f)]
+              ;; expected path: test/errormsg/TEST-NAME/src/**/*.cljt
+              (when (and (>= n 5)
+                         (= (.toString (.getName f 0)) "test")
+                         (= (.toString (.getName f 1)) "errormsg")
+                         (= (.toString (.getName f 3)) "src")
+                         (.endsWith (.toString (.getFileName f))
+                                    files/source-suffix))
+                (let [fname (.toString (.getFileName f))
+                      i (- (.length fname) (.length files/source-suffix))]
+                  (str (-> (.subpath f 4 (dec n))
+                           (.toString)
+                           (.replace \/ \.))
+                       "." (.substring fname 0 i))))))]
+    (let [args (->> (files/recursive-file-seq p)
+                    (keep namespace-name)
+                    (list* "-s" (.toString stub-sources-core)
+                           "-s" (.toString (.resolve p "src"))))]
+      #_(prn :args args)
+      (-> (options/parse)
+          (assoc :parent-loader parent-ld)
+          (options/parse args)))))
+
+(defn- path-expected ^Path [^Path p] (.resolve p "expected.txt"))
+(defn- read-expected ^String [^Path p]
+  (try
+    (Files/readString (path-expected p))
+    (catch java.nio.file.NoSuchFileException _
+      "<missing-expected-output>")))
+
+(defn- path-actual ^Path [^Path p] (.resolve p "actual.txt"))
+(defn- write-actual ^void [^Path p ^String act]
+  (let [p-act (path-actual p)
+        act* (try
+               (Files/readString p-act)
+               (catch java.nio.file.NoSuchFileException _
+                 nil))]
+    (when-not (= act act*)         ;try to keep file system noise down
+      (Files/writeString p-act act))))
+
+(defn- print-diff ^void [^Path p ^String exp ^String act]
+  (when-not (= act exp)
+    (println "diff" (.toString (path-expected p)) (.toString  (path-actual p)))))
+
+(defn- run-errormsg-test ^void [^Path p]
+  (let [act (try
+              #_(tclj0/build-all (mk-opts p) false)
+              (with-out-str (tclj0/build-all (mk-opts p) false))
+              "<build completed normally>\n"
+              (catch Exception ex
+                (str (.getName (class ex)) "\n" (error/format ex))))]
+    #_(prn :act act)
+    (write-actual p act)
+    (print-diff p (read-expected p) act)))
+
+(defn run-errormsg-tests
+  (^void []
+   (let [base-dir (files/path-of "test/errormsg")
+         paths (files/child-directory-seq base-dir)]
+     (println "Evaluating error reporting"
+              (str "(" (count paths) " tests in " base-dir "/...)"))
+     (time (run-errormsg-tests paths))))
+  (^void [^seq paths]
+   (loop [[p :as paths] (seq paths)]
+     (when (some? paths)
+       (run-errormsg-test p)
+       (recur (next paths))))))

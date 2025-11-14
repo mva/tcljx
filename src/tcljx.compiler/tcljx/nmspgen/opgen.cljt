@@ -1,6 +1,6 @@
 (ns tcljx.nmspgen.opgen
   (:require 
-   (tcljx.data [type :as type] [wrong :as wrong] [ir :as ir])
+   (tcljx.data [type :as type] [error :as error] [ir :as ir])
    (tcljx.nmspgen [util :as util] [constgen :as constgen] [emit :as emit]
                   [insn :as insn]))
   (:import
@@ -137,14 +137,19 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn info-type-mismatch ^Throwable [form ^Insns args ^int i ^String exp]
-  (-> (str (wrong/q (first form)) " expects " exp " type for argument #"
-           (inc i) (wrong/got-types (insn/expr-types args)))
-      (wrong/wr-info)))
-(defn info-top-type ^Throwable [^Wrapper top-type form ^Insns args ^int i]
-  (info-type-mismatch form args i (if (identical? type/double top-type)
-                                    "numeric"
-                                    "integral")))
+(defn error-type-mismatch ^Exception [form ^Insns args ^int i ^String exp]
+  (-> (error/mk-error-msg)
+      (.q (first form))
+      (.txt "expects")
+      (.txt exp)
+      (.txt "type for argument #")
+      (.txt (inc i))
+      (.got-types (.expr-types args))
+      (error/to-error)))
+(defn error-top-type ^Throwable [^Wrapper top-type form ^Insns args ^int i]
+  (error-type-mismatch form args i (if (identical? type/double top-type)
+                                     "numeric"
+                                     "integral")))
 (defn top-type-of ^Wrapper [^Wrapper bottom-type ^Wrapper top-type
                             form ^Insns args]
   (loop [acc bottom-type, i (dec (alength (.expr-types args)))]
@@ -158,7 +163,7 @@
                        acc
                        wtp)
                      (dec i))
-              (throw (info-top-type top-type form args i))))
-          (throw (info-top-type top-type form args i)))))))
+              (throw (error-top-type top-type form args i))))
+          (throw (error-top-type top-type form args i)))))))
 (defn top-numeric-of ^Wrapper [form ^Insns args]
   (top-type-of type/int type/double form args))

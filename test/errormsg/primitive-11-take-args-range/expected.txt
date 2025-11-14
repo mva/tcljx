@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [1;39mclojure.core.primitive/aget[0m takes 2 to 3 arguments (got: 4)
+[31m@@@ [0mtest/errormsg/primitive-11-take-args-range/src/pkg/ns0.cljt:[1m2[0m

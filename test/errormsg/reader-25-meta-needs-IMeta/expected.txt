@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0mmetadata can only be applied to IMeta instances
+[31m@@@ [0mtest/errormsg/reader-25-meta-needs-IMeta/src/pkg/ns0.cljt:[1m2[0m:0

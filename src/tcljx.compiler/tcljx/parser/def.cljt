@@ -1,6 +1,6 @@
 (ns tcljx.parser.def
   (:require
-   (tcljx.data [meta :as meta] [wrong :as wrong] [context :as context]
+   (tcljx.data [meta :as meta] [error :as error] [context :as context]
                [ir :as ir] [type :as type])
    (tcljx.parser [syntax :as syntax] [interop :as interop] [parse :as parse]))
   (:import
@@ -48,30 +48,30 @@
             (ce-macro-value ^CodeEmitter [form]
               (if (fully-qualified-symbol? form)
                 (.emitter (parse/form parser (context/of-arg fctx) form))
-                (wrong/other (str ":macro-value must de fully qualified symbol"
-                                  (wrong/got-q form)))))]
+                (error/throw ":macro-value must be fully qualified symbol"
+                              (got-q form))))]
       (if-some [prior-def (prior-definition nm)]
         (or (when (instance? Assignable prior-def)
               (.redef-expr* ^Assignable prior-def fctx (x-init)))
-            (wrong/other "target of redef must be unbound or :redef"))
+            (error/throw "target of redef must be unbound or :redef"))
         
         (do
-          (when-not (= (-> parser .entity-factory .closure-level)
-                       ir/closure-level-clinit)
-            (wrong/other (str "cannot " (wrong/q 'def) " in this position")))
+          (error/when-not (= (-> parser .entity-factory .closure-level)
+                             ir/closure-level-clinit)
+            "cannot" (sym 'def) "in this context")
           (cond
             (:var nm-meta)
             (let [x-meta (parse/meta parser fctx nm-meta nil)]
-              (when macro?
-                (wrong/other ":var and :macro are mutually exclusive"))
-              (when redef?
-                (wrong/other ":var and :redef are mutually exclusive"))
+              (error/when macro?
+                ":var and :macro are mutually exclusive")
+              (error/when redef?
+                ":var and :redef are mutually exclusive")
               (.new-def-var nmsp private? nm (x-init) (or nm-tp Object)
                             (boolean (:dynamic nm-meta)) x-meta))
             
             (or redef? (nil? args))
-            (do (when macro?
-                  (wrong/other ":macro and :redef are mutually exclusive"))
+            (do (error/when macro?
+                  ":macro and :redef are mutually exclusive")
                 (.new-def-mutable nmsp private? nm (x-init)))
 
             :else

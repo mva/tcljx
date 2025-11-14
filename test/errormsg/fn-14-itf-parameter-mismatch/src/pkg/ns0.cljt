@@ -1,0 +1,2 @@
+(ns pkg.ns0 (:refer-clojure :none))
+(^java.util.function.IntConsumer fn* ^void [^long x] 0)

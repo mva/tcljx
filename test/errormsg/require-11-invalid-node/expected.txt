@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0mexpect symbol, vector, or list (got: [1m{clojure.core cc}[0m)
+[31m@@@ [0mtest/errormsg/require-11-invalid-node/src/pkg/ns0.cljt:[1m2[0m

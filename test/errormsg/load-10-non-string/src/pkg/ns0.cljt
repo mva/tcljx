@@ -1,0 +1,2 @@
+(ns pkg.ns0 (:refer-clojure :none))
+(load 123)

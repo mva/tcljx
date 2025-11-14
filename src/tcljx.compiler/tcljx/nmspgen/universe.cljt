@@ -1,6 +1,6 @@
 ;; Copyright (c) Michael van Acken. All rights reserved.
 ;; The use and distribution terms for this software are covered by the
-;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
 ;; which can be found in the file epl-v20.html at the root of this distribution.
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
@@ -9,7 +9,7 @@
   (:require
    (tcljx.data
     [config :as cfg] [files :as files] [resolve :as resolve] [reflect :as reflect]
-    [meta :as meta] [wrong :as wrong] [context :as context] [ir :as ir])
+    [meta :as meta] [error :as error] [context :as context] [ir :as ir])
    (tcljx.parser
     [reader :as reader] [form :as form] [parse :as parse]
     [namespace :as namespace])
@@ -36,13 +36,14 @@
                     (^map [^map acc ^String nm]
                      (if-some [ent (get other nm)]
                        (assoc-req acc nm ent)
-                       (wrong/unresolved-nmsp-sym (.ns-str require) nm)))
+                       (error/throw "no public var" (sym nm) "in namespace"
+                                    (sym (.ns-str require)))))
                     (^map [^map acc ^String nm* ^Entity ent]
                      (let [nm (get rename nm* nm*)]
-                       (if (contains? acc nm)
-                         (wrong/other (str "required name already defined by this "
-                                           "namespace: " (wrong/q-as-symbol nm)))
-                         (assoc acc nm ent)))))]
+                       (error/when (contains? acc nm)
+                         "required name already defined by this namespace:"
+                         (sym nm))
+                       (assoc acc nm ent))))]
     (let [refer-all? (nil? (.refer-strs require))]
       (if (and (empty? globals) refer-all? (empty? (.rename-strs require)))
         (reduce dissoc other (.exclude-strs require)) ;scenario: core first
@@ -131,8 +132,7 @@
               (if-some [req-pn (.valAt all-ns req-str nil)]
                 (do (aset apn i req-pn)
                     (set! known-ns (merge-transitive known-ns req-pn)))
-                (wrong/other (str "unresolved namespace "
-                                  (wrong/q-as-symbol req-str))))))))
+                (error/throw "unresolved namespace " (sym req-str)))))))
       apn))
   (process-require [this require provided]
     (let [ns-str (.ns-str provided)]
@@ -148,7 +148,7 @@
     (doseq [^String nm import-strs]
       (if-some [cl (.lookup-class this nm)]
         (.import-class this cl)
-        (throw (wrong/info-class-not-found nm))))
+        (error/throw "class not found:" (type nm))))
     this)
 
   (new-def-mutable [_ private? nm init]
@@ -215,8 +215,8 @@
                      (-> (form/mk-parser code-gen entity-gen this globals-before)
                          (parse/form fctx form)) ;try again *once*
                      (catch tcljx.data.ir.ImplementationUnavailableException _
-                       (wrong/other (str "cannot define and expand macro "
-                                         "in same top-level form"))))))]
+                       (error/throw "cannot define and expand macro"
+                                    "in same top-level form")))))]
       (.stage-clinit-statement! pkg-build expr)
       this))
 

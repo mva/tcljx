@@ -1,7 +1,7 @@
 (ns tcljx.parser.interop
   (:require
    (tcljx.data [meta :as meta] [member :as member] [type :as type]
-               [resolve :as resolve] [wrong :as wrong] [context :as context]
+               [resolve :as resolve] [context :as context] [error :as error]
                [ir :as ir])
    (tcljx.parser [syntax :as syntax]))
   (:import
@@ -36,14 +36,14 @@
 (defn resolve-class
   (^Class [^Resolver rsv ^symbol sym]
    (or (lookup-type rsv sym)
-       (throw (wrong/info-class-not-found sym))))
+       (error/throw "class not found:" (type sym))))
   (^Class [^Resolver rsv ^symbol sym ^Class or-else]
    (if (some? sym) (resolve-class rsv sym) or-else)))
 (defn resolve-interface ^Class [^Resolver rsv ^symbol sym]
   (let [tp (resolve-class rsv sym)]
-    (if (.isInterface tp)
-      tp
-      (wrong/other "not an interface class" tp))))
+    (error/when-not (.isInterface tp)
+      "not an interface class:" (type tp))
+    tp))
 
 (defn untagged? ^boolean [form]
   (nil? (meta/get-tag (meta form))))
@@ -65,10 +65,8 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn parse-type-symbol ^Class [^Resolver resolver form]
-  (let [sym (syntax/symbol form)]
-    (or (lookup-type resolver sym)
-        (throw (syntax/info "expected type expression" form)))))
+(defn parse-type-symbol ^Class [^Resolver rsv form]
+  (resolve-class rsv (syntax/symbol form)))
 
 (defn cast-to-type ^Expr [^Expr x ^Parser parser ^long fctx ^Class tp]
   (.type-cast (.expr-factory parser) fctx tp x))
@@ -78,17 +76,18 @@
 (defn- class-member-match ^MemberHandle [^boolean static? ^Class owner
                                          ^String mnm ^Class/1 ptags]
   (let [ms (resolve/members-by-param-tags static? owner mnm ptags)
-        wr-info (fn ^Throwable []
-                  (let [sym (wrong/q-as-symbol owner mnm)]
-                    (-> (if (and static? (= resolve/constructor-name mnm))
-                          (if (seq ms)
-                            (str "multiple constructors matching " sym)
-                            (str "no constructor matching " sym))
-                          (let [label (if static? "static" "virtual")]
-                            (if (seq ms)
-                              (str "multiple " label " members matching " sym)
-                              (str "no " label " member matching " sym))))
-                        (wrong/wr-info))))]
+        wr-info (fn ^Exception []
+                  (-> (error/mk-error-msg)
+                      (.txt (if (and static? (= resolve/constructor-name mnm))
+                              (if (seq ms)
+                                "multiple constructors matching"
+                                "no constructor matching")
+                              (let [label (if static? "static" "virtual")]
+                                (if (seq ms)
+                                  (str "multiple " label " members matching")
+                                  (str "no " label " member matching")))))
+                      (.sym owner mnm)
+                      (error/to-error)))]
     (let [m ^MemberHandle (first ms)]
       (if (and (some? m) (nil? (next ms)))
         m
@@ -157,7 +156,7 @@
               (cond
                 (nil? tp) (when (some? or-else-type) type/seq)
                 (.isArray tp) tp
-                :else (wrong/other "type of rest parameter must be array" tp)))
+                :else (error/throw "type of rest parameter must be array" (got-q tp))))
         (aset pnames n-fixed (name psym))
         (ArityType. return-type ptypes pnames (not variadic?) variadic?))
       (ArityType. return-type ptypes pnames false false))))
@@ -168,8 +167,7 @@
             (if (= meta/auto-return-type return-tag)
               (if accept-art?
                 type/auto-return-marker
-                (throw (syntax/info (str (wrong/q meta/auto-return-type)
-                                         " not applicable in this context"))))
+                (error/throw (sym return-tag) "not applicable in this context"))
               (resolve-class rsv return-tag or-else-type))))]
   
   (defn parse-arity-type ^ArityType [^Resolver rsv paramv ^Class or-else-type
@@ -189,10 +187,12 @@
                 (if-some [ms (seq (resolve/itf-methods-with-name owner mnm n))]
                   (if (nil? (next ms))
                     (first ms)
-                    (-> (str "multiple virtual " n "-parameter methods matching ")
-                        (wrong/other method-name)))
-                  (-> (str "no virtual " n "-parameter method matching ")
-                      (wrong/other method-name))))
+                    (error/throw "multiple virtual"
+                                  (txt (str n "-parameter methods matching"))
+                                  (sym method-name)))
+                  (error/throw "no virtual"
+                                (txt (str n "-parameter method matching"))
+                                (sym method-name))))
               (unhinted-to-Object ^Class [^Class tp]
                 (or tp Object))
               (select-matching-method ^Method [^ArityType at]
@@ -203,14 +203,15 @@
                                     (unhinted-to-Object))))
                   (if-some [m (resolve/itf-method-exact owner mnm rt pts)]
                     m
-                    (wrong/other "no virtual method matching " method-name))))]
+                    (error/throw "no virtual method matching"
+                                  (sym method-name)))))]
         
-        (when-not (untagged? (first paramv))
-          (throw (syntax/info "no type tag allowed for receiver parameter")))
+        (error/when-not (untagged? (first paramv))
+          "no type tag allowed for receiver parameter")
         (aset (.parameter-types at) 0 owner) ;type of receiver
         (let [m (if (unhinted-arity-type? at 1)
                   (select-method-by-arity at)
                   (select-matching-method at))]
-          (when (not= (ir/translates-to-varargs? at) (.isVarArgs m))
-            (wrong/other "varargs mismatch for method " method-name))
+          (error/when-not (= (ir/translates-to-varargs? at) (.isVarArgs m))
+            "varargs mismatch for method " (sym method-name))
           (ir/with-method-type at m))))))

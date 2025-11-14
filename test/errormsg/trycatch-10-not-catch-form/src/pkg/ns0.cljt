@@ -1,0 +1,2 @@
+(ns pkg.ns0 (:refer-clojure :none))
+(try nil (catch Exception _) catch)

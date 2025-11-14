@@ -11,4 +11,10 @@
    tcljx.alpha.textflow__table
    tcljx.alpha.textflow__terminal
    tcljx.alpha.textflow__termios
+
+   tcljx.alpha.pp.ansi
+   tcljx.alpha.pp.paragraph
+   tcljx.alpha.pp.recording
+   tcljx.alpha.pp.style
+   tcljx.alpha.pp.styled
    ))

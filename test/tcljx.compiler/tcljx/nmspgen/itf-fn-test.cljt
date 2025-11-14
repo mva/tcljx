@@ -1,6 +1,6 @@
 ;; Copyright (c) Michael van Acken. All rights reserved.
 ;; The use and distribution terms for this software are covered by the
-;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
 ;; which can be found in the file epl-v20.html at the root of this distribution.
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
@@ -10,11 +10,11 @@
             [tcljx.alpha.ptest :refer :all]))
 
 (deftest restrictions-of-itf-fn
-  (is (thrown-with-msg? tcljx.data.wrong.WrongInfo
+  (is (thrown-with-msg? tcljx.data.error.WrongInfo
                         #"type tag on function name is not supported"
                         (asm-expr (fn* ^Runnable foo []
                                        nil))))
-  (is (thrown-with-msg? tcljx.data.wrong.WrongInfo
+  (is (thrown-with-msg? tcljx.data.error.WrongInfo
                         #"interface function cannot have a name"
                         (asm-expr (^Runnable fn* foo []
                                    nil)))))
@@ -250,7 +250,7 @@
 
 (deftest sig-mismatch
   (is (thrown-with-msg?
-       tcljx.data.wrong.WrongInfo
+       tcljx.data.error.WrongInfo
        #"function result .*java.lang.Object.* not assignment compatible to method's .*void.*"
        (nmsp '[(ns pkg.ns0)
                (.accept (^java.util.function.Consumer fn* [^String s]
@@ -258,7 +258,7 @@
                         "foo")])))
   
   (is (thrown-with-msg?
-       tcljx.data.wrong.WrongInfo
+       tcljx.data.error.WrongInfo
        #"function parameter .*int.* not assignment compatible to method's .*java.lang.Object.*"
        (nmsp '[(ns pkg.ns0)
                (.accept (^java.util.function.Consumer fn* ^void [^int s]

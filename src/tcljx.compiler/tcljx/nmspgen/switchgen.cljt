@@ -1,6 +1,6 @@
 (ns tcljx.nmspgen.switchgen
   (:require
-   (tcljx.data [type :as type] [wrong :as wrong] [context :as context]
+   (tcljx.data [type :as type] [context :as context] [error :as error]
                [resolve :as resolve] [ir :as ir])
    (tcljx.nmspgen [runtime :as rt] [constgen :as constgen] [emit :as emit]
                    [insn :as insn]))
@@ -20,16 +20,11 @@
               (if (< i (.length guards))
                 (let [guard-tp (insn/expr-type guards i)
                       guard-val (Loadable/.datafy (insn/emitter guards i))]
-                  (when-not (type/assignable-from? select-tp guard-tp)
-                    (-> (str "guard " guard-val " not compatible with select "
-                             "expression " (wrong/q-type select-tp)
-                             (wrong/got-type guard-tp))
-                        (wrong/wr-info)
-                        (throw)))
-                  (when (contains? seen guard-val)
-                    (-> (str "duplicate guard value " guard-val)
-                         (wrong/wr-info)
-                         (throw)))
+                  (error/when-not (type/assignable-from? select-tp guard-tp)
+                    "guard" (q guard-val) "not compatible with select expression"
+                    (type select-tp) (got-type guard-tp))
+                  (error/when (contains? seen guard-val)
+                    "duplicate guard value: " (q guard-val))
                   (recur (conj seen guard-val) (inc i)))
                 seen))))]
   

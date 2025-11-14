@@ -1,0 +1,4 @@
+tcljx.data.error.WrongInfo
+[31m### [0mguard [1mtrue[0m not compatible with select expression [1mjava.lang.String[0m (got:
+    [1mboolean[0m)
+[31m@@@ [0mtest/errormsg/case-10-incompatble-guard/src/pkg/ns0.cljt:[1m2[0m

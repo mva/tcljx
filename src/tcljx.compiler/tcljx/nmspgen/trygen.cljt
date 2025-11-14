@@ -1,7 +1,6 @@
 (ns tcljx.nmspgen.trygen
   (:require
-   (tcljx.data [type :as type] [wrong :as wrong] [reflect :as reflect]
-               [ir :as ir])
+   (tcljx.data [type :as type] [reflect :as reflect] [ir :as ir])
    (tcljx.nmspgen [emit :as emit] [insn :as insn]))
   (:import
    (tcljx.data.ir CodeEmitter)

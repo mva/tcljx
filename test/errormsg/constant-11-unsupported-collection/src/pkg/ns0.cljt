@@ -1,0 +1,6 @@
+(ns pkg.ns0 (:refer-clojure :none))
+(def ^:macro foo (fn* foo [&form &env] foo))
+;;; Note: As part of the testing environment's bootstrap setup, this
+;;; fails in RT.applyMacroMapped without reaching the error message
+;;; that an application would see.
+(foo)

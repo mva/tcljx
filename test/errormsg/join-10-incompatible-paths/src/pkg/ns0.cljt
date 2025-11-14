@@ -1,0 +1,2 @@
+(ns pkg.ns0 (:refer-clojure :none))
+(if true 123 false)

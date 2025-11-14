@@ -380,7 +380,7 @@
 (definterface FormReader
   (read ^Object [^Resolver resolver]) ;end of file is :tcljx.parser.reader/EOF
   (resolve ^FormReader [^String path-str])
-  (resource-url ^java.net.URL [])
+  (resource-uri ^java.net.URI [])
   (with-source-file ^ClassBuilder [^ClassBuilder cb]))
 
 (definterface NamespaceProvider
@@ -626,7 +626,9 @@
 
 (defn def-from-this-namespace? ^boolean [^Entity ent ^Parser parser]
   (when (instance? ImmediateEntity ent)
-    (= (.namespace-if-def ^ImmediateEntity ent) (-> parser .resolver .ns-str))))
+    (let [nmsp (.namespace-if-def ^ImmediateEntity ent)]
+      (or (nil? nmsp)                ;if def was aliased to a constant
+          (= nmsp (-> parser .resolver .ns-str))))))
 
 (defn exprs-of ^Exprs [^ExprFactory xf & ^Expr/1 xs*]
   (let [xs (.new-exprs xf (alength xs*))]

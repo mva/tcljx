@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0mrecur expects [1mjava.lang.String[0m for argument #1 (got: [[1mjava.lang.Boolean[0m])
+[31m@@@ [0mtest/errormsg/recur-11-arg-mismatch/src/pkg/ns0.cljt:[1m2[0m

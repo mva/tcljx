@@ -1,6 +1,6 @@
 ;; Copyright (c) Michael van Acken. All rights reserved.
 ;; The use and distribution terms for this software are covered by the
-;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
 ;; which can be found in the file epl-v20.html at the root of this distribution.
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
@@ -27,11 +27,11 @@
    (java.util.concurrent ConcurrentHashMap)
    (java.util.function Consumer Function)))
 
+(def stage1-classes-rt (Path/of (System/getProperty "java.io.tmpdir")
+                                (System/getProperty "user.name")
+                                "tcljx-stage1.mdir-xpl" "tcljx.rt"))
 (def app-ld
-  (let [stage1-classes-rt (Path/of (System/getProperty "java.io.tmpdir")
-                                   (System/getProperty "user.name")
-                                   "tcljx-stage1.mdir-xpl" "tcljx.rt")]
-    (rt/app-class-loader :platform [stage1-classes-rt])))
+  (rt/app-class-loader (ClassLoader/getPlatformClassLoader) [stage1-classes-rt]))
 (def rt-lookup (.lookup (rt/mk-runtime app-ld nil)))
 (type/fixup-runtime-types-once! rt-lookup)
 
@@ -59,7 +59,7 @@
         form)))
   (with-source-file [_ cb]
     cb)
-  (resource-url [_]
+  (resource-uri [_]
     nil))
 (defn mk-reader-stub [forms]
   (ReaderStub. (seq forms)))
@@ -184,7 +184,7 @@
     (meta &form)))
 
 (defmacro is-error [form exp-msg]
-  (with-meta `(ptest/is (ptest/thrown-with-msg? tcljx.data.wrong.WrongInfo
+  (with-meta `(ptest/is (ptest/thrown-with-msg? tcljx.data.error.WrongInfo
                                                 ~exp-msg (asm-expr ~form)))
     (meta &form)))
 

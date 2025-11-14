@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0mcannot [1mdef[0m in this context
+[31m@@@ [0mtest/errormsg/def-10-out-of-context/src/pkg/ns0.cljt:[1m2[0m

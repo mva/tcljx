@@ -1,7 +1,7 @@
 (ns tcljx.parser.form
   (:require
    (tcljx.data
-    [meta :as meta] [wrong :as wrong] [type :as type] [context :as context]
+    [meta :as meta] [error :as error] [type :as type] [context :as context]
     [ir :as ir])
    (tcljx.parser
     [interop :as interop] [syntax :as syntax] [parse :as parse] [def :as def]
@@ -30,7 +30,9 @@
                 (map? form) type/map
                 (set? form) type/set
                 (seq? form) type/list
-                (symbol? form) type/symbol))
+                (symbol? form) type/symbol
+                :else (error/throw "unsupported collection literal"
+                                    (txt (.getName (class form))))))
             (parse-collection-literal ^Expr [^long fctx form ^map form-meta]
               (let [x-meta (parse/meta this fctx form-meta nil)
                     coll-tp (type-of-quoted-form form)
@@ -64,9 +66,10 @@
                 (syntax/empty-tail (nnext args))
                 (or (when (instance? Assignable ce-dest)
                       (.set-expr* ^Assignable ce-dest fctx x-value))
-                    (wrong/other (str "cannot set! " (wrong/q (first args)))))))
+                    (error/throw "cannot set!" (q (first args))))))
             
             (parse-if ^Expr [^long fctx [_ & formr]]
+              ;; FIXME... change this to "3 arguments only"?
               (syntax/first (next formr)) ;test and first path exist?
               (syntax/empty-tail 3 formr) ;nothing after test and two paths?
               (let [xs (.new-exprs expr-factory (count formr))]
@@ -167,12 +170,6 @@
               (let [clnm (.substring nm 0 (dec (.length nm)))]
                 (parse-dot fctx (list* \. (symbol nil clnm) 'new formr))))
             
-            (wr-info-unresolved-qualified-sym ^Throwable [^symbol op]
-              (wrong/wr-info
-               (if (parse/lookup-namespace this (namespace op))
-                 ;; namespace exists: def lookup must have failed
-                 (str "no public def " (wrong/q op))
-                 (str "no namespace or class " (wrong/q-namespace op)))))
             (invoke-entity ^Expr [^long fctx ^seq form ^Entity inv]
               (let [specs (.invoke-methods inv)
                     fctx' (cond-> fctx
@@ -195,7 +192,7 @@
                   (->> (.expand-macro resolver inv form)
                        (.parse-form this fctx))
                   (invoke-entity fctx form inv))
-                (throw (wrong/info-unresolved op))))
+                (error/throw "undefined symbol:" (sym op))))
             (parse-invocation-qname ^Expr [^symbol op ^long fctx ^seq form
                                            ^String nmsp ^String nm]
               ;; `op` is qualified symbol: either a reference to
@@ -299,7 +296,7 @@
                     (.value-of entity-factory ent sym))
                 (if-some [ent (interop/lookup-class-entity this sym)]
                   (.value-of entity-factory ent sym)
-                  (throw (wrong/info-unresolved sym)))))]
+                  (error/throw "undefined symbol:" (sym sym)))))]
 
       (if (instance? IMeta form)
         (let [form-meta (.meta ^IMeta form)

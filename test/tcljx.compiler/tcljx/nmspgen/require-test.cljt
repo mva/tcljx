@@ -1,6 +1,6 @@
 ;; Copyright (c) Michael van Acken. All rights reserved.
 ;; The use and distribution terms for this software are covered by the
-;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
 ;; which can be found in the file epl-v20.html at the root of this distribution.
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
@@ -663,25 +663,25 @@
                  #_(def public-alias immutable-f)])))
 
   (is (thrown-with-msg?
-       tcljx.data.wrong.WrongInfo #"undefined symbol.*pkg.exp/immutable-m"
+       tcljx.data.error.WrongInfo #"undefined symbol.*pkg.exp/immutable-m"
        (nmsp '[(ns pkg.exp)
                (def ^:private immutable-m 123)
                (ns pkg.ns0 (:require pkg.exp))
                pkg.exp/immutable-m])))
   (is (thrown-with-msg?
-       tcljx.data.wrong.WrongInfo #"undefined symbol.*pkg.exp/immutable-f"
+       tcljx.data.error.WrongInfo #"undefined symbol.*pkg.exp/immutable-f"
        (nmsp '[(ns pkg.exp)
                (def ^:private immutable-f (System/currentTimeMillis))
                (ns pkg.ns0 (:require pkg.exp))
                pkg.exp/immutable-f])))
   (is (thrown-with-msg?
-       tcljx.data.wrong.WrongInfo #"undefined symbol.*pkg.exp/var"
+       tcljx.data.error.WrongInfo #"undefined symbol.*pkg.exp/var"
        (nmsp '[(ns pkg.exp)
                (def ^:private ^:var var 123)
                (ns pkg.ns0 (:require pkg.exp))
                pkg.exp/var])))
   (is (thrown-with-msg?
-       tcljx.data.wrong.WrongInfo #"undefined symbol.*pkg.exp/alias"
+       tcljx.data.error.WrongInfo #"undefined symbol.*pkg.exp/alias"
        (nmsp '[(ns pkg.exp)
                (def immutable-f (System/currentTimeMillis))
                (def ^:private alias immutable-f)

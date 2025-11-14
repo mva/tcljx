@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0mexpect array argument
+[31m@@@ [0mtest/errormsg/primitive-12-take-array/src/pkg/ns0.cljt:[1m2[0m

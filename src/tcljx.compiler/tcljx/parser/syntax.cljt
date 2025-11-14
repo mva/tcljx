@@ -1,30 +1,22 @@
 (ns tcljx.parser.syntax
-  (:require (tcljx.data [config :as cfg] [wrong :as wrong])
+  (:require (tcljx.data [config :as cfg] [error :as error])
             [clojure.core :as cc])
   (:refer-clojure :exclude [vector list map symbol first second]))
-
-(defn info
-  (^Throwable [^String msg]
-   (wrong/wr-info msg))
-  (^Throwable [^String msg-prefix form]
-   (wrong/wr-info-line-number (str msg-prefix (wrong/got-q form)) form)))
-
-;;; ------------------------------------------------------------------------
 
 (defn simple-symbol? ^boolean [form]
   (and (symbol? form) (nil? (namespace form))))
 
 (defn symbol ^symbol [form]
-  (if (symbol? form)
-    form
-    (throw (info "expect symbol" form))))
+  (error/when-not (symbol? form)
+    "expect symbol" (got-q form))
+  form)
 (defn simple-symbol ^symbol [form]
-  (if (simple-symbol? form)
-    form
-    (throw (info "expect unqualified symbol" form))))
+  (error/when-not (simple-symbol? form)
+    "expect unqualified symbol" (got-q form))
+  form)
 (defn parameter-symbol ^symbol [form]
   (if (= form '&)
-    (throw (info "invalid parameter name" form))
+    (error/throw "invalid parameter name" (got-q form))
     (simple-symbol form)))
 
 (defn simple-symbol-str ^String [form]
@@ -32,24 +24,25 @@
 
 (defn vector
   (^vector [form]
-   (if (vector? form)
-     form
-     (throw (info "expect vector" form))))
+   (error/when-not (vector? form)
+     "expect vector" (got-q form))
+   form)
   (^vector [form ^boolean even?]
    (let [x (vector form)]
      (if (and even? (odd? (count x)))
-       (throw (info "expect vector with even number of elements" form))
+       (error/throw "expect vector with even number of elements, got"
+                     (txt (count form)))
        x))))
 
 (defn list ^seq [form]
-  (if (seq? form)
-    form
-    (throw (info "expect list" form))))
+  (error/when-not (seq? form)
+    "expect list" (got-q form))
+  form)
 
 (defn map ^map [form]
-  (if (map? form)
-    form
-    (throw (info "expect map" form))))
+  (error/when-not (map? form)
+    "expect map" (got-q form))
+  form)
 
 ;;; ------------------------------------------------------------------------
 
@@ -65,23 +58,18 @@
   (^void [^seq forms]
    (empty-tail 0 forms))
   (^void [^int n ^seq forms]
-   (when (some? (nthnext forms n))
-     (throw (info "unexpected arguments at end" (nthnext forms n))))))
+   (error/when-not (nil? (nthnext forms n))
+     "unexpected arguments at end" (got-q (nthnext forms n)))))
 
 (defn first [^seq forms]
-  (if (some? (seq forms))
-    (cc/first forms)
-    (throw (info "missing argument"))))
+  (if-some [xs (seq forms)]
+    (cc/first xs)
+    (error/throw "missing argument")))
 
 (defn second [^seq forms]
   (if-some [xs (next forms)]
     (cc/first xs)
-    (throw (info "missing argument"))))
-
-(defn varargs-parameter ^symbol [[_ & forms]]
-  (if (some? forms)
-    (simple-symbol (cc/first forms))
-    (throw (info "missing varargs parameter"))))
+    (error/throw "missing argument")))
 
 ;;; ------------------------------------------------------------------------
 
@@ -101,6 +89,7 @@
                                  (rest spec) spec))
                       
               :else
-              (throw (info "expect symbol or list" spec))))]
+              (error/throw "expect symbol or list" (got-q spec)
+                            (set-list-context error-context))))]
     (reduce flatten-import rimports specs)))
 

@@ -1,6 +1,6 @@
 (ns tcljx.parser.deftype
   (:require
-   (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong]
+   (tcljx.data [config :as cfg] [meta :as meta] [error :as error]
                [context :as context] [reflect :as reflect] [member :as member]
                [type :as type] [ir :as ir] [code :as code])
    (tcljx.parser [syntax :as syntax] [interop :as interop] [parse :as parse]))
@@ -30,7 +30,7 @@
             (try
               (ClassDesc/of x)
               (catch IllegalArgumentException _
-                (throw (syntax/info "invalid class name" x)))))
+                (error/throw "invalid class name" (sym x)))))
           (symbol-class-desc ^ClassDesc [^symbol tag]
             (or (some-> (interop/lookup-type rsv tag) (reflect/describe-class))
                 (let [nm (.toString tag)]
@@ -40,8 +40,9 @@
     
     (if (some? tag)
       (let [n (interop/array-rank (name tag))]
-        (when (and (not void?) (= tag 'void))
-          (throw (syntax/info "`void` tag not applicable in this context")))
+        (when (or (and (not void?) (= tag 'void))
+                  (= tag meta/auto-return-type))
+          (error/throw (sym tag) "tag not applicable in this context"))
         (if (zero? n)
           (symbol-class-desc tag)
           (-> (symbol nil (namespace tag))
@@ -67,8 +68,9 @@
         (if-some [tp (tag-desc-of rsv psym false nil)]
           (if (.isArray tp)
             (aset ptypes n-fixed tp)
-            (wrong/other "type of vararg parameter must be array" tp))
-          (throw (syntax/info "method cannot have rest parameter")))))
+            (error/throw "type of vararg parameter is not array:"
+                          (sym (interop/tag-of psym))))
+          (error/throw "method cannot have rest parameter"))))
     (MethodTypeDesc/of rtype ptypes)))
 
 (defn parse-definterface* ^Expr [^Resolver rsv ^EntityFactory etf ^long fctx
@@ -81,9 +83,9 @@
                   msig (syntax/vector msig)]
               (syntax/empty-tail methodr)
               (when-some [tag (interop/tag-of mname)]
-                (wrong/other (str "method result tag " (wrong/q tag) " must "
-                                  "be placed on the parameter vector, not the "
-                                  "method name")))
+                (error/throw "method result tag" (q tag)
+                              "must be placed on the parameter vector, not the"
+                              "method name"))
               (let [mnm (name mname)
                     mtd (method-lookup-type rsv msig)
                     flags (cond-> (code/acc* public)
@@ -125,11 +127,11 @@
        (.isInterface cl)
        (recur super (cons cl interfaces) clr)
        (.isArray cl)
-       (throw (wrong/wr-info "class cannot implement array type"))
+       (error/throw "class cannot implement array type")
        (.isPrimitive cl)
-       (throw (wrong/wr-info "class cannot implement primitive type"))
+       (error/throw "class cannot implement primitive type")
        (some? super)
-       (throw (wrong/wr-info "class can only extend a single class"))
+       (error/throw "class can only extend a single class")
        :else
        (recur cl interfaces clr))))
   (^Supers [^Class super ^seq interfaces]
@@ -194,12 +196,11 @@
                           java-record? (code/acc* private final)
                           :else (code/acc* public final))]
               (when java-record?
-                (when-not (member/acc-final? flags)
-                  (wrong/other (str "java.lang.Record cannot have mutable field "
-                                    (wrong/q sym))))
+                (error/when-not (member/acc-final? flags)
+                  "java.lang.Record cannot have mutable field" (sym sym))
                 (when (contains? prohibited-record-fields nm)
-                  (wrong/other (str "java.lang.Record cannot declare field with name "
-                                    "of no-arg Object method " (wrong/q (symbol nm))))))
+                  (error/throw "java.lang.Record cannot declare field with"
+                                "name of no-arg Object method " (sym nm))))
               (FieldSpec. owner nm tag flags tpd nil)))]
     (let [a (new FieldSpec/1 (count fieldv))]
       (dotimes [i (alength a)]

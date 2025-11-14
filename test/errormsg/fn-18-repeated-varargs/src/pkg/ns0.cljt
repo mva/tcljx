@@ -1,0 +1,4 @@
+(ns pkg.ns0 (:refer-clojure :none))
+(fn*
+ ([& x] 0)
+ ([a & x] 1))

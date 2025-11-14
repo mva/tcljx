@@ -1,6 +1,6 @@
 ;; Copyright (c) Michael van Acken. All rights reserved.
 ;; The use and distribution terms for this software are covered by the
-;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
 ;; which can be found in the file epl-v20.html at the root of this distribution.
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
@@ -8,7 +8,7 @@
 (ns tcljx.nmspgen.fn-member-test
   (:require [tcljx.nmspgen.bootstrap :refer [asm-expr str-expr nmsp]]
             [tcljx.alpha.ptest :refer :all])
-  (:import (tcljx.data.wrong WrongInfo)))
+  (:import (tcljx.data.error WrongInfo)))
 
 ;;; Note: Tests using `^[...]` syntax should use `str-expr` instead of
 ;;; `asm-expr` to bypass the bootstrap compiler's meta syntax processing.

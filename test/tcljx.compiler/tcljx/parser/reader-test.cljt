@@ -1,6 +1,6 @@
 ;; Copyright (c) Michael van Acken. All rights reserved.
 ;; The use and distribution terms for this software are covered by the
-;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
 ;; which can be found in the file epl-v20.html at the root of this distribution.
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
@@ -12,7 +12,7 @@
             [tinyclj.string :as str]
             [tcljx.alpha.ptest :refer :all])
   (:import (tcljx.data.ir Resolver)
-           (tcljx.data.wrong WrongInfo)
+           (tcljx.data.error WrongInfo)
            (tcljx.parser.reader FormBuilder TokenParser)
            (java.lang.invoke MethodHandles)))
 
@@ -666,9 +666,9 @@
 (deftest collection-error-test
   (is (thrown-with-msg? WrongInfo #"invalid start of token"
                         (read1 "{a}")))
-  (is (thrown-with-msg? WrongInfo #"duplicate key: a"
+  (is (thrown-with-msg? WrongInfo #"duplicate map key: a"
                         (read1 "{a 1, a 2}")))
-  (is (thrown-with-msg? WrongInfo #"duplicate key: a"
+  (is (thrown-with-msg? WrongInfo #"duplicate set key: a"
                         (read1 "#{a a}"))))
 
 

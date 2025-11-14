@@ -2,8 +2,7 @@
   (:require
    (tcljx.data
     [config :as cfg] [reflect :as reflect] [resolve :as resolve] [type :as type]
-    [member :as member] [context :as context] [wrong :as wrong] [ir :as ir]
-    [code :as code])
+    [member :as member] [context :as context] [ir :as ir] [code :as code])
    (tcljx.nmspgen
     [runtime :as rt] [util :as util] [pkggen :as pkggen]
     [constgen :as constgen] [insn :as insn] [emit :as emit]))

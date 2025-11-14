@@ -1,7 +1,7 @@
 (ns tcljx.nmspgen.codegen
   (:require
    (tcljx.data
-    [config :as cfg] [wrong :as wrong] [context :as context] [member :as member]
+    [config :as cfg] [context :as context] [error :as error] [member :as member]
     [type :as type] [ir :as ir] [resolve :as resolve] [reflect :as reflect])
    (tcljx.nmspgen
     [pkggen :as pkggen] [runtime :as rt] [constgen :as constgen]
@@ -23,16 +23,25 @@
     (when-some [m (first ms)]
       (insn/invoke-member m receiver args fctx))))
 
-(defn- info-unresolved-member ^Throwable [^seq ms ^Class owner ^String mnm
-                                          ^Insns args ^String label]
+(defn- error-unresolved-member ^Exception [^seq ms ^Class owner ^String mnm
+                                           ^Insns args ^String label]
   ;; label is one of "static", "virtual", or "constructor"
   (let [entity (str label (when (not= label "constructor")
                             (if (.empty? args) " member" " method")))
-        mnm (cond->> mnm (= label "virtual") (str "."))
-        member (wrong/q-as-symbol owner mnm)]
-    (wrong/wr-info (if (nil? (seq ms))
-                     (str "no " entity " matching " member)
-                     (str "multiple " entity "s matching " member)))))
+        mnm (cond->> mnm (= label "virtual") (str "."))]
+    (if (nil? (seq ms))
+      (-> (error/mk-error-msg)
+          (.txt "no")
+          (.txt entity)
+          (.txt "matching")
+          (.sym owner mnm)
+          (error/to-error))
+      (-> (error/mk-error-msg)
+          (.txt "multiple")
+          (.txt (str entity "s"))
+          (.txt "matching")
+          (.sym owner mnm)
+          (error/to-error)))))
 
 (defn- recur-iinc-deltas ^int/1 [^Entity/1 entities ^CodeEmitter/1 ces]
   (let [a (new int/1 (alength entities))]
@@ -118,7 +127,7 @@
     (let [ce (.emitter arg)]
       (if (instance? tcljx.nmspgen.defgen.DefVarDeref ce)
         (.expr-of (.df ^tcljx.nmspgen.defgen.DefVarDeref ce))
-        (wrong/other "special form `var` only applicable to :var def"))))
+        (error/throw "special form `var` only applicable to :var def"))))
   
   (progn-expr [_ xs x]
     (insn/progn xs x))
@@ -181,8 +190,7 @@
                      (.invokestatic xb rt/ClojureRT "booleanCast" rt/mtd-boolean-Object))
                    consumed-type))))
             (insn/mk-insn type/polymorphic))
-        (throw (insn/wr-type "called function's type does not implement `IFn`"
-                             f)))))
+        (throw (insn/error-type "called function's type does not implement `IFn`" f)))))
   
   (block-bindings [this fctx bindings patch-letfn? recur-to-body? body]
     (if (and (not recur-to-body?) (ir/every-binding-alias? bindings))
@@ -230,19 +238,15 @@
           ces (.emitters args)
           entities recur-variables]
       
-      (when-not (= (alength arg-types) (alength entities))
-        (-> (str "recur expects " (alength entities) " arguments"
-                 (wrong/got-int (alength arg-types)))
-            (wrong/wr-info)
-            (throw)))
+      (error/when-not (= (alength arg-types) (alength entities))
+        "recur expects" (txt (alength entities)) "arguments"
+        (got-types arg-types))
       (dotimes [i (alength arg-types)]
         (let [exp (.value-type (aget entities i))
               act (aget arg-types i)]
-          (when-not (type/assignable-from? exp act)
-            (-> (str "recur expects " (wrong/q-type exp) " for argument #"
-                     (inc i) (wrong/got-types arg-types))
-                (wrong/wr-info)
-                (throw)))))
+          (error/when-not (type/assignable-from? exp act)
+            "recur expects" (type exp) "for argument #"
+            (txt (inc i)) (got-types arg-types))))
 
       (-> (^CodeEmitter fn [xb _ _]
            (let [iinc-deltas (recur-iinc-deltas entities ces)]
@@ -279,9 +283,12 @@
 
   (type-cast [this fctx target-type arg]
     (let [arg-tp (insn/expr-type arg)]
-      (letfn [(wr-info-invalid-cast ^Throwable []
-                (wrong/wr-info (str "cannot cast to " (wrong/q-type target-type)
-                                    (wrong/got-type arg-tp))))
+      (letfn [(error-invalid-cast ^Exception []
+                (-> (error/mk-error-msg)
+                    (.txt "cannot cast to")
+                    (.type target-type)
+                    (.got-type arg-tp)
+                    (error/to-error)))
               (checkcast ^Insn [^Insn ref-arg ^Class ref-target]
                 (let [arg-tp (insn/expr-type ref-arg)]
                   (if (or (.isInterface ref-target)
@@ -289,7 +296,7 @@
                           (.isAssignableFrom arg-tp ref-target) ;checkcast
                           (type/poly-reference? arg-tp)) ;cast from nil
                     (insn/cast-to ref-arg ref-target fctx)
-                    (throw (wr-info-invalid-cast)))))
+                    (throw (error-invalid-cast)))))
               (boxed-arg ^Insn [^Class prim-tp]
                 (insn/cast-to arg (.class-reference (type/of prim-tp))
                               context/fctx-none))]
@@ -303,7 +310,7 @@
           
           (.isPrimitive target-type)
           (if (.isPrimitive arg-tp)
-            (throw (wr-info-invalid-cast)) ;no cast between different primitives
+            (throw (error-invalid-cast)) ;no cast between different primitives
             (-> (boxed-arg target-type) (insn/cast-to target-type fctx)))
           
           ;; here holds: `target-type` is reference
@@ -317,7 +324,7 @@
           mnm resolve/constructor-name
           ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
       (or (invoke-single-match ms nil args fctx)
-          (throw (info-unresolved-member ms owner mnm args "constructor")))))
+          (throw (error-unresolved-member ms owner mnm args "constructor")))))
   (invoke-static-member [_ fctx invoke-member-if-field? owner mnm args]
     (let [args ^Insns args
           ms (resolve/members-by-arg-types true owner mnm (.expr-types args))]
@@ -328,28 +335,27 @@
             (if (and invoke-member-if-field? (member/field? (first ms)))
               (assert false "not yet implemented")
               insn))
-          (throw (info-unresolved-member ms owner mnm args "static")))))
+          (throw (error-unresolved-member ms owner mnm args "static")))))
   (invoke-virtual-member [_ fctx receiver opt-owner mnm args]
     (let [receiver ^Insn receiver
           args ^Insns args
           owner (or opt-owner (insn/expr-type receiver))
           ms (resolve/members-by-arg-types false owner mnm (.expr-types args))]
       (or (invoke-single-match ms receiver args fctx)
-          (throw (info-unresolved-member ms owner mnm args "virtual")))))
+          (throw (error-unresolved-member ms owner mnm args "virtual")))))
 
   (get-static-field [_ fctx owner mnm]
     (let [args insn/empty-insns
           ms (resolve/field-exact nil true owner mnm resolve/empty-class-array)]
       (or (invoke-single-match ms nil args fctx)
-          (throw (info-unresolved-member ms owner mnm args "static")))))
+          (throw (error-unresolved-member ms owner mnm args "static")))))
   (get-virtual-field [_ fctx receiver mnm]
     (let [receiver ^Insn receiver
           args insn/empty-insns
           owner (insn/expr-type receiver)
           ms (resolve/field-exact nil false owner mnm (.expr-types args))]
       (or (invoke-single-match ms receiver args fctx)
-          (throw (wrong/wr-info (str "no virtual field matching "
-                                     (wrong/q-as-symbol owner mnm)))))))
+          (error/throw "no virtual field matching" (sym owner mnm)))))
 
   (instanceof-expr [_ fctx type arg]
     (let [arg ^Insn arg]
@@ -367,16 +373,16 @@
                (-> xb (emit/with-line-number fctx) (.athrow))
                nil))         ;operand type reported when emitting code
             (insn/mk-insn Void/TYPE))   ;type used while parsing
-        (throw (insn/info-type "expect instance of Throwable" arg)))))
+        (throw (insn/error-type "expect instance of Throwable" arg)))))
   (monitor-expr [_ fctx enter? lockee]
-    (if (type/monomorphic-primitive? (insn/expr-type lockee))
-      (wrong/other "monitor operation requires an identity object")
-      (-> (^CodeEmitter fn [xb _ _]
-           (when (emit/insn? xb fctx Object (.emitter lockee))
-             (emit/with-line-number xb fctx)
-             (if enter? (.monitorenter xb) (.monitorexit xb))
-             Void/TYPE))     ;operand type reported when emitting code
-          (insn/mk-insn Void/TYPE)))))
+    (error/when (type/monomorphic-primitive? (insn/expr-type lockee))
+        "monitor operation requires an identity object")
+    (-> (^CodeEmitter fn [xb _ _]
+         (when (emit/insn? xb fctx Object (.emitter lockee))
+           (emit/with-line-number xb fctx)
+           (if enter? (.monitorenter xb) (.monitorexit xb))
+           Void/TYPE))     ;operand type reported when emitting code
+        (insn/mk-insn Void/TYPE))))
 
 (defn mk-factory ^ExprFactory []
   (InsnFactoryImpl. nil nil))

@@ -1,7 +1,7 @@
 (ns tcljx.nmspgen.condgen
   (:require
    (tcljx.data [type :as type] [resolve :as resolve] [ir :as ir] [code :as code]
-               [wrong :as wrong])
+               [error :as error])
    (tcljx.nmspgen [util :as util] [pkggen :as pkggen] [constgen :as constgen]
                   [insn :as insn] [emit :as emit]))
   (:import
@@ -325,10 +325,7 @@
 ;;; Throws if there is no type from which all paths in the given range
 ;;; of `types` are "compatible".  pre: (< start end)
 (defn join-type ^Class [^Class/1 types ^int start ^int end]
-  (letfn [(info-incompatible-types ^Throwable []
-            (wrong/wr-info (str "incompatible path types"
-                                (wrong/got-types types start end))))
-          (single-type ^Class []
+  (letfn [(single-type ^Class []
             (let [candidate (aget types start)]
               (loop [i (inc start)]
                 (cond (>= i end) candidate
@@ -351,7 +348,8 @@
                         (type/primitive-assignable-from? candidate wtp)
                         (recur candidate (inc i))
                         :else
-                        (throw (info-incompatible-types)))))))))
+                        (error/throw "incompatible path types"
+                                     (got-types types start end)))))))))
           (reference-type ^Class [] ;pre: at least one type is reference
             (loop [candidate nil, i start]
               (if (>= i end)

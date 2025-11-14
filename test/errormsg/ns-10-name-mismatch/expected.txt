@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0mns name mismatch, expected [1mpkg.ns0[0m (got: [1mpkg.ns9[0m)
+[31m@@@ [0mtest/errormsg/ns-10-name-mismatch/src/pkg/ns0.cljt:[1m1[0m

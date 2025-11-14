@@ -1,6 +1,6 @@
 (ns tcljx.nmspgen.publics
   (:require
-   (tcljx.data [config :as cfg] [wrong :as wrong] [reflect :as reflect]
+   (tcljx.data [config :as cfg] [error :as error] [reflect :as reflect]
                [type :as type] [resolve :as resolve] [member :as member]
                [code :as code] [ir :as ir])
    (tcljx.nmspgen [runtime :as rt] [insn :as insn] [constgen :as constgen]
@@ -190,9 +190,9 @@
                     Field (add-field! pb !unresolved m)
                     Method (add-method! pb !unresolved m)))
                 (if (= (.size !unresolved) (.size ms))
-                  (wrong/other (str "failed to resolve imported defs (like a "
-                                    "public alias for private def): "
-                                    (str/join " " (map Member/.getName ms))))
+                  (error/throw "failed to resolve imported defs (like a"
+                               "public alias for private def):"
+                               (txt (str/join " " (map Member/.getName ms))))
                   (recur !unresolved)))))
           (segment-into! ^void [^Class segment]
             (let [!unresolved (ArrayList.)]

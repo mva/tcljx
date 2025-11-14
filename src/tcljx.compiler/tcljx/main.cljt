@@ -7,7 +7,7 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.main
   (:require
-   (tcljx.data [config :as cfg] [wrong :as wrong])
+   (tcljx.data [config :as cfg] [error :as error])
    (tcljx.main [options :as options] [invoke :as invoke]
                [tclj0 :as tclj0] [tclj1 :as tclj1]))
   (:import
@@ -15,9 +15,9 @@
    (java.util Optional)
    (java.util.function Consumer)))
 
-(defn print-exception-info [^tcljx.data.wrong.WrongInfo e]
+(defn print-exception-info [^tcljx.data.error.WrongInfo e]
   (println "WrongInfo:" (ex-message e))
-  (run! println (sort-by key (wrong/wr-data e))))
+  (run! println (sort-by key (error/wr-data e))))
 
 (defn -main [& args]
   (let [res (try
@@ -30,7 +30,7 @@
                     (tclj1/run opts)
                     (tclj0/run opts))
                   false))
-              (catch tcljx.data.wrong.WrongInfo e
+              (catch tcljx.data.error.WrongInfo e
                 (print-exception-info e)
                 false)
               (catch Throwable t
@@ -57,7 +57,7 @@
     (when-not (instance? java.nio.file.Path x)
       (options/abort (str "error: sourcev entry must java.nio.file.Path"))))
   (let [opts (Options. (options/to-dest-dir dest-dir) ;dest-dir
-                       :system               ;parent-classloader
+                       (ClassLoader/getSystemClassLoader) ;parent-class-loader
                        sourcev               ;sourcev
                        (list (str var-name)) ;targets
                        false                 ;deterministic?

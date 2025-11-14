@@ -1,6 +1,6 @@
 ;; Copyright (c) Michael van Acken. All rights reserved.
 ;; The use and distribution terms for this software are covered by the
-;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
 ;; which can be found in the file epl-v20.html at the root of this distribution.
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
@@ -10,14 +10,17 @@
    (tcljx.alpha textflow__pp-test ptest__align-test ptest-test)
    (tcljx.parser reader-test)
    (tcljx.nmspgen bootstrap-test invoke-test unreachable-test
-                   const-test conv-test prim-conv-test dot-form-test new-test
-                   arith-test let-test quote-test meta-test str-test bits-test
-                   array-test clone-test switch-test cond-test logic-test
-                   xcmp-test try-test loop-test unboxing-test boxing-test
-                   fn-member-test fn-test definterface-test itf-fn-test xjunction-test
-                   deftype-test record-test reify-test letfn-test closure-test
-                   variadic-test main-test macro-test rtiow-nocore-test
-                   namespace-test set-test line-test require-test)
+                  const-test conv-test prim-conv-test dot-form-test new-test
+                  arith-test let-test quote-test meta-test str-test bits-test
+                  array-test clone-test switch-test cond-test logic-test
+                  xcmp-test try-test loop-test unboxing-test boxing-test
+                  fn-member-test fn-test definterface-test itf-fn-test
+                  xjunction-test deftype-test record-test reify-test letfn-test
+                  closure-test variadic-test main-test macro-test
+                  rtiow-nocore-test namespace-test set-test line-test
+                  require-test
+                  [errormsg :as errormsg])
+   
    tcljx.main                      ;at least compile unused namespaces
    [tcljx.alpha.ptest :refer [run-scoped-tests]]))
 
@@ -71,7 +74,8 @@
     tcljx.nmspgen.require-test])
 
 (defn run []
-  (run-scoped-tests all-namespaces))
+  (when (= :success (run-scoped-tests all-namespaces))
+    (errormsg/run-errormsg-tests)))
 
 (defn -main [& args]
   (try

@@ -1,0 +1,126 @@
+(ns tcljx.alpha.pp.styled
+  (:require [tcljx.alpha.pp.style :as style])
+  (:import (java.io Writer Closeable)))
+
+(definterface StyledWriter
+  :extends [Closeable]
+  ;; Starts a new line.  Sets line's code point counter to zero.
+  ;; Lowest-level writers upon close ensure that the last action is a
+  ;; call to `nl`.
+  (nl ^StyledWriter [])
+
+  ;; Appends interval of `s` from position `start` (inclusive) to
+  ;; `end` (exclusive).  "Raw" writers pass on embedded \newline
+  ;; characters without interpreting them or calling the method `nl`
+  ;; in their place.
+  (append ^StyledWriter [^long style ^CharSequence cs ^int start ^int end])
+
+  ;; The number of code points appended since the last call to `nl`.
+  ;; Unavailable for pretty-printing writers.
+  (code-points-in-line ^int []))
+
+(defn nl ^StyledWriter [^StyledWriter w]
+  (.nl w))
+
+(defn write
+  (^StyledWriter [^StyledWriter w ^CharSequence cs]
+   (write w style/default cs))
+  (^StyledWriter [^StyledWriter w ^CharSequence cs ^int start ^int end]
+   (write w style/default cs start end))
+  
+  (^StyledWriter [^StyledWriter w ^long style ^CharSequence cs]
+   (.append w style cs 0 (.length cs)))
+  (^StyledWriter [^StyledWriter w ^long style ^CharSequence cs ^int start ^int end]
+   (.append w style cs start end)))
+
+(def null-writer
+  (reify StyledWriter
+    (nl [this] this)
+    (append [this style cs start end] this)
+    (code-points-in-line [_] 0)
+    (close [_] nil)))
+
+;;; ------------------------------------------------------------------------
+
+;;; Number of Unicode code points, as opposed to the number of UTF-16
+;;; characters.  At least half of the length of `s`, and at most the
+;;; length of `s`.  With high probability equal or close to the length
+;;; of `s`.
+(defn code-point-count
+  (^int [^CharSequence cs]
+   (Character/codePointCount cs 0 (.length cs)))
+  (^int [^CharSequence cs ^int start]
+   (Character/codePointCount cs start (.length cs)))
+  (^int [^CharSequence cs ^int start ^int end]
+   (Character/codePointCount cs start end)))
+
+;;; Returns index of leftmost \newline in interval from
+;;; `start` (inclusive) to `end` (exclusive).  Returns -1 if no
+;;; \newline exists.
+(defn index-of-nl ^int [^CharSequence cs ^int start ^int end]
+  (cond (= start end) -1
+        (= (.charAt cs start) \newline) start
+        :else (recur cs (inc start) end)))
+
+;;; ------------------------------------------------------------------------
+
+(deftype PlainWriter [^:unsynchronized-mutable ^int cp-count ;counts since nl
+                      ^Writer w]
+  StyledWriter
+  (nl [this]
+    (.append w \newline)
+    (set! cp-count 0)
+    this)
+  (append [this _ cs start end]
+    (.append w cs start end)
+    (set! cp-count (+ cp-count (code-point-count cs start end)))
+    this)
+  (code-points-in-line [_]
+    cp-count)
+  (close [this]
+    (when (not= cp-count 0) (.nl this))))
+
+(defn plain-raw-writer ^StyledWriter [^Writer w]
+  (PlainWriter. 0 w))
+
+;;; ------------------------------------------------------------------------
+
+;;; A writer whose method `nl` writes additional data `indent-text`
+;;; after every call to the corresponding downstream method.
+(defn raw-indent-writer
+  (^StyledWriter [^StyledWriter w ^String indent-text]
+   (raw-indent-writer w indent-text style/default))
+  (^StyledWriter [^StyledWriter w ^String indent-text
+                  ^long indent-style]
+   (reify StyledWriter
+     (nl [this]
+       (.nl w)
+       (write w indent-style indent-text)
+       this)
+     (append [this style cs start end]
+       (write w style cs start end)
+       this)
+     (code-points-in-line [_]
+       (.code-points-in-line w))
+     (close [_]
+       nil))))
+
+;;; A writer converting \newline characters in text into calls to
+;;; method `nl`.
+(defn lines-writer ^StyledWriter [^StyledWriter w]
+  (reify StyledWriter
+    (nl [this]
+      (.nl w)
+      this)
+    (append [this style cs start end]
+      (let [j (index-of-nl cs start end)]
+        (if (neg? j)
+          (do (write w style cs start end)
+              this)
+          (do (write w style cs start j)
+              (.nl this)
+              (recur style cs (inc j) end)))))
+    (code-points-in-line [_]
+      (.code-points-in-line w))
+    (close [_]
+      nil)))

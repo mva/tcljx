@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0moctal escape sequence must be in range [0, 377]
+[31m@@@ [0mtest/errormsg/reader-42-octal-out-of-range/src/pkg/ns0.cljt:[1m2[0m:0

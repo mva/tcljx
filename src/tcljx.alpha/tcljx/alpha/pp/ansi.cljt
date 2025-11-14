@@ -1,0 +1,106 @@
+(ns tcljx.alpha.pp.ansi
+  (:require (tcljx.alpha.pp [style :as style] [styled :as styled]))
+  (:import (tcljx.alpha.pp.styled StyledWriter)
+           (java.io Writer)))
+
+;;; https://en.wikipedia.org/wiki/ANSI_escape_code#Select_Graphic_Rendition_parameters
+(defn- apply-style ^long [^Writer w ^long active-style ^long style]
+  (letfn [(sep ^void []
+            (.append w \;))
+          (arg
+            (^void [^int n]
+             (.append w (Integer/toString n)))
+            (^void [^int n ^int arg-1 ^int arg-2]
+             (arg n) (sep) (arg arg-1) (sep) (arg arg-2))
+            (^void [^int n ^int arg-1 ^int arg-2 ^int arg-3 ^int arg-4]
+             (arg n) (sep) (arg arg-1) (sep) (arg arg-2)
+             (sep) (arg arg-3) (sep) (arg arg-4)))
+          (apply-conceal ^long []
+            (let [mode (style/extract-conceal style)]
+              (arg (if (= mode style/conceal-invisible) 8 28))
+              style/mask-conceal))
+          (apply-intensity ^long []
+            (arg (if (zero? (style/extract-bold style))
+                   (case (style/extract-intensity style)
+                     (#_intensity-normal 0) 22
+                     (#_intensity-bright 1) 1
+                     (#_intensity-faint 2) 2)
+                   1))
+            (bit-or style/mask-intensity style/mask-bold))
+          (apply-flag ^long [^long mask ^int n-on ^int n-off]
+            (arg (if (zero? (style/extract style mask)) n-off n-on))
+            mask)
+          (apply-color ^long [^int offset ^int style-color]
+            (let [v (style/color-value style-color)]
+              (case (style/color-mode style-color)
+                (#_color-mode-default 0)
+                (arg (+ offset 9))
+                (#_color-mode-palette-4bit 1)
+                (arg (+ offset v))
+                (#_color-mode-palette-8bit 2)
+                (arg (+ offset 8) 5 v)
+                (#_color-mode-rgb -1)
+                (arg (+ offset 8) 2 (style/rgb-red v) (style/rgb-green v)
+                     (style/rgb-blue v)))))
+          (applied-mask ^long [^int diff-lsb]
+            (case diff-lsb
+              (#_conceal 0 1) (apply-conceal)
+              (#_intensity 2 3 #_bold 4) (apply-intensity)
+              (#_italic 5) (apply-flag style/mask-italic 3 23)
+              (#_underline 6) (apply-flag style/mask-underline 4 24)
+              (#_strikethrough 7) (apply-flag style/mask-strikethrough 9 29)
+              (#_overline 8) (apply-flag style/mask-overline 53 55)
+              #_else
+              (cond
+                (>= diff-lsb #_(Long/numberOfTrailingZeros mask-foreground) 39)
+                (do (apply-color 30 (style/extract-fg style))
+                    style/mask-foreground)
+                (>= diff-lsb #_(Long/numberOfTrailingZeros mask-background) 14)
+                (do (apply-color 40 (style/extract-bg style))
+                    style/mask-background)
+                :else
+                (throw (IllegalArgumentException.)))))]
+    (.append w \u001b)                  ;aka escape
+    (.append w \[)
+    (if (= style style/default)
+      (.append w \0)                    ;shortcut: reset to default
+      (loop [diff (bit-xor active-style style)]
+        (when-not (zero? diff)
+          (let [diff-lsb (Long/numberOfTrailingZeros diff)
+                diff' (bit-and-not diff (applied-mask diff-lsb))]
+            (when-not (zero? diff')
+              (sep))
+            (recur diff')))))
+    (.append w \m)
+    style))
+
+(deftype AnsiWriter [^:unsynchronized-mutable ^long active-style ;of terminal
+                     ^:unsynchronized-mutable ^int cp-count ;counts since nl
+                     ^Writer w]
+  StyledWriter
+  (nl [this]
+    (let [active-bg (bit-and style/mask-background active-style)]
+      (when-not (zero? active-bg)
+        (set! active-style     ;clear any non-default background color
+              (apply-style w active-style (bit-xor active-style active-bg))))
+      (.append w \newline)
+      (set! cp-count 0)
+      this))
+  (append [this style cs start end]
+    (when-not (= active-style style)
+      (set! active-style (apply-style w active-style style)))
+    (let [n (styled/code-point-count cs start end)]
+      (case (style/extract-conceal style)
+        (#_conceal-XXX 2) (.append w (.repeat "X" n))
+        (#_conceal-spaces 3) (.append w (.repeat " " n))
+        #_else (.append w cs start end))
+      (set! cp-count (+ cp-count n)))
+    this)
+  (code-points-in-line [_]
+    cp-count)
+  (close [this]
+    (styled/write this "")
+    (when (not= cp-count 0) (.nl this))))
+
+(defn raw-writer ^StyledWriter [^Writer w]
+  (AnsiWriter. style/default 0 w))

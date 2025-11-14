@@ -1,0 +1,223 @@
+(ns tcljx.alpha.pp.style)
+
+;;; https://en.wikipedia.org/wiki/ANSI_escape_code#Select_Graphic_Rendition_parameters
+
+(def conceal-off 0)
+(def conceal-invisible 1) ;can cut&paste; Wikipedia: "Not widely supported"
+(def conceal-XXX 2)                     ;via replacement text
+(def conceal-spaces 3)                  ;via replacement text
+
+(def intensity-normal 0)
+(def intensity-bright 1)
+(def intensity-faint 2)
+
+(def ^:private color-mode-rgb -1)
+(def ^:private color-mode-default 0)
+(def ^:private color-mode-palette-4bit 1)
+(def ^:private color-mode-palette-8bit 2)
+
+;;; https://en.wikipedia.org/wiki/ANSI_escape_code#3-bit_and_4-bit
+(def ^:private palette-black 0)
+(def ^:private palette-red 1)
+(def ^:private palette-green 2)
+(def ^:private palette-yellow 3)
+(def ^:private palette-blue 4)
+(def ^:private palette-magenta 5)
+(def ^:private palette-cyan 6)
+(def ^:private palette-white 7)
+(def ^:private palette-bright-black 8)
+(def ^:private palette-bright-red 9)
+(def ^:private palette-bright-green 10)
+(def ^:private palette-bright-yellow 11)
+(def ^:private palette-bright-blue 12)
+(def ^:private palette-bright-magenta 13)
+(def ^:private palette-bright-cyan 14)
+(def ^:private palette-bright-white 15)
+(def ^:private palette-gray palette-bright-black)
+
+;;; color encoding: 25 bit, with bit 24 marking an RGB value
+;;; and [_(1):value(22):mode(2)] otherwise
+(def ^:private flag-rgb-mode 24)
+(def ^:private mask-color (dec (bit-shift-left 1 (inc flag-rgb-mode))))
+(def ^:private mask-color-mode 2r11)
+(def ^:private mask-rgb (dec (bit-shift-left 1 flag-rgb-mode)))
+(def ^:private mask-4bit (dec (bit-shift-left 1 4)))
+(def ^:private mask-8bit (dec (bit-shift-left 1 8)))
+
+(defn color-mode ^int [^int style-color]
+  (if (bit-test style-color flag-rgb-mode)
+    color-mode-rgb
+    (bit-and mask-color-mode style-color)))
+(defn color-value ^int [^int style-color]
+  (if (bit-test style-color flag-rgb-mode)
+    (bit-and mask-rgb style-color)
+    (bit-shift-right style-color 2)))
+(defn rgb-red ^int [^int rgb]
+  (-> rgb (unsigned-bit-shift-right 16) (bit-and 0xff)))
+(defn rgb-green ^int [^int rgb]
+  (-> rgb (unsigned-bit-shift-right 8) (bit-and 0xff)))
+(defn rgb-blue ^int [^int rgb]
+  (-> rgb (unsigned-bit-shift-right 0) (bit-and 0xff)))
+
+(defmacro ^:private color-4* [id]
+  `(bit-or (bit-shift-left ~id 2) color-mode-palette-4bit))
+(def black (color-4* palette-black))
+(def red (color-4* palette-red))
+(def green (color-4* palette-green))
+(def yellow (color-4* palette-yellow))
+(def blue (color-4* palette-blue))
+(def magenta (color-4* palette-magenta))
+(def cyan (color-4* palette-cyan))
+(def white (color-4* palette-white))
+(def bright-black (color-4* palette-bright-black))
+(def bright-red (color-4* palette-bright-red))
+(def bright-green (color-4* palette-bright-green))
+(def bright-yellow (color-4* palette-bright-yellow))
+(def bright-blue (color-4* palette-bright-blue))
+(def bright-magenta (color-4* palette-bright-magenta))
+(def bright-cyan (color-4* palette-bright-cyan))
+(def bright-white (color-4* palette-bright-white))
+(def gray bright-black)
+
+(defn color-8 ^int [^int id]
+  (if (= id (bit-and mask-8bit id))
+    (bit-or (bit-shift-left id 2) color-mode-palette-8bit)
+    (throw (IllegalArgumentException.))))
+
+(defn color-rgb
+  (^int [^int rgb]
+   (-> rgb (bit-and mask-rgb) (bit-set flag-rgb-mode)))
+  (^int [^int r ^int g ^int b]
+   (color-rgb (bit-or (-> r (bit-and 0xff) (bit-shift-left 16))
+                      (-> g (bit-and 0xff) (bit-shift-left 8))
+                      (-> b (bit-and 0xff) (bit-shift-left 0))))))
+
+;;; ------------------------------------------------------------------------
+
+;;; State bits from LSB to MSB:
+;;; 2 (conceal) -- at LSB to extract text rewrite information via masking
+;;; 2 (intensity)
+;;; 1 (bold)
+;;; 1 (italic)
+;;; 1 (underline)
+;;; 1 (strikethrough)
+;;; 1 (overline)
+;;; 5 (currently unused)
+;;; 25 (foreground color)
+;;; 25 (background color)
+
+(def mask-conceal (bit-shift-left (long 2r11) 0))
+(def mask-intensity (bit-shift-left (long 2r11) 2))
+(def mask-bold (bit-shift-left (long 2r1) 4))
+(def mask-italic (bit-shift-left (long 2r1) 5))
+(def mask-underline (bit-shift-left (long 2r1) 6))
+(def mask-strikethrough (bit-shift-left (long 2r1) 7))
+(def mask-overline (bit-shift-left (long 2r1) 8))
+(def mask-unused (bit-shift-left 2r11111 9))
+(def mask-background (bit-shift-left (long mask-color) 14))
+(def mask-foreground (bit-shift-left (long mask-color) 39)) ;at end of long
+(assert (= -1 (bit-or mask-conceal mask-intensity mask-bold mask-italic
+                      mask-underline mask-strikethrough mask-overline
+                      mask-unused mask-background mask-foreground)))
+
+(def default 0l)
+
+;;; An unused bit combination unreachable when starting from
+;;; `default`.
+(def invalid -1l)
+
+;;; Note: As of JDK 24, both compress and expand seem to be emulated
+;;; below the C2 compiler.  They only become very efficient once C2
+;;; intrinsifies them to their x86 instructions.
+(defn with
+  (^long [^long style ^long mask]
+   (with style mask 1))
+  (^long [^long style ^long mask ^int value]
+   (-> style (bit-and-not mask) (bit-or (Long/expand value mask)))))
+(defn without ^long [^long style ^long mask]
+  (with style mask 0))
+(defn extract ^int [^long style ^long mask]
+  (int (Long/compress style mask)))
+
+(defn conceal
+  (^long [^int conceal-mode]
+   (with default mask-conceal conceal-mode))
+  (^long [^long style ^int conceal-mode]
+   (with style mask-conceal conceal-mode)))
+(defn extract-conceal ^int [^long style]
+  (int (bit-and mask-conceal style))) ;cheapest approach only possible at bit 0
+
+(defn intensity
+  (^long [^int intensity-mode]
+   (with default mask-intensity intensity-mode))
+  (^long [^long style ^int intensity-mode]
+   (with style mask-intensity intensity-mode)))
+(defn extract-intensity ^int [^long style]
+  (extract style mask-intensity))
+
+(defn italic
+  (^long []
+   (with default mask-italic))
+  (^long [^long style]
+   (with style mask-italic))
+  (^long [^long style ^int italic-mode]
+   (with style mask-italic italic-mode)))
+(defn extract-italic ^int [^long style]
+  (extract style mask-italic))
+
+(defn bold
+  (^long []
+   (with default mask-bold))
+  (^long [^long style]
+   (with style mask-bold))
+  (^long [^long style ^int bold-mode]
+   (with style mask-bold bold-mode)))
+(defn extract-bold ^int [^long style]
+  (extract style mask-bold))
+
+(defn underline
+  (^long []
+   (with default mask-underline))
+  (^long [^long style]
+   (with style mask-underline))
+  (^long [^long style ^int underline-mode]
+   (with style mask-underline underline-mode)))
+(defn extract-underline ^int [^long style]
+  (extract style mask-underline))
+
+(defn strikethrough
+  (^long []
+   (with default mask-strikethrough))
+  (^long [^long style]
+   (with style mask-strikethrough))
+  (^long [^long style ^int strikethrough-mode]
+   (with style mask-strikethrough strikethrough-mode)))
+(defn extract-strikethrough ^int [^long style]
+  (extract style mask-strikethrough))
+
+(defn overline
+  (^long []
+   (with default mask-overline))
+  (^long [^long style]
+   (with style mask-overline))
+  (^long [^long style ^int overline-mode]
+   (with style mask-overline overline-mode)))
+(defn extract-overline ^int [^long style]
+  (extract style mask-overline))
+
+(defn fg
+  (^long [^int color]
+   (with default mask-foreground color))
+  (^long [^long style ^int color]
+   (with style mask-foreground color)))
+(defn extract-fg ^int [^long style]
+  (extract style mask-foreground))
+
+(defn bg
+  (^long [^int color]
+   (with default mask-background color))
+  (^long [^long style ^int color]
+   (with style mask-background color)))
+(defn extract-bg ^int [^long style]
+  (extract style mask-background))
+

@@ -46,18 +46,20 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- path-seq [^Path p ^int max-depth ^Predicate pred]
+(defn- path-seq ^seq [^Path p ^int max-depth ^Predicate pred]
   (try
     (-> p (Files/walk max-depth) (.filter pred) (.toArray) (seq))
     (catch java.nio.file.NoSuchFileException _ ;thrown if `p` does not exist
       nil)))
 
 (def ^:private file? (^Predicate fn [x] (Files/isRegularFile x)))
-(defn file-seq [^Path p]
+(defn recursive-file-seq ^seq [^Path p]
   (path-seq p Integer/MAX_VALUE file?))
-(defn directory-file-seq [^Path p]
+(defn child-file-seq ^seq [^Path p]     ;files local to `p` only
   (path-seq p 1 file?))
 
 (def ^:private dir? (^Predicate fn [x] (Files/isDirectory x)))
-(defn recursive-directory-seq [^Path p]
+(defn recursive-directory-seq ^seq [^Path p]
   (path-seq p Integer/MAX_VALUE dir?))
+(defn child-directory-seq ^seq [^Path p] ;directories local to `p` only
+  (rest (path-seq p 1 dir?)))            ;drop `p` itself

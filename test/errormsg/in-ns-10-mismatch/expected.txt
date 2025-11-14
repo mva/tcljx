@@ -1,0 +1,4 @@
+tcljx.data.error.WrongInfo
+[31m### [0min-ns argument does not match current namespace [1mpkg.ns0[0m (got: [1m(quote
+[0m    [1mpkg.nsX)[0m)
+[31m@@@ [0mtest/errormsg/in-ns-10-mismatch/src/pkg/ns0.cljt:[1m2[0m

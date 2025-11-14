@@ -1,4 +1,4 @@
- module tcljx.compiler {
-   requires transitive tcljc.core;
+module tcljx.compiler {
+  requires transitive tcljc.core;
    
 }

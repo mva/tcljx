@@ -1,0 +1,302 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.data.error
+  (:require (tcljx.data [type :as type] [meta :as meta])
+            (tcljx.alpha.pp [style :as style] [styled :as styled] [ansi :as ansi]
+                            [recording :as recording] [paragraph :as paragraph]))
+  (:import (tcljx.alpha.pp.styled StyledWriter)
+           (tcljx.alpha.pp.recording Recorder Recording)))
+
+;;; Compilation errors raise an exception of type WrongInfo.  It
+;;; mirrors ExceptionInfo, but does not implement IExceptionInfo.  The
+;;; compiler turns such an exception into a readable error message,
+;;; without confronting the user with its long and confusing stack
+;;; trace.
+(deftype WrongInfo [^String message ^map data]
+  RuntimeException
+  (getMessage [_] ;problem: cannot set message after RuntimeException()
+    message)
+  (toString [this]
+    ;; For some reason, "make test" crashes in prn or println
+    ;; with "IllegalStateException: failed to resolve runtime fn
+    ;; clojure.core/isa?" in some scenarios, where "make
+    ;; watch-and-test" works as expected.  This happens in
+    ;; the (.toString data), or later when trying to print the summary
+    ;; report.  Running single tests via TEST=... avoids this problem.
+    (str "tcljx.data.error.WrongInfo: " (.getMessage this) " " (.toString data))))
+
+(defn wr-info
+  (^WrongInfo [^String msg]
+   (wr-info msg nil))
+  (^WrongInfo [^String msg ^map map]
+   (wr-info msg map nil))
+  (^WrongInfo [^String msg ^map map ^Throwable cause]
+   #_(prn :error msg map)
+   #_(.printStackTrace (or cause (Throwable.)) (java.io.PrintWriter. *out*))
+   (let [ex (WrongInfo. msg (or map clojure.lang.PersistentArrayMap/EMPTY))]
+     (.initCause ex cause)              ;can be called only once
+     ex)))
+
+(defn wr-data ^map [ex]
+  (when (instance? WrongInfo ex)
+    (.data ^WrongInfo ex)))
+(defn wr-line-number ^int [ex]      ;zero if no line number is present
+  (let [data (wr-data ex)]
+    (when-some [x (or (:form/line-of data) (:reader/line data))]
+      ^int x)))
+;;; Note: core's `ex-message` and `ex-cause` work on any Throwable, so
+;;; there is no need to duplicate the functions here.
+
+;;; ------------------------------------------------------------------------
+
+(defn update-wr-data ^WrongInfo [^WrongInfo ex f & args]
+  (let [ex* (wr-info (ex-message ex) (apply f (wr-data ex) args) (ex-cause ex))]
+    (when-some [t (.getStackTrace ex)]
+      (.setStackTrace ex* t))
+    ex*))
+
+;;; The compiler reports errors by throwing an WrongInfo instance.
+;;; Its data map encodes information about the context of the error,
+;;; while the exception's message is a free form error message.
+;;;
+;;; If it exists, then :form/line-of is the line number of the
+;;; innermost list form "around" the point of error.
+;;;
+;;; If a `WrongInfo` is decorated with a ex-cause value, then it
+;;; is assumed that this Throwable originates outside of the control
+;;; of the compiler (e.g. during macro expansion).
+(defn push-line-number* ^WrongInfo [^WrongInfo ex ^int line]
+  (cond-> ex
+    (and (pos? line) (not (contains? (wr-data ex) :form/line-of)))
+    (update-wr-data assoc :form/line-of line)))
+
+;;; Only assoc `k` to the exception's data if this key is not defined
+;;; yet.  With exceptions decorated from the most to the least
+;;; specific context, this is used to preserve the most specific
+;;; information available.
+(defn assoc-if-new ^WrongInfo [^WrongInfo e k v]
+  (cond-> e
+    (not (contains? (wr-data e) k))
+    (update-wr-data assoc k v)))
+
+(defn assoc-dep-map ^WrongInfo [^Throwable t ^map dep-map]
+  #_(.printStackTrace t)
+  (-> (if (instance? WrongInfo t)
+        ^WrongInfo t
+        (do (.printStackTrace t)
+            (wr-info "unhandled exception" {} t)))
+      (update-wr-data assoc :emitter/namespaces dep-map)))
+
+;;; ------------------------------------------------------------------------
+
+(definterface ErrorMsg
+  (txt ^ErrorMsg [obj])
+  (chr ^ErrorMsg [^char ch])
+  (sym ^ErrorMsg [str-or-sym])
+  (sym ^ErrorMsg [nmsp-or-class ^String nm])
+  (type ^ErrorMsg [nm-cl-ex])
+  (q ^ErrorMsg [obj])
+  
+  (got ^ErrorMsg [form])
+  (got-q ^ErrorMsg [form])
+  (got-type ^ErrorMsg [^Class tp])
+  (got-types ^ErrorMsg [^Class/1 tps])
+  (got-types ^ErrorMsg [^Class/1 tps ^int start ^int end])
+  
+  (set-reader-position ^ErrorMsg [^int pos])
+  (set-line-number ^ErrorMsg [^int line])
+  (set-list-context ^ErrorMsg [form])
+  (set-cause ^ErrorMsg [^Throwable ex])
+  
+  (get-ex-data ^map [])
+  (get-cause ^Throwable [])
+  (write* ^ErrorMsg [^boolean pad? ^long style ^String s]))
+
+(defn str* ^String [form]
+  (cond
+    (nil? form) "nil"
+    (class? form) (str (type/type-symbol form))
+    (string? form) (pr-str form)
+    :else (str form)))
+
+(def ^:private style-txt style/default)
+(def ^:private style-quote (style/intensity style/intensity-bright))
+
+(deftype ErrorMsgImpl [^Recorder w ^:unsynchronized-mutable ^char last-char
+                       ^:unsynchronized-mutable ^map ex-data
+                       ^:unsynchronized-mutable ^Throwable cause]
+  ErrorMsg
+  (txt [this obj]
+    (.write* this true style-txt (.toString obj)))
+  (chr [this ch]
+    (.txt this (if (<= (int ch) (int \space))
+                 (str "\\u" (.toHexDigits (java.util.HexFormat/of) ch))
+                 (str "\\" ch))))
+  (sym [this str-or-sym]
+    (-> this (.write* true style-quote (.toString str-or-sym))))
+  (sym [this nmsp-or-class nm]
+    (.sym this (symbol (if (string? nmsp-or-class)
+                         ^String nmsp-or-class
+                         (Class/.getName nmsp-or-class))
+                       nm)))
+  (type [this nm-cl-ex]
+    (cond
+      (instance? NoClassDefFoundError nm-cl-ex)
+      (recur (.getMessage ^NoClassDefFoundError nm-cl-ex))
+      (instance? Class nm-cl-ex)
+      (recur (type/type-symbol nm-cl-ex))
+      :else
+      (-> this (.write* true style-quote (.toString nm-cl-ex)))))
+  (q [this obj]
+    (-> this (.write* true style-quote (str* obj))))
+  
+  (got [this form]
+    (-> this
+        (.write* true style-txt "(got:")
+        (.write* true style-txt (str* form))
+        (.write* false style-txt ")")))
+  (got-q [this form]
+    (-> this
+        (.write* true style-txt "(got:")
+        (.write* true style-quote (str* form))
+        (.write* false style-txt ")")))
+  (got-type [this tp]
+    (-> this
+        (.write* true style-txt "(got:")
+        (.type tp)
+        (.write* false style-txt ")")))
+  (got-types [this tps]
+    (.got-types this tps 0 (alength tps)))
+  (got-types [this tps start end]
+    (-> this (.write* true style-txt "(got: ["))
+    (loop [i start]
+      (when (< i end)
+        (.type this (aget tps i))
+        (recur (inc i))))
+    (-> this (.write* false style-txt "])")))
+  
+  (set-reader-position [this pos]
+    (set! ex-data (assoc ex-data :reader/position pos))
+    this)
+  (set-line-number [this line]
+    (when (pos? line)
+      (set! ex-data (assoc ex-data :form/line-of line)))
+    this)
+  (set-list-context [this form]
+    (when (seq? form)
+      (when-some [line (meta/line-of form)]
+        (set! ex-data (assoc ex-data :form/line-of line))))
+    this)
+  (set-cause [this ex]
+    (set! cause ex)
+    this)
+  
+  (get-ex-data [_]
+    ex-data)
+  (get-cause [_]
+    cause)
+  (write* [this pad? style s]
+    (when-not (.isEmpty s)
+      (when (and pad? (not (contains? #{\space \( \[ \{ \#} last-char)))
+        (styled/write w (str \space)))
+      (styled/write w style s)
+      (set! last-char (.charAt s (dec (.length s)))))
+    this))
+
+(defn mk-error-msg ^ErrorMsg []
+  (ErrorMsgImpl. (recording/raw-recorder) \space nil nil))
+
+(defn to-error ^Exception [^ErrorMsg msg]
+  (let [rec (.take-recording! (.w ^ErrorMsgImpl msg))
+        data (assoc (.get-ex-data msg) :styled-error-msg rec)]
+    (wr-info (.text rec) data (.get-cause msg))))
+
+(defn- exception-form [parts]
+  (letfn [(rewrite [form]
+            (if (string? form)
+              (list 'txt form)
+              form))]
+    `((fn ^Exception []
+        (to-error (.. (mk-error-msg) ~@(map rewrite parts)))))))
+
+(defmacro throw [& parts]
+  `(throw ~(exception-form parts)))
+
+;;; Recycle clojure.code name to get proper indenting from Emacs.
+(defmacro when [test & parts]
+  `(when ~test (throw ~(exception-form parts))))
+(defmacro when-not [test & parts]
+  `(when-not ~test (throw ~(exception-form parts))))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private width 80)
+(def ^:private style-error (style/fg style/red))
+(def ^:private style-line (style/intensity style/intensity-bright))
+
+(letfn [(error-msg ^StyledWriter [^StyledWriter w-raw ^Exception ex]
+          (with-open [w-indent (styled/raw-indent-writer w-raw "    ")
+                      w-lines (styled/lines-writer w-indent)
+                      w-paragraph (paragraph/writer w-lines width)]
+            (let [data (wr-data ex)]
+              (styled/write w-paragraph style-error "### ")
+              (if-some [rec (:styled-error-msg data)]
+                (recording/write-raw-to rec w-paragraph)
+                (styled/write w-paragraph (.getMessage ex)))))
+          w-raw)
+        (relative-path ^String [^java.net.URI uri]
+          (if (some? uri)
+            (let [path (java.nio.file.Path/of uri)
+                  wd (-> (java.nio.file.Paths/get "") (.toAbsolutePath))]
+              (try
+                (str (.relativize wd path))
+                (catch IllegalArgumentException _
+                  (str path))))
+            "<unknown-file>"))
+        (file-line-column ^StyledWriter [^StyledWriter w-raw ^Exception ex]
+          (let [data (wr-data ex)
+                line (or (:form/line-of data) (:reader/line data))
+                column (:reader/column data)]
+            #_(.println System/err (str data))
+            (cond-> (styled/nl w-raw)
+              true (styled/write style-error "@@@ ")
+              true (styled/write (relative-path (:file/resource-uri data)))
+              (some? line) (-> (styled/write ":")
+                               (styled/write style-line (.toString line)))
+              (some? column) (-> (styled/write ":")
+                                 (styled/write (.toString column))))))]
+  
+  (defn format ^String [^Exception ex]
+    (let [w-string (java.io.StringWriter.)]
+      (with-open [w-ansi (ansi/raw-writer w-string)]
+        (-> w-ansi
+            (error-msg ex)
+            (file-line-column ex)))
+      (.toString w-string))))
+
+(defn- print-error* [^WrongInfo ex]
+  (let [msg (ex-message ex)
+        data (wr-data ex)]
+    (println)
+    (println (.stripTrailing (format ex)))
+    (when-some [t (ex-cause ex)]
+      (if (and (instance? IllegalArgumentException t)
+               (some? (ex-message t))
+               (not= (ex-message t) ""))
+        ;; expansion of let etc.
+        (println "cause:" (str (.getName (class t)) ": "
+                               (ex-message t)))
+        (.printStackTrace t)))))
+
+(defn print-error [^WrongInfo ex]
+  (try
+    (print-error* ex)
+    (catch Throwable t*
+      (.printStackTrace (Exception. "error while formatting error message" t*))
+      (println)
+      (throw ex))))

@@ -1,6 +1,6 @@
 (ns tcljx.parser.loop
   (:require
-   (tcljx.data [wrong :as wrong] [context :as context] [ir :as ir])
+   (tcljx.data [error :as error] [context :as context] [ir :as ir])
    (tcljx.parser [parse :as parse] [syntax :as syntax] [interop :as interop]))
   (:import
    (tcljx.data.ir Expr Exprs Binding Entity Parser)))
@@ -30,4 +30,4 @@
   (if (context/can-recur? fctx)
     (->> (parse/args parser fctx args)
          (.recur-expr (.expr-factory parser) fctx))
-    (throw (syntax/info "cannot recur from this position"))))
+    (error/throw "cannot recur from this position")))

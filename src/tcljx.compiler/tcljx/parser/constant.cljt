@@ -1,6 +1,6 @@
 (ns tcljx.parser.constant
   (:require
-   (tcljx.data [wrong :as wrong] [type :as type] [ir :as ir]))
+   (tcljx.data [error :as error] [type :as type] [ir :as ir]))
   (:import
    (tcljx.data.ir Expr Parser)
    (java.lang.constant ConstantDesc ConstantDescs)
@@ -53,4 +53,5 @@
       (instance? Pattern form)
       (.new-loadable etf form Pattern)
 
-      :else (wrong/other "unsupported literal value" (class form)))))
+      :else (error/throw "unsupported literal value"
+                          (txt (.getName (class form)))))))

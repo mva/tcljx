@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0mexpect caught exception type (got: [1mObject[0m)
+[31m@@@ [0mtest/errormsg/trycatch-11-not-exception-type/src/pkg/ns0.cljt:[1m2[0m

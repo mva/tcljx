@@ -47,15 +47,12 @@
 ;;; on the neutral `getPlatformClassLoader`.  The Tinyclj runtime and
 ;;; imported application classes must be installed manually into a
 ;;; fresh application class loader.
-(defn app-class-loader ^URLClassLoader [parent class-paths]
-  (let [parent-ld (case parent
-                    :platform (ClassLoader/getPlatformClassLoader)
-                    :system (ClassLoader/getSystemClassLoader))
-        urls (into-array URL (cc/map files/path-url class-paths))]
+(defn app-class-loader ^URLClassLoader [^ClassLoader parent-ld class-paths]
+  (let [urls (into-array URL (cc/map files/path-url class-paths))]
     (URLClassLoader. "tclj-app" urls parent-ld)))
 
 (defn class-loader-instance ^URLClassLoader [^ClassLoader parent ^String name
-                                              source-paths]
+                                             source-paths]
   (let [dyn-cl-class (.loadClass parent "tinyclj.lang.DynamicClassLoader")
         c (.getConstructor dyn-cl-class java.lang.String URL/1 ClassLoader)
         urls (->> source-paths (cc/map files/path-url) (distinct))]

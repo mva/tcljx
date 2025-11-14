@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0mcannot recur from this position
+[31m@@@ [0mtest/errormsg/loop-10-cannot-recur/src/pkg/ns0.cljt:[1m2[0m

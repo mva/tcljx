@@ -6,8 +6,9 @@
 ;; the terms of this license.
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.nmspgen.macro
-  (:require (tcljx.data [wrong :as wrong] ir))
-  (:import (tcljx.data.ir Resolver Entity)
+  (:require (tcljx.data [error :as error] ir))
+  (:import (tcljx.data.error WrongInfo)
+           (tcljx.data.ir Resolver Entity)
            (java.lang.invoke MethodHandle)
            (java.util.function Function)))
 
@@ -121,15 +122,21 @@
 (def array-to-cpl (ArrayToCpl. (.getClassLoader Object)))
 
 
-(letfn [(wrong-arity [^Throwable cause form]
-          (throw (wrong/wr-info (str "wrong number of args (" (dec (count form))
-                                     ") passed to macro") {} cause)))
-        (wrong-expand [^Throwable cause form]
-          (if-some [ex (wrong/first-wrong-info cause)]
+(letfn [(first-wrong-info ^WrongInfo [^Throwable t]
+          ;; If `t` has a compiler error as one of its causes, then
+          ;; return the WrongInfo instance.  Otherwise, return nil.
+          (cond (nil? t) nil
+                (instance? WrongInfo t) ^WrongInfo t
+                :else (recur (.getCause t))))
+        (throw-arity ^void [^Throwable cause form]
+          (error/throw "wrong number of args"
+                       (txt (str "(" (dec (count form)) ")"))
+                       "passed to macro" (set-cause cause)))
+        (throw-expand ^void [^Throwable cause form]
+          (if-some [ex (first-wrong-info cause)]
             (throw ex)                  ;discard any parent exceptions
-            (throw (wrong/wr-info (str "error while expanding macro "
-                                       (wrong/q (first form)))
-                                  {} cause))))
+            (error/throw "error while expanding macro " (q (first form))
+                         (set-cause cause))))
 
         ;; True if `x`'s class has the same name as `cl`.  Use this
         ;; if `x` may come from a different classloader, where class
@@ -148,9 +155,9 @@
              (clojure.lang.Cons. form)
              (.applyTo ^tinyclj.lang.AFnMh f)))
       (catch clojure.lang.ArityException e
-        (wrong-arity e form))
+        (throw-arity e form))
       (catch Throwable t
-        (wrong-expand t form))))
+        (throw-expand t form))))
   
   ;; Distinct runtime classes: go the long way via the handle for
   ;; `rt/mhd-applyMacroMapped`.
@@ -162,5 +169,5 @@
       (.invoke apply-mh cpl-to-itf array-to-cpl f form env)
       (catch Throwable t
         (if (classname? clojure.lang.ArityException t)
-          (wrong-arity t form)
-          (wrong-expand t form))))))
+          (throw-arity t form)
+          (throw-expand t form))))))

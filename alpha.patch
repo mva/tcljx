@@ -2,12 +2,12 @@ diff -Nru src/tcljx.alpha/module-info.java ../tcljx.alpha.patched/module-info.ja
 --- src/tcljx.alpha/module-info.java	2025-10-30 06:50:06.492136999 +0100
 +++ ../tcljx.alpha.patched/module-info.java	2025-10-30 07:26:15.414265280 +0100
 @@ -1,5 +1,5 @@
-  module tcljx.alpha {
--   requires transitive tcljc.core;
-+   requires transitive tcljx.core;
+ module tcljx.alpha {
+-  requires transitive tcljc.core;
++  requires transitive tcljx.core;
  
-    exports tcljx.alpha.ptest;
-    exports tcljx.alpha.ptest__align;
+   exports tcljx.alpha.ptest;
+   exports tcljx.alpha.ptest__align;
 diff -Nru src/tcljx.alpha/tcljx/alpha/ptest.cljt ../tcljx.alpha.patched/tcljx/alpha/ptest.cljt
 --- src/tcljx.alpha/tcljx/alpha/ptest.cljt	2025-10-30 06:40:31.251406039 +0100
 +++ ../tcljx.alpha.patched/tcljx/alpha/ptest.cljt	2025-10-30 07:25:47.720936439 +0100

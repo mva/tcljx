@@ -1,7 +1,7 @@
 (ns tcljx.nmspgen.entity
   (:require
    (tcljx.data
-    [config :as cfg] [wrong :as wrong] [type :as type] [member :as member]
+    [config :as cfg] [error :as error] [type :as type] [member :as member]
     [ir :as ir] [resolve :as resolve] [reflect :as reflect] [code :as code])
    (tcljx.nmspgen
     [util :as util] [constgen :as constgen] [env :as env] pkggen
@@ -40,8 +40,7 @@
             (.display-of! this ent (name form))
             ent)
           (insn/mk-insn tp))
-      (throw (wrong/wr-info (str "entity " (wrong/q form)
-                                 " has no runtime value")))))
+      (error/throw "entity" (q form) "has no runtime value")))
   (invocation-of [this inv form]
     (if (.closes-over? this inv)
       (.display-of! this inv (name ^symbol (first form)))
@@ -130,8 +129,8 @@
       (set-expr* [_ fctx value]
         (let [nm (.field-name spec), tp (.type spec)]
           (insn/ensure-assignable tp value)
-          (when (member/acc-final? (.flags spec))
-            (wrong/other (str "field " (wrong/q-as-symbol nm) " is final")))
+          (error/when (member/acc-final? (.flags spec))
+            "field" (sym nm) "is final")
           (-> (^CodeEmitter fn [xb consumed-type _]
                (code/load-receiver xb)
                (when (emit/insn? xb fctx tp (.emitter value))
@@ -142,8 +141,8 @@
         nil)))
   (expr-deftype [this eph-ncl field-specs java-record? defrecord?
                  !dt-parts method-specs]
-    (when (not= (.closure-level this) ir/closure-level-clinit)
-      (throw (wrong/wr-info "cannot define class in this position")))
+    (error/when-not (= (.closure-level this) ir/closure-level-clinit)
+      "cannot define class in this position")
     (->> (typegen/promise-deftype eph-ncl field-specs method-specs
                                   java-record? defrecord? !dt-parts)
          (.stage-code-promise! this)))
@@ -153,8 +152,8 @@
                                 !reify-parts nil)
          (.stage-code-promise! this)))
   (expr-definterface [this eph-ncl]
-    (when (not= (.closure-level this) ir/closure-level-clinit)
-      (throw (wrong/wr-info "cannot define class in this position")))
+    (error/when-not (= (.closure-level this) ir/closure-level-clinit)
+      "cannot define class in this position")
     (let [p (typegen/promise-definterface* eph-ncl)]
       (.stage-code-promise! this p)))
   (class-name-for-reify [this]

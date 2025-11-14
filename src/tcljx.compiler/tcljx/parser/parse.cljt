@@ -1,9 +1,9 @@
 (ns tcljx.parser.parse
-  (:require (tcljx.data [config :as cfg] [wrong :as wrong] [ir :as ir]
+  (:require (tcljx.data [config :as cfg] [error :as error] [ir :as ir]
                         [context :as context]))
   (:import (tcljx.data.ir Resolver NamespaceBuilder Entity Binding
                           Expr Exprs ExprFactory Parser AritySpec MethodSpec)
-           (tcljx.data.wrong WrongInfo)))
+           (tcljx.data.error WrongInfo)))
 
 (defn new-exprs ^Exprs [^Parser parser ^int n]
   (.new-exprs (.expr-factory parser) n))
@@ -94,7 +94,7 @@
   (let [rsv (.resolver parser)]
     (if (instance? NamespaceBuilder rsv)
       rsv
-      (throw (wrong/wr-info "cannot manipulate namespace data in this position")))))
+      (error/throw "cannot update namespace data in this context"))))
 
 ;;; ------------------------------------------------------------------------
 

@@ -7,10 +7,10 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.main.tclj1
   (:require
-   (tcljx.data [config :as cfg] [wrong :as wrong] [ir :as ir])
+   (tcljx.data [config :as cfg] [error :as error] [ir :as ir])
    (tcljx.nmspgen [destdir :as destdir])
    (tcljx.main [options :as options] [invoke :as invoke] [tclj0 :as tclj0]
-               [watcher :as watcher] [efmt :as efmt]))
+               [watcher :as watcher]))
   (:import
    (tcljx.data.ir ProvidedNamespace)
    (tcljx.main.options Options)
@@ -93,7 +93,7 @@
                 (.accept on-completion (Optional/of known-ns)) ;not dep-map!
                 dep-map
                 (catch Throwable t
-                  (throw (wrong/assoc-dep-map t dep-map))))))
+                  (throw (error/assoc-dep-map t dep-map))))))
           (report-failure ^void []
             (.accept on-completion (Optional/empty)))
           (try-build-and-report ^map []
@@ -101,10 +101,10 @@
               (-> (tclj0/build-all opts true)
                   (time)
                   (report-success))
-              (catch tcljx.data.wrong.WrongInfo e
+              (catch tcljx.data.error.WrongInfo e
                 (report-failure)
-                (efmt/print-emap e)
-                (:emitter/namespaces (wrong/wr-data e)))
+                (error/print-error e)
+                (:emitter/namespaces (error/wr-data e)))
               (catch Throwable t
                 (report-failure)
                 (throw t))

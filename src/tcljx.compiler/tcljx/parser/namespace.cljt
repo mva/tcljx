@@ -1,7 +1,7 @@
 (ns tcljx.parser.namespace
   (:require
    (tcljx.data [config :as cfg] [files :as files] [meta :as meta]
-               [wrong :as wrong] [context :as context] [ir :as ir])
+               [error :as error] [context :as context] [ir :as ir])
    (tcljx.parser [reader :as reader] [syntax :as syntax]))
   (:import
    (tcljx.data.ir NamespaceBuilder ProvidedNamespace Require FormReader)))
@@ -36,10 +36,10 @@
                               rename exclude (nnext spec))
                 :rename (recur alias refer (second-map spec)
                                exclude (nnext spec))
-                ::exclude (recur alias refer rename
-                                 (second-vector spec) (nnext spec))
-                #_else (throw (syntax/info "expect :as, :refer, or :rename"
-                                           (first spec))))
+                :exclude (recur alias refer rename
+                                (second-vector spec) (nnext spec))
+                #_else (error/throw "expect :as, :refer, :rename, or :exclude"
+                                     (got-q (first spec))))
               (Require. ns-str alias refer rename exclude error-context))))
         (flatten-requires ^seq [^seq rrequires ^String prefix ^seq specs
                                 ^seq error-context]
@@ -63,13 +63,14 @@
                                           (rest spec) spec))
                       
                       :else
-                      (throw (syntax/info "expect symbol, vector, or list" spec))))]
+                      (error/throw "expect symbol, vector, or list"
+                                    (got-q spec))))]
             (context/with-error-info error-context
               (reduce flatten-require rrequires specs))))
         
         (parse-refer-cljs ^Require [^seq rrefer-cljs]
-          (when (some? (nnext rrefer-cljs))
-            (throw (syntax/info "multiple :refer-clojure clauses")))
+          (error/when-not (nil? (next rrefer-cljs))
+            "multiple :refer-clojure clauses")
           
           (let [refer-clj (first rrefer-cljs)]
             ;; pre: (first refer-clj) is :refer-clojure
@@ -84,8 +85,8 @@
                                     (nnext specs))
                     :rename (recur refer exclude (second-map specs)
                                    (nnext specs))
-                    #_else (throw (syntax/info "expect :only, :exclude, or :rename"
-                                               (first specs))))
+                    #_else (error/throw "expect :only, :exclude, or :rename"
+                                         (got-q (first specs))))
                   (Require. cfg/core-lib nil refer rename exclude
                             refer-clj))))))
 
@@ -93,10 +94,9 @@
                                             ^Require require
                                             ^ProvidedNamespace provided]
           (context/with-error-info (.error-context require)
-            (if (nil? provided)
-              (throw (wrong/info-unresolved "no such namespace:"
-                                            (ir/required-ns-sym require)))
-              (.process-require nmsp require provided))))
+            (error/when-not (some? provided)
+              "no such namespace:" (sym (ir/required-ns-sym require)))
+            (.process-require nmsp require provided)))
         (process-requires ^NamespaceBuilder [^NamespaceBuilder nmsp
                                              ^seq requires]
           (let [arequires ^Require/1 (into-array Require requires)
@@ -116,10 +116,8 @@
         (ns-form ^NamespaceBuilder [^NamespaceBuilder nmsp
                                     [_ ns-sym & formr :as ^seq form]]
           ;; pre: (first form) is 'ns
-          (when-not (= ns-sym (ir/ns-sym nmsp))
-            (wrong/other (str "ns name mismatch, expected "
-                              (wrong/q (ir/ns-sym nmsp))
-                              (wrong/got-q ns-sym))))
+          (error/when-not (= ns-sym (ir/ns-sym nmsp))
+            "ns name mismatch, expected" (sym (ir/ns-sym nmsp)) (got-q ns-sym))
           (loop [^seq rrequires nil
                  ^seq rimports nil
                  ^seq rrefer-cljs nil
@@ -139,7 +137,8 @@
                 (recur rrequires rimports (cons clause rrefer-cljs) clauses')
                 
                 #_else
-                (throw (syntax/info "expect :require, :import, or :refer-clojure" tag)))
+                (error/throw "expect :require, :import, or :refer-clojure"
+                              (got-q tag) (set-list-context clause)))
               (let [requires (reverse rrequires)
                     requires (cond
                                (nil? rrefer-cljs)
@@ -167,9 +166,8 @@
           (.flush-segment nmsp rdr)
           (loop [nmsp nmsp, [arg & argr :as args] (next form)]
             (if (some? args)
-              (do (when-not (string? arg)
-                    (wrong/other (str "load expects file name string"
-                                      (wrong/got-q arg))))
+              (do (error/when-not (string? arg)
+                    "load expects file name string" (got-q arg))
                   (let [path-str (str arg files/source-suffix)
                         rdr' (.resolve rdr path-str)]
                     (recur (-> nmsp (parse-all rdr') (.flush-segment rdr'))
@@ -178,12 +176,11 @@
         (in-ns-form ^NamespaceBuilder [^NamespaceBuilder nmsp
                                        [_ ns-sym & formr :as ^seq form]]
           ;; pre: (first form) is 'in-ns
-          (if (and (nil? formr)
-                   (= (syntax/strip-quote ns-sym) (ir/ns-sym nmsp)))
-            nmsp
-            (wrong/other (str "in-ns argument does not match current "
-                              "namespace " (wrong/q (ir/ns-sym nmsp))
-                              (wrong/got-q ns-sym)))))
+          (error/when-not (= (syntax/strip-quote ns-sym) (ir/ns-sym nmsp))
+            "in-ns argument does not match current namespace "
+            (q (ir/ns-sym nmsp)) (got-q ns-sym))
+          (syntax/empty-tail formr)
+          nmsp)
         
         (parse-top-level-form ^NamespaceBuilder [^NamespaceBuilder nmsp
                                                  ^FormReader rdr form]
@@ -205,8 +202,8 @@
                 (if (identical? :tcljx.parser.reader/EOF form)
                   nmsp
                   (recur (parse-top-level-form nmsp rdr form)))))
-            (catch tcljx.data.wrong.WrongInfo ex
-              (throw (wrong/assoc-if-new ex :file/resource-url
-                                         (.resource-url rdr))))))]
+            (catch tcljx.data.error.WrongInfo ex
+              (throw (error/assoc-if-new ex :file/resource-uri
+                                         (.resource-uri rdr))))))]
 
   (def parse-all parse-all))

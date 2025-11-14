@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0minvalid number: 123n
+[31m@@@ [0mtest/errormsg/reader-33-invalid-number/src/pkg/ns0.cljt:[1m2[0m:0

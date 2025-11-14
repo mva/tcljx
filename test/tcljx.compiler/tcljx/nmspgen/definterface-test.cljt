@@ -1,6 +1,6 @@
 ;; Copyright (c) Michael van Acken. All rights reserved.
 ;; The use and distribution terms for this software are covered by the
-;; Eclipse Public License 2.0 (https:;;www.eclipse.org/legal/epl-v20.html)
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
 ;; which can be found in the file epl-v20.html at the root of this distribution.
 ;; By using this software in any fashion, you are agreeing to be bound by
 ;; the terms of this license.
@@ -160,7 +160,7 @@
                    (succ ^IForward [^IForward a]))]))))
 
 (deftest definterface-inside-function
-  (is (thrown-with-msg? tcljx.data.wrong.WrongInfo
+  (is (thrown-with-msg? tcljx.data.error.WrongInfo
                         #"cannot define class in this position"
                         (nmsp '[(ns pkg.ns0)
                                 (def f (fn* f ^boolean []

@@ -1,0 +1,5 @@
+(ns pkg.ns0 (:refer-clojure :none))
+(deftype* pkg.ns0/Vec3 pkg.ns0.Vec3
+  []
+  :implements [clojure.lang.IType]
+  (equals [^String _ other] false))

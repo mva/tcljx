@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0minvalid character code: \u000g
+[31m@@@ [0mtest/errormsg/reader-40-invalid-character-code/src/pkg/ns0.cljt:[1m2[0m:0

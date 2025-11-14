@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [1;39mvoid[0m tag not applicable in this context
+[31m@@@ [0mtest/errormsg/definterface-11-void-parameter/src/pkg/ns0.cljt:[1m2[0m

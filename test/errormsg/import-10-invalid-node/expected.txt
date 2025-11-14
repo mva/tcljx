@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0mexpect symbol or list (got: [1m"foo"[0m)
+[31m@@@ [0mtest/errormsg/import-10-invalid-node/src/pkg/ns0.cljt:[1m2[0m

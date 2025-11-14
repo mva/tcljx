@@ -1,6 +1,6 @@
 (ns tcljx.parser.trycatch
   (:require
-   (tcljx.data [context :as context] [ir :as ir])
+   (tcljx.data [context :as context] [error :as error] [ir :as ir])
    (tcljx.parser [syntax :as syntax] [parse :as parse] [interop :as interop]))
   (:import
    (tcljx.data.ir CodeEmitter Expr Exprs Binding Parser)))
@@ -17,12 +17,10 @@
           (when (some? form)
             (parse/progn parser form (context/of-finally fctx) (next form))))
         (parse-binding ^CatchBinding [^Parser parser ^long fctx [_ tp nm :as form]]
-          (when-not (catch-form? form)
-            (throw (syntax/info "expect catch clause" form)))
           (let [ctp (-> (parse/form parser fctx tp)
                         (ir/type-literal tp))]
             (when (or (nil? ctp) (not (.isAssignableFrom Throwable ctp)))
-              (throw (syntax/info "expect caught exception type" tp)))
+              (error/throw "expect caught exception type" (got-q tp)))
             (-> (.binding-catching-local (.entity-factory parser) fctx ctp
                                          (syntax/simple-symbol-str nm))
                 (CatchBinding. ctp))))
@@ -38,6 +36,9 @@
                                 ^seq finally-form]
           (let [[body-forms catch-forms] (split-with body-form? formr)
                 body (parse/progn parser fctx body-forms)]
+            (doseq [form catch-forms]
+              (error/when-not (catch-form? form)
+                "expect catch clause" (got-q form)))
             (cond
               (seq catch-forms)
               (let [ctps (new Class/1 (count catch-forms))

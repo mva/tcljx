@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0minterface function must implement exactly one arity
+[31m@@@ [0mtest/errormsg/fn-15-itf-multiple-arities/src/pkg/ns0.cljt:[1m2[0m

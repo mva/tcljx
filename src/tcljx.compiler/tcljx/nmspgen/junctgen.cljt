@@ -1,6 +1,6 @@
 (ns tcljx.nmspgen.junctgen
   (:require
-   (tcljx.data [type :as type] [wrong :as wrong] [ir :as ir])
+   (tcljx.data [type :as type] [ir :as ir])
    (tcljx.nmspgen [util :as util] [emit :as emit] [insn :as insn]
                   [constgen :as constgen] [condgen :as condgen] [opgen :as opgen]))
   (:import

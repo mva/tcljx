@@ -1,6 +1,6 @@
 (ns tcljx.data.context
-  (:require (tcljx.data [wrong :as wrong]))
-  (:import (tcljx.data.wrong WrongInfo)))
+  (:require (tcljx.data [error :as error]))
+  (:import (tcljx.data.error WrongInfo)))
 
 ;;; If set in a form context, then a `recur` is possible.  This means
 ;;; that the form is in tail position with respect to the
@@ -54,16 +54,18 @@
 
 
 (defn decorate-with-fctx ^Throwable [^Throwable ex ^long fctx]
-  (letfn [(no-class-def-found ^WrongInfo [^Throwable e]
-            (let [nm (symbol nil (.replace (ex-message e) \/ \.))]
-              (wrong/wr-info (str "failed to load class " (wrong/q nm)) {} e)))]
-    (let [line (fctx-line fctx)]
-      (condp instance? ex
-        NoClassDefFoundError
-        (-> ex (no-class-def-found) (wrong/push-line-number* line))
-        WrongInfo
-        (-> ex (wrong/push-line-number* line))
-        #_else ex))))
+  (let [line (fctx-line fctx)]
+    (condp instance? ex
+      NoClassDefFoundError
+      (-> (error/mk-error-msg)
+          (.txt "failed to load class")
+          (.sym (.replace (.getMessage ex) \/ \.))
+          (.set-line-number line)
+          (.set-cause ex)
+          (error/to-error))
+      WrongInfo
+      (-> ex (error/push-line-number* line))
+      #_else ex)))
 
 (defmacro with-line-from-meta [[fctx-sym form-meta :as binding] & body]
   (assert (vector? binding))

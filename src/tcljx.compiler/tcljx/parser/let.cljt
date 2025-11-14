@@ -1,6 +1,6 @@
 (ns tcljx.parser.let
   (:require
-   (tcljx.data [wrong :as wrong] [context :as context] [ir :as ir])
+   (tcljx.data [context :as context] [ir :as ir])
    (tcljx.parser [syntax :as syntax] [parse :as parse] [interop :as interop]))
   (:import
    (tcljx.data.ir Expr Entity Binding FnPromise ExprFactory EntityFactory Parser)))

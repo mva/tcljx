@@ -1,8 +1,8 @@
 (ns tcljx.nmspgen.primitive
   (:require
    (tcljx.data [config :as cfg] [type :as type] [resolve :as resolve]
-               [reflect :as reflect] [context :as context] [ir :as ir]
-               [code :as code] [wrong :as wrong])
+               [reflect :as reflect] [context :as context] [error :as error]
+               [ir :as ir] [code :as code])
    (tcljx.nmspgen [pkggen :as pkggen] [constgen :as constgen] [emit :as emit]
                   [insn :as insn] [runtime :as rt] [condgen :as condgen]
                   [opgen :as opgen] [junctgen :as junctgen])
@@ -28,7 +28,7 @@
   (invoke-methods [ _]
     ir/invoke-methods-primitive-fn)
   (namespace-if-def [_]
-    nil))
+    cfg/primitive-ns-str))
 (defmacro with-primitive-invoke [^vector paramv & body]
   `(reify PrimitiveFnEntity (~'invoke* ~paramv ~@body)))
 
@@ -44,24 +44,22 @@
   (invoke-methods [ _]
     ir/invoke-methods-primitive-recur)
   (namespace-if-def [_]
-    nil))
+    cfg/primitive-ns-str))
 (defmacro with-primitive-invoke-recur [^vector paramv & body]
   `(reify PrimitiveFnRecurEntity (~'invoke* ~paramv ~@body)))
 
 (defn take-args
   (^Insns [^seq form ^Insns xs ^int n]
-   (if (= (.length xs) n)
-     xs
-     (throw (wrong/wr-info (str (wrong/q (first form)) " takes " n
-                                " argument" (when-not (= 1 n) "s")
-                                (wrong/got-int (.length xs)))))))
+   (error/when-not (= (.length xs) n)
+     (q (first form)) "takes" (txt n)
+     (txt (str "argument" (when-not (= 1 n) "s"))) (got (.length xs)))
+   xs)
   (^Insns [^seq form ^Insns xs ^int n-min ^int n-max]
    (cond
      (= n-min n-max) (take-args form xs n-max)
      (<= n-min (.length xs) n-max) xs
-     :else (throw (wrong/wr-info (str (wrong/q (first form)) " takes " n-min
-                                      " to " n-max " arguments"
-                                      (wrong/got-int (.length xs))))))))
+     :else (error/throw (q (first form)) "takes" (txt n-min)
+                        "to" (txt n-max) "arguments" (got (.length xs))))))
 (defn take-arg ^Insn [^seq form ^Insns xs]
   (.get (take-args form xs 1) 0))
 
@@ -151,21 +149,17 @@
                     wtp))))))  ;int, long, float, or double
         (integral-type ^Wrapper [form ^Insns args ^int i]
           (or (consumed-as-numeric type/long args i)
-              (throw (opgen/info-type-mismatch form args i "integral"))))
+              (throw (opgen/error-type-mismatch form args i "integral"))))
         (integer-type ^Wrapper [form ^Insns args ^int i]
           (or (consumed-as-numeric type/int args i)
-              (throw (opgen/info-type-mismatch form args i "integer"))))
+              (throw (opgen/error-type-mismatch form args i "integer"))))
         (array-type-at-0 ^Class [form ^Insns args]
           (if (zero? (.length args))
-            (throw (wrong/wr-info "expect array argument"))
+            (error/throw "expect array argument")
             (let [tp (insn/expr-type args 0)]
               (if (.isArray tp)
                 tp
-                (throw (opgen/info-type-mismatch form args 0 "array"))))))
-        (info-two-reference-args ^Throwable [form ^Insns args]
-          (-> (str (wrong/q (first form)) " expects two reference arguments"
-                   (wrong/got-types (insn/expr-types args)))
-              (wrong/wr-info)))
+                (throw (opgen/error-type-mismatch form args 0 "array"))))))
         
         (unary ^CodeEmitter [^OpSpec op ^int opcd ^CodeEmitter ce ^long fctx]
           (condp identical? (.base-opcode op)
@@ -266,9 +260,10 @@
   (def binary-identical
     (with-primitive-invoke [_ fctx form _ _ args]
       (let [args (take-args form args 2)]
-        (if (type/any-primitive? (.expr-types args))
-          (throw (info-two-reference-args form args))
-          (condgen/acmp (.get args 0) (.get args 1) condgen/cmp-eq fctx)))))
+        (error/when (type/any-primitive? (.expr-types args))
+          (q (first form)) "expects two reference arguments"
+          (got-types (.expr-types args)))
+        (condgen/acmp (.get args 0) (.get args 1) condgen/cmp-eq fctx))))
 
   (def array-length
     (with-primitive-invoke [_ fctx form _ _ args]
@@ -358,7 +353,7 @@
                        (type/of-all (.expr-types args)))
                      (opgen/top-numeric-of form args)))]
       (case (.length args)
-        0 (throw (wrong/wr-info "missing argument"))
+        0 (error/throw "missing argument")
         1 (insn/progn args insn/insn-true)
         2 (condgen/xcmp-2 wtop (.get args 0) (.get args 1) cmp-opcd fctx)
         #_else (let [tp (.class-primitive wtop)
@@ -554,7 +549,11 @@
         (primitive "bit-shift-left" binary-shift-left)
         (primitive "bit-shift-right" binary-shift-right)
         (primitive "unsigned-bit-shift-right" binary-unsigned-shift-right)
-
+        ;; FIXME... add bit-compress and bit-expand as shortcut for
+        ;; the corresponding static methods of Integer and Long?
+        ;; would make them easier to reach, and also enable early
+        ;; constant folding
+        
         (primitive "bit-clear" binary-bit-clear)
         (primitive "bit-set" binary-bit-set)
         (primitive "bit-flip" binary-bit-flip)

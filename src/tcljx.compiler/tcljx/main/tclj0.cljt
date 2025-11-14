@@ -7,13 +7,14 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.main.tclj0
   (:require
-   (tcljx.data [config :as cfg] [files :as files] wrong [type :as type])
+   (tcljx.data [config :as cfg] [files :as files] [error :as error]
+               [type :as type])
    (tcljx.nmspgen [runtime :as rt] [destdir :as destdir]
                   [pkggen :as pkggen] [insn :as insn]
                   [primitive :as primitive] [universe :as universe])
-   (tcljx.main [options :as options] [invoke :as invoke] [efmt :as efmt]))
+   (tcljx.main [options :as options] [invoke :as invoke]))
   (:import
-   (tcljx.data.wrong WrongInfo)
+   (tcljx.data.error WrongInfo)
    (tcljx.data.ir ProvidedNamespace)
    (tcljx.nmspgen.destdir Destination)
    (tcljx.main.options Options)
@@ -22,7 +23,8 @@
 (defn prepare-destination ^Destination [^Path path ^boolean keep-files?]
   (if (some? path)         ;wipe *before* any classloaders are created
     (do (when-not keep-files?
-          (doseq [^Path x (files/file-seq path) :when (files/class-file? x)]
+          (doseq [^Path x (files/recursive-file-seq path)
+                  :when (files/class-file? x)]
             #_(prn :wipe-dest-dir (.toString x))
             (Files/delete x)))
         (destdir/mk-dest-files path))
@@ -30,7 +32,7 @@
 
 (defn build-all ^map [^Options opts ^boolean load-from-dest-dir?]
   (let [dest (prepare-destination (.dest-dir opts) load-from-dest-dir?)
-        app-ld (rt/app-class-loader (.parent-classloader opts) (.sourcev opts))
+        app-ld (rt/app-class-loader (.parent-class-loader opts) (.sourcev opts))
         dyn-sourcev (if load-from-dest-dir? [(.dest-dir opts)] [])
         dyn-ld (rt/dyn-class-loader app-ld dyn-sourcev)
         rt (rt/mk-runtime app-ld dyn-ld)
@@ -58,6 +60,6 @@
     (-> (time (build-all opts false))
         (invoke/invoke-and-report opts))
     (catch WrongInfo e
-      (efmt/print-emap e)
+      (error/print-error e)
       (println)
       false)))

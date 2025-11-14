@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0mfunction parameter [1mlong[0m not assignment compatible to method's [1mint
+[22;31m@@@ [0mtest/errormsg/fn-14-itf-parameter-mismatch/src/pkg/ns0.cljt:[1m2[0m

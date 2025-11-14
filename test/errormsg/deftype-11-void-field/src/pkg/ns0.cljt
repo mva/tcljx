@@ -1,0 +1,4 @@
+(ns pkg.ns0 (:refer-clojure :none))
+(deftype* pkg.ns0/Vec3 pkg.ns0.Vec3
+  [^void x]
+  :implements [clojure.lang.IType])

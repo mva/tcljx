@@ -1,0 +1,84 @@
+(ns tcljx.alpha.pp.paragraph
+  (:require (tcljx.alpha.pp [style :as style] [styled :as styled]
+                            [recording :as recording]))
+  (:import (tcljx.alpha.pp.styled StyledWriter)
+           (tcljx.alpha.pp.recording Recorder Recording)))
+
+(def ^:private nl \newline)
+(def ^:private sep \space)
+(defn- sep?
+  (^boolean [^char ch]
+   (or (= ch sep) (= ch nl)))
+  (^boolean [^CharSequence cs ^int i]
+   (sep? (.charAt cs i))))
+
+(letfn [(offset-upto ^int [^int i ^String cs ^int offset]
+          (try
+            (Character/offsetByCodePoints cs i offset)
+            (catch IndexOutOfBoundsException _
+              (.length cs))))
+        (backward-to-break ^int [^int i ^String cs ^int start]
+          (loop [i i, then-word? (and (< (inc i) (.length cs))
+                                      (not (sep? cs (inc i))))]
+            (cond
+              (< i start) i
+              (sep? cs i) (if then-word? i (recur (dec i) false))
+              :else (recur (dec i) true))))
+        (forward-to-break ^int [^int i ^String cs]
+          (let [end (.length cs)]
+            (loop [sep-then? (and (>= i 0) (sep? cs i)), i (inc i)]
+              (cond
+                (= i end) Integer/MAX_VALUE
+                (sep? cs i) (recur true (inc i))
+                sep-then? (dec i)
+                :else (recur false (inc i))))))
+        (end-of-line ^int [^int i ^String cs ^int start]
+          (if (= i (.length cs))
+            Integer/MAX_VALUE
+            (let [j (backward-to-break i cs start)]
+              (if (<= j start)
+                (forward-to-break i cs)
+                j))))]
+  
+  (defn- flush-paragraph ^void [^StyledWriter w ^int width ^Recording rec]
+    (let [remain (max 0 (- width (.code-points-in-line w)))
+          eol (-> (.start rec)
+                  (offset-upto (.text rec) remain)
+                  (end-of-line (.text rec) (.start rec)))
+          rec' (recording/write-raw-to rec w eol)]
+      (when (< eol Integer/MAX_VALUE)
+        (.nl w)
+        (recur w width (recording/skip-chars rec' 1))))))
+
+(deftype ParagraphWriter [^StyledWriter w ^Recorder wr ^int width]
+  StyledWriter
+  (nl [this]          ;ends the current paragraph and begins a new one
+    (flush-paragraph w width (.take-recording! wr))
+    (.nl w)                             ;prepare for next paragraph
+    this)
+  (append [this style cs start end]
+    (loop [i start]
+      (let [j (styled/index-of-nl cs i end)]
+        (if (neg? j)
+          (styled/write wr style cs i end)
+          (do (styled/write wr style cs i j)
+              (.nl this)
+              (recur (inc j))))))
+    this)
+  (code-points-in-line [_]
+    (throw (UnsupportedOperationException.)))
+  (close [this]
+    (flush-paragraph w width (.take-recording! wr))))
+
+;;; Prints out paragraphs separated by a newline, either denoted by a
+;;; call to method `nl` or by the character \newline.  Tries to impose
+;;; `width` as a soft limit for the paragraph lines' length.  Within a
+;;; paragraph, line breaks are created by converting the rightmost
+;;; space just before a word.  By only replacing a space with a
+;;; newline character, the total number of characters written remains
+;;; unchanged.
+(defn writer
+  (^StyledWriter [^StyledWriter w]
+   (writer w 80))
+  (^StyledWriter [^StyledWriter w ^int width]
+   (ParagraphWriter. w (recording/raw-recorder) width)))

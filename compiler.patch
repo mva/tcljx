@@ -2,8 +2,8 @@ diff -Nru src/tcljx.compiler/module-info.java ../tcljx.compiler.patched/module-i
 --- src/tcljx.compiler/module-info.java	2025-10-30 13:03:33.598942032 +0100
 +++ ../tcljx.compiler.patched/module-info.java	2025-11-02 14:34:34.400379661 +0100
 @@ -1,3 +1,3 @@
-  module tcljx.compiler {
--   requires transitive tcljc.core;
-+   requires transitive tcljx.alpha;
+ module tcljx.compiler {
+-  requires transitive tcljc.core;
++  requires transitive tcljx.alpha;
     
 }

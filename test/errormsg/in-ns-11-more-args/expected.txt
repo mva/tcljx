@@ -1,0 +1,3 @@
+tcljx.data.error.WrongInfo
+[31m### [0munexpected arguments at end (got: [1m((quote foo))[0m)
+[31m@@@ [0mtest/errormsg/in-ns-11-more-args/src/pkg/ns0.cljt:[1m2[0m

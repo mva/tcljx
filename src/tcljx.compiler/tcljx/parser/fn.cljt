@@ -1,6 +1,6 @@
 (ns tcljx.parser.fn
   (:require
-   (tcljx.data [wrong :as wrong] [context :as context] [type :as type]
+   (tcljx.data [error :as error] [context :as context] [type :as type]
                [ir :as ir] [resolve :as resolve] [reflect :as reflect])
    (tcljx.parser [parse :as parse] [syntax :as syntax] [interop :as interop]
                  [let :as let]))
@@ -17,33 +17,31 @@
                   (or at-tp (if unhinted? method-tp Object)))
         rtype (let [mtype (.getReturnType m)
                     rtype (resolve (.return-type at) mtype)]
-                (when-not (type/jvm-assignable-from? mtype rtype)
-                  (wrong/other (str "function result " (wrong/q rtype)
-                                    " not assignment compatible to method's "
-                                    (wrong/q mtype))))
+                (error/when-not (type/jvm-assignable-from? mtype rtype)
+                  "function result" (type rtype)
+                  "not assignment compatible to method's" (type mtype))
                 rtype)
         pclasses (.getParameterTypes m)
         aparam-tp (new Class/1 (.parameter-count at))]
     (dotimes [i (alength aparam-tp)]
       (let [pclass (aget pclasses i)
             dclass (resolve (aget (.parameter-types at) i) pclass)]
-        (if (type/jvm-assignable-from? pclass dclass)
-          (aset aparam-tp i dclass)
-          (wrong/other (str "function parameter " (wrong/q dclass)
-                            " not assignment compatible to "
-                            "method's " (wrong/q pclass))))))
-    (when-not (= (.varargs? at) (.isVarArgs m))
-      (wrong/other "interface and function disagree on varargs status"))
+        (error/when-not (type/jvm-assignable-from? pclass dclass)
+          "function parameter" (type dclass)
+          "not assignment compatible to method's" (type pclass))
+        (aset aparam-tp i dclass)))
+    (error/when-not (= (.varargs? at) (.isVarArgs m))
+      "interface and function disagree on varargs status")
     (ir/with-return-type at rtype aparam-tp)))
 
 (defn- itf-method ^Method [^AritySpec/1 specs ^Class itf-class]
-  (when-not (= (alength specs) 1)
-    (wrong/other "interface function must implement exactly one arity"))
+  (error/when-not (= (alength specs) 1)
+    "interface function must implement exactly one arity")
   (let [an (-> (aget specs 0) .at .parameter-count)]
     (or (first (->> (resolve/itf-methods itf-class)
                     (filter #(= (Method/.getParameterCount %) an))))
-        (wrong/other (str "interface " (wrong/q itf-class)
-                          " has no method of arity " an)))))
+        (error/throw "interface" (type itf-class) "has no method of arity"
+                      (txt an)))))
 
 (defn- fixup-arity-specs-from-itf ^AritySpec/1 [^AritySpec/1 specs ^Method m]
   (let [spec (aget specs 0)]
@@ -72,28 +70,27 @@
             (let [n (count arity-seq)
                   specs (new AritySpec/1 n)]
               (loop [seen-ns #{}, seen-va -1, i 0,
-                     [[paramv & body :as arity] & arity-r] arity-seq]
+                     [arity & arity-r] arity-seq]
                 (if (< i n)
                   (if (seq? arity)
-                    (let [spec (arity-spec-of paramv body arity)
+                    (let [[paramv & body] arity
+                          spec (arity-spec-of paramv body arity)
                           at (.at spec)
                           n (.parameter-count at)
                           va (if (ir/translates-to-varargs? at) i -1)]
-                      (when (contains? seen-ns n)
-                        (wrong/other (str "multiple function arities "
-                                          "with " n " parameters")))
-                      (when (and (>= va 0) (>= seen-va 0))
-                        (wrong/other (str "multiple variadic function "
-                                          "arities")))
+                      (error/when (contains? seen-ns n)
+                        "multiple function arities with" (txt n) "parameters")
+                      (error/when (and (>= va 0) (>= seen-va 0))
+                        "multiple variadic function arities")
                       (aset specs i spec)
                       (recur (conj seen-ns n) va (inc i) arity-r))
-                    (throw (syntax/info "expect function arity ([...] ...)"
-                                        arity)))
+                    (error/throw "expect function arity ([...] ...)"
+                                  (got-q arity)))
 
                   (when (>= seen-va 0)
                     (when (not= (max-parameter-count specs)
                                 (-> specs (aget seen-va) .at .parameter-count))
-                      (wrong/other "only maximum arity can be variadic")))))
+                      (error/throw "only maximum arity can be variadic")))))
               specs))]
     
     (let [[h & t] more]
@@ -170,10 +167,10 @@
     (let [itf-tag (interop/tag-of (first form))
           fn-nm (second form)]
       (if (symbol? fn-nm)
-        (do (when (some? (interop/tag-of fn-nm))
-              (wrong/other "type tag on function name is not supported"))
-            (when (some? itf-tag)
-              (wrong/other "interface function cannot have a name"))
+        (do (error/when (some? (interop/tag-of fn-nm))
+              "type tag on function name is not supported")
+            (error/when (some? itf-tag)
+              "interface function cannot have a name")
             (new-fn (syntax/simple-symbol fn-nm) (nnext form)))
         (if (some? itf-tag)
           (-> (.resolver parser)
@@ -190,9 +187,8 @@
                 (when (< i n)
                   (let [x (syntax/list (nth fnv i))
                         nm (syntax/simple-symbol (first x))]
-                    (when (contains? seen nm)
-                      (wrong/other (str "duplicate name in letfn bindings: "
-                                        (wrong/q nm))))
+                    (error/when (contains? seen nm)
+                      "duplicate name in letfn bindings:" (sym nm))
                     (aset a i x)
                     (recur (conj seen nm), (inc i)))))
               a))

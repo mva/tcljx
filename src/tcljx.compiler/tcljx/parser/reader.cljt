@@ -7,11 +7,11 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.parser.reader
   (:require
-   (tcljx.data [config :as cfg] [meta :as meta] [wrong :as wrong] [ir :as ir])
+   (tcljx.data [config :as cfg] [meta :as meta] [error :as error] [ir :as ir])
    [clojure.string :as str])
   (:import
    (tcljx.data.ir Resolver FormReader)
-   (tcljx.data.wrong WrongInfo)
+   (tcljx.data.error WrongInfo)
    (tinyclj.lang Literal)
    (clojure.lang IMapEntry IRecord Named)
    (java.net URI URL)
@@ -104,9 +104,7 @@
 
 (defn template [form]
   (letfn
-      [(wrong [^String msg]
-         (throw (wrong/wr-info msg {}))) ;no line/column info available here
-       (q [form]
+      [(q [form]
          (list cfg/sym-quote form))
             
        (expand-list ^vector [xs]
@@ -168,7 +166,7 @@
                    (second form)
 
                    (unquote-splicing? form)
-                   (wrong "unquote-splicing ~@ outside of list")
+                   (error/throw "unquote-splicing ~@ outside of list")
                    
                    (coll? form)
                    (encode-collection form)
@@ -185,17 +183,10 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- wrong ^void [& ^Object/1 msg-parts]
-  (throw (wrong/wr-info (str/join " " msg-parts))))
-(defn- wrong-pos ^void [^int pos & ^Object/1 msg-parts]
-  (throw (wrong/wr-info (str/join " " msg-parts) {:reader/position pos})))
-(defn- wrong-token ^void [^String cs ^int pos ^int end]
-  (throw (wrong/wr-info (str "invalid token: " (.substring cs pos end))
-                        {:reader/position pos})))
 (defn- rethrow-with-position ^void [^WrongInfo ex ^int pos]
   (throw (cond-> ex
-           (not (contains? (wrong/wr-data ex) :reader/position))
-           (wrong/update-wr-data assoc :reader/position pos))))
+           (not (contains? (error/wr-data ex) :reader/position))
+           (error/update-wr-data assoc :reader/position pos))))
 
 ;;; "End of text" character virtually appended to program text to
 ;;; enable one or more additional characters of lookahead without the
@@ -207,18 +198,16 @@
 
 (def ^:private bias-nothing Integer/MIN_VALUE)
 (def ^:private require-form \X)
-(letfn [(wrong-nothing ^void [^int pos ^char actual]
-          (if (= actual eot)
-            (wrong-pos pos "unexpected end of file")
-            (let [s (if (<= (int actual) (int \space))
-                      (str "\\u" (.toHexDigits (java.util.HexFormat/of) actual))
-                      (str "\\" actual))]
-              (wrong-pos pos "invalid start of token:" s))))
-        (compare-to-expected ^int [^int pos ^char expected ^String cs]
+(letfn [(compare-to-expected ^int [^int pos ^char expected ^String cs]
           (let [actual (if (= pos (.length cs)) eot (.charAt cs pos))]
-            (if (= actual expected)
+            (cond
+              (= actual expected)
               pos
-              (wrong-nothing pos actual))))]
+              (= actual eot)
+              (error/throw "unexpected end of file" (set-reader-position pos))
+              :else
+              (error/throw "invalid start of token:" (chr actual)
+                            (set-reader-position pos)))))]
   (defn- check-nothing ^int [^int pos ^char expected ^String cs]
     (if (neg? pos)
       (compare-to-expected (- pos bias-nothing) expected cs)
@@ -262,8 +251,8 @@
                           (catch NumberFormatException _
                             -1))
                         -1)]
-                (when-not (<= 1 n max-fnlit-param)
-                  (wrong "arg literal must be %, %& or %integer"))
+                (error/when-not (<= 1 n max-fnlit-param)
+                  "arg literal must be %, %& or %integer")
                 n))]
       (cond
         (= s "%") (register-arg! arg-env 1)
@@ -275,9 +264,9 @@
               (if (nil? x) "(none)" (str x)))
             (tagged-parameter ^symbol [^map tag-map ^symbol p]
               (let [tags (tag-map p)]
-                (when (> (count tags) 1)
-                  (wrong "conflicting type tags for arg literal:"
-                         (str/join " " (->> tags (map type-str) sort))))
+                (error/when-not (<= (count tags) 1)
+                  "conflicting type tags for arg literal:"
+                  (txt (str/join " " (->> tags (map type-str) sort))))
                 (if-some [tag (first tags)]
                   (with-meta p {:tag tag})
                   p)))
@@ -381,22 +370,21 @@
   #"([-+]?[0-9]+)/([0-9]+)")
 
 (defn- parse-number ^Number [^String s] ;see matchNumber in LispReader.java 
-  (letfn [(unsupported-big-int []
-            (wrong "BigInt values are not supported"))
-          (parse-int [^Matcher m ^String n ^int radix]
+  (letfn [(parse-int [^Matcher m ^String n ^int radix]
             (let [bn (cond-> (BigInteger. n radix)
                        (= "-" (.group m 1)) (.negate))
                   x (.group m 8)]
               (if (some? x)
                 (case (.charAt x 0)
-                  \N (unsupported-big-int)
+                  \N (error/throw "BigInt values are not supported")
                   (\l \L) (if (< (.bitLength bn) 64)
                             (object (.longValue bn)) ;return Long
-                            (wrong "value out of range for long:" bn))
-                  #_else (wrong (str "unsupported number suffix: " x)))
+                            (error/throw "value out of range for long:"
+                                          (txt bn)))
+                  #_else (error/throw "unsupported number suffix:" (txt x)))
                 (if (< (.bitLength bn) 32)
                   (object (.intValue bn)) ;force Integer
-                  (wrong "value out of range for int:" bn)))))
+                  (error/throw "value out of range for int:" (txt bn))))))
           (match-int [^Matcher m]
             (if-some [n (or (.group m 2) (.group m 3))]
               (parse-int m n 10)
@@ -406,14 +394,13 @@
                   (parse-int m n 8)
                   (if-some [n (.group m 7)]
                     (parse-int m n (Integer/parseInt (.group m 6)))
-                    (wrong "invalid integer number:" (.group m)))))))
+                    (error/throw "invalid integer number:"
+                                  (txt (.group m))))))))
 
-          (unsupported-big-decimal []
-            (wrong "BigDecimal values are not supported"))
           (match-float [^Matcher m ^String s]
             (if-some [x (.group m 4)]
               (case (.charAt x 0)
-                \M (unsupported-big-decimal)
+                \M (error/throw "BigDecimal values are not supported")
                 (\f \F) (object (Float/parseFloat s))) ;force Float
               (object (Double/parseDouble s))))]       ;return Double
 
@@ -426,10 +413,11 @@
               (match-float m s)))
           (let [m (.matcher ratio-pat s)]
             (when (.matches m)
-              (wrong "Ratio values are not supported")))
-          (wrong "invalid number:" s))
+              (error/throw "Ratio values are not supported")))
+          (error/throw "invalid number:" (txt s)))
       (catch NumberFormatException e
-        (wrong "number format error:" (.getMessage e))))))
+        (error/throw "number format error:" (txt (.getMessage e))
+                      (set-cause e))))))
 
 (defn- parse-unicode-char ^char [^String s ^int offset ^int length ^int base]
   (when (or (not= (.length s) (+ offset length))
@@ -438,22 +426,22 @@
                 (neg? i) false
                 (neg? (Character/digit (.charAt s (+ offset i)) base)) true
                 :else (recur (dec i)))))
-    (wrong "invalid character code:" s))
+    (error/throw "invalid character code:" (txt s)))
   (try
     (let [n (Integer/parseInt s offset (+ offset length) base)]
-      (if (or (neg? n) (> n (int Character/MAX_VALUE)))
-        (do (wrong "character out of range:" s) \0)
-        (char n)))
-    (catch NumberFormatException e
-      (wrong "number format error:" (.getMessage e))
-      \0)))
+      (error/when-not (<= 0 n (int Character/MAX_VALUE))
+        "character out of range:" (txt s)) ;unreachable?
+      (char n))
+    (catch NumberFormatException e      ;unreachable?
+      (error/throw "number format error:" (txt (.getMessage e))
+                    (set-cause e)))))
 
 (defn- parse-octal-char ^char [^String s ^int offset ^int length]
-  (when (> length 3)
-    (wrong "invalid octal escape sequence length:" s))
+  (error/when-not (<= length 3)
+    "invalid octal escape sequence length:" (txt s))
   (let [uc (parse-unicode-char s offset length 8)]
-    (when (> (int uc) 0377)
-      (wrong "octal escape sequence must be in range [0, 377]"))
+    (error/when-not (<= (int uc) 0377)
+      "octal escape sequence must be in range [0, 377]")
     uc))
 
 (defn- parse-character ^Character [^String s] ;pre: `s` starts with backslash
@@ -471,11 +459,11 @@
         (when (= h \u)
           (let [uc (parse-unicode-char s 2 4 16)]
             (if (<= 0xD800 (int uc) 0xDFFF) ;surrogate code unit?
-              (wrong "invalid surrogate character:" s)
+              (error/throw "invalid surrogate character:" (txt s))
               (object uc))))
         (when (= h \o)
           (object (parse-octal-char s 2 (- (.length s) 2))))
-        (wrong "unsupported character:" s))))
+        (error/throw "unsupported character:" (txt s)))))
 
 (defn- merge-meta [^map m dm]
   (cond
@@ -484,7 +472,7 @@
     (string? dm) (assoc m :tag dm)
     (map? dm) (merge m dm)
     (vector? dm) (assoc m :param-tags dm)
-    :else (wrong "metadata must be symbol, keyword, string, map, or vector")))
+    :else (error/throw "metadata must be symbol, keyword, string, map, or vector")))
 
 (defn- checked-map ^map [^Object/1 es]
   (loop [seen #{}, i 0]
@@ -493,7 +481,7 @@
       (Literal/map es)
 
       (contains? seen (aget es i))
-      (wrong "duplicate key:" (aget es i))
+      (error/throw "duplicate map key:" (q (aget es i)))
 
       :else (recur (conj seen (aget es i)) (+ i 2)))))
 
@@ -504,7 +492,7 @@
       (Literal/set es)
 
       (contains? seen (aget es i))
-      (wrong "duplicate key:" (aget es i))
+      (error/throw "duplicate set key:" (q (aget es i)))
 
       :else (recur (conj seen (aget es i)) (inc i)))))
 
@@ -691,7 +679,9 @@
                 -1
                 (let [slash (.indexOf (.cs fb) (int \/) start end)]
                   (if (or (= slash start) (= (inc slash) end) (= start end))
-                    (wrong-token (.cs fb) pos end)
+                    (error/throw "invalid token:"
+                                  (txt (.substring (.cs fb) pos end))
+                                  (set-reader-position pos))
                     slash)))))
           (push-symbol ^int [^int pos]  ;pre: not looking at \:
             (let [end (skip-token-cont (.cs fb) pos)
@@ -711,7 +701,7 @@
               (if (some? nmsp)
                 (if-some [nmsp* (.lookup-namespace resolver nmsp)]
                   (keyword nmsp* nm)
-                  (wrong "no such namespace:" nmsp))
+                  (error/throw "no such namespace:" (sym nmsp)))
                 (keyword (.ns-str resolver) nm))))
           (push-keyword ^int [^int pos] ;pre: looking at \:
             (let [two-colons? (= (char-at (inc pos)) \:)
@@ -758,8 +748,8 @@
                         x (substring pos (+ pos len 1))]
                     (.append sb (parse-octal-char x 1 len))
                     (inc len))
-                  (wrong-pos pos "unsupported escape character:"
-                             (str \\ ch))))))
+                  (error/throw "unsupported escape character:" (chr ch)
+                                (set-reader-position pos))))))
           (skip-over-copied-text ^int [^int pos]
             (let [cs (.cs fb), end (length-cs)]
               (loop [i pos]
@@ -774,11 +764,12 @@
                 (case (char-at pos)
                   \" (.push fb (inc pos) (.toString sb))
                   \\ (if (at-eol? (char-at (inc pos)))
-                       (wrong-pos pos "incomplete quote at end of line")
+                       (error/throw "incomplete quote at end of line"
+                                     (set-reader-position pos))
                        (recur (+ pos (append-escape sb pos))))
                   \newline (do (.append sb \newline)
                                (recur (.beginning-of-line fb (inc pos))))
-                  #_eot \u0000 (wrong "unterminated string")
+                  #_eot \u0000 (error/throw "unterminated string")
                   #_else (let [j (skip-over-copied-text (inc pos))]
                            (.append sb (.cs fb) pos j)
                            (recur j))))))
@@ -792,8 +783,7 @@
             (try
               (Pattern/compile pattern)
               (catch PatternSyntaxException e
-                (throw (wrong/wr-info (str "invalid regex " (wrong/q pattern))
-                                      {} e)))))
+                (error/throw "invalid regex" (q pattern) (set-cause e)))))
           (push-regex ^int [^int pos]   ;pre: looking at "#\""
             (let [sb (StringBuilder.)
                   line (.current-line fb)]
@@ -802,12 +792,13 @@
                   \" (.push fb (inc pos) (compile-pattern (.toString sb)))
                   \\ (let [ch+1 (char-at (inc pos))]
                        (if (at-eol? ch+1)
-                         (wrong-pos pos "incomplete quote at end of line")
+                         (error/throw "incomplete quote at end of line"
+                                       (set-reader-position pos))
                          (do (.append sb \\) (.append sb ch+1)
                              (recur (+ pos 2)))))
                   \newline (do (.append sb \newline)
                                (recur (.beginning-of-line fb (inc pos))))
-                  #_eot \u0000 (wrong "unterminated regular expression")
+                  #_eot \u0000 (error/throw "unterminated regular expression")
                   #_else (let [j (skip-over-copied-text (inc pos))]
                            (.append sb (.cs fb) pos j)
                            (recur j))))))
@@ -845,8 +836,8 @@
                   dm (.pop fb)
                   pos (push-form pos)
                   x (.pop fb)]
-              (when-not (instance? clojure.lang.IMeta x)
-                (wrong "metadata can only be applied to IMeta instances"))
+              (error/when-not (instance? clojure.lang.IMeta x)
+                "metadata can only be applied to IMeta instances")
               (.push fb pos (with-meta x (merge-meta (meta x) dm)))))
           
           (push-syntax-quote ^int [^int pos]
@@ -871,10 +862,10 @@
                                 '-Inf Double/NEGATIVE_INFINITY
                                 'NaN Double/NaN} sval)]
                 (.push fb pos x)
-                (wrong "unknown symbolic value:" (str "##" sval)))))
+                (error/throw "unknown symbolic value:" (txt (str "##" sval))))))
           (push-fn-literal ^int [^int pos] ;pre: looking at "#("
             (when (.fn-literal? tp)
-              (wrong "nested fn literals #(...) are not allowed"))
+              (error/throw "nested fn literals #(...) are not allowed"))
             (let [arg-env (mk-arg-env)
                   pos (push-form (inc pos) (fnlit-token-parser tp arg-env))
                   body (.pop fb)]
@@ -890,8 +881,8 @@
                 \_ (-> pos (skip-discard) (push-form-or-nothing))
                 \< (if (.skip-over-unreadable? tp)
                      (.push fb (+ pos 2) nil) ;ignore discarded unreadable
-                     (wrong "unreadable form"))
-                #_else (wrong "unsupported dispatch:" (str "#" ch)))))
+                     (error/throw "unreadable form"))
+                #_else (error/throw "unsupported dispatch:" (txt (str "#" ch))))))
           
           (push-or-discard ^int [^int pos]
             (let [ch (char-at pos)]
@@ -938,13 +929,13 @@
     (push-form-or-nothing pos)))
 
 (letfn [(assoc-line-column ^WrongInfo [^WrongInfo ex ^String cs]
-          (let [pos ^int (:reader/position (wrong/wr-data ex))]
+          (let [pos ^int (:reader/position (error/wr-data ex))]
             (loop [line-num 1, i 0]
               (let [j (.indexOf cs "\n" i)]
                 (if (or (neg? j) (>= j pos))
                   (-> ex
-                      (wrong/update-wr-data assoc :reader/line line-num)
-                      (wrong/update-wr-data assoc :reader/column (- pos i)))
+                      (error/update-wr-data assoc :reader/line line-num)
+                      (error/update-wr-data assoc :reader/column (- pos i)))
                   (recur (inc line-num) (inc j)))))))]
   
   (defn push-1 ^int [^int pos ^FormBuilder fb ^Resolver resolver]
@@ -970,14 +961,16 @@
 (defn- resource-uri ^URI [^ClassLoader app-ld ^Path path]
   (if-some [url (.getResource app-ld (.toString path))]
     (.toURI url)
-    (wrong/other (str "no such file " (wrong/q path)))))
+    (error/throw "no such file:" (q path))))
 
 (deftype Reader [^FormBuilder fb ^:unsynchronized-mutable ^int pos
                  ^ClassLoader app-ld ^URI ruri ^HashSet !all-uris]
   FormReader
   (read [_ resolver]
-    (if (neg? (set! pos (push-1 pos fb resolver)))
-      :tcljx.parser.reader/EOF
+    (set! pos (push-1 pos fb resolver))
+    (if (neg? pos)
+      (do (check-nothing pos eot (.cs fb))
+          :tcljx.parser.reader/EOF)
       (let [form (.pop fb)]
         #_(prn :form form)
         form)))
@@ -987,8 +980,8 @@
                   (.resolve ruri path-str))]
       (-> (mk-form-builder (read-resource !all-uris ruri'))
           (Reader. 0 app-ld ruri' !all-uris))))
-  (resource-url [_]
-    (.toURL ruri))
+  (resource-uri [_]
+    ruri)
   (with-source-file [_ cb]
     (when (some? ruri)
       (let [path (.getPath ruri), i (.lastIndexOf path (int \/))]
