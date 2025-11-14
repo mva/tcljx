@@ -69,6 +69,7 @@
 
 (defn run-errormsg-tests
   (^void []
+   #_(run-errormsg-test (files/path-of "test/errormsg/def-11-redef-when-bound"))
    (let [base-dir (files/path-of "test/errormsg")
          paths (files/child-directory-seq base-dir)]
      (println "Evaluating error reporting"

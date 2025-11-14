@@ -10,6 +10,7 @@
    (tcljx.data.ir CodeEmitter Entity Assignable MethodSpec
                   EntityFactory BindableEntity)
    (tcljx.nmspgen.insn Insn Insns)
+   (tcljx.nmspgen.pkggen CodePromise)
    (tcljx.nmspgen.fngen FnPromiseImpl)
    (java.lang.classfile CodeBuilder TypeKind)
    (java.lang.constant ClassDesc)
@@ -36,10 +37,11 @@
   (value-of [this ent form]
     (assert (some? form))
     (if-some [tp (.value-type ent)]
-      (-> (if (.closes-over? this ent)
-            (.display-of! this ent (name form))
-            ent)
-          (insn/mk-insn tp))
+      (cond
+        (.closes-over? this ent) (-> (.display-of! this ent (name form))
+                                     (insn/mk-insn tp))
+        (instance? CodePromise ent) (.expr-of ^CodePromise ent)
+        :else (insn/mk-insn ent tp))
       (error/throw "entity" (q form) "has no runtime value")))
   (invocation-of [this inv form]
     (if (.closes-over? this inv)

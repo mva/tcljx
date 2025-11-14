@@ -155,7 +155,7 @@
     #_(prn :new-def-mutable nm)
     (let [p (defgen/promise-def-mutable ir/entity-id-def private?
               (.staged-segment pkg-build) nm init)
-          ent (-> p .expr-of .emitter)
+          ent ^Entity p
           bnd (ir/mk-binding ent nm false)]
       (.stage-code-promise! pkg-build p)
       (set! globals (assoc globals nm (.bound-to bnd)))
@@ -164,19 +164,17 @@
     #_(prn :new-def-immutable nm)
     (let [p (defgen/promise-def-immutable ir/entity-id-def private?
               (.staged-segment pkg-build) nm init)
-          ent (-> p .expr-of .emitter)
+          ent ^Entity p
           bnd (ir/mk-binding ent nm false)
           init-ce (.emitter init)]
       (.stage-code-promise! pkg-build p)
-      (set! globals (assoc globals nm (if (constgen/const? init-ce)
-                                        init-ce
-                                        (.bound-to bnd))))
+      (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/bind-then-value bnd ent)))
   (new-def-macro [_ private? nm init fq-value ce-value]
     #_(prn :new-def-macro nm)
     (let [p (defgen/promise-def-macro private? (.staged-segment pkg-build)
               nm init fq-value ce-value)
-          ent (-> p .expr-of .emitter)
+          ent ^Entity p
           bnd (ir/mk-binding ent nm true)]
       (.stage-code-promise! pkg-build p)
       (set! globals (assoc globals nm (.bound-to bnd)))
@@ -185,7 +183,7 @@
     #_(prn :new-def-var nm)
     (let [p (defgen/promise-def-var private? (.staged-segment pkg-build)
               nm init tp-var dynamic? meta)
-          bnd (ir/mk-binding (-> p .expr-of .emitter) nm false)]
+          bnd (ir/mk-binding ^Entity p nm false)]
       (.stage-code-promise! pkg-build p)
       (set! globals (assoc globals nm (.bound-to bnd)))
       (insn/bind-then-value bnd (.df p))))

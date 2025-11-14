@@ -627,8 +627,7 @@
 (defn def-from-this-namespace? ^boolean [^Entity ent ^Parser parser]
   (when (instance? ImmediateEntity ent)
     (let [nmsp (.namespace-if-def ^ImmediateEntity ent)]
-      (or (nil? nmsp)                ;if def was aliased to a constant
-          (= nmsp (-> parser .resolver .ns-str))))))
+      (= nmsp (-> parser .resolver .ns-str)))))
 
 (defn exprs-of ^Exprs [^ExprFactory xf & ^Expr/1 xs*]
   (let [xs (.new-exprs xf (alength xs*))]

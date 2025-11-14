@@ -117,7 +117,8 @@
     true)
   CodePromise
   (expr-of [this]
-    (insn/mk-insn this (.value-type this)))
+    (-> (if (constgen/const? init-ce) init-ce this) ;unwrap to constant
+        (insn/mk-insn (.value-type this))))
   (child-methods [_]
     nil)
   (!nested-parts [_]
