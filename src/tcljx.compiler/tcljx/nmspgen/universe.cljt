@@ -118,20 +118,30 @@
 
       ;; Note: The `merge-transitive` is *very* conservative, because
       ;; it assumes that any namespace in the transitive chain of
-      ;; requires may appear during macro expansion.
+      ;; requires may appear during macro expansion.  (Cannot set
+      ;; mutable field from inside a closure.  Therefore there are two
+      ;; functions to compute the new `known-ns` and the new
+      ;; `ns-alias` -- and the set! happens inside the method.)
       (letfn [(merge-transitive ^map [^map known-ns ^ProvidedNamespace pn]
                 (if (or (nil? pn) (contains? known-ns (.ns-str pn)))
                   known-ns ;pn of nil means a cylic require of core-lib
                   (reduce #(merge-transitive %1 (get all-ns ^String %2))
                           (assoc known-ns (.ns-str pn) pn)
+                          (.require-strs pn))))
+              (merge-ns-alias ^map [^map ns-alias ^ProvidedNamespace pn]
+                (if (or (nil? pn) (contains? ns-alias (.ns-str pn)))
+                  ns-alias
+                  (reduce #(merge-ns-alias %1 (get all-ns ^String %2))
+                          (assoc ns-alias (.ns-str pn) (.ns-str pn))
                           (.require-strs pn))))]
         (dotimes [i (alength ns-strs)]
           (let [req-str (aget ns-strs i)]
             (if-some [known-pn (.valAt known-ns req-str nil)]
               (aset apn i known-pn) ;retain own provided version of core-lib
-              (if-some [req-pn (.valAt all-ns req-str nil)]
+              (if-some [^ProvidedNamespace req-pn (.valAt all-ns req-str nil)]
                 (do (aset apn i req-pn)
-                    (set! known-ns (merge-transitive known-ns req-pn)))
+                    (set! known-ns (merge-transitive known-ns req-pn))
+                    (set! ns-alias (merge-ns-alias ns-alias req-pn)))
                 (error/throw "unresolved namespace " (sym req-str)))))))
       apn))
   (process-require [this require provided]
