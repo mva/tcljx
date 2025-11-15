@@ -85,31 +85,23 @@
 ;; compiled successfully.
 (defn build-pass ^map [^Options opts ^Consumer on-completion
                        ^map prior-completed-map]
-  (letfn [(report-success ^map [^map known-ns]
-            ;; returns `dep-map` or throws a WrongInfo with embedded
-            ;; `dep-map`
-            (let [dep-map (dependency-map known-ns)]
-              (try
-                (.accept on-completion (Optional/of known-ns)) ;not dep-map!
-                dep-map
-                (catch Throwable t
-                  (throw (error/assoc-dep-map t dep-map))))))
+  (letfn [(report-success ^void [^map all-pns]
+            (.accept on-completion (Optional/of all-pns))) ;not dep-map!
           (report-failure ^void []
             (.accept on-completion (Optional/empty)))
           (try-build-and-report ^map []
             (try
-              (-> (tclj0/build-all opts true)
-                  (time)
-                  (report-success))
-              (catch tcljx.data.error.WrongInfo e
-                (report-failure)
-                (error/print-error e)
-                (:emitter/namespaces (error/wr-data e)))
+              (let [universe (tclj0/start-universe opts true)
+                    ns-strs (options/target-ns-strs opts)
+                    all-nmsps (time (tclj0/build-all universe ns-strs))]
+                (if (every? all-nmsps ns-strs)
+                  (report-success all-nmsps)
+                  (report-failure))
+                (println)
+                (dependency-map all-nmsps))
               (catch Throwable t
                 (report-failure)
-                (throw t))
-              (finally                 ;use finally to preserve result
-                (println))))
+                (throw t))))
           (keep-across-import [prior build]
             ;; preserve old rpaths and req-strs info if this namespace
             ;; was imported from class files instead of being compiled

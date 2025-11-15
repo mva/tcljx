@@ -313,7 +313,7 @@
                 (set! all-pns (assoc all-pns ns-str pn)))))))
       all-pns))
 
-  (all-provided-namespaces [_]
+  (await-quiescence [_]
     all-pns))
 
 (defn mk-universe ^NamespaceProvider [^map reader-map ^Runtime rt

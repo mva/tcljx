@@ -395,7 +395,11 @@
   ;; namespaces, which may be referred to by macro or alias expansion.
   (import-namespace ^map [^map known-ns ^Class capstone])
   
-  (all-provided-namespaces ^map []))
+  ;; Waits until all in progress namespaces have completed.  Does not
+  ;; propagate any (additional) compilation errors or exceptions to
+  ;; the caller.  Returns a map of all successfully compiled
+  ;; namespaces.
+  (await-quiescence ^map []))
 
 (deftype Require [^String ns-str
                   ^String alias-str     ;nil if no alias

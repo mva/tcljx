@@ -84,14 +84,6 @@
     (not (contains? (wr-data e) k))
     (update-wr-data assoc k v)))
 
-(defn assoc-dep-map ^WrongInfo [^Throwable t ^map dep-map]
-  #_(.printStackTrace t)
-  (-> (if (instance? WrongInfo t)
-        ^WrongInfo t
-        (do (.printStackTrace t)
-            (wr-info "unhandled exception" {} t)))
-      (update-wr-data assoc :emitter/namespaces dep-map)))
-
 ;;; ------------------------------------------------------------------------
 
 (definterface ErrorMsg
@@ -280,10 +272,9 @@
       (.toString w-string))))
 
 (defn- print-error* [^WrongInfo ex]
-  (let [msg (ex-message ex)
-        data (wr-data ex)]
+  (let [msg (ex-message ex), data (wr-data ex)]
     (println)
-    (println (.stripTrailing (format ex)))
+    (print (format ex)) ;assumes the caller adds a println or an explicit flush
     (when-some [t (ex-cause ex)]
       (if (and (instance? IllegalArgumentException t)
                (some? (ex-message t))

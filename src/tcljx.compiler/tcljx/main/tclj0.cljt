@@ -15,7 +15,7 @@
    (tcljx.main [options :as options] [invoke :as invoke]))
   (:import
    (tcljx.data.error WrongInfo)
-   (tcljx.data.ir ProvidedNamespace)
+   (tcljx.data.ir NamespaceProvider ProvidedNamespace)
    (tcljx.nmspgen.destdir Destination)
    (tcljx.main.options Options)
    (java.nio.file Path Files)))
@@ -30,7 +30,8 @@
         (destdir/mk-dest-files path))
     destdir/dest-none))
 
-(defn build-all ^map [^Options opts ^boolean load-from-dest-dir?]
+(defn start-universe ^NamespaceProvider [^Options opts
+                                         ^boolean load-from-dest-dir?]
   (let [dest (prepare-destination (.dest-dir opts) load-from-dest-dir?)
         app-ld (rt/app-class-loader (.parent-class-loader opts) (.sourcev opts))
         dyn-sourcev (if load-from-dest-dir? [(.dest-dir opts)] [])
@@ -42,24 +43,28 @@
                                          primitive/primitive-nmsp-globals
                                          (new String/1 0) nil nil
                                          insn/insn-empty)
-        provided-ns {cfg/primitive-ns-str pn-primitive}
+        provided-ns {cfg/primitive-ns-str pn-primitive}]
+    (universe/mk-universe nil rt dest provided-ns)))
 
-        ;; All namespaces required by clojure.core are part of cyclic
-        ;; dependencies, but only clojure.core is allowed to initiate
-        ;; the cycle.  So *always* require it first, to prevent the
-        ;; other namespaces from initiating the cycle.
-        preload-ns-strs (doto (new String/1 1) (aset 0 cfg/core-lib))]
-    (-> (doto (universe/mk-universe nil rt dest provided-ns)
-          (.require-namespaces* preload-ns-strs nil)
-          (.require-namespaces* (options/target-ns-strs opts) nil))
-        (.all-provided-namespaces))))
+(defn build-all ^map [^NamespaceProvider universe ^String/1 ns-strs]
+  ;; All namespaces required by clojure.core are part of cyclic
+  ;; dependencies, but only clojure.core is allowed to initiate the
+  ;; cycle.  So *always* require it first, to prevent the other
+  ;; namespaces from initiating the cycle.
+  (let [preload-ns-strs (doto (new String/1 1) (aset 0 cfg/core-lib))]
+    (try
+      (.require-namespaces* universe preload-ns-strs nil)
+      (.require-namespaces* universe ns-strs nil)
+      (catch WrongInfo e
+        (error/print-error e)
+        (println)))
+    (.await-quiescence universe)))
 
 (defn run ^boolean [^Options opts]
   (options/print-options opts)
-  (try
-    (-> (time (build-all opts false))
-        (invoke/invoke-and-report opts))
-    (catch WrongInfo e
-      (error/print-error e)
-      (println)
-      false)))
+  (let [ns-strs (options/target-ns-strs opts)
+        all-nmsps (-> (start-universe opts false)
+                      (build-all ns-strs)
+                      (time))]
+    (and (every? all-nmsps ns-strs)
+         (invoke/invoke-and-report all-nmsps opts))))

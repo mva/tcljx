@@ -57,9 +57,11 @@
     (println "diff" (.toString (path-expected p)) (.toString  (path-actual p)))))
 
 (defn- run-errormsg-test ^void [^Path p]
-  (let [act (try
-              #_(tclj0/build-all (mk-opts p) false)
-              (with-out-str (tclj0/build-all (mk-opts p) false))
+  (let [opts (mk-opts p)
+        act (try
+              (with-out-str
+                (.require-namespaces* (tclj0/start-universe opts false)
+                                      (options/target-ns-strs opts) nil))
               "<build completed normally>\n"
               (catch Exception ex
                 (str (.getName (class ex)) "\n" (error/format ex))))]
