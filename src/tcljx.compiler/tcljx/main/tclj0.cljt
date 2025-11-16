@@ -30,6 +30,10 @@
         (destdir/mk-dest-files path))
     destdir/dest-none))
 
+(deftype Build [^String/1 ns-strs       ;requested namespace names
+                ^map all-nmsps          ;completed namespaces
+                ^boolean success?])     ;true iff all `ns-strs` completed
+
 (defn start-universe ^NamespaceProvider [^Options opts
                                          ^boolean load-from-dest-dir?]
   (let [dest (prepare-destination (.dest-dir opts) load-from-dest-dir?)
@@ -46,25 +50,28 @@
         provided-ns {cfg/primitive-ns-str pn-primitive}]
     (universe/mk-universe nil rt dest provided-ns)))
 
-(defn build-all ^map [^NamespaceProvider universe ^String/1 ns-strs]
-  ;; All namespaces required by clojure.core are part of cyclic
-  ;; dependencies, but only clojure.core is allowed to initiate the
-  ;; cycle.  So *always* require it first, to prevent the other
-  ;; namespaces from initiating the cycle.
-  (let [preload-ns-strs (doto (new String/1 1) (aset 0 cfg/core-lib))]
-    (try
-      (.require-namespaces* universe preload-ns-strs nil)
-      (.require-namespaces* universe ns-strs nil)
-      (catch WrongInfo e
-        (error/print-error e)
-        (println)))
-    (.await-quiescence universe)))
+(defn build-all ^Build [^Options opts ^boolean load-from-dest-dir?]
+  (let [ns-strs (options/target-ns-strs opts)
+        universe (start-universe opts load-from-dest-dir?)]
+    
+    ;; All namespaces required by clojure.core are part of cyclic
+    ;; dependencies, but only clojure.core is allowed to initiate
+    ;; the cycle.  So *always* require it first, to prevent the
+    ;; other namespaces from initiating the cycle.
+    (let [preload-ns-strs (doto (new String/1 1) (aset 0 cfg/core-lib))]
+      (try
+        (.require-namespaces* universe preload-ns-strs nil)
+        (.require-namespaces* universe ns-strs nil)
+        (catch WrongInfo e
+          (error/print-error e)
+          (println)))
+      
+      (let [all-nmsps (.await-quiescence universe)]
+        (Build. ns-strs all-nmsps (every? all-nmsps ns-strs))))))
 
 (defn run ^boolean [^Options opts]
   (options/print-options opts)
   (let [ns-strs (options/target-ns-strs opts)
-        all-nmsps (-> (start-universe opts false)
-                      (build-all ns-strs)
-                      (time))]
-    (and (every? all-nmsps ns-strs)
-         (invoke/invoke-and-report all-nmsps opts))))
+        build (time (build-all opts false))]
+    (when (.success? build)
+      (invoke/invoke-and-report (.all-nmsps build) opts))))

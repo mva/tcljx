@@ -91,14 +91,12 @@
             (.accept on-completion (Optional/empty)))
           (try-build-and-report ^map []
             (try
-              (let [universe (tclj0/start-universe opts true)
-                    ns-strs (options/target-ns-strs opts)
-                    all-nmsps (time (tclj0/build-all universe ns-strs))]
-                (if (every? all-nmsps ns-strs)
-                  (report-success all-nmsps)
+              (let [build (time (tclj0/build-all opts true))]
+                (if (.success? build)
+                  (report-success (.all-nmsps build))
                   (report-failure))
                 (println)
-                (dependency-map all-nmsps))
+                (dependency-map (.all-nmsps build)))
               (catch Throwable t
                 (report-failure)
                 (throw t))))
