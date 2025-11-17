@@ -49,28 +49,18 @@
       (aset a i (primitive/iinc-delta (aget entities i) (aget ces i))))
     a))
 
+;;; Returns -1 if none of the arities matches `arg-count`.
 (defn- method-index ^int [^MethodSpec/1 method-specs ^int arg-count]
   (loop [i (dec (alength method-specs))]
     (cond
       (neg? i) (let [n-m1 (dec (alength method-specs))
-                     at* (-> method-specs (aget n-m1) .at)
-                     va? (ir/translates-to-varargs? at*)]
-                 (assert (and va? (>= arg-count (dec (.parameter-count at*)))))
-                 n-m1)
+                     at* (-> method-specs (aget n-m1) .at)]
+                 (if (and (ir/translates-to-varargs? at*)
+                          (>= arg-count (dec (.parameter-count at*))))
+                   n-m1
+                   -1))
       (= (-> method-specs (aget i) .at .parameter-count) arg-count) i
       :else (recur (dec i)))))
-
-(defn- select-method-for-arity ^int [^Entity inv ^Insns xs]
-  (let [specs (.invoke-methods inv)
-        m-idx (method-index specs (.length xs))
-        at (.at (aget specs m-idx))
-        ptypes (.parameter-types at)
-        vararg-tp (ir/vararg-type at)
-        fixed (- (.parameter-count at) (int (some? vararg-tp)))]
-    (insn/ensure-assignables ptypes xs fixed)
-    (when (< fixed (alength ptypes)) ;any arguments passed as varargs?
-      (insn/ensure-assignable* vararg-tp xs fixed))
-    m-idx))
 
 ;;; Bridge gap between Clojure variadic function and JVM vararg method
 ;;; by casting the argument that can unintentionally match the
@@ -97,8 +87,21 @@
       (Insns. (new CodeEmitter/1 n) (new Class/1 n))))
   
   (invoke-arity [this fctx form inv f args]
-    (let [m-idx (select-method-for-arity inv args)]
-      (.invoke* inv fctx form f m-idx args)))
+    (let [args ^Insns args
+          specs (.invoke-methods inv)
+          n (.length args)
+          m-idx (method-index specs n)]
+      (error/when (neg? m-idx)
+        "no function arity for" (txt n)
+        (txt (str "argument" (when (> n 1) "s"))))
+      (let [at (.at (aget specs m-idx))
+            ptypes (.parameter-types at)
+            vararg-tp (ir/vararg-type at)
+            fixed (- (.parameter-count at) (int (some? vararg-tp)))]
+        (insn/ensure-assignables ptypes args fixed)
+        (when (< fixed (alength ptypes)) ;any arguments passed as varargs?
+          (insn/ensure-assignable* vararg-tp args fixed))
+        (.invoke* inv fctx form f m-idx args))))
 
   (attach-meta-to [this meta arg]
     (if (and (ir/loadable? (.emitter arg)) (ir/loadable? (.emitter meta)))
@@ -376,12 +379,12 @@
         (throw (insn/error-type "expect instance of Throwable" arg)))))
   (monitor-expr [_ fctx enter? lockee]
     (error/when (type/monomorphic-primitive? (insn/expr-type lockee))
-        "monitor operation requires an identity object")
+      "monitor operation requires an identity object")
     (-> (^CodeEmitter fn [xb _ _]
          (when (emit/insn? xb fctx Object (.emitter lockee))
            (emit/with-line-number xb fctx)
            (if enter? (.monitorenter xb) (.monitorexit xb))
-           Void/TYPE))     ;operand type reported when emitting code
+           Void/TYPE))       ;operand type reported when emitting code
         (insn/mk-insn Void/TYPE))))
 
 (defn mk-factory ^ExprFactory []

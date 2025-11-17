@@ -1,0 +1,3 @@
+(ns pkg.ns0 (:refer-clojure :none))
+(def f (fn* [x] nil))
+(f 1 2)
