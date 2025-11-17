@@ -88,6 +88,7 @@
 
 (definterface ErrorMsg
   (txt ^ErrorMsg [obj])
+  (txt-pl ^ErrorMsg [obj ^int n])
   (chr ^ErrorMsg [^char ch])
   (sym ^ErrorMsg [str-or-sym])
   (sym ^ErrorMsg [nmsp-or-class ^String nm])
@@ -125,6 +126,8 @@
   ErrorMsg
   (txt [this obj]
     (.write* this true style-txt (.toString obj)))
+  (txt-pl [this obj n]
+    (cond-> (.txt this obj) (not= n 1) (.write* false style-txt "s")))
   (chr [this ch]
     (.txt this (if (<= (int ch) (int \space))
                  (str "\\u" (.toHexDigits (java.util.HexFormat/of) ch))

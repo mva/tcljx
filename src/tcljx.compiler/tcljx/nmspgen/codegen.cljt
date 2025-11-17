@@ -38,7 +38,7 @@
           (error/to-error))
       (-> (error/mk-error-msg)
           (.txt "multiple")
-          (.txt (str entity "s"))
+          (.txt-pl entity 2)
           (.txt "matching")
           (.sym owner mnm)
           (error/to-error)))))
@@ -92,8 +92,7 @@
           n (.length args)
           m-idx (method-index specs n)]
       (error/when (neg? m-idx)
-        "no function arity for" (txt n)
-        (txt (str "argument" (when (> n 1) "s"))))
+        "no function arity for" (txt n) (txt-pl "argument" n))
       (let [at (.at (aget specs m-idx))
             ptypes (.parameter-types at)
             vararg-tp (ir/vararg-type at)

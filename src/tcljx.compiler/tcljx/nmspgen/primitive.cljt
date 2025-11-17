@@ -51,8 +51,7 @@
 (defn take-args
   (^Insns [^seq form ^Insns xs ^int n]
    (error/when-not (= (.length xs) n)
-     (q (first form)) "takes" (txt n)
-     (txt (str "argument" (when-not (= 1 n) "s"))) (got (.length xs)))
+     (q (first form)) "takes" (txt n) (txt-pl "argument" n) (got (.length xs)))
    xs)
   (^Insns [^seq form ^Insns xs ^int n-min ^int n-max]
    (cond
