@@ -257,13 +257,7 @@
                    ^map ns-alias]
   NamespaceProvider
   (require-namespaces* [this ns-strs pn-core]
-    (letfn [(mk-nmsp-reader ^FormReader [^HashSet all-uris ^String ns-str]
-              (let [!source-file-strs (HashSet.)]
-                (if (some? reader-map)
-                  (get reader-map ns-str)
-                  (let [nmsp-path (files/namespace-path ns-str)]
-                    (reader/mk-reader all-uris (.app-ld rt) nmsp-path)))))
-            (mk-nmsp-builder ^NmspBuilder [^String ns-str ^map known-ns
+    (letfn [(mk-nmsp-builder ^NmspBuilder [^String ns-str ^map known-ns
                                            ^PackageBuilder pkg-build]
               (let [etf (entity/mk-clinit-etf ns-str
                                               (.segment-tasks pkg-build))
@@ -277,7 +271,10 @@
                               (.apply-macro-mh rt) nil)))
             (emit-nmsp ^vector [^String ns-str ^map provided-ns]
               (let [all-uris (HashSet.)
-                    rdr (mk-nmsp-reader all-uris ns-str)
+                    rdr (if (some? reader-map)
+                          (get reader-map ns-str)
+                          (reader/mk-reader all-uris (.app-ld rt)
+                                            (files/namespace-path ns-str)))
                     pkg-build (pkggen/mk-package-builder rt dest ns-str)]
                 (.push-file-context rt ns-str)
                 (try
