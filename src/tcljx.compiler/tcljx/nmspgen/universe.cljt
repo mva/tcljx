@@ -253,7 +253,7 @@
 
 (deftype Universe [^Runtime rt ^Destination dest
                    ^map reader-map
-                   ^:unsynchronized-mutable ^map all-pns
+                   ^:unsynchronized-mutable ^map __all-pns
                    ^map ns-alias]
   NamespaceProvider
   (require-namespaces* [this ns-strs pn-core]
@@ -289,6 +289,7 @@
                     (.pop-file-context rt)))))
             (compile-nmsp ^ProvidedNamespace [^String ns-str ^map provided-ns]
               (let [[all-uris capstone] (emit-nmsp ns-str provided-ns)
+                    all-pns (.all-known-namespaces this) ;value after emit-nmsp
                     globals (publics/import-globals rt all-pns capstone)
                     req-strs (publics/require-strings rt capstone)]
                 (ProvidedNamespace. ns-str globals req-strs all-uris capstone
@@ -296,25 +297,28 @@
             (import-nmsp ^ProvidedNamespace [^String ns-str ^Class capstone]
               (let [req-strs (publics/require-strings rt capstone)]
                 (.require-namespaces* this req-strs nil)
-                (let [globals (publics/import-globals rt all-pns capstone)]
+                (let [all-pns (.all-known-namespaces this) ;value after require
+                      globals (publics/import-globals rt all-pns capstone)]
                   (ProvidedNamespace. ns-str globals req-strs nil capstone
                                       (publics/insn-force-clinit capstone)))))]
       
-      (let [provided-ns (cond-> all-pns
+      (let [provided-ns (cond-> __all-pns
                           (some? pn-core) (assoc cfg/core-lib pn-core))]
         (dotimes [i (alength ns-strs)]
           (let [ns-str (aget ns-strs i)]
-            (when-not (contains? all-pns ns-str)
+            (when-not (contains? __all-pns ns-str)
               (when (cfg/core-lib? ns-str) ;prevent cyclic import of core lib
-                (set! all-pns (assoc all-pns ns-str nil)))
+                (set! __all-pns (assoc __all-pns ns-str nil)))
               (let [pn (if-some [cl (.try-load-capstone rt ns-str)]
                          (import-nmsp ns-str cl)
                          (compile-nmsp ns-str provided-ns))]
-                (set! all-pns (assoc all-pns ns-str pn)))))))
-      all-pns))
+                (set! __all-pns (assoc __all-pns ns-str pn)))))))
+      __all-pns))
 
-  (await-quiescence [_]
-    all-pns))
+  (all-known-namespaces [_]
+    __all-pns)
+  (await-quiescence [this]
+    (.all-known-namespaces this)))
 
 (defn mk-universe ^NamespaceProvider [^map reader-map ^Runtime rt
                                       ^Destination dest ^map provided-ns]

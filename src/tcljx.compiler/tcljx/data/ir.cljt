@@ -399,7 +399,10 @@
   ;; propagate any (additional) compilation errors or exceptions to
   ;; the caller.  Returns a map of all successfully compiled
   ;; namespaces.
-  (await-quiescence ^map []))
+  (await-quiescence ^map [])
+
+  ;; Helper method for closures of the provider implementation.
+  (all-known-namespaces ^map []))     
 
 (deftype Require [^String ns-str
                   ^String alias-str     ;nil if no alias
