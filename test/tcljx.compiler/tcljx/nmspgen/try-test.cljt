@@ -167,7 +167,7 @@
              (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
              (IRETURN)]
 
-            [(METHOD [PUBLIC STATIC FINAL] "asm-expr~2"
+            [(METHOD [PUBLIC STATIC] "asm-expr~2"
                      "(DI)Ljava/lang/String;")
              ["LOCAL 0: double a"]
              ["LOCAL 2: int b"]
@@ -218,7 +218,7 @@
              (INVOKEVIRTUAL PrintStream "println" "(Ljava/lang/String;)V")
              (FRETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "asm-expr~2"
+            [(METHOD [PUBLIC STATIC] "asm-expr~2"
                      "(DI)Ljava/lang/String;")
              ["LOCAL 0: double a"]
              ["LOCAL 2: int b"]
@@ -480,9 +480,9 @@
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(FIELD [PUBLIC STATIC FINAL] "x" "Ljava/lang/String;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()V")
+            [(METHOD [PUBLIC STATIC] "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~0" "()V"]]])
              (ARETURN)]

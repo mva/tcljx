@@ -311,7 +311,7 @@
             [(FIELD [PUBLIC STATIC FINAL] "v" "Lclojure/lang/Var;")
              (Signature "Lclojure/lang/Var<Ljava/lang/Object;>;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "fn~0" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "fn~0" "()Ljava/lang/Object;")
              (GETSTATIC . "v" "Lclojure/lang/Var;")
              (LDC "bar")
              (INVOKEVIRTUAL Var "set" "(Ljava/lang/Object;)Ljava/lang/Object;")
@@ -346,7 +346,7 @@
             [(FIELD [PUBLIC STATIC FINAL] "v" "Lclojure/lang/Var;")
              (Signature "Lclojure/lang/Var<Ljava/lang/String;>;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "fn~0" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "fn~0" "()Ljava/lang/Object;")
              (GETSTATIC . "v" "Lclojure/lang/Var;")
              (LDC "bar")
              (INVOKEVIRTUAL Var "set" "(Ljava/lang/Object;)Ljava/lang/Object;")
@@ -384,7 +384,7 @@
             [(FIELD [PUBLIC STATIC FINAL] "v" "Lclojure/lang/Var;")
              (Signature "Lclojure/lang/Var<Ljava/lang/Object;>;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "fn~0" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "fn~0" "()Ljava/lang/Object;")
              (GETSTATIC System "out" "Ljava/io/PrintStream;")
              (GETSTATIC . "v" "Lclojure/lang/Var;")
              (LDC "bar")

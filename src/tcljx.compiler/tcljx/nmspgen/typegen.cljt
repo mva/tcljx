@@ -61,7 +61,7 @@
                               (code/mtd-of-fields fields))
               (.areturn))))
        (.withMethodBody cb "create" (MethodTypeDesc/of this-class rt/map)
-                        (code/acc* public static synthetic))))
+                        (code/acc* public static final synthetic))))
 
 (defn- dt-virtual-methods ^void [^ClassBuilder cb ^MethodSpec/1 method-specs]
   (dotimes [i (alength method-specs)]

@@ -65,7 +65,7 @@
 
 (deftest export-rename-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/exp/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "foo" "()I")
+            [(METHOD [PUBLIC STATIC] "foo" "()I")
              (BIPUSH 123)
              (IRETURN)]
             
@@ -79,7 +79,7 @@
              (ARETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns1/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "x" "()I")
+            [(METHOD [PUBLIC STATIC] "x" "()I")
              (BIPUSH 124)
              (IRETURN)]
 
@@ -102,7 +102,7 @@
 
 (deftest public-def-test
   (let [exp '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/exp/_10")
-               [(METHOD [PUBLIC STATIC FINAL] "public-def" "()I")
+               [(METHOD [PUBLIC STATIC] "public-def" "()I")
                 (BIPUSH 123)
                 (IRETURN)]
 
@@ -116,7 +116,7 @@
                 (ARETURN)]]
               
               [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-               [(METHOD [PUBLIC STATIC FINAL] "local-def" "()I")
+               [(METHOD [PUBLIC STATIC] "local-def" "()I")
                 (BIPUSH 123)
                 (IRETURN)]
                
@@ -212,13 +212,13 @@
 
 (deftest refer-static-fn-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/exp/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "inc1~1" "(I)I")
+            [(METHOD [PUBLIC STATIC] "inc1~1" "(I)I")
              ["LOCAL 0: int n"]
              (ILOAD_0)
              (ICONST_1)
              (IADD)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "inc1" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "inc1" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "inc1~1" "(I)I"]]])
              (ARETURN)]
@@ -240,14 +240,14 @@
             [(FIELD [PUBLIC STATIC FINAL]
                     "three_alias" "I")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "apply1~2" "(Ljava/lang/Object;I)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "apply1~2" "(Ljava/lang/Object;I)Ljava/lang/Object;")
              ["LOCAL 0: Object f"]
              ["LOCAL 1: int n"]
              (ALOAD_0)
              (ILOAD_1)
              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;I)Ljava/lang/Object;" :bsm-invoke-fn [])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "apply1" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "apply1" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "apply1~2" "(Ljava/lang/Object;I)Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -306,10 +306,10 @@
              (ARETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "f~0" "()Ljava/lang/Object;")
              (GETSTATIC _10 "src" "Ljava/lang/String;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~0" "()Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -334,13 +334,13 @@
 
 (deftest require-macro-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/exp/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "simple-macro~2"
+            [(METHOD [PUBLIC STATIC] "simple-macro~2"
                      "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object &form"]
              ["LOCAL 1: Object &env"]
              (LDC "foo")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "simple-macro" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "simple-macro" "()Ltinyclj/lang/StaticFn;")
              (RuntimeVisibleAnnotations (Macro))
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "simple-macro~2"
@@ -357,10 +357,10 @@
              (ARETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "f~0" "()Ljava/lang/Object;")
              (LDC "foo")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~0" "()Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -402,7 +402,7 @@
              (RETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/exp/_10")
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "mk-t-varargs-constr~2"
+            [(METHOD [PUBLIC STATIC VARARGS] "mk-t-varargs-constr~2"
                      "(Ljava/lang/Object;[Ljava/util/function/Consumer;)Lpkg/exp/T;")
              ["LOCAL 0: Object value"]
              ["LOCAL 1: Consumer[] hooks"]
@@ -412,14 +412,14 @@
              (ALOAD_1)
              (INVOKESPECIAL T "<init>" "(Ljava/lang/Object;[Ljava/util/function/Consumer;)V")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "mk-t-varargs-constr"
+            [(METHOD [PUBLIC STATIC] "mk-t-varargs-constr"
                      "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "mk-t-varargs-constr~2"
                      "(Ljava/lang/Object;[Ljava/util/function/Consumer;)Lpkg/exp/T;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "mk-t-varargs-new~2"
+            [(METHOD [PUBLIC STATIC VARARGS] "mk-t-varargs-new~2"
                      "(Ljava/lang/Object;[Ljava/util/function/Consumer;)Lpkg/exp/T;")
              ["LOCAL 0: Object value"]
              ["LOCAL 1: Consumer[] hooks"]
@@ -429,13 +429,13 @@
              (ALOAD_1)
              (INVOKESPECIAL T "<init>" "(Ljava/lang/Object;[Ljava/util/function/Consumer;)V")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "mk-t-varargs-new" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "mk-t-varargs-new" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "mk-t-varargs-new~2"
                      "(Ljava/lang/Object;[Ljava/util/function/Consumer;)Lpkg/exp/T;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "mk-t-fixargs" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "mk-t-fixargs" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[CONSTRUCTOR T "<init>"
                      "(Ljava/lang/Object;[Ljava/util/function/Consumer;)V"]]])
@@ -528,30 +528,30 @@
 
 (deftest import-varargs-fn-wrapping-static-method
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/exp/_10")
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "hash-varargs-static~1"
+            [(METHOD [PUBLIC STATIC VARARGS] "hash-varargs-static~1"
                      "([Ljava/lang/Object;)I")
              ["LOCAL 0: Object[] objs"]
              (ALOAD_0)
              (INVOKESTATIC Arrays "hashCode" "([Ljava/lang/Object;)I")
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "hash-varargs-static"
+            [(METHOD [PUBLIC STATIC] "hash-varargs-static"
                      "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "hash-varargs-static~1" "([Ljava/lang/Object;)I"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "hash-varargs-member~1" "([Ljava/lang/Object;)I")
+            [(METHOD [PUBLIC STATIC VARARGS] "hash-varargs-member~1" "([Ljava/lang/Object;)I")
              ["LOCAL 0: Object[] objs"]
              (ALOAD_0)
              (INVOKESTATIC Arrays "hashCode" "([Ljava/lang/Object;)I")
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "hash-varargs-member"
+            [(METHOD [PUBLIC STATIC] "hash-varargs-member"
                      "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "hash-varargs-member~1" "([Ljava/lang/Object;)I"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "hash-from-member" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "hash-from-member" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC Arrays "hashCode" "([Ljava/lang/Object;)I"]]])
              (ARETURN)]
@@ -628,7 +628,7 @@
             [(FIELD [STATIC FINAL] "private-alias" "Ljava/lang/Object;")
              (RuntimeVisibleAnnotations (Alias ["of" "pkg.exp/immutable-m"]))]
             
-            [(METHOD [STATIC FINAL] "immutable-m" "()I")
+            [(METHOD [STATIC] "immutable-m" "()I")
              (BIPUSH 123)
              (IRETURN)]
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")

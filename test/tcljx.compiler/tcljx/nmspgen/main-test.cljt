@@ -11,9 +11,9 @@
 
 (deftest main-void-no-arguments
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "-main~0" "()V")
+            [(METHOD [PUBLIC STATIC] "-main~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "-main" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "-main~0" "()V"]]])
              (ARETURN)]
@@ -39,11 +39,11 @@
 
 (deftest main-void-strings
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "-main~1"
+            [(METHOD [PUBLIC STATIC VARARGS] "-main~1"
                      "([Ljava/lang/String;)V")
              ["LOCAL 0: String[] args"]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "-main" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "-main~1" "([Ljava/lang/String;)V"]]])
              (ARETURN)]
@@ -67,12 +67,12 @@
 
 (deftest main-int-strings
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "-main~1"
+            [(METHOD [PUBLIC STATIC VARARGS] "-main~1"
                      "([Ljava/lang/String;)I")
              ["LOCAL 0: String[] args"]
              (ICONST_0)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "-main" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "-main~1" "([Ljava/lang/String;)I"]]])
              (ARETURN)]
@@ -97,12 +97,12 @@
 
 (deftest main-long-strings
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "-main~1"
+            [(METHOD [PUBLIC STATIC VARARGS] "-main~1"
                      "([Ljava/lang/String;)J")
              ["LOCAL 0: String[] args"]
              (LCONST_0)
              (LRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "-main" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "-main~1" "([Ljava/lang/String;)J"]]])
              (ARETURN)]
@@ -127,11 +127,11 @@
 
 (deftest main-void-objects
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "-main~1"
+            [(METHOD [PUBLIC STATIC VARARGS] "-main~1"
                      "([Ljava/lang/Object;)V")
              ["LOCAL 0: Object[] args"]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "-main" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "-main~1" "([Ljava/lang/Object;)V"]]])
              (ARETURN)]
@@ -155,11 +155,11 @@
 
 (deftest main-void-vararg-objects
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "-main~1"
+            [(METHOD [PUBLIC STATIC VARARGS] "-main~1"
                      "([Ljava/lang/Object;)V")
              ["LOCAL 0: Object[] args"]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "-main" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "-main~1" "([Ljava/lang/Object;)V"]]])
              (ARETURN)]
@@ -183,17 +183,17 @@
 
 (deftest main-void-variadic
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "-main~1"
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "-main~1"
                      "([Ljava/lang/Object;)V")
              (ALOAD_0)
              (INVOKESTATIC ArraySeq "create"
                            "([Ljava/lang/Object;)Lclojure/lang/ArraySeq;")
              (INVOKESTATIC . "-main~1" "(Lclojure/lang/ISeq;)V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "-main~1" "(Lclojure/lang/ISeq;)V")
+            [(METHOD [PUBLIC STATIC] "-main~1" "(Lclojure/lang/ISeq;)V")
              ["LOCAL 0: ISeq args"]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "-main" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "-main" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "-main~1" "([Ljava/lang/Object;)V"]]])
              (ARETURN)]

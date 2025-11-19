@@ -85,7 +85,7 @@
 (defn- with-requires ^ClassBuilder [^ClassBuilder cb ^String req-str]
   (code/with-method-body->
     cb [rt/name-requires (MethodTypeDesc/of ConstantDescs/CD_String)
-        (bit-or code/acc-method-static (code/acc* synthetic))]
+        (code/acc* public static final synthetic)]
     (-> (.ldc req-str) (.areturn))))
 
 (def ^:private mtd-void-String

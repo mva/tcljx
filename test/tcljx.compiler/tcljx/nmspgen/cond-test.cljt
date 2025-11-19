@@ -273,7 +273,7 @@
              (RETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1" "(Z)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "fn~1" "(Z)Ljava/lang/Object;")
              ["LOCAL 0: boolean x"]
              [L:0]
              (ILOAD_0)
@@ -299,7 +299,7 @@
              (ATHROW)
              [L:4]
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "if-let" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "if-let" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "fn~1" "(Z)Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -335,14 +335,14 @@
 
 (deftest statm-position-when
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()V")
+            [(METHOD [PUBLIC STATIC] "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~0" "()V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "g~1" "(Z)V")
+            [(METHOD [PUBLIC STATIC] "g~1" "(Z)V")
              ["LOCAL 0: boolean x"]
              (ILOAD_0)
              (IFEQ L:0)
@@ -350,12 +350,12 @@
              [L:0]
              (INVOKESTATIC . "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "g" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "g~1" "(Z)V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "h~1" "(J)V")
+            [(METHOD [PUBLIC STATIC] "h~1" "(J)V")
              ["LOCAL 0: long x"]
              (LLOAD_0)
              (LCONST_0)
@@ -365,7 +365,7 @@
              [L:0]
              (INVOKESTATIC . "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "h" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "h" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "h~1" "(J)V"]]])
              (ARETURN)]
@@ -392,14 +392,14 @@
 
 (deftest statm-position-when-tail
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()V")
+            [(METHOD [PUBLIC STATIC] "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~0" "()V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "g~1" "(Z)V")
+            [(METHOD [PUBLIC STATIC] "g~1" "(Z)V")
              ["LOCAL 0: boolean x"]
              (ILOAD_0)
              (IFEQ L:0)
@@ -407,12 +407,12 @@
              (RETURN)
              [L:0]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "g" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "g~1" "(Z)V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "g^1~1" "(J)V")
+            [(METHOD [PUBLIC STATIC] "g^1~1" "(J)V")
              ["LOCAL 0: long x"]
              (LLOAD_0)
              (LCONST_0)
@@ -422,7 +422,7 @@
              (RETURN)
              [L:0]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "h" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "h" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "g^1~1" "(J)V"]]])
              (ARETURN)]
@@ -446,14 +446,14 @@
 
 (deftest statm-position-when-not
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()V")
+            [(METHOD [PUBLIC STATIC] "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~0" "()V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "g~1" "(Z)V")
+            [(METHOD [PUBLIC STATIC] "g~1" "(Z)V")
              ["LOCAL 0: boolean x"]
              (ILOAD_0)
              (IFNE L:0)
@@ -461,12 +461,12 @@
              [L:0]
              (INVOKESTATIC . "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "g" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "g~1" "(Z)V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "h~1" "(J)V")
+            [(METHOD [PUBLIC STATIC] "h~1" "(J)V")
              ["LOCAL 0: long x"]
              (LLOAD_0)
              (LCONST_0)
@@ -476,12 +476,12 @@
              [L:0]
              (INVOKESTATIC . "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "h" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "h" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "h~1" "(J)V"]]])
              (ARETURN)]
 
-            [(METHOD [PUBLIC STATIC FINAL] "i~1" "(Z)V")
+            [(METHOD [PUBLIC STATIC] "i~1" "(Z)V")
              ["LOCAL 0: boolean x"]
              (ILOAD_0)
              (IFNE L:0)
@@ -489,7 +489,7 @@
              [L:0]
              (INVOKESTATIC . "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "i" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "i" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "i~1" "(Z)V"]]])
              (ARETURN)]
@@ -520,26 +520,26 @@
 
 (deftest statm-position-when-not-tail
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()V")
+            [(METHOD [PUBLIC STATIC] "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~0" "()V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "g~1" "(Z)V")
+            [(METHOD [PUBLIC STATIC] "g~1" "(Z)V")
              ["LOCAL 0: boolean x"]
              (ILOAD_0)
              (IFNE L:0)
              (INVOKESTATIC . "f~0" "()V")
              [L:0]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "g" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "g~1" "(Z)V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "h~1" "(J)V")
+            [(METHOD [PUBLIC STATIC] "h~1" "(J)V")
              ["LOCAL 0: long x"]
              (LLOAD_0)
              (LCONST_0)
@@ -548,19 +548,19 @@
              (INVOKESTATIC . "f~0" "()V")
              [L:0]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "h" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "h" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "h~1" "(J)V"]]])
              (ARETURN)]
 
-            [(METHOD [PUBLIC STATIC FINAL] "i~1" "(Z)V")
+            [(METHOD [PUBLIC STATIC] "i~1" "(Z)V")
              ["LOCAL 0: boolean x"]
              (ILOAD_0)
              (IFNE L:0)
              (INVOKESTATIC . "f~0" "()V")
              [L:0]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "i" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "i" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "i~1" "(Z)V"]]])
              (ARETURN)]
@@ -585,26 +585,26 @@
 
 (deftest statm-position-empty-when
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()V")
+            [(METHOD [PUBLIC STATIC] "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~0" "()V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "g~1" "(Z)V")
+            [(METHOD [PUBLIC STATIC] "g~1" "(Z)V")
              ["LOCAL 0: boolean x"]
              (ILOAD_0)
              (IFNE L:0)
              [L:0]
              (INVOKESTATIC . "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "g" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "g~1" "(Z)V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "h~1" "(J)V")
+            [(METHOD [PUBLIC STATIC] "h~1" "(J)V")
              ["LOCAL 0: long x"]
              (LLOAD_0)
              (LCONST_0)
@@ -613,7 +613,7 @@
              [L:0]
              (INVOKESTATIC . "f~0" "()V")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "h" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "h" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "h~1" "(J)V"]]])
              (ARETURN)]
@@ -640,18 +640,18 @@
 
 (deftest statm-position-empty-when-tail
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "g~1" "(Z)V")
+            [(METHOD [PUBLIC STATIC] "g~1" "(Z)V")
              ["LOCAL 0: boolean x"]
              (ILOAD_0)
              (IFNE L:0)
              [L:0]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "g" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "g~1" "(Z)V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "h~1" "(J)V")
+            [(METHOD [PUBLIC STATIC] "h~1" "(J)V")
              ["LOCAL 0: long x"]
              (LLOAD_0)
              (LCONST_0)
@@ -659,7 +659,7 @@
              (IFLT L:0)
              [L:0]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "h" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "h" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "h~1" "(J)V"]]])
              (ARETURN)]
@@ -680,15 +680,15 @@
 
 (deftest statm-position-throw-when-not
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "test?~0" "()Z")
+            [(METHOD [PUBLIC STATIC] "test?~0" "()Z")
              (ICONST_1)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "test?" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "test?" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "test?~0" "()Z"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "f~0" "()Ljava/lang/Object;")
              (INVOKESTATIC . "test?~0" "()Z")
              (IFNE L:0)
              (NEW IllegalArgumentException) (DUP)
@@ -698,7 +698,7 @@
              [L:0]
              (LDC "foo")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~0" "()Ljava/lang/Object;"]]])
              (ARETURN)]

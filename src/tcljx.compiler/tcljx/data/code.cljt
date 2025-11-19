@@ -73,8 +73,8 @@
 
 ;;; ------------------------------------------------------------------------
 
-(def acc-method-virtual (acc* public final))
-(def acc-method-static (bit-or acc-method-virtual (acc* static)))
+(def acc-method-virtual (acc* public final)) ;no override
+(def acc-method-static (acc* public static)) ;can be hidden
 
 (defmacro accept->
   ([builder handler]

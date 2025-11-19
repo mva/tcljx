@@ -69,24 +69,24 @@
             [(FIELD [PUBLIC STATIC FINAL]
                     "cfn" "Lclojure/lang/IPersistentMap;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "add2~2" "(II)I")
+            [(METHOD [PUBLIC STATIC] "add2~2" "(II)I")
              ["LOCAL 0: int a"]
              ["LOCAL 1: int b"]
              (ILOAD_0)
              (ILOAD_1)
              (IADD)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "add2" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "add2" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "add2~2" "(II)I"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1" "(I)Ltinyclj/lang/AFnMh;")
+            [(METHOD [PUBLIC STATIC] "fn~1" "(I)Ltinyclj/lang/AFnMh;")
              ["LOCAL 0: int a"]
              (ILOAD_0)
              (INVOKESTATIC fn$add1 "__create" "(I)Lpkg/ns0/fn$add1;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "mk-add1" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "mk-add1" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "fn~1" "(I)Ltinyclj/lang/AFnMh;"]]])
              (ARETURN)]

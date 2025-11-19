@@ -83,7 +83,7 @@
              (ILOAD_1)
              (IADD)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "apply-binary-int" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "apply-binary-int" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[INTERFACE_VIRTUAL FnBinaryInt "fn2" "(II)I"]]])
              (ARETURN)]

@@ -338,12 +338,12 @@
              (RETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "value-instance-field"
+            [(METHOD [PUBLIC STATIC] "value-instance-field"
                      "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[GETTER T "field" "I"]]])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "value-accessor-method"
+            [(METHOD [PUBLIC STATIC] "value-accessor-method"
                      "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[VIRTUAL R "field" "()I"]]])
@@ -351,27 +351,27 @@
 
             ;; fn method elided and replaced with invoked method handle:
             ;; 
-            ;; [(METHOD [PUBLIC STATIC FINAL] "invoke-instance-field~1"
+            ;; [(METHOD [PUBLIC STATIC] "invoke-instance-field~1"
             ;;          "(Lpkg/ns0/T;)I")
             ;;  ["LOCAL 0: T x"]
             ;;  (ALOAD_0)
             ;;  (GETFIELD T "field" "I")
             ;;  (IRETURN)]
-            ;; [(METHOD [PUBLIC STATIC FINAL] "invoke-accessor-method~1"
+            ;; [(METHOD [PUBLIC STATIC] "invoke-accessor-method~1"
             ;;          "(Lpkg/ns0/R;)I")
             ;;  ["LOCAL 0: R x"]
             ;;  (ALOAD_0)
             ;;  (INVOKEVIRTUAL R "field" "()I")
             ;;  (IRETURN)]
 
-            [(METHOD [PUBLIC STATIC FINAL] "cast-and-invoke-instance-field~1"
+            [(METHOD [PUBLIC STATIC] "cast-and-invoke-instance-field~1"
                      "(Ljava/lang/Object;)I")
              ["LOCAL 0: Object x"]
              (ALOAD_0)
              (CHECKCAST T)
              (GETFIELD T "field" "I")
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "cast-and-invoke-accessor-method~1"
+            [(METHOD [PUBLIC STATIC] "cast-and-invoke-accessor-method~1"
                      "(Ljava/lang/Object;)I")
              ["LOCAL 0: Object x"]
              (ALOAD_0)

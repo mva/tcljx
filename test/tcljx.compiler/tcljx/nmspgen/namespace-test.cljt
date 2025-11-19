@@ -23,13 +23,13 @@
 
 (deftest inline-init-def-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "x" "()I")
+            [(METHOD [PUBLIC STATIC] "x" "()I")
              (ICONST_1)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "y" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC STATIC] "y" "()Ljava/lang/String;")
              (LDC "abc")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "z" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "z" "()Ljava/lang/Object;")
              (ACONST_NULL)
              (ARETURN)]
             
@@ -48,16 +48,16 @@
 
 (deftest inline-init-def-computational-int-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "a" "()C")
+            [(METHOD [PUBLIC STATIC] "a" "()C")
              (BIPUSH 97)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "b" "()Z")
+            [(METHOD [PUBLIC STATIC] "b" "()Z")
              (ICONST_0)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "c" "()Z")
+            [(METHOD [PUBLIC STATIC] "c" "()Z")
              (ICONST_1)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "z" "()I")
+            [(METHOD [PUBLIC STATIC] "z" "()I")
              (ICONST_0)
              (IRETURN)]
             
@@ -81,7 +81,7 @@
              (RuntimeVisibleAnnotations (Alias ["of" "pkg.ns0/x"]))]
             [(FIELD [PUBLIC STATIC FINAL] "z" "Ljava/lang/Object;")
              (RuntimeVisibleAnnotations (Alias ["of" "pkg.ns0/x"]))]
-            [(METHOD [PUBLIC STATIC FINAL] "x" "()I")
+            [(METHOD [PUBLIC STATIC] "x" "()I")
              (ICONST_1)
              (IRETURN)]
             
@@ -177,11 +177,11 @@
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(FIELD [PUBLIC STATIC VOLATILE] "flag" "Z")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()V")
+            [(METHOD [PUBLIC STATIC] "f~0" "()V")
              (ICONST_1)
              (PUTSTATIC . "flag" "Z")
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~0" "()V"]]])
              (ARETURN)]
@@ -203,13 +203,13 @@
 
 (deftest static-init-def-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "x" "()I")
+            [(METHOD [PUBLIC STATIC] "x" "()I")
              (ICONST_1)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "y" "()I")
+            [(METHOD [PUBLIC STATIC] "y" "()I")
              (ICONST_2)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "z" "()I")
+            [(METHOD [PUBLIC STATIC] "z" "()I")
              (ICONST_3)
              (IRETURN)]
 
@@ -336,7 +336,7 @@
              (ARETURN)]]
 
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "x" "()Ljava/lang/String;")
+            [(METHOD [PUBLIC STATIC] "x" "()Ljava/lang/String;")
              (LDC "foo")
              (ARETURN)]
             
@@ -609,7 +609,7 @@
 
 (deftest def-in-let-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "c" "()I")
+            [(METHOD [PUBLIC STATIC] "c" "()I")
              (SIPUSH 357)
              (IRETURN)]
             
@@ -627,13 +627,13 @@
 
 (deftest def-propagate-const-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "one" "()I")
+            [(METHOD [PUBLIC STATIC] "one" "()I")
              (ICONST_1)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "two" "()I")
+            [(METHOD [PUBLIC STATIC] "two" "()I")
              (ICONST_2)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "three" "()I")
+            [(METHOD [PUBLIC STATIC] "three" "()I")
              (ICONST_3)
              (IRETURN)]
             
@@ -719,14 +719,14 @@
              (RuntimeVisibleAnnotations
               (Alias ["of" "clojure.core.primitive/+"]))]
             
-            [(METHOD [PUBLIC STATIC FINAL] "a" "()I")
+            [(METHOD [PUBLIC STATIC] "a" "()I")
              (ICONST_3)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "b" "()I")
+            [(METHOD [PUBLIC STATIC] "b" "()I")
              (ICONST_3)
              (IRETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "add~3"
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "add~3"
                      "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"
                      )
              #_["LOCAL 0: Object &form"]
@@ -738,7 +738,7 @@
              (INVOKESTATIC ArraySeq "create" "([Ljava/lang/Object;)Lclojure/lang/ArraySeq;")
              (INVOKESTATIC . "add~3" "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "add~3" "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "add~3" "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: Object &form"]
              ["LOCAL 1: Object &env"]
              ["LOCAL 2: ISeq args"]
@@ -746,7 +746,7 @@
              (ALOAD_2)
              (INVOKESTATIC RT "cons" "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "add" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "add" "()Ltinyclj/lang/StaticFn;")
              (RuntimeVisibleAnnotations (Macro))
              
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
@@ -762,10 +762,10 @@
             [(FIELD [PUBLIC STATIC FINAL] "add-alias" "Ljava/lang/Object;")
              (RuntimeVisibleAnnotations (Alias ["of" "pkg.ns0/add"]))]
             
-            [(METHOD [PUBLIC STATIC FINAL] "c" "()I")
+            [(METHOD [PUBLIC STATIC] "c" "()I")
              (ICONST_3)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "d" "()I")
+            [(METHOD [PUBLIC STATIC] "d" "()I")
              (ICONST_3)
              (IRETURN)]
             
@@ -797,7 +797,7 @@
             [(FIELD [PUBLIC STATIC FINAL] "b" "Lclojure/lang/Var;")
              (Signature "Lclojure/lang/Var<Ljava/lang/Object;>;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()Z")
+            [(METHOD [PUBLIC STATIC] "f~0" "()Z")
              (GETSTATIC . "a" "Lclojure/lang/Var;")
              (INVOKEVIRTUAL Var "deref" "()Ljava/lang/Object;")
              (ASTORE_0)
@@ -813,7 +813,7 @@
              [L:1]
              (INVOKESTATIC RT "booleanCast" "(Ljava/lang/Object;)Z")
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;" [[STATIC . "f~0" "()Z"]]])
              (ARETURN)]
             

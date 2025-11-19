@@ -203,15 +203,15 @@
 
 (deftest rebind-recur-alias
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "f~0" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "f~0" "()Ljava/lang/Object;")
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~0" "()Ljava/lang/Object;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "g~0" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "g~0" "()Ljava/lang/Object;")
              (ACONST_NULL)
              (ASTORE_0)
              ["LOCAL 0: Object x"]
@@ -219,7 +219,7 @@
              (INVOKESTATIC . "f" "()Ltinyclj/lang/StaticFn;")
              (ASTORE_0)
              (GOTO L:0)]
-            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "g" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "g~0" "()Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -314,7 +314,7 @@
 
 (deftest cons-into-list
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL VARARGS]
+            [(METHOD [PUBLIC STATIC VARARGS]
                      "fn~1" "([Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object[] items"]
              (ALOAD_0)
@@ -342,7 +342,7 @@
              [L:1]
              (ALOAD_2)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL]
+            [(METHOD [PUBLIC STATIC]
                      "list" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "fn~1" "([Ljava/lang/Object;)Ljava/lang/Object;"]]])
@@ -366,7 +366,7 @@
 
 (deftest join-vector-with-null-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "lift-ns~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "lift-ns~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object m"]
              [L:0]
              (ALOAD_0)
@@ -382,7 +382,7 @@
              [L:2]
              (LDC [:bsm-quote "vector" "Lclojure/lang/IPersistentVector;" []])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "lift-ns" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "lift-ns" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;" [[STATIC . "lift-ns~1" "(Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
             
@@ -406,7 +406,7 @@
 
 (deftest explicit-type-on-variable-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "lift-ns~1"
+            [(METHOD [PUBLIC STATIC] "lift-ns~1"
                      "(Ljava/lang/String;)Ljava/lang/Object;")
              ["LOCAL 0: String s"]
              (ALOAD_0)

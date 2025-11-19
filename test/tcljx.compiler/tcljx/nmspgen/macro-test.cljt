@@ -11,12 +11,12 @@
 
 (def exp-one-macro
   '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-     [(METHOD [PUBLIC STATIC FINAL] "one-macro~2" "(Ljava/lang/Object;Ljava/lang/Object;)I")
+     [(METHOD [PUBLIC STATIC] "one-macro~2" "(Ljava/lang/Object;Ljava/lang/Object;)I")
       ["LOCAL 0: Object &form"]
       ["LOCAL 1: Object &env"]
       (ICONST_1)
       (IRETURN)]
-     [(METHOD [PUBLIC STATIC FINAL] "one-macro" "()Ltinyclj/lang/StaticFn;")
+     [(METHOD [PUBLIC STATIC] "one-macro" "()Ltinyclj/lang/StaticFn;")
       (RuntimeVisibleAnnotations (Macro))
       (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
             [[STATIC . "one-macro~2" "(Ljava/lang/Object;Ljava/lang/Object;)I"]]])
@@ -27,7 +27,7 @@
       (INVOKESTATIC RT "createNamespace" "(Ljava/lang/String;)V")
       (RETURN)]]
     [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_11" nil "pkg/ns0/_10")
-     [(METHOD [PUBLIC STATIC FINAL] "one" "()I")
+     [(METHOD [PUBLIC STATIC] "one" "()I")
       (ICONST_1)
       (IRETURN)]
      [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
@@ -59,12 +59,12 @@
 (deftest macro-call-to-same-segment
   ;; my-defn should call sigs from the same namespace segment
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "cons" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "cons" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC RT "cons" "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "loop~3" "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "loop~3" "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
              #_["LOCAL 0: Object &form"]
              #_["LOCAL 1: Object &env"]
              #_["LOCAL 2: Object[] decl"]
@@ -74,7 +74,7 @@
              (INVOKESTATIC ArraySeq "create" "([Ljava/lang/Object;)Lclojure/lang/ArraySeq;")
              (INVOKESTATIC . "loop~3" "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "loop~3" "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "loop~3" "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: Object &form"]
              ["LOCAL 1: Object &env"]
              ["LOCAL 2: ISeq decl"]
@@ -82,13 +82,13 @@
              (ALOAD_2)
              (INVOKESTATIC RT "cons" "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "loop" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "loop" "()Ltinyclj/lang/StaticFn;")
              (RuntimeVisibleAnnotations (Macro))
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "loop~3" "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "my-fn~3"
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "my-fn~3"
                      "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
              (ALOAD_0)
              (ALOAD_1)
@@ -98,7 +98,7 @@
              (INVOKESTATIC . "my-fn~3"
                            "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "my-fn~3"
+            [(METHOD [PUBLIC STATIC] "my-fn~3"
                      "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: Object &form"]
              ["LOCAL 1: Object &env"]
@@ -108,7 +108,7 @@
              (INVOKESTATIC RT "cons"
                            "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "my-fn" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "my-fn" "()Ltinyclj/lang/StaticFn;")
              (RuntimeVisibleAnnotations (Macro))
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "my-fn~3"
@@ -121,21 +121,21 @@
              (RETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_11" nil "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "first" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "first" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC RT "first" "(Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "sigs~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "sigs~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object fdecl"]
              (ACONST_NULL)
              (ARETURN)]            
-            [(METHOD [PUBLIC STATIC FINAL] "sigs" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "sigs" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "sigs~1" "(Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "my-defn~4" "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "my-defn~4" "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
              #_["LOCAL 0: Object &form"]
              #_["LOCAL 1: Object &env"]
              #_["LOCAL 2: Object name"]
@@ -147,7 +147,7 @@
              (INVOKESTATIC ArraySeq "create" "([Ljava/lang/Object;)Lclojure/lang/ArraySeq;")
              (INVOKESTATIC . "my-defn~4" "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "my-defn~4" "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "my-defn~4" "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: Object &form"]
              ["LOCAL 1: Object &env"]
              ["LOCAL 2: Object name"]
@@ -161,7 +161,7 @@
              (INVOKESTATIC RT "cons" "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
              (INVOKESTATIC RT "cons" "(Ljava/lang/Object;Ljava/lang/Object;)Lclojure/lang/ISeq;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "my-defn" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "my-defn" "()Ltinyclj/lang/StaticFn;")
              (RuntimeVisibleAnnotations (Macro))
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "my-defn~4" "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"]]])
@@ -171,7 +171,7 @@
              (RETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_12" nil "pkg/ns0/_11")
-            [(METHOD [PUBLIC STATIC FINAL] "to-array" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "to-array" "()Ljava/lang/Object;")
              (ACONST_NULL)
              (ARETURN)]
 
@@ -207,17 +207,17 @@
 (deftest fallback-value-in-meta
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "list~1" "([Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC VARARGS] "list~1" "([Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object[] items"]
              (ALOAD_0)
              (INVOKESTATIC Literal "list" "([Ljava/lang/Object;)Lclojure/lang/IPersistentList;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "list" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "list" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "list~1" "([Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "__nil-pred~1" "(Ljava/lang/Object;)Z")
+            [(METHOD [PUBLIC STATIC] "__nil-pred~1" "(Ljava/lang/Object;)Z")
              ["LOCAL 0: Object x"]
              (ALOAD_0)
              (IFNONNULL L:0)
@@ -226,12 +226,12 @@
              [L:0]
              (ICONST_0)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "__nil-pred" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "__nil-pred" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "__nil-pred~1" "(Ljava/lang/Object;)Z"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "nil-pred~3" "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "nil-pred~3" "(Ljava/lang/Object;Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object &form"]
              ["LOCAL 1: Object &env"]
              ["LOCAL 2: Object x"]
@@ -252,7 +252,7 @@
              (AASTORE)
              (INVOKESTATIC . "list~1" "([Ljava/lang/Object;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "nil-pred" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "nil-pred" "()Ltinyclj/lang/StaticFn;")
              (RuntimeVisibleAnnotations
               (Macro ["macroValue" "pkg.ns0/__nil-pred"]))
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
@@ -266,7 +266,7 @@
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_11" nil "pkg/ns0/_10")
             [(FIELD [PUBLIC STATIC FINAL] "y" "Ljava/lang/Object;")]
-            [(METHOD [PUBLIC STATIC FINAL] "x" "()Z")
+            [(METHOD [PUBLIC STATIC] "x" "()Z")
              (ICONST_0)
              (IRETURN)]
 
@@ -307,19 +307,19 @@
 (deftest import-macro-value
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/exp/_10")
             
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "__list~1"
+            [(METHOD [PUBLIC STATIC VARARGS] "__list~1"
                      "([Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object[] items"]
              (ALOAD_0)
              (INVOKESTATIC Literal "list" "([Ljava/lang/Object;)Lclojure/lang/IPersistentList;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "__list"
+            [(METHOD [PUBLIC STATIC] "__list"
                      "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "__list~1" "([Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "list~3"
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "list~3"
                      "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
              (ALOAD_0)
              (ALOAD_1)
@@ -327,7 +327,7 @@
              (INVOKESTATIC ArraySeq "create" "([Ljava/lang/Object;)Lclojure/lang/ArraySeq;")
              (INVOKESTATIC . "list~3" "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "list~3"
+            [(METHOD [PUBLIC STATIC] "list~3"
                      "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: Object &form"]
              ["LOCAL 1: Object &env"]
@@ -344,7 +344,7 @@
                 [:bsm-quote "symbol" "Lclojure/lang/Symbol;" ["java.lang.Object"]]]])
              (INVOKEINTERFACE IObj "withMeta" "(Lclojure/lang/IPersistentMap;)Lclojure/lang/IObj;" :itf)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "list" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "list" "()Ltinyclj/lang/StaticFn;")
              (RuntimeVisibleAnnotations (Macro ["macroValue" "pkg.exp/__list"]))
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "list~3" "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"]]])

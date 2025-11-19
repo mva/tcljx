@@ -243,7 +243,7 @@
             [(FIELD [PUBLIC STATIC FINAL] "x" "Lpkg/ns0/Vec3;")]
             [(FIELD [PUBLIC STATIC FINAL] "y" "Lpkg/ns0/Vec3;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "-_GT_Vec3" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "-_GT_Vec3" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[CONSTRUCTOR Vec3 "<init>" "(FFF)V"]]])
              (ARETURN)]
@@ -761,7 +761,7 @@
              (INVOKESPECIAL . "<init>" "(IILjava/lang/String;Ljava/lang/Object;Ljava/lang/Object;II)V")
              (RETURN)]
 
-            [(METHOD [PUBLIC STATIC SYNTHETIC] "create"
+            [(METHOD [PUBLIC STATIC FINAL SYNTHETIC] "create"
                      "(Lclojure/lang/IPersistentMap;)Lpkg/ns0/T;")
              #_["LOCAL 0: IPersistentMap m"]
              (NEW T)
@@ -956,7 +956,7 @@
              (RETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "deftype~2" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "deftype~2" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object &form"]
              ["LOCAL 1: Object &env"]
              (LDC [:bsm-quote "list" "Lclojure/lang/IPersistentList;"
@@ -969,7 +969,7 @@
                      [[:bsm-quote "symbol" "Lclojure/lang/Symbol;" ["clojure.lang.IType"]]]]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "deftype" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "deftype" "()Ltinyclj/lang/StaticFn;")
              (RuntimeVisibleAnnotations (Macro))
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;" [[STATIC . "deftype~2" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]

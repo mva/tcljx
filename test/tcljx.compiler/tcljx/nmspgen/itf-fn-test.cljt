@@ -69,12 +69,12 @@
             [(METHOD [STATIC FINAL] "Runnable~0" "()V")
              (RETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "g~0" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "g~0" "()Ljava/lang/Object;")
              (GETSTATIC . "f" "Ljava/lang/Runnable;")
              (INVOKEINTERFACE Runnable "run" "()V" :itf)
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "g" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "g~0" "()Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -110,14 +110,14 @@
              (ICONST_0)
              (IRETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "g~0" "()I")
+            [(METHOD [PUBLIC STATIC] "g~0" "()I")
              (GETSTATIC . "f" "Ljava/util/Comparator;")
              (ACONST_NULL)
              (ACONST_NULL)
              (INVOKEINTERFACE Comparator "compare"
                               "(Ljava/lang/Object;Ljava/lang/Object;)I" :itf)
              (IRETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "g" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "g" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "g~0" "()I"]]])
              (ARETURN)]
@@ -161,7 +161,7 @@
              (ICONST_2)
              (IRETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(Ljava/lang/Object;)V")
+            [(METHOD [PUBLIC STATIC] "f~1" "(Ljava/lang/Object;)V")
              ["LOCAL 0: Object x"]
              (ALOAD_0)
              (IFNONNULL L:0)
@@ -173,7 +173,7 @@
              (ASTORE_1)
              ["LOCAL 1: FnMyFn g*"]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~1" "(Ljava/lang/Object;)V"]]])
              (ARETURN)]
@@ -297,7 +297,7 @@
              ["LOCAL 0: String x"]
              (ALOAD_0)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1"
+            [(METHOD [PUBLIC STATIC] "fn~1"
                      "(Ljava/lang/String;)Ljava/util/function/Supplier;")
              ["LOCAL 0: String x"]
              (ALOAD_0)
@@ -338,7 +338,7 @@
              (INVOKESTATIC Integer "valueOf" "(I)Ljava/lang/Integer;")
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1"
+            [(METHOD [PUBLIC STATIC] "fn~1"
                      "(I)Ljava/util/function/Function;")
              ["LOCAL 0: int n"]
              (ILOAD_0)
@@ -386,7 +386,7 @@
                              [STATIC . "fn$step$Supplier~0" "(Ljava/util/regex/Matcher;)Ljava/lang/Object;"]
                              "MethodTypeDesc[()Object]"])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1" "(Ljava/util/regex/Matcher;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "fn~1" "(Ljava/util/regex/Matcher;)Ljava/lang/Object;")
              ["LOCAL 0: Matcher m"]
              (ALOAD_0)
              (INVOKESTATIC . "fn$step~0" "(Ljava/util/regex/Matcher;)Ljava/lang/Object;")
@@ -409,11 +409,11 @@
   
   ;; full version from clojure.core, after macro expansion
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1" "(Ljava/util/regex/Matcher;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "fn~1" "(Ljava/util/regex/Matcher;)Ljava/lang/Object;")
              ["LOCAL 0: Matcher m"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "re-groups" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "re-groups" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "fn~1" "(Ljava/util/regex/Matcher;)Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -445,7 +445,7 @@
              (ACONST_NULL)
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "fn^1~2" "(Ljava/util/regex/Pattern;Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "fn^1~2" "(Ljava/util/regex/Pattern;Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Pattern re"]
              ["LOCAL 1: Object s"]
              (ALOAD_0)

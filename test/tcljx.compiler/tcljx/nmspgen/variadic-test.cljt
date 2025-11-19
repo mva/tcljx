@@ -11,14 +11,14 @@
 
 (deftest varargs-list
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "fn~1"
+            [(METHOD [PUBLIC STATIC VARARGS] "fn~1"
                      "([Ljava/lang/Object;)Lclojure/lang/IPersistentList;")
              ["LOCAL 0: Object[] items"]
              (ALOAD_0)
              (INVOKESTATIC Arrays "asList" "([Ljava/lang/Object;)Ljava/util/List;")
              (INVOKESTATIC PersistentList "create" "(Ljava/util/List;)Lclojure/lang/IPersistentList;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "list" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "list" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "fn~1" "([Ljava/lang/Object;)Lclojure/lang/IPersistentList;"]]])
              (ARETURN)]
@@ -135,7 +135,7 @@
             [(FIELD [PUBLIC STATIC FINAL] "l1" "Ljava/util/List;")]
             [(FIELD [PUBLIC STATIC FINAL] "l2" "Ljava/util/List;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "as-list" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "as-list" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC Arrays "asList" "([Ljava/lang/Object;)Ljava/util/List;"]]])
              (ARETURN)]
@@ -194,12 +194,12 @@
             [(FIELD [PUBLIC STATIC FINAL]
                     "lints" "Ljava/util/List;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "as-list" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "as-list" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC Arrays "asList" "([Ljava/lang/Object;)Ljava/util/List;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "as-list-wrapped~1" "([Ljava/lang/Object;)Ljava/util/List;")
+            [(METHOD [PUBLIC STATIC VARARGS] "as-list-wrapped~1" "([Ljava/lang/Object;)Ljava/util/List;")
              ["LOCAL 0: Object[] items"]
              (ICONST_1)
              (ANEWARRAY "Object[]")
@@ -209,7 +209,7 @@
              (AASTORE)
              (INVOKESTATIC Arrays "asList" "([Ljava/lang/Object;)Ljava/util/List;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "as-list-wrapped" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "as-list-wrapped" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "as-list-wrapped~1"
                      "([Ljava/lang/Object;)Ljava/util/List;"]]])
@@ -271,35 +271,35 @@
             [(FIELD [PUBLIC STATIC FINAL] "l1" "Ljava/lang/Object;")]
             [(FIELD [PUBLIC STATIC FINAL] "l2" "Ljava/lang/Object;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "as-list" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "as-list" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC Arrays "asList" "([Ljava/lang/Object;)Ljava/util/List;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "apply-0~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "apply-0~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object f"]
              (ALOAD_0)
              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;"
                             :bsm-invoke-fn [])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "apply-0" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "apply-0" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "apply-0~1" "(Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "apply-1~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "apply-1~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object f"]
              (ALOAD_0)
              (ICONST_1)
              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;I)Ljava/lang/Object;"
                             :bsm-invoke-fn [])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "apply-1" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "apply-1" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "apply-1~1" "(Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "apply-2~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "apply-2~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object f"]
              (ALOAD_0)
              (ICONST_1)
@@ -307,7 +307,7 @@
              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;II)Ljava/lang/Object;"
                             :bsm-invoke-fn [])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "apply-2" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "apply-2" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "apply-2~1" "(Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -350,48 +350,48 @@
             [(FIELD [PUBLIC STATIC FINAL] "l1" "Ljava/lang/Object;")]
             [(FIELD [PUBLIC STATIC FINAL] "l2" "Ljava/lang/Object;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1" "(Ljava/lang/String;)Ltinyclj/lang/AFnMh;")
+            [(METHOD [PUBLIC STATIC] "fn~1" "(Ljava/lang/String;)Ltinyclj/lang/AFnMh;")
              ["LOCAL 0: String s"]
              (ALOAD_0)
              (INVOKESTATIC fn$as-list "__create" "(Ljava/lang/String;)Lpkg/ns0/fn$as-list;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "mk-as-list" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "mk-as-list" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "fn~1"
                      "(Ljava/lang/String;)Ltinyclj/lang/AFnMh;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "apply-0~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "apply-0~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object f"]
              (ALOAD_0)
              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;" :bsm-invoke-fn [])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "apply-0" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "apply-0" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "apply-0~1"
                      "(Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "apply-1~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "apply-1~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object f"]
              (ALOAD_0)
              (ICONST_1)
              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;I)Ljava/lang/Object;" :bsm-invoke-fn [])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "apply-1" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "apply-1" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "apply-1~1"
                      "(Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "apply-2~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "apply-2~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object f"]
              (ALOAD_0)
              (ICONST_1)
              (ICONST_2)
              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;II)Ljava/lang/Object;" :bsm-invoke-fn [])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "apply-2" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "apply-2" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "apply-2~1"
                      "(Ljava/lang/Object;)Ljava/lang/Object;"]]])
@@ -500,12 +500,12 @@
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(FIELD [PUBLIC STATIC FINAL] "l1" "Ljava/util/List;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "as-list" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "as-list" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC Arrays "asList" "([Ljava/lang/Object;)Ljava/util/List;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "apply-1~2" "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/util/List;")
+            [(METHOD [PUBLIC STATIC VARARGS] "apply-1~2" "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/util/List;")
              ["LOCAL 0: Object f"]
              ["LOCAL 1: Object[] items"]
              (ALOAD_0)
@@ -513,7 +513,7 @@
              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;"
                             :bsm-invoke-fn [])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "apply-1" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "apply-1" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "apply-1~2" "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/util/List;"]]])
              (ARETURN)]
@@ -557,18 +557,18 @@
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(FIELD [PUBLIC STATIC FINAL] "l1" "Ljava/util/List;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1" "(Ljava/lang/String;)Ltinyclj/lang/AFnMh;")
+            [(METHOD [PUBLIC STATIC] "fn~1" "(Ljava/lang/String;)Ltinyclj/lang/AFnMh;")
              ["LOCAL 0: String s"]
              (ALOAD_0)
              (INVOKESTATIC fn$as-list "__create"
                            "(Ljava/lang/String;)Lpkg/ns0/fn$as-list;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "mk-as-list" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "mk-as-list" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "fn~1" "(Ljava/lang/String;)Ltinyclj/lang/AFnMh;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL VARARGS] "apply-1~2" "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/util/List;")
+            [(METHOD [PUBLIC STATIC VARARGS] "apply-1~2" "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/util/List;")
              ["LOCAL 0: Object f"]
              ["LOCAL 1: Object[] items"]
              (ALOAD_0)
@@ -576,7 +576,7 @@
              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;"
                             :bsm-invoke-fn [])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "apply-1" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "apply-1" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "apply-1~2" "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/util/List;"]]])
              (ARETURN)]
@@ -682,7 +682,7 @@
 
 (deftest variadic-array-to-iseq
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "callee-gets-iseq~1"
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "callee-gets-iseq~1"
                      "([Ljava/lang/Object;)Ljava/lang/Object;")
              #_["LOCAL 0: Object[] items"]
              (ALOAD_0)
@@ -691,12 +691,12 @@
              (INVOKESTATIC . "callee-gets-iseq~1"
                            "(Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "callee-gets-iseq~1"
+            [(METHOD [PUBLIC STATIC] "callee-gets-iseq~1"
                      "(Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: ISeq items"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "callee-gets-iseq"
+            [(METHOD [PUBLIC STATIC] "callee-gets-iseq"
                      "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "callee-gets-iseq~1"
@@ -719,7 +719,7 @@
 
 (deftest variadic-array-to-iseq-apply
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "callee-gets-iseq~2"
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "callee-gets-iseq~2"
                      "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
              #_["LOCAL 0: Object item"]
              #_["LOCAL 1: Object[] items"]
@@ -730,13 +730,13 @@
              (INVOKESTATIC . "callee-gets-iseq~2"
                            "(Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "callee-gets-iseq~2"
+            [(METHOD [PUBLIC STATIC] "callee-gets-iseq~2"
                      "(Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: Object item"]
              ["LOCAL 1: ISeq items"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "callee-gets-iseq"
+            [(METHOD [PUBLIC STATIC] "callee-gets-iseq"
                      "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "callee-gets-iseq~2"
@@ -759,11 +759,11 @@
 
 (deftest variadic-array-to-iseq-apply-2
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "callee-gets-iseq~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "callee-gets-iseq~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object item"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "callee-gets-iseq~2"
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "callee-gets-iseq~2"
                      "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
              #_["LOCAL 0: Object item"]
              #_["LOCAL 1: Object[] items"]
@@ -774,13 +774,13 @@
              (INVOKESTATIC . "callee-gets-iseq~2"
                            "(Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "callee-gets-iseq~2"
+            [(METHOD [PUBLIC STATIC] "callee-gets-iseq~2"
                      "(Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: Object item"]
              ["LOCAL 1: ISeq items"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "callee-gets-iseq"
+            [(METHOD [PUBLIC STATIC] "callee-gets-iseq"
                      "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "callee-gets-iseq~1"
@@ -809,14 +809,14 @@
 (deftest variadic-array-to-iseq-apply-3
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             
-            [(METHOD [PUBLIC STATIC FINAL] "and~0" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "and~0" "()Ljava/lang/Object;")
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "and~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "and~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object x"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "and~2"
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "and~2"
                      "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
              #_["LOCAL 0: Object x"]
              #_["LOCAL 1: Object[] next"]
@@ -827,13 +827,13 @@
              (INVOKESTATIC . "and~2"
                            "(Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "and~2"
+            [(METHOD [PUBLIC STATIC] "and~2"
                      "(Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: Object x"]
              ["LOCAL 1: ISeq next"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "and" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "and" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "and~0"
                      "()Ljava/lang/Object;"]
@@ -880,14 +880,14 @@
              (ALOAD_0)
              (ARETURN)]
 
-            [(METHOD [PUBLIC STATIC FINAL] "f~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "f~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object x"]
              (ALOAD_0)
              (ICONST_0)
              (ANEWARRAY "Object[]")
              (INVOKESTATIC . "f$callee-gets-iseq~1" "(Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "f~1" "(Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -907,13 +907,13 @@
 
 (deftest variadic-array-to-iseq-closure
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1" "(Ljava/lang/Object;)Ltinyclj/lang/AFnMh;")
+            [(METHOD [PUBLIC STATIC] "fn~1" "(Ljava/lang/Object;)Ltinyclj/lang/AFnMh;")
              ["LOCAL 0: Object a"]
              (ALOAD_0)
              (INVOKESTATIC fn$callee-gets-iseq "__create"
                            "(Ljava/lang/Object;)Lpkg/ns0/fn$callee-gets-iseq;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "f" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "f" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "fn~1" "(Ljava/lang/Object;)Ltinyclj/lang/AFnMh;"]]])
              (ARETURN)]
@@ -1004,7 +1004,7 @@
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(FIELD [PUBLIC STATIC FINAL] "x" "Ljava/lang/Object;")]
             
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "concat~3"
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "concat~3"
                      "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
              #_["LOCAL 0: Object x"]
              #_["LOCAL 1: Object y"]
@@ -1015,14 +1015,14 @@
              (INVOKESTATIC ArraySeq "create" "([Ljava/lang/Object;)Lclojure/lang/ArraySeq;")
              (INVOKESTATIC . "concat~3" "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "concat~3"
+            [(METHOD [PUBLIC STATIC] "concat~3"
                      "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: Object x"]
              ["LOCAL 1: Object y"]
              ["LOCAL 2: ISeq zs"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "concat" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "concat" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "concat~3" "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -1076,25 +1076,25 @@
 
 (deftest object-to-variadic-parameter
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/exp/_10")
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "println~1"
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "println~1"
                      "([Ljava/lang/Object;)Ljava/lang/Object;")
              (ALOAD_0)
              (INVOKESTATIC ArraySeq "create"
                            "([Ljava/lang/Object;)Lclojure/lang/ArraySeq;")
              (INVOKESTATIC . "println~1" "(Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "println~1"
+            [(METHOD [PUBLIC STATIC] "println~1"
                      "(Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: ISeq more"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "println" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "println" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "println~1"
                      "([Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1"
+            [(METHOD [PUBLIC STATIC] "fn~1"
                      "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object x"]
              (ICONST_1)
@@ -1117,7 +1117,7 @@
              (ARETURN)]]
            
            [(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1"
+            [(METHOD [PUBLIC STATIC] "fn~1"
                      "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object x"]
              (ICONST_1)
@@ -1148,21 +1148,21 @@
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
             [(FIELD [PUBLIC STATIC FINAL] "x" "Ljava/util/List;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "void-fn~1" "(Ljava/lang/String;)V")
+            [(METHOD [PUBLIC STATIC] "void-fn~1" "(Ljava/lang/String;)V")
              ["LOCAL 0: String s"]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL]
+            [(METHOD [PUBLIC STATIC]
                      "void-fn" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "void-fn~1" "(Ljava/lang/String;)V"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "as-list" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "as-list" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC Arrays "asList" "([Ljava/lang/Object;)Ljava/util/List;"]]])
              (ARETURN)]
             
-            [(METHOD [PUBLIC STATIC FINAL] "fn~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "fn~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object f"]
              (ALOAD_0)
              (LDC "foo")
@@ -1170,7 +1170,7 @@
              (ACONST_NULL)
              (INVOKEDYNAMIC "_" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;" :bsm-invoke-fn [])
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "y" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "y" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "fn~1" "(Ljava/lang/Object;)Ljava/lang/Object;"]]])
              (ARETURN)]
@@ -1208,10 +1208,10 @@
             [(FIELD [PUBLIC STATIC FINAL]
                     "x" "Lclojure/lang/IPersistentVector;")]
             
-            [(METHOD [PUBLIC STATIC FINAL] "void-fn~1" "(Ljava/lang/String;)V")
+            [(METHOD [PUBLIC STATIC] "void-fn~1" "(Ljava/lang/String;)V")
              ["LOCAL 0: String s"]
              (RETURN)]
-            [(METHOD [PUBLIC STATIC FINAL]
+            [(METHOD [PUBLIC STATIC]
                      "void-fn" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
                    [[STATIC . "void-fn~1" "(Ljava/lang/String;)V"]]])
@@ -1293,32 +1293,32 @@
 
 (deftest conj-with-five-arguments-test
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")
-            [(METHOD [PUBLIC STATIC FINAL] "conj~0" "()Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "conj~0" "()Ljava/lang/Object;")
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "conj~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "conj~1" "(Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object coll"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "conj~2" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "conj~2" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;")
              ["LOCAL 0: Object coll"]
              ["LOCAL 1: Object x"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL BRIDGE VARARGS SYNTHETIC] "conj~3" "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC BRIDGE VARARGS SYNTHETIC] "conj~3" "(Ljava/lang/Object;Ljava/lang/Object;[Ljava/lang/Object;)Ljava/lang/Object;")
              (ALOAD_0)
              (ALOAD_1)
              (ALOAD_2)
              (INVOKESTATIC ArraySeq "create" "([Ljava/lang/Object;)Lclojure/lang/ArraySeq;")
              (INVOKESTATIC . "conj~3" "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "conj~3" "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
+            [(METHOD [PUBLIC STATIC] "conj~3" "(Ljava/lang/Object;Ljava/lang/Object;Lclojure/lang/ISeq;)Ljava/lang/Object;")
              ["LOCAL 0: Object coll"]
              ["LOCAL 1: Object x"]
              ["LOCAL 2: ISeq xs"]
              (ACONST_NULL)
              (ARETURN)]
-            [(METHOD [PUBLIC STATIC FINAL] "conj" "()Ltinyclj/lang/StaticFn;")
+            [(METHOD [PUBLIC STATIC] "conj" "()Ltinyclj/lang/StaticFn;")
              (LDC
               [:bsm-static-fn
                "_"
