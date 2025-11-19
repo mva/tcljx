@@ -1603,11 +1603,11 @@
   `(let [locklocal# ~x]
      ;; FIXME... how to force empty operand stack and inlining of
      ;; whole "monitor-enter followed by try/finally" sequence?
-     (monitor-enter locklocal#)
+     (clojure.core.primitive/monitor-enter locklocal#)
      (try
        ~@body
        (finally
-         (monitor-exit locklocal#)))))
+         (clojure.core.primitive/monitor-exit locklocal#)))))
 
 (defmacro ..
   "form => fieldName-symbol or (instanceMethodName-symbol args*)
@@ -4931,7 +4931,7 @@
 (def ^:private specials            ;copy of tcljx.data.config/specials
   '#{def loop* recur if case* let* letfn*
      do fn* quote var import* . set! deftype* reify* try throw
-     monitor-enter monitor-exit catch finally new &
+     catch finally new &
      ;; special forms that are not special in Clojure:
      definterface*})
 

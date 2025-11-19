@@ -353,16 +353,7 @@
                (-> xb (emit/with-line-number fctx) (.athrow))
                nil))         ;operand type reported when emitting code
             (insn/mk-insn Void/TYPE))   ;type used while parsing
-        (throw (insn/error-type "expect instance of Throwable" arg)))))
-  (monitor-expr [_ fctx enter? lockee]
-    (error/when (type/monomorphic-primitive? (insn/expr-type lockee))
-      "monitor operation requires an identity object")
-    (-> (^CodeEmitter fn [xb _ _]
-         (when (emit/insn? xb fctx Object (.emitter lockee))
-           (emit/with-line-number xb fctx)
-           (if enter? (.monitorenter xb) (.monitorexit xb))
-           Void/TYPE))       ;operand type reported when emitting code
-        (insn/mk-insn Void/TYPE))))
+        (throw (insn/error-type "expect instance of Throwable" arg))))))
 
 (defn mk-factory ^ExprFactory []
   (InsnFactoryImpl. nil nil))

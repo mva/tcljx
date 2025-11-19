@@ -39,7 +39,7 @@
 ;;; note: a copy of this lives in clojure.core/specials
 (def specials '#{def loop* recur if case* let* letfn*
                  do fn* quote var import* . set! deftype* reify* try throw
-                 monitor-enter monitor-exit catch finally new &
+                 catch finally new &
                  ;; special forms that are not special in Clojure:
                  definterface*})
 

@@ -225,10 +225,6 @@
               (deftype/parse-definterface* resolver entity-factory fctx form))
             (parse-deftype* ^Expr [^long fctx ^seq form]
               (deftype/parse-deftype* this fctx form))
-            (parse-monitor ^Expr [^long fctx ^boolean enter? [_ & args]]
-              (let [lockee (parse/arg this fctx (syntax/first args))]
-                (syntax/empty-tail (next args))
-                (.monitor-expr expr-factory fctx enter? lockee)))
             (parse-invocation ^Expr [op ^long fctx ^seq form] ;discards meta
               (if (symbol? op)
                 (let [nm (name op), nmsp (namespace op)]
@@ -259,8 +255,6 @@
                                  (deftype/parse-reify* this fctx m form))
                       "try" (parse-try-or-extract fctx form)
                       "throw" (parse-throw fctx form)
-                      "monitor-enter" (parse-monitor fctx true form)
-                      "monitor-exit" (parse-monitor fctx false form)
                       ;; "catch" is only special within `try-form`
                       ;; "finally" is only special within `try-form`
                       "new" (let [arg (syntax/second form)

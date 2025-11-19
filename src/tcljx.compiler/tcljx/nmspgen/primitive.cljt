@@ -337,6 +337,17 @@
                                        rt/mtd-boolean-Object))
                    Boolean/TYPE))))
             (insn/mk-insn Boolean/TYPE)))))
+  (defn monitor-primitive ^PrimitiveFnEntity [^boolean enter?]
+    (with-primitive-invoke [_ fctx form _ _ args]
+      (let [lockee (take-arg form args)]
+        (error/when (type/monomorphic-primitive? (insn/expr-type lockee))
+          "monitor operation requires an identity object")
+        (-> (^CodeEmitter fn [xb _ _]
+             (when (emit/insn? xb fctx Object (.emitter lockee))
+               (emit/with-line-number xb fctx)
+               (if enter? (.monitorenter xb) (.monitorexit xb))
+               Void/TYPE))
+            (insn/mk-insn Void/TYPE)))))
   
   (def unary-not
     (with-primitive-invoke [_ fctx form _ _ args]
@@ -589,6 +600,8 @@
         (primitive "aset" nary-array-store)
         (primitive "aclone" array-clone)
         (primitive "instance?" instance?-primitive)
+        (primitive "monitor-enter" (monitor-primitive true))
+        (primitive "monitor-exit" (monitor-primitive false))
 
         (primitive "not" unary-not)
         (primitive "and" nary-and)

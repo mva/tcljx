@@ -599,8 +599,7 @@
   (get-static-field ^Expr [^long fctx ^Class owner ^String mnm])
   (get-virtual-field ^Expr [^long fctx ^Expr receiver ^String mnm])
   
-  (throw-expr ^Expr [^long fctx ^Expr arg])
-  (monitor-expr ^Expr [^long fctx ^boolean enter? ^Expr lockee]))
+  (throw-expr ^Expr [^long fctx ^Expr arg]))
 
 ;;; Note: Factory methods return nil if operation is not supported.
 (definterface Assignable
