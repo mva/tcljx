@@ -41,7 +41,7 @@
                  do fn* quote var import* . set! deftype* reify* try throw
                  monitor-enter monitor-exit catch finally new &
                  ;; special forms that are not special in Clojure:
-                 definterface* instanceof*})
+                 definterface*})
 
 (def primitive-ns-str "clojure.core.primitive")
 

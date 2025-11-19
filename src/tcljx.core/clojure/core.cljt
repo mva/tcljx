@@ -151,9 +151,8 @@
  ^{:arglists '([^Class c x])
    :doc "Evaluates x and tests if it is an instance of the class
     c. Returns true or false"
-   :macro true
    :added "1.0"}
- instance? (fn* instance? [&form &env c x] (list 'instanceof* c x)))
+ instance? clojure.core.primitive/instance?)
 
 (def
  ^{:arglists '([x])
@@ -4934,7 +4933,7 @@
      do fn* quote var import* . set! deftype* reify* try throw
      monitor-enter monitor-exit catch finally new &
      ;; special forms that are not special in Clojure:
-     definterface* instanceof*})
+     definterface*})
 
 (defn special-symbol?
   "Returns true if s names a special form"

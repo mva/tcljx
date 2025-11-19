@@ -319,6 +319,25 @@
                  atp)))
             (insn/mk-insn atp)))))
 
+  (def instance?-primitive
+    (with-primitive-invoke [_ fctx form _ _ args]
+      (let [args (take-args form args 2)
+            arg-cl (insn/checkcast (.get args 0) Class fctx)
+            ce (insn/emitter args 1)]
+        (-> (^CodeEmitter fn [xb _ _]
+             (if-some [tp (ir/type-literal arg-cl (first form))]
+               (when (emit/insn? xb fctx Object ce)
+                 (-> (emit/with-line-number xb fctx)
+                     (.instanceOf (reflect/describe-class tp)))
+                 Boolean/TYPE)
+               (when (emit/insn? xb fctx Class (.emitter arg-cl))
+                 (when (emit/insn? xb fctx Object ce)
+                   (-> (emit/with-line-number xb fctx)
+                       (.invokevirtual ConstantDescs/CD_Class "isInstance"
+                                       rt/mtd-boolean-Object))
+                   Boolean/TYPE))))
+            (insn/mk-insn Boolean/TYPE)))))
+  
   (def unary-not
     (with-primitive-invoke [_ fctx form _ _ args]
       (let [arg (take-arg form args)]
@@ -569,6 +588,7 @@
         (primitive "aget" nary-array-load)
         (primitive "aset" nary-array-store)
         (primitive "aclone" array-clone)
+        (primitive "instance?" instance?-primitive)
 
         (primitive "not" unary-not)
         (primitive "and" nary-and)

@@ -111,7 +111,7 @@
            (INSTANCEOF String)
            (IRETURN)]
          (asm-expr ^boolean [^Object x]
-                   (instanceof* String x)))))
+                   (instance? String x)))))
 
 (deftest instanceof-string
   (is (= '[["LOCAL 0: Object x"]
@@ -119,7 +119,7 @@
            (INSTANCEOF String)
            (IRETURN)]
          (asm-expr ^boolean [^Object x]
-                   (instanceof* java.lang.String x)))))
+                   (instance? java.lang.String x)))))
 
 (deftest instanceof-expr
   (is (= '[["LOCAL 0: Object x"]
@@ -129,21 +129,21 @@
            (INVOKEVIRTUAL Class "isInstance" "(Ljava/lang/Object;)Z")
            (IRETURN)]
          (asm-expr ^boolean [^Object x ^Class cl]
-                   (instanceof* cl x)))))
+                   (instance? cl x)))))
 
 (deftest instanceof-null
   (is (= '[(ACONST_NULL)
            (INSTANCEOF String)
            (IRETURN)]
          (asm-expr ^boolean []
-                   (instanceof* String nil))))
+                   (instance? String nil))))
   (is (= '[["LOCAL 0: Class cl"]
            (ALOAD_0 )
            (ACONST_NULL)
            (INVOKEVIRTUAL Class "isInstance" "(Ljava/lang/Object;)Z")
            (IRETURN)]
          (asm-expr ^boolean [^Class cl]
-                   (instanceof* cl nil)))))
+                   (instance? cl nil)))))
 
 (deftest instanceof-clojure-classes
   (is (= '[["LOCAL 0: Object x"]
@@ -151,41 +151,41 @@
            (INSTANCEOF IPersistentVector)
            (IRETURN)]
          (asm-expr ^boolean [^Object x]
-                   (instanceof* vector x))))
+                   (instance? vector x))))
   (is (= '[["LOCAL 0: Object x"]
            (ALOAD_0)
            (INSTANCEOF IPersistentMap)
            (IRETURN)]
          (asm-expr ^boolean [^Object x]
-                   (instanceof* map x))))
+                   (instance? map x))))
   (is (= '[["LOCAL 0: Object x"]
            (ALOAD_0)
            (INSTANCEOF IPersistentSet)
            (IRETURN)]
          (asm-expr ^boolean [^Object x]
-                   (instanceof* set x))))
+                   (instance? set x))))
   (is (= '[["LOCAL 0: Object x"]
            (ALOAD_0)
            (INSTANCEOF IPersistentList)
            (IRETURN)]
          (asm-expr ^boolean [^Object x]
-                   (instanceof* clojure.lang.IPersistentList x))))
+                   (instance? clojure.lang.IPersistentList x))))
   
   (is (= '[["LOCAL 0: Object x"]
            (ALOAD_0)
            (INSTANCEOF ISeq)
            (IRETURN)]
          (asm-expr ^boolean [^Object x]
-                   (instanceof* seq x))))
+                   (instance? seq x))))
   (is (= '[["LOCAL 0: Object x"]
            (ALOAD_0)
            (INSTANCEOF Symbol)
            (IRETURN)]
          (asm-expr ^boolean [^Object x]
-                   (instanceof* symbol x))))
+                   (instance? symbol x))))
   (is (= '[["LOCAL 0: Object x"]
            (ALOAD_0)
            (INSTANCEOF Keyword)
            (IRETURN)]
          (asm-expr ^boolean [^Object x]
-                   (instanceof* keyword x)))))
+                   (instance? keyword x)))))

@@ -285,21 +285,7 @@
 
   (type-cast [this fctx target-type arg]
     (let [arg-tp (insn/expr-type arg)]
-      (letfn [(error-invalid-cast ^Exception []
-                (-> (error/mk-error-msg)
-                    (.txt "cannot cast to")
-                    (.type target-type)
-                    (.got-type arg-tp)
-                    (error/to-error)))
-              (checkcast ^Insn [^Insn ref-arg ^Class ref-target]
-                (let [arg-tp (insn/expr-type ref-arg)]
-                  (if (or (.isInterface ref-target)
-                          (.isAssignableFrom ref-target arg-tp) ;empty
-                          (.isAssignableFrom arg-tp ref-target) ;checkcast
-                          (type/poly-reference? arg-tp)) ;cast from nil
-                    (insn/cast-to ref-arg ref-target fctx)
-                    (throw (error-invalid-cast)))))
-              (boxed-arg ^Insn [^Class prim-tp]
+      (letfn [(boxed-arg ^Insn [^Class prim-tp]
                 (insn/cast-to arg (.class-reference (type/of prim-tp))
                               context/fctx-none))]
         (cond
@@ -311,16 +297,16 @@
           arg
           
           (.isPrimitive target-type)
-          (if (.isPrimitive arg-tp)
-            (throw (error-invalid-cast)) ;no cast between different primitives
+          (if (.isPrimitive arg-tp) ;no cast between different primitives
+            (throw (insn/error-invalid-cast target-type arg-tp))
             (-> (boxed-arg target-type) (insn/cast-to target-type fctx)))
           
           ;; here holds: `target-type` is reference
           (.isPrimitive arg-tp)
-          (-> (boxed-arg arg-tp) (checkcast target-type))
+          (-> (boxed-arg arg-tp) (insn/checkcast target-type fctx))
           
           ;; here holds: both `target-type` and `arg-tp` are reference
-          :else (-> arg (checkcast target-type))))))
+          :else (-> arg (insn/checkcast target-type fctx))))))
   (invoke-constructor [_ fctx owner args]
     (let [args ^Insns args
           mnm resolve/constructor-name
@@ -359,14 +345,6 @@
       (or (invoke-single-match ms receiver args fctx)
           (error/throw "no virtual field matching" (sym owner mnm)))))
 
-  (instanceof-expr [_ fctx type arg]
-    (let [arg ^Insn arg]
-      (-> (^CodeEmitter fn [xb _ _]
-           (when (emit/insn? xb context/fctx-none Object (.emitter arg))
-             (-> (emit/with-line-number xb fctx)
-                 (.instanceOf (reflect/describe-class type)))
-             Boolean/TYPE))
-          (insn/mk-insn Boolean/TYPE))))
   (throw-expr [_ fctx arg]
     (let [arg ^Insn arg]
       (if (.isAssignableFrom Throwable (insn/logical-type arg))

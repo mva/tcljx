@@ -254,6 +254,22 @@
   (^Insn [^Insns insns ^int i]
    (cast-to-logical (.get insns i))))
 
+(defn error-invalid-cast ^Exception [^Class target-type ^Class arg-tp]
+  (-> (error/mk-error-msg)
+      (.txt "cannot cast to")
+      (.type target-type)
+      (.got-type arg-tp)
+      (error/to-error)))
+(defn checkcast ^Insn [^Insn arg ^Class ref-target ^long fctx]
+  (let [arg-tp (expr-type arg)]
+    (if (or (.isInterface ref-target)
+            (.isAssignableFrom ref-target arg-tp) ;empty
+            (.isAssignableFrom arg-tp ref-target) ;checkcast
+            (type/polymorphic? arg-tp)            ;cast from void
+            (type/poly-reference? arg-tp))        ;cast from nil
+      (cast-to arg ref-target fctx)
+      (throw (error-invalid-cast ref-target arg-tp)))))
+
 ;;; ------------------------------------------------------------------------
 
 ;;; Emit `insn` using its own logical type, without any applying any

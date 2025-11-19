@@ -113,14 +113,6 @@
               (let [x (parse/arg this fctx (syntax/first args))]
                 (syntax/empty-tail (next args))
                 (.throw-expr expr-factory fctx x)))
-            (parse-instanceof* ^Expr [^long fctx [_ & args]]
-              (let [xs (parse/args this fctx args)
-                    arg-cl (.type-cast expr-factory fctx Class (.get xs 0))]
-                (syntax/empty-tail 2 args)
-                (if-some [tp (ir/type-literal arg-cl (first args))]
-                  (.instanceof-expr expr-factory fctx tp (.get xs 1))
-                  (.invoke-virtual-member expr-factory fctx arg-cl
-                                          nil "isInstance" (.drop xs 1)))))
             
             (parse-import* ^Expr [[_ & formr :as form]]
               (let [specs (map syntax/strip-quote formr)
@@ -278,7 +270,6 @@
                       
                       ;; special forms that are not special in Clojure:
                       "definterface*" (parse-definterface* fctx form)
-                      "instanceof*" (parse-instanceof* fctx form)
                       #_else (cond
                                (= (.charAt nm 0) \.)
                                (parse-dot-dot-or-member nm fctx form)

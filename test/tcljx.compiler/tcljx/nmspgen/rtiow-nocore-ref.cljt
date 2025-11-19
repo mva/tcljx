@@ -18,8 +18,7 @@
 (def ^:macro loop (fn* loop [&form &env & decl]
                        (cons 'loop* decl)))
 
-(def ^:macro instance? (fn* instance? [&form &env & args]
-                            (cons 'instanceof* args)))
+(def instance? clojure.core.primitive/instance?)
 
 (def with-meta (fn* with-meta [^clojure.lang.IObj x m]
                     (.withMeta x m)))
