@@ -163,6 +163,12 @@
               (.ldc xb (.loadable-entry this (.constantPool xb) false)))
             consumed-type)
         
+        (type/same? Boolean consumed-type)
+        (do (.getstatic xb ConstantDescs/CD_Boolean
+                        (if (number-zero? computational-value) "FALSE" "TRUE")
+                        ConstantDescs/CD_Boolean)
+            consumed-type)
+        
         (instance? Number computational-value)
         (if (.isPrimitive consumed-type) ;cannot be void
           (do (->> (type/convert-from-constant consumed-type computational-value)
@@ -170,7 +176,7 @@
               consumed-type)
           (do (.loadConstant xb ^ConstantDesc computational-value)
               opnd-type))
-        
+
         :else
         (do (.ldc xb (.loadable-entry this (.constantPool xb) false))
             opnd-type))))

@@ -119,6 +119,13 @@
   (is-asm (object 123)
           [(BIPUSH 123)
            (INVOKESTATIC Integer "valueOf" "(I)Ljava/lang/Integer;")
+           (ARETURN)])
+
+  (is-asm (object true)
+          [(GETSTATIC Boolean "TRUE" "Ljava/lang/Boolean;")
+           (ARETURN)])
+  (is-asm (object false)
+          [(GETSTATIC Boolean "FALSE" "Ljava/lang/Boolean;")
            (ARETURN)]))
 
 (deftest unboxing-test
@@ -180,12 +187,10 @@
   
   (is (= '[(ACONST_NULL) (ARETURN)]
          (asm-expr (object nil))))
-  (is (= '[(ICONST_1)
-           (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+  (is (= '[(GETSTATIC Boolean "TRUE" "Ljava/lang/Boolean;")
            (ARETURN)]
          (asm-expr (object true))))
-  (is (= '[(ICONST_0)
-           (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+  (is (= '[(GETSTATIC Boolean "FALSE" "Ljava/lang/Boolean;")
            (ARETURN)]
          (asm-expr (object false)))))
 
