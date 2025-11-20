@@ -315,7 +315,7 @@
         in (InputStreamReader. input (encoding opts))]
     (loop []
       (let [size (.read in buffer 0 (alength buffer))]
-        (if (pos? size)
+        (when (pos? size)
           (do (.write output buffer 0 size)
               (recur)))))))
 

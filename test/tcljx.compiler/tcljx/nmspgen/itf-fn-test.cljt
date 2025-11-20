@@ -475,4 +475,5 @@
                                  (re-groups m)
                                  (clojure.lang.LazySeq.
                                   (^java.util.function.Supplier fn* []
-                                   (step)))))))))]))))
+                                   (step))))
+                                (do))))))]))))

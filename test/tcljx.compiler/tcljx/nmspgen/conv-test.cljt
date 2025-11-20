@@ -626,7 +626,7 @@
            [L:0]
            (ACONST_NULL)
            (ARETURN)]
-         (asm-expr [^boolean x] (if x "bar"))))
+         (asm-expr [^boolean x] (if x "bar" (do)))))
   (is (= '[["LOCAL 0: boolean x"]
            (ILOAD_0)
            (IFEQ L:0)
@@ -635,7 +635,7 @@
            [L:0]
            (ICONST_0)
            (IRETURN)]
-         (asm-expr [^boolean x] (if x 1)))))
+         (asm-expr [^boolean x] (if x 1 (do))))))
 
 
 (deftest polymorphic-if-test

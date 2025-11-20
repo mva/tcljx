@@ -103,7 +103,8 @@
          (asm-expr [^boolean sigs]
                    (if sigs
                      (IllegalArgumentException. 
-                             (if sigs "foo")))))))
+                      ^String (if sigs "foo" (do)))
+                     (do))))))
 
 (deftest instanceof-symbol
   (is (= '[["LOCAL 0: Object x"]

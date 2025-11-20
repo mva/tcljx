@@ -62,7 +62,6 @@
          ;; here holds: consumed-type is `void`
          (when (.emit-branch-on? branch xb true end-false)
            ;; FIXME... when-not to (list 'if test (list 'do) (cons 'do body))
-           ;; FIXME... related: maybe if should require exactly 3 args?
            (emit/insn? xb fctx Void/TYPE if-false)
            (.labelBinding xb end-false)
            Void/TYPE))))))

@@ -573,7 +573,8 @@
          (nmsp '[(ns pkg.ns0)
                  (def fn-recur (fn* fn-recur [^int i]
                                     (if (< i 100)
-                                      (recur (+ i 1)))))]))))
+                                      (recur (+ i 1))
+                                      (do))))]))))
 
 ;;; Only works when read by tcljx.parser.reader, otherwise the
 ;;; expansion of #(...) is not properly type hinted.

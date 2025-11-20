@@ -7,14 +7,24 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.nmspgen.cond-test ;types in conditional expressions (if & case)
   (:require [tcljx.nmspgen.bootstrap :refer [asm-expr nmsp]]
-            [tcljx.alpha.ptest :refer :all]))
+            [tcljx.alpha.ptest :refer :all])
+  (:import (tcljx.data.error WrongInfo)))
 
 (deftest if-else-omit-path
+  (is (thrown-with-msg? WrongInfo #"if takes exactly three arguments"
+                        (asm-expr ^boolean [^boolean x] (if :else x))))
+  
   (is (= '[["LOCAL 0: boolean x"]
            (ILOAD_0)
            (IRETURN)]
          (asm-expr ^boolean [^boolean x]
-                   (if :else x))))
+                   (if :else x (do)))))
+  (is (= '[["LOCAL 0: String x"]
+           (ALOAD_0)
+           (INVOKEVIRTUAL String "length" "()I")
+           (IRETURN)]
+         (asm-expr ^int [^String x]
+                   (.length (if :else x (do))))))
   (is (= '[["LOCAL 0: boolean x"]
            #_(ICONST_1)
            #_(IFEQ L:0)
@@ -26,7 +36,7 @@
            #_(ICONST_0)
            #_(IRETURN)]
          (asm-expr ^boolean [^boolean x]
-                   (if :else (throw (IllegalArgumentException.)))))))
+                   (if :else (throw (IllegalArgumentException.)) (do))))))
 
 (deftest if-nil-or-object               ;result type is Object
   (is (= '[["LOCAL 0: boolean x"]
@@ -235,7 +245,7 @@
            [L:0]
            (ICONST_0) (IRETURN)]
          (asm-expr ^boolean [^boolean test?]
-                   (if test? true))))
+                   (if test? true (do)))))
   (is (= '[["LOCAL 0: boolean test?"]
            (ILOAD_0)
            (IFEQ L:0)
@@ -253,7 +263,7 @@
            [L:0]
            (ICONST_0) (IRETURN)]
          (asm-expr ^int [^boolean test?]
-                   (if test? 2))))
+                   (if test? 2 (do)))))
   (is (= '[["LOCAL 0: boolean test?"]
            (ILOAD_0)
            (IFEQ L:0)
@@ -382,11 +392,11 @@
                  (def f (fn* f ^void []
                              nil))
                  (def g (fn* g ^void [^boolean x]
-                             (if x (f))
+                             (if x (f) (do))
                              ;; prevent RETURN from being moved into the `if`:
                              (f)))
                  (def h (fn* h ^void [^long x]
-                             (if (< x 0) (f))
+                             (if (< x 0) (f) (do))
                              ;; prevent RETURN from being moved into the `if`:
                              (f)))]))))
 
@@ -440,9 +450,9 @@
                  (def f (fn* f ^void []
                              nil))
                  (def g (fn* g ^void [^boolean x]
-                             (if x (f))))
+                             (if x (f) (do))))
                  (def h (fn* g ^void [^long x]
-                             (if (< x 0) (f))))]))))
+                             (if (< x 0) (f) (do))))]))))
 
 (deftest statm-position-when-not
   (is (= '[[(CLASS Vx [PUBLIC ABSTRACT] "pkg/ns0/_10")

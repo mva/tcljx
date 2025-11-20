@@ -32,7 +32,7 @@
                 (seq? form) type/list
                 (symbol? form) type/symbol
                 :else (error/throw "unsupported collection literal"
-                                    (txt (.getName (class form))))))
+                                   (txt (.getName (class form))))))
             (parse-collection-literal ^Expr [^long fctx form ^map form-meta]
               (let [x-meta (parse/meta this fctx form-meta nil)
                     coll-tp (type-of-quoted-form form)
@@ -68,16 +68,14 @@
                       (.set-expr* ^Assignable ce-dest fctx x-value))
                     (error/throw "cannot set!" (q (first args))))))
             
-            (parse-if ^Expr [^long fctx [_ & formr]]
-              ;; FIXME... change this to "3 arguments only"?
-              (syntax/first (next formr)) ;test and first path exist?
-              (syntax/empty-tail 3 formr) ;nothing after test and two paths?
-              (let [xs (.new-exprs expr-factory (count formr))]
-                (.set xs 0 (parse/arg this fctx (first formr)))
-                (.set xs 1 (parse/form this fctx (first (next formr))))
-                (when (= (.length xs) 3)
-                  (.set xs 2 (parse/form this fctx (first (nnext formr)))))
-                (.if-expr expr-factory fctx xs)))
+            (parse-if ^Expr [^long fctx [_ test path-true path-false :as form]]
+              (error/when-not (= (count form) 4)
+                (sym 'if) "takes exactly three arguments")
+              (.if-expr expr-factory fctx
+                        (doto (.new-exprs expr-factory 3)
+                          (.set 0 (parse/arg this fctx test))
+                          (.set 1 (parse/form this fctx path-true))
+                          (.set 2 (parse/form this fctx path-false)))))
             (parse-case*-guard ^Exprs [form]
               (if (seq? form)           ;accept empty list!
                 (let [gs (.new-exprs expr-factory (count form))]

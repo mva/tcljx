@@ -910,7 +910,8 @@
                    :implements
                    [clojure.lang.IType java.util.function.Function]
                    (apply [_ x] (if (identical? x nil)
-                                  (recur "foo"))))]))))
+                                  (recur "foo")
+                                  (do))))]))))
 
 (deftest method-reiver-test
   (is (= '[[(CLASS Vx [PUBLIC FINAL] "pkg/ns0/T"

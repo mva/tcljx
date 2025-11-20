@@ -390,4 +390,4 @@
                    [^Class/1 parameter-types]
                    :implements [java.lang.Record pkg.ns0.IArityType clojure.lang.IType]
                    (parameter-count [_] (alength parameter-types)))
-                 (if false (.parameter-count (new ArityType nil)))]))))
+                 (if false (.parameter-count (new ArityType nil)) (do))]))))
