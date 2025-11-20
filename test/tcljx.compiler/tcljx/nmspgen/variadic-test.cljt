@@ -510,8 +510,9 @@
              ["LOCAL 1: Object[] items"]
              (ALOAD_0)
              (ALOAD_1)
-             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;"
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
                             :bsm-invoke-fn [])
+             (CHECKCAST List)
              (ARETURN)]
             [(METHOD [PUBLIC STATIC] "apply-1" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"
@@ -573,8 +574,9 @@
              ["LOCAL 1: Object[] items"]
              (ALOAD_0)
              (ALOAD_1)
-             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/util/List;"
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;Ljava/lang/Object;)Ljava/lang/Object;"
                             :bsm-invoke-fn [])
+             (CHECKCAST List)
              (ARETURN)]
             [(METHOD [PUBLIC STATIC] "apply-1" "()Ltinyclj/lang/StaticFn;")
              (LDC [:bsm-static-fn "_" "Ltinyclj/lang/StaticFn;"

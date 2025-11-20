@@ -235,16 +235,22 @@
             [(METHOD [STATIC FINAL] "prim-result-generic-cast-1~1" "(Ljava/lang/Object;)I")
              ["LOCAL 0: Object g"]
              (ALOAD_0)
-             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)I" :bsm-invoke-fn [])
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;" :bsm-invoke-fn [])
+             (CHECKCAST Integer)
+             (INVOKEVIRTUAL Integer "intValue" "()I")
              (IRETURN)]
             [(METHOD [STATIC FINAL] "prim-result-generic-cast-2~1" "(Ljava/lang/Object;)I")
              ["LOCAL 0: Object g"]
              (ALOAD_0)
-             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)I" :bsm-invoke-fn [])
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;" :bsm-invoke-fn [])
+             (CHECKCAST Integer)
+             (INVOKEVIRTUAL Integer "intValue" "()I")
              (ISTORE_1)
              ["LOCAL 1: int i"]
              (ALOAD_0)
-             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)I" :bsm-invoke-fn [])
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)Ljava/lang/Object;" :bsm-invoke-fn [])
+             (CHECKCAST Integer)
+             (INVOKEVIRTUAL Integer "intValue" "()I")
              (IRETURN)]
             [(METHOD [STATIC FINAL] "prim-result-generic-conv~1" "(Ljava/lang/Object;)I")
              ["LOCAL 0: Object g"]

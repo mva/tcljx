@@ -158,7 +158,9 @@
              (ALOAD_0)
              (ILOAD_1)
              (ILOAD_2)
-             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;II)I" :bsm-invoke-fn [])
+             (INVOKEDYNAMIC "_" "(Ljava/lang/Object;II)Ljava/lang/Object;" :bsm-invoke-fn [])
+             (CHECKCAST Integer)
+             (INVOKEVIRTUAL Integer "intValue" "()I")
              (IRETURN)]
             
             [(METHOD [PUBLIC STATIC] "<clinit>" "()V")
