@@ -336,7 +336,8 @@
                          ^:unsynchronized-mutable ^int segment-id
                          ^:unsynchronized-mutable ^ClassDesc staged-segment
                          ^:unsynchronized-mutable ^ClassDesc last-segment
-                         ^HashSet !require-strs] ;implicitly mutable
+                         ^HashSet !require-strs ;implicitly mutable
+                         ^:unsynchronized-mutable ^ClassLoader eph-parent-ld]
   IPackageBuilder
   (class-for-name [_ nm]
     (when (pos? (.indexOf nm (int \.))) ;format must be pkgName.className
@@ -345,8 +346,8 @@
         (catch ClassNotFoundException _
           nil))))  
   (ephemeral-factory [_]
-    (let [ld (-> lookup .lookupClass .getClassLoader
-                 (rt/class-loader-instance "tclj-eph" nil))]
+    (let [ld (rt/class-loader-instance eph-parent-ld "tclj-eph" nil)]
+      (set! eph-parent-ld ld) ;stack ephemeral loaders on top of each other
       (-> (MethodHandles/lookup)
           (.findVirtual (class ld) "ephemeralClass" mt-Class-bytes)
           (.bindTo ld))))
@@ -434,7 +435,7 @@
 
 (defn mk-pkg-importer ^PackageBuilder [^Class capstone]
   (PackageBuilder. nil (.in (MethodHandles/publicLookup) capstone) nil nil nil
-                   0 -1 nil nil nil))
+                   0 -1 nil nil nil nil))
 
 (letfn [(mk-lookup-in-pkg ^MethodHandles$Lookup [^Runtime rt ^String ns-str]
           (let [bs (.build
@@ -460,7 +461,9 @@
   (defn mk-package-builder ^PackageBuilder [^Runtime rt ^Destination dest
                                             ^String pkg-name]
     (.prepare-package-directory dest pkg-name)
-    (PackageBuilder. pkg-name (mk-lookup-in-pkg rt pkg-name)
-                     (ConcurrentHashMap.) dest (ArrayList.) 0 first-segment-id
-                     (segment-cld pkg-name first-segment-id) rt/Object
-                     (HashSet.))))
+    (let [lookup-in-pkg (mk-lookup-in-pkg rt pkg-name)
+          ld-pkg (-> lookup-in-pkg .lookupClass .getClassLoader)]
+      (PackageBuilder. pkg-name lookup-in-pkg
+                       (ConcurrentHashMap.) dest (ArrayList.) 0 first-segment-id
+                       (segment-cld pkg-name first-segment-id) rt/Object
+                       (HashSet.) ld-pkg))))
