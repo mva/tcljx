@@ -49,9 +49,6 @@
                 mnm (str (.getSimpleName consumed-type) "Value")]
             (if (type/same? Number on-stack-type) ;not instanceof test!
               ;; type conversion from Number to primitive type
-              ;; FIXME... does conversion via Number.xxxValue() make
-              ;; RT.longCast(Object) etc. redundant, at least as far
-              ;; as tcljx is concerned?
               (-> (with-line-number xb consumer-fctx)
                   (.invokevirtual ConstantDescs/CD_Number mnm mtd))
               ;; type cast from box type to primitive type
