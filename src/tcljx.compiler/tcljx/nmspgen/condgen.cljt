@@ -354,10 +354,8 @@
                 (or candidate Object)
                 (let [tp (aget types i)]
                   (cond
-                    (type/polymorphic? tp)
-                    Object        ;may appear in logical-truth context
                     (or (type/poly-reference? tp)
-                        (.isPrimitive tp)
+                        (.isPrimitive tp) ;implied by type/polymorphic?
                         (identical? candidate tp))
                     (recur candidate (inc i))
                     (nil? candidate)

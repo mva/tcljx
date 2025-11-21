@@ -135,13 +135,7 @@
     (insn/progn xs x))
   (if-expr [_ fctx xs]
     (let [xs ^Insns xs
-          ;; FIXME... make empty path logic part of join-type in general?
-          tp (cond (identical? constgen/emitter-empty (.emitter xs 1))
-                   (insn/expr-type xs 2)
-                   (identical? constgen/emitter-empty (.emitter xs 2))
-                   (insn/expr-type xs 1)
-                   :else
-                   (condgen/join-type (.expr-types xs) 1 (.length xs)))]
+          tp (condgen/join-type (.expr-types xs) 1 (.length xs))]
       (-> (.emitter (condgen/logical-truth (.get xs 0) fctx))
           (condgen/mk-if tp (insn/emitter xs 1) (insn/emitter xs 2) fctx)
           (insn/mk-insn tp))))
