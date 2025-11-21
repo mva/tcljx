@@ -231,8 +231,7 @@
            (IRETURN)
            [L:0]
            (ALOAD_1)
-           (CHECKCAST Boolean)
-           (INVOKEVIRTUAL Boolean "booleanValue" "()Z")
+           (INVOKESTATIC RT "booleanCast" "(Ljava/lang/Object;)Z")
            (IRETURN)]
          (asm-expr [^boolean x ^Object y]
                    (if x x y)))))

@@ -179,15 +179,8 @@
                  (when (emit/typed-insns? xb fctx atypes (.emitters args))
                    (-> (emit/with-line-number xb fctx)
                        (.invokedynamic (.invokeDynamicEntry cpb bsm nat)))
-                   (if (identical? Boolean/TYPE consumed-type)
-                     ;; FIXME... or introduce a marker type to
-                     ;; distinguish context "JVM boolean" from
-                     ;; context "Clojure logical truth"?
-                     (do (.invokestatic xb rt/ClojureRT "booleanCast"
-                                        rt/mtd-boolean-Object)
-                         Boolean/TYPE)
-                     Object)))))
-            (insn/mk-insn Object)) ;do not advertise invocation as polymorphic
+                   Object))))
+            (insn/mk-insn Object))  ;non-polymorphic for logical truth
         (throw (insn/error-type "called function's type does not implement `IFn`" f)))))
   
   (block-bindings [this fctx bindings patch-letfn? recur-to-body? body]

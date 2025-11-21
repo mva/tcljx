@@ -2,7 +2,7 @@
   (:require
    (tcljx.data [context :as context] [type :as type] [ir :as ir]
                [reflect :as reflect])
-   (tcljx.nmspgen [util :as util]))
+   (tcljx.nmspgen [runtime :as rt] [util :as util]))
   (:import
    (tcljx.data.type Wrapper)
    (tcljx.data.ir CodeEmitter Entity MethodSpec)
@@ -68,7 +68,11 @@
           ;; pre: `consumed-type` is not void
           (cond
             (.isPrimitive consumed-type)
-            (unbox-reference xb consumer-fctx consumed-type on-stack-type)
+            (if (identical? Boolean/TYPE consumed-type)
+              ;; Clojure's idea of logical truth has priority here
+              (.invokestatic xb rt/ClojureRT "booleanCast"
+                             rt/mtd-boolean-Object)
+              (unbox-reference xb consumer-fctx consumed-type on-stack-type))
 
             (.isAssignableFrom consumed-type on-stack-type)
             nil
