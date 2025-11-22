@@ -104,10 +104,10 @@
            (ILOAD_0)
            (IFEQ L:0)
            (ALOAD_1)
-           (GOTO L:1)
+           (INVOKEVIRTUAL Integer "intValue" "()I")
+           (IRETURN)
            [L:0]
            (ALOAD_2)
-           [L:1]
            (INVOKEVIRTUAL Integer "intValue" "()I")
            (IRETURN)]
          (asm-expr ^int [^boolean test? ^Integer a ^Integer b]
@@ -118,10 +118,11 @@
            (ILOAD_0)
            (IFEQ L:0)
            (ALOAD_1)
-           (GOTO L:1)
+           (CHECKCAST Integer)
+           (INVOKEVIRTUAL Integer "intValue" "()I")
+           (IRETURN)
            [L:0]
            (ALOAD_2)
-           [L:1]
            (CHECKCAST Integer)
            (INVOKEVIRTUAL Integer "intValue" "()I")
            (IRETURN)]

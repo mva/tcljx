@@ -33,12 +33,12 @@
 ;;; materialize the primitive to trigger any NPE, before the known to
 ;;; be non-nil consumed value is produced.
 (defn with-adaption-barrier ^CodeEmitter [^Class produced-type ^CodeEmitter ce]
-  (if (type/polymorphic? produced-type)
+  (if (or (type/polymorphic? produced-type)
+          (not (.isPrimitive produced-type)))
     ce
     (^CodeEmitter fn [xb consumed-type then-leave?]
-     (if (or (identical? produced-type consumed-type) ;true for ~75% of calls
-             (= (.isPrimitive produced-type) (.isPrimitive consumed-type)) ;90%
-             (type/void? consumed-type))
+     (if (or (identical? produced-type consumed-type) ;true for ~90% of calls
+             (.isPrimitive consumed-type)) ;(.isPrimitive produced-type) holds
        (.emit-insn* ce xb consumed-type then-leave?)
        (.emit-insn* ce xb produced-type false)))))
 
