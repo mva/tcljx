@@ -26,7 +26,10 @@
 (defn- error-unresolved-member ^Exception [^seq ms ^Class owner ^String mnm
                                            ^Insns args ^String label]
   ;; label is one of "static", "virtual", or "constructor"
-  (let [entity (str label (when (not= label "constructor")
+  (let [label (if (and (= label "static") (= mnm "new"))
+                "constructor"
+                label)
+        entity (str label (when (not= label "constructor")
                             (if (.empty? args) " member" " method")))
         mnm (cond->> mnm (= label "virtual") (str "."))]
     (if (nil? (seq ms))
