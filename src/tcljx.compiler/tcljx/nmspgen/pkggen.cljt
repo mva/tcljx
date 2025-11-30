@@ -422,12 +422,16 @@
   ClassHierarchyResolver
   (getClassInfo [_ class-desc]
     (letfn [(lookup-chi ^ClassHierarchyResolver$ClassHierarchyInfo []
-              (let [cl (.resolveConstantDesc class-desc lookup)]
-                (if (.isInterface cl)
-                  (ClassHierarchyResolver$ClassHierarchyInfo/ofInterface)
-                  (-> (when-some [super (.getSuperclass cl)]
-                        (.get (.describeConstable super)))
-                      (ClassHierarchyResolver$ClassHierarchyInfo/ofClass)))))]
+              (try
+                (let [cl (.resolveConstantDesc class-desc lookup)]
+                  (if (.isInterface cl)
+                    (ClassHierarchyResolver$ClassHierarchyInfo/ofInterface)
+                    (-> (when-some [super (.getSuperclass cl)]
+                          (.get (.describeConstable super)))
+                        (ClassHierarchyResolver$ClassHierarchyInfo/ofClass))))
+                (catch IllegalAccessException _
+                  (.getClassInfo (ClassHierarchyResolver/defaultResolver)
+                                 class-desc))))]
       (or (.get chr-class-map class-desc)
           (let [chi (lookup-chi)]
             (.put chr-class-map class-desc chi)
