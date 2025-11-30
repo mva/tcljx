@@ -31,12 +31,17 @@
             (arg (if (zero? (style/extract style mask)) n-off n-on))
             mask)
           (apply-color ^long [^int offset ^int style-color]
-            (let [v (style/color-value style-color)]
+            (let [v (style/color-value style-color)
+                  map-bright (fn ^int [^int palette-id]
+                               (+ (bit-and 2r111 palette-id)
+                                  (-> (bit-shift-right palette-id 3)
+                                      (bit-and 2r1)
+                                      (* 60))))]
               (case (style/color-mode style-color)
                 (#_color-mode-default 0)
                 (arg (+ offset 9))
                 (#_color-mode-palette-4bit 1)
-                (arg (+ offset v))
+                (arg (+ offset (map-bright v)))
                 (#_color-mode-palette-8bit 2)
                 (arg (+ offset 8) 5 v)
                 (#_color-mode-rgb -1)
