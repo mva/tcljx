@@ -255,7 +255,7 @@
             "<unknown-file>"))
         (file-line-column ^StyledWriter [^StyledWriter w-raw ^Exception ex]
           (let [data (wr-data ex)
-                line (or (:form/line-of data) (:reader/line data))
+                line (or (:reader/line data) (:form/line-of data))
                 column (:reader/column data)]
             #_(.println System/err (str data))
             (cond-> (styled/nl w-raw)
