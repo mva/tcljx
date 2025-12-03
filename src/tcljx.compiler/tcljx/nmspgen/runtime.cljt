@@ -3,11 +3,14 @@
    (tcljx.data [config :as cfg] [files :as files] [ir :as ir])
    [clojure.core :as cc])
   (:import
+   (java.lang.classfile ClassHierarchyResolver
+                        ClassHierarchyResolver$ClassHierarchyInfo)
    (java.lang.constant ClassDesc MethodTypeDesc MethodHandleDesc ConstantDescs
                        DirectMethodHandleDesc$Kind)
    (java.lang.invoke MethodType MethodHandle MethodHandles MethodHandles$Lookup)
    (java.lang.reflect Member)
-   (java.net URLClassLoader URL))
+   (java.net URLClassLoader URL)
+   (java.util.concurrent ConcurrentHashMap))
   (:refer-clojure :exclude [symbol vector map set list]))
 
 (def ^:private Class ConstantDescs/CD_Class)
@@ -79,6 +82,8 @@
 (deftype Runtime [^ClassLoader app-ld
                   ^MethodHandles$Lookup lookup
                   ^MethodHandles$Lookup public-lookup ;for tcljx.nmspgen.publics
+                  ^ConcurrentHashMap dyn-chr-map ;updated by PackageBuilder
+                  ^ClassHierarchyResolver app-chr ;fallback for other classes
                   ^MethodHandle mh-push-file-context
                   ^MethodHandle mh-pop-file-context
                   ^MethodHandle mh-public-def-info ;for tcljx.nmspgen.publics
@@ -102,7 +107,14 @@
   (public-def-info [_ member]
     ^Object/1 (.invokeExact mh-public-def-info public-lookup member))
   (fn-arities [_ tp value]
-    ^MethodHandle/1 (.invokeExact mh-fn-arities public-lookup tp value)))
+    ^MethodHandle/1 (.invokeExact mh-fn-arities public-lookup tp value))
+
+  ClassHierarchyResolver
+  (getClassInfo [_ class-desc]
+    (or (.get dyn-chr-map class-desc)
+        (let [chi (.getClassInfo app-chr class-desc)]
+          (.put dyn-chr-map class-desc chi)
+          chi))))
 
 
 
@@ -131,7 +143,8 @@
     (let [cl (Class/forName "tinyclj.lang.CljCljMapper" false app-ld)
           f (.getDeclaredField cl "rtLookup")
           lookup (.get f nil)]
-      (Runtime. app-ld lookup (MethodHandles/publicLookup)
+      (Runtime. app-ld lookup (MethodHandles/publicLookup) (ConcurrentHashMap.)
+                (ClassHierarchyResolver/ofClassLoading app-ld)
                 (.resolveConstantDesc mhd-pushFileContext lookup)
                 (.resolveConstantDesc mhd-popFileContext lookup)
                 (.resolveConstantDesc mhd-publicDefInfo lookup)

@@ -16,7 +16,6 @@
    (java.lang.constant ClassDesc MethodTypeDesc ConstantDescs)
    (java.lang.invoke MethodType MethodHandle MethodHandles MethodHandles$Lookup)
    (java.util List ArrayList HashSet HashMap Map$Entry)
-   (java.util.concurrent ConcurrentHashMap)
    (java.util.function Consumer BiConsumer)))
 
 (definterface ISegmentBuilder
@@ -330,7 +329,7 @@
 ;;; Note: `segment-tasks` is shared with the top-level EntityFactory
 ;;; serving the clinit level, and indirectly mutated through it.
 (deftype PackageBuilder [^String pkg-name ^MethodHandles$Lookup lookup
-                         ^ConcurrentHashMap chr-class-map ^Destination dest
+                         ^Runtime rt ^Destination dest
                          ^ArrayList segment-tasks
                          ^:unsynchronized-mutable ^int end-of-segment
                          ^:unsynchronized-mutable ^int segment-id
@@ -392,7 +391,7 @@
                              (.collect (java.util.stream.Collectors/joining ","))))
           ncl (->> (capstone-handler last-segment all-requires entry-main)
                    (ir/mk-nmsp-class capstone-cld last-segment)
-                   (bwdi* this dest lookup))]
+                   (bwdi* rt dest lookup))]
       (.defined-class ncl)))
   (install-segment [this rdr segment env-factory]
     (let [clinit-statms (.clinit-statements segment)
@@ -405,7 +404,7 @@
       (doseq [^NmspClass ncl other-classes]
         ;; For future class building, declare that `ncl` extends some
         ;; superclass or is an interface class.
-        (.put chr-class-map (.this-class ncl)
+        (.put (.dyn-chr-map rt) (.this-class ncl)
               (if-some [super-class (.super-if-class ncl)]
                 (ClassHierarchyResolver$ClassHierarchyInfo/ofClass super-class)
                 (ClassHierarchyResolver$ClassHierarchyInfo/ofInterface))))
@@ -414,28 +413,10 @@
                (^java.util.function.Consumer fn ^void [^ClassBuilder cb]
                 (.accept (.class-handler ncl) cb)
                 (.with-source-file rdr cb)))
-             (bwdi* this dest lookup)))
+             (bwdi* rt dest lookup)))
       (->> (segment-handler rdr segment class-elements clinit-statms)
            (ir/mk-nmsp-class (.segment-class segment) (.super-class segment))
-           (bwdi* this dest lookup))))
-  
-  ClassHierarchyResolver
-  (getClassInfo [_ class-desc]
-    (letfn [(lookup-chi ^ClassHierarchyResolver$ClassHierarchyInfo []
-              (try
-                (let [cl (.resolveConstantDesc class-desc lookup)]
-                  (if (.isInterface cl)
-                    (ClassHierarchyResolver$ClassHierarchyInfo/ofInterface)
-                    (-> (when-some [super (.getSuperclass cl)]
-                          (.get (.describeConstable super)))
-                        (ClassHierarchyResolver$ClassHierarchyInfo/ofClass))))
-                (catch IllegalAccessException _
-                  (.getClassInfo (ClassHierarchyResolver/defaultResolver)
-                                 class-desc))))]
-      (or (.get chr-class-map class-desc)
-          (let [chi (lookup-chi)]
-            (.put chr-class-map class-desc chi)
-            chi)))))
+           (bwdi* rt dest lookup)))))
 
 (defn mk-pkg-importer ^PackageBuilder [^Class capstone]
   (PackageBuilder. nil (.in (MethodHandles/publicLookup) capstone) nil nil nil
@@ -468,6 +449,6 @@
     (let [lookup-in-pkg (mk-lookup-in-pkg rt pkg-name)
           ld-pkg (-> lookup-in-pkg .lookupClass .getClassLoader)]
       (PackageBuilder. pkg-name lookup-in-pkg
-                       (ConcurrentHashMap.) dest (ArrayList.) 0 first-segment-id
+                       rt dest (ArrayList.) 0 first-segment-id
                        (segment-cld pkg-name first-segment-id) rt/Object
                        (HashSet.) ld-pkg))))
