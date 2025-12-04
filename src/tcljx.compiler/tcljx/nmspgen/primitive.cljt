@@ -438,10 +438,9 @@
         (invoke-2 nary-bit-xor nil (.get args 0) x-one))))
   (def binary-bit-test
     (with-primitive-invoke [_ fctx form _ _ args]
-      (let [args ^Insns args, tp (insn/expr-type args 0)
-            x-shr (.invoke* binary-unsigned-shift-right fctx form nil -1 args)]
-        ;; note: tcljx.data.type's convert-to-boolean masks bit 0
-        (insn/mk-insn (.emitter x-shr) Boolean/TYPE)))))
+      (-> (.invoke* binary-unsigned-shift-right fctx form nil -1 args)
+          ;; note: tcljx.data.type's convert-to-boolean masks bit 0
+          (insn/cast-to Boolean/TYPE fctx)))))
 
 ;;; ------------------------------------------------------------------------
 

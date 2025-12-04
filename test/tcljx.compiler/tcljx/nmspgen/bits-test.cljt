@@ -198,7 +198,27 @@
            (ICONST_1)
            (IAND)
            (IRETURN)]
-         (asm-expr [^long x] (bit-test x 4)))))
+         (asm-expr [^long x] (bit-test x 4))))
+
+  (is (= '[["LOCAL 0: int x"]
+           (ILOAD_0)
+           (ICONST_4)
+           (IUSHR)
+           (ICONST_1)
+           (IAND)
+           (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+           (ARETURN)]
+      (asm-expr ^Object [^int x] (bit-test x 4))))
+  (is (= '[["LOCAL 0: long x"]
+           (LLOAD_0)
+           (ICONST_4)
+           (LUSHR)
+           (L2I)
+           (ICONST_1)
+           (IAND)
+           (INVOKESTATIC Boolean "valueOf" "(Z)Ljava/lang/Boolean;")
+           (ARETURN)]
+         (asm-expr ^Object [^long x] (bit-test x 4)))))
 
 (deftest shifted-one-test
   (is (= '[["LOCAL 0: int x"] (ILOAD_0) (ICONST_1) (IOR) (IRETURN)]
