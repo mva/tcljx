@@ -478,7 +478,7 @@
   (closure-level ^int [])               ;of this class/entity
   (closes-over? ^boolean [^Entity ent])
   (display-of! ^CodeEmitter [^Entity origin ^String local-name])
-  (value-of ^Expr [^Entity ent ^symbol form]) ;throw if (nil? (.value-type ent))
+  (value-of ^Expr [^Entity ent form]) ;throw if (nil? (.value-type ent))
   (invocation-of ^CodeEmitter [^Entity inv ^seq form])
   
   ;; Create an entity denoting the constant `value` of type `type`.

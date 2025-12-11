@@ -186,6 +186,8 @@
     opnd-type)
   (value-type-exact [this]
     (-> opnd-type (type/expr-to-logical) (reflect/describe-class)))
+  (invoke-methods [_]
+    ir/invoke-methods-dynamic)
   (entity-id [_]
     ir/entity-id-constant)
   (namespace-if-def [_]
