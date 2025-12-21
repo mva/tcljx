@@ -236,3 +236,8 @@ stage2-alpha: $(STAGE2_MINFO_ALPHA)
 stage2-compiler: $(STAGE2_MINFO_COMPILER)
 bootstrap-and-check: stage2-compiler stage1-rtiow
 bootstrap-mdir: bootstrap-and-check $(STAGE2_MDIR_JAR)/DONE
+
+install-into-bootstrap-tcljx: bootstrap-mdir
+	$(MAKE) -C ../bootstrap-tcljx pack JAR=$(BUILD_JAR)
+	cp -f  $(STAGE2_MDIR_JAR)/*.jar ../bootstrap-tcljx
+	$(MAKE) -C ../bootstrap-tcljx unpack JAR=$(BUILD_JAR)
