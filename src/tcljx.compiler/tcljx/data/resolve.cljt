@@ -31,7 +31,7 @@
 (def ^:private java-base-classes    ;almost all from package java.lang
   [Boolean Byte Character Class ClassLoader #_clojure.lang.Compiler Double
    Enum Float InheritableThreadLocal Integer Long Math Number Object
-   Package Process ProcessBuilder Runtime RuntimePermission
+   Package Process ProcessBuilder Runtime #_RuntimePermission
    Short StackTraceElement StrictMath String
    #_StringBuffer StringBuilder System Thread ThreadGroup ThreadLocal
    Throwable Void Appendable CharSequence Cloneable Comparable
