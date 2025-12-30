@@ -63,7 +63,7 @@
 
 (defn write-raw-to
   (^Recording [^Recording rec ^StyledWriter w]
-   ;; write all intervals, including an empty ones at the end
+   ;; write all intervals, including any empty ones at the end
    (write-raw-to rec w Integer/MAX_VALUE))
   (^Recording [^Recording rec ^StyledWriter w ^int end]
    (let [cs (.text rec)]
