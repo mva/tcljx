@@ -1,0 +1,94 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.diff-test
+  (:require (tcljx.alpha.pp [diff :as diff] [prettydiff :as prettydiff])
+            [tcljx.alpha.ptest :refer :all]))
+
+(defn diff-lines [form-a form-b]
+  (let [trace (diff/two-forms-trace form-a form-b)
+        dt (prettydiff/line-text trace)]
+    #_(prn :trace (partition 2 trace))
+    (vector (-> dt .line-0 .text) (-> dt .line-1 .text))))
+
+
+;;; see https://difftastic.wilfred.me.uk/tricky_cases.html
+
+(deftest adding-delimiters
+  ;; pairings: ".(" "xx" ".)" with score 2
+  (is (= [" x"
+          "(x)"]
+         (diff-lines 'x '(x)))))
+
+(deftest changing-delimiters
+  ;; pairings: ".[" "(." "xx" ".]" ")." with score 4
+  (is (= ["(x)"
+          "[x]"]
+         (diff-lines '(x) '[x]))))
+
+(deftest expanding-delimiters
+  ;; pairings: "[[" "((" "xx" ".y" "))" "y." "]]" with score 2
+  (is (= ["[(x) y]"
+          "[(x y)]"]
+         (diff-lines '[(x) y] '[(x y)]))))
+
+(deftest contracting-delimiters
+  ;; pairings: "[[" "((" "xx" ".)" "yy" ")." "]]" with score 2
+  (is (= ["[(x  y)]"
+          "[(x) y]"]
+         (diff-lines '[(x y)] '[(x) y]))))
+
+(deftest disconnected-delimiters
+  ;; pairings: "((" "ff" ".(" ".n" ".)" "((" "bb" "))" "))" with score 3
+  (is (= ["(f     (b))"
+          "(f (n) (b))"]
+         (diff-lines '(f (b)) '(f (n) (b))))))
+
+(deftest rewrapping-large-nodes
+  ;; moving just the "(" includes "[[foo]]" in the list
+  (is (= ["[ [[foo]] (x y)]"
+          "[([[foo]]  x y)]"]
+         (diff-lines '[[[foo]] (x y)] '[([[foo]] x y)]))))
+
+(deftest reordering-within-a-list
+  ;; pairings: "((" ".y" "xx" "y." "))" with score 2
+  (is (= ["(  x y)"
+          "(y x)"]
+         (diff-lines '(x y) '(y x)))))
+
+(deftest middle-insertions
+  ;; wraps the bar list within the extra list
+  (is (= ["[foo        (bar (123))]"
+          "[foo (extra (bar (123)))]"]
+         (diff-lines '[foo (bar (123))]
+                     '[foo (extra (bar (123)))]))))
+
+(deftest sliders-nested
+  ;; a variant of middle-insertions above
+  (is (= ["[old1       (old2)]"
+          "[old1 (new1 (old2))]"]
+         (diff-lines '[old1 (old2)]
+                     '[old1 (new1 (old2))]))))
+
+(deftest minimising-depth-changes
+  ;; latches onto the first `foo` match, while matching on the second
+  ;; one would have been nicer here; no way to improve on this as long
+  ;; as the shortest path search is agnostic of nesting depth
+  (is (= ["(do (when true (foo 123)) (foo 456))"
+          "(do            (foo 789))"]
+         (diff-lines '(do (when true (foo 123)) (foo 456))
+                     '(do (foo 789))))))
+
+;;; More of Difftastic's tricky cases do not apply: Coming from data
+;;; instead of source code there are no comments to deal with.  With
+;;; diff happening on the level of whole tokens, the amount of changes
+;;; within string tokens are ignored.  Tokenizing forms does not
+;;; introduce variable whitespace or commas.  The tokenizer tries to
+;;; impose an order on sets and maps before writing them out.  While
+;;; the shortest path search does not care about syntax, printing the
+;;; diff's trace expects syntactically valid grouping in the token
+;;; paths.

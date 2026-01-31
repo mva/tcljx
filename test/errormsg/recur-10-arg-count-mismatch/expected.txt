@@ -1,3 +1,3 @@
 tcljx.data.error.WrongInfo
-[31m### [0mrecur expects 1 arguments (got: [[1mjava.lang.String[0m [1mjava.lang.Void[0m])
-[31m@@@ [0mtest/errormsg/recur-10-arg-count-mismatch/src/pkg/ns0.cljt:[1m2[0m
+[31m### [mrecur expects 1 arguments (got: [[1mjava.lang.String[m [1mjava.lang.Void[m])
+[31m@@@ [mtest/errormsg/recur-10-arg-count-mismatch/src/pkg/ns0.cljt:[1m2[m

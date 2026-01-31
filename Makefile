@@ -6,10 +6,8 @@ JAVA=$(JAVA_BIN)java
 JAVAC=$(JAVA_BIN)javac
 JAVAP=$(JAVA_BIN)javap
 
-# Note: only textflow__terminal requires --enable-native-access
-JAVA_OPTS=-p $(BOOTSTRAP_MDIR) --add-modules tcljc.core --enable-native-access=ALL-UNNAMED
+JAVA_OPTS=-p $(BOOTSTRAP_MDIR) --add-modules tcljc.core
 
-#MAIN_NS=tcljx.alpha.textflow__terminal
 MAIN_NS=tcljx.main
 RUN_TESTS_NS=tcljx.run-tests
 
@@ -36,7 +34,7 @@ run-jfr: compile
 
 
 clean:
-	rm -rf support/DONE support/*.class "$(DEST_DIR)"/* "/tmp/$(USER)"/tcljx* *.class textflow__termios.out hs_err_pid*.log replay_pid*.log
+	rm -rf support/DONE support/*.class "$(DEST_DIR)"/* "/tmp/$(USER)"/tcljx* *.class hs_err_pid*.log replay_pid*.log
 
 print-line-count:
 	find src/tcljx.compiler/tcljx -name "*.cljt" | grep -v src/tcljx.compiler/tcljx/alpha/ | xargs wc -l | sort -n
@@ -46,13 +44,6 @@ print-lines-of-code:
 
 .PHONY: compile watch-and-compile test watch-and-test clean
 
-
-
-textflow__termios.out: src/tcljx.compiler/tcljx/alpha/textflow__termios.c
-	gcc -Wall -o $@ $^
-
-src/tcljx.compiler/tcljx/alpha/textflow__termios.cljt: textflow__termios.out
-	./$^ >$@
 
 # ------------------------------------------------------------------------
 # Support for strict class loader isolation between bootstrapping

@@ -1,3 +1,3 @@
 tcljx.data.error.WrongInfo
-[31m### [0minvalid octal escape sequence length: \o0000
-[31m@@@ [0mtest/errormsg/reader-41-invalid-octal-length/src/pkg/ns0.cljt:[1m2[0m:0
+[31m### [minvalid octal escape sequence length: \o0000
+[31m@@@ [mtest/errormsg/reader-41-invalid-octal-length/src/pkg/ns0.cljt:[1m2[m:0

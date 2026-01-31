@@ -7,12 +7,11 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.alpha.pp.style)
 
-;;; https://en.wikipedia.org/wiki/ANSI_escape_code#Select_Graphic_Rendition_parameters
+;;; Low-level API to compose style directives.  Options offered are a
+;;; subset of the ones implemented by most terminal programs.  Styles
+;;; are encoded as 64 bit long values.
 
-(def conceal-off 0)
-(def conceal-invisible 1) ;can cut&paste; Wikipedia: "Not widely supported"
-(def conceal-XXX 2)                     ;via replacement text
-(def conceal-spaces 3)                  ;via replacement text
+;;; https://en.wikipedia.org/wiki/ANSI_escape_code#Select_Graphic_Rendition_parameters
 
 (def intensity-normal 0)
 (def intensity-bright 1)
@@ -102,30 +101,33 @@
 ;;; ------------------------------------------------------------------------
 
 ;;; State bits from LSB to MSB:
-;;; 2 (conceal) -- at LSB to extract text rewrite information via masking
 ;;; 2 (intensity)
 ;;; 1 (bold)
 ;;; 1 (italic)
 ;;; 1 (underline)
 ;;; 1 (strikethrough)
 ;;; 1 (overline)
+;;; 1 (conceal)
 ;;; 5 (currently unused)
+;;; 1 (reversed)
 ;;; 25 (foreground color)
 ;;; 25 (background color)
 
-(def mask-conceal (bit-shift-left (long 2r11) 0))
-(def mask-intensity (bit-shift-left (long 2r11) 2))
-(def mask-bold (bit-shift-left (long 2r1) 4))
-(def mask-italic (bit-shift-left (long 2r1) 5))
-(def mask-underline (bit-shift-left (long 2r1) 6))
-(def mask-strikethrough (bit-shift-left (long 2r1) 7))
-(def mask-overline (bit-shift-left (long 2r1) 8))
-(def mask-unused (bit-shift-left 2r11111 9))
+(def mask-intensity (bit-shift-left (long 2r11) 0))
+(def mask-bold (bit-shift-left (long 2r1) 2))
+(def mask-italic (bit-shift-left (long 2r1) 3))
+(def mask-underline (bit-shift-left (long 2r1) 4))
+(def mask-strikethrough (bit-shift-left (long 2r1) 5))
+(def mask-overline (bit-shift-left (long 2r1) 6))
+(def mask-conceal (bit-shift-left (long 2r11) 7))
+(def mask-unused (bit-shift-left 2r11111 8))
+(def mask-reversed (bit-shift-left (long 2r1) 13))
 (def mask-background (bit-shift-left (long mask-color) 14))
 (def mask-foreground (bit-shift-left (long mask-color) 39)) ;at end of long
-(assert (= -1 (bit-or mask-conceal mask-intensity mask-bold mask-italic
-                      mask-underline mask-strikethrough mask-overline
-                      mask-unused mask-background mask-foreground)))
+(assert (= -1 (bit-or mask-intensity mask-bold mask-italic mask-underline
+                      mask-strikethrough mask-overline mask-conceal
+                      mask-unused
+                      mask-reversed mask-background mask-foreground)))
 
 (def default 0l)
 
@@ -145,14 +147,6 @@
   (with style mask 0))
 (defn extract ^int [^long style ^long mask]
   (int (Long/compress style mask)))
-
-(defn conceal
-  (^long [^int conceal-mode]
-   (with default mask-conceal conceal-mode))
-  (^long [^long style ^int conceal-mode]
-   (with style mask-conceal conceal-mode)))
-(defn extract-conceal ^int [^long style]
-  (int (bit-and mask-conceal style))) ;cheapest approach only possible at bit 0
 
 (defn intensity
   (^long [^int intensity-mode]
@@ -211,6 +205,27 @@
    (with style mask-overline overline-mode)))
 (defn extract-overline ^int [^long style]
   (extract style mask-overline))
+
+;; Can cut & paste.  Wikipedia: "Not widely supported".
+(defn conceal
+  (^long []
+   (with default mask-conceal))
+  (^long [^long style]
+   (with style mask-conceal))
+  (^long [^long style ^int conceal-mode]
+   (with style mask-conceal conceal-mode)))
+(defn extract-conceal ^int [^long style]
+  (extract style mask-conceal))
+
+(defn reversed
+  (^long []
+   (with default mask-reversed))
+  (^long [^long style]
+   (with style mask-reversed))
+  (^long [^long style ^int reversed-mode]
+   (with style mask-reversed reversed-mode)))
+(defn extract-reversed ^int [^long style]
+  (extract style mask-reversed))
 
 (defn fg
   (^long [^int color]

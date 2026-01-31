@@ -1,0 +1,40 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.buffer-test
+  (:require (tcljx.alpha.pp [style :as style] [styled :as styled]
+                            [ansi :as ansi] [buffer :as buffer])
+            [tcljx.alpha.pp.styled :refer [write nl]]
+            [tcljx.alpha.ptest :refer :all]))
+
+(defmacro with-buf-> [& body]
+  `(let [w-buffer# (buffer/buffer-writer)]
+     (-> w-buffer# ~@body)
+     (let [w-string# (java.io.StringWriter.)]
+       (with-open [w-ansi# (ansi/styled-writer w-string#)]
+         (buffer/transfer-to (buffer/to-text w-buffer#) w-ansi#))
+       (.toString w-string#))))
+
+(deftest buffer-empty-test
+  (is (= ""
+         (with-buf->)))
+  (is (= ""
+         (with-buf-> (write "") (write "")))))
+
+(deftest buffer-unstyled-test
+  (is (= "Hello\n"
+         (with-buf-> (write "Hello"))))
+  (is (= "Hello\n"
+         (with-buf-> (write "") (write "Hello"))))
+  (is (= "Hello\n"
+         (with-buf-> (write "Hello") (write "")))))
+
+(deftest buffer-styled-test
+  (is (= "\u001b[1mHello\u001b[m World\n"
+         (with-buf-> (write (style/bold) "Hello") (write " World"))))
+  (is (= "Hello \u001b[1mHello\u001b[m\n"
+         (with-buf-> (write "Hello ") (write (style/bold) "Hello")))))

@@ -1,0 +1,130 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.treetext
+  (:require (tcljx.alpha.pp [styled :as styled] [buffer :as buffer]))
+  (:import (tcljx.alpha.pp.buffer BufferWriter StyledText)
+           (java.util Arrays)))
+
+;;; A highly specialized writer for `stringify` to pass tree
+;;; structured text to `prettify`.  Text is serialized into a styled
+;;; buffer, with sufficient information on top to 1) identify a group
+;;; of text nodes, 2) obtain its width when written out as a line of
+;;; text, and 3) get the additional indentation applied to child nodes
+;;; when written out across multiple line.
+;;;
+;;; The structure of the text, i.e. how it is divided into independent
+;;; parts, reflects the output side's needs more that of the input
+;;; data.  For example, opening and closing delimiters of groups are
+;;; lumped in with the first and last child element of the group,
+;;; instead of being independent text fragments.
+;;;
+;;; Consider this namespace to be a set of private helper functions
+;;; for `prettify` and `stringify`.  It is unlikely to be useful in
+;;; any other context.
+
+(def ^:private mask-node-end (unsigned-bit-shift-right -1 2)) ;2^30 indices
+(defn- node-info ^int [^int node-indent ^int node-end]
+  (if (= (bit-and node-end mask-node-end) node-end)
+    (bit-or (bit-shift-left node-indent 30) node-end)
+    (throw (IllegalArgumentException.))))
+(defn- indent-of ^int [^int node-info]
+  (unsigned-bit-shift-right node-info 30))
+(defn- end-of ^int [^int node-info]
+  (bit-and mask-node-end node-info))
+
+;;; Whitespace is only ever inserted as a single space between child
+;;; nodes of an inner node.  The `end-of-node` value always points to
+;;; the closest whitespace following the node.  That is, the end of
+;;; the last child node of a group subsumes the closing delimiter of
+;;; its parent node, and possibly the one of the parent's parent, and
+;;; so on.
+(defn end-of-node ^int [^int/1 node-info ^int node-id] ;returns character index
+  (end-of (aget node-info node-id)))
+
+;;; The `indent-of-node` of a collection (list, vector, map, or set)
+;;; is the width of its opening delimiter, and zero for all other
+;;; nodes.
+(defn indent-of-node ^int [^int/1 node-info ^int node-id] ;returns char count
+  (indent-of (aget node-info node-id)))
+
+
+;;; Immutable representation of a form rendered as a single long line,
+;;; with just enough additional information to easily implement
+;;; pretty-printing on top.
+;;;
+;;; The root of the tree is located at id 0.  It is either a form, or
+;;; a synthetic undelimited group of forms.  Inner nodes are usually
+;;; collections, but can also be a map entry, a meta plus value pair,
+;;; or the synthetic root group.  Leaf nodes represent the text of any
+;;; non-collection form and also empty collections.
+;;; 
+;;; Note: `text` ends with a single synthetic space, and the last
+;;; entry of `node-info` is an empty node with an `end-of`
+;;; of `(.length text)`.  These synthetic entries enable a lookahead
+;;; of one, which in turn makes downstream processing easier.
+(deftype TreeText [^StyledText styled-text ^int/1 node-info])
+
+
+(definterface TreeWriter
+  ;; Allocate id for a node whose properties are defined later.  From
+  ;; a tree traversal perspective this method is called in pre-order,
+  ;; i.e. before beginning processing of the node.
+  (allocate-node-id ^int [])
+
+  ;; Optionally set the node's identation level delta to be applied to
+  ;; its child nodes .  Defaults to zero, with the other two valid
+  ;; values for `d` being 1 and 2.
+  (set-indent-of ^TreeWriter [^int node-id ^int d]) ;one of 0 (default), 1, or 2
+  
+  ;; Pick up the end of the node in the text string and store it in
+  ;; the node information of `node-id`.  The actual value being stored
+  ;; is the current writer position plus `distance-to-flex-space`, and
+  ;; the text at the resulting position must be a space character.
+  ;; This method is called in post-order, after the node has been
+  ;; processed.
+  (mark-end-of-node ^TreeWriter [^int node-id ^int distance-to-flex-space])
+
+  ;; Append `cs` to the linear text representation.
+  (append ^TreeWriter [^String cs])
+
+  ;; Collected the accumulated text and node information into a
+  ;; immutable representation for use by the pretty-printer.
+  (to-text ^TreeText []))
+
+(deftype TreeWriterImpl [^BufferWriter text-writer
+                         ^:unsynchronized-mutable ^int prev-node-id
+                         ^:unsynchronized-mutable ^int/1 anode-info]
+  TreeWriter
+  (allocate-node-id [_]
+    (letfn [(expand ^int/1 [^int/1 a]
+              (Arrays/copyOf a (bit-shift-left (alength a) 1)))]
+      (while (>= (inc prev-node-id) (alength anode-info))
+        (set! anode-info (expand anode-info)))
+      (set! prev-node-id (inc prev-node-id))))
+  (set-indent-of [this node-id d]
+    (aset anode-info node-id d)
+    this)
+  (mark-end-of-node [this node-id distance-to-flex-space]
+    (aset anode-info node-id (node-info (aget anode-info node-id)
+                                        (+ (.length text-writer)
+                                           distance-to-flex-space)))
+    this)
+  (append ^TreeWriter [this ^String cs]
+    (styled/write text-writer cs)
+    this)
+  (to-text [_]
+    (TreeText. (.to-text text-writer)
+               (Arrays/copyOf anode-info (inc prev-node-id)))))
+
+(defn tree-writer ^TreeWriter []
+  (TreeWriterImpl. (buffer/buffer-writer) -1 (new int/1 8)))
+
+(defn to-text! ^TreeText [^TreeWriter w]
+  (-> (.append w " ")                ;synthetic "always present" space
+      (.mark-end-of-node (.allocate-node-id w) 0) ;synthetic node info
+      (.to-text)))

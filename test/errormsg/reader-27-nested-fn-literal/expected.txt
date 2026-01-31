@@ -1,3 +1,3 @@
 tcljx.data.error.WrongInfo
-[31m### [0mnested fn literals #(...) are not allowed
-[31m@@@ [0mtest/errormsg/reader-27-nested-fn-literal/src/pkg/ns0.cljt:[1m2[0m:2
+[31m### [mnested fn literals #(...) are not allowed
+[31m@@@ [mtest/errormsg/reader-27-nested-fn-literal/src/pkg/ns0.cljt:[1m2[m:2

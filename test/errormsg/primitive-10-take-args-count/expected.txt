@@ -1,3 +1,3 @@
 tcljx.data.error.WrongInfo
-[31m### [1;39mclojure.core.primitive/bit-shift-left[0m takes 2 arguments (got: 3)
-[31m@@@ [0mtest/errormsg/primitive-10-take-args-count/src/pkg/ns0.cljt:[1m2[0m
+[31m### [m[1mclojure.core.primitive/bit-shift-left[m takes 2 arguments (got: 3)
+[31m@@@ [mtest/errormsg/primitive-10-take-args-count/src/pkg/ns0.cljt:[1m2[m

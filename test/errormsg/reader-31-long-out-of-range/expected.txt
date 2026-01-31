@@ -1,3 +1,3 @@
 tcljx.data.error.WrongInfo
-[31m### [0mvalue out of range for long: 9223372036854775808
-[31m@@@ [0mtest/errormsg/reader-31-long-out-of-range/src/pkg/ns0.cljt:[1m2[0m:0
+[31m### [mvalue out of range for long: 9223372036854775808
+[31m@@@ [mtest/errormsg/reader-31-long-out-of-range/src/pkg/ns0.cljt:[1m2[m:0

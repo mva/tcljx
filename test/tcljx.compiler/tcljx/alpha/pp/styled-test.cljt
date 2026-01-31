@@ -1,0 +1,108 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.styled-test
+  (:require (tcljx.alpha.pp [style :as style] [styled :as styled])
+            [tcljx.alpha.pp.styled :refer [write nl]]
+            [tcljx.alpha.ptest :refer :all]))
+
+(defmacro with-plain-> [& body]
+  `(let [w-string# (java.io.StringWriter.)]
+     (with-open [w-plain# (styled/plain-writer w-string#)]
+       (-> w-plain# ~@body))
+     (.toString w-string#)))
+
+(defmacro with-cp-> [& body]
+  `(with-open [w-plain# (styled/plain-writer (java.io.Writer/nullWriter))]
+     (-> w-plain# ~@body)
+     (.code-points-in-line w-plain#)))
+
+
+;;; "Left and Lower One Eighth Block" U+1FB7C / UTF-16 Encoding: 0xD83E 0xDF7C
+;;; "Right and Lower One Eighth Block" U+1FB7F / UTF-16 Encoding: 0xD83E 0xDF7F
+(deftest code-points-in-line-test
+  (is (= 0 (with-cp->)))
+  (is (= 0 (with-cp-> (write ""))))
+  (is (= 1 (with-cp-> (write "A"))))
+  (is (= 2 (with-cp-> (write "\uD83E\uDF7C\uD83E\uDF7F"))))
+
+  (is (= 0 (with-cp-> (write "X") (nl))))
+  (is (= 0 (with-cp-> (write "X") (nl) (write ""))))
+  (is (= 1 (with-cp-> (write "X") (nl) (write "A"))))
+  (is (= 2 (with-cp-> (write "X") (nl) (write "\uD83E\uDF7C\uD83E\uDF7F")))))
+
+(deftest empty-test
+  (is (= ""
+         (with-plain->)))
+  (is (= ""
+         (with-plain-> (write "") (write ""))))
+
+  (is (= "Hello\n"
+         (with-plain-> (write "Hello"))))
+  (is (= "Hello\n"
+         (with-plain-> (write "") (write "Hello"))))
+  (is (= "Hello\n"
+         (with-plain-> (write "Hello") (write "")))))
+
+(deftest discard-style-test
+  (is (= "Hello\n"
+         (with-plain-> (write (style/bold) "Hello")))))
+
+(deftest nl-test
+  (is (= "\n"
+         (with-plain-> (nl))))
+  (is (= "foo\n"
+         (with-plain-> (write "foo") (nl))))
+  (is (= "\nfoo\n"
+         (with-plain-> (nl) (write "foo"))))
+  (is (= "\n\n"
+         (with-plain-> (nl) (nl)))))
+
+;;; ------------------------------------------------------------------------
+
+(defmacro with-indent-> [& body]
+  `(let [w-string# (java.io.StringWriter.)]
+     (with-open [w-plain# (styled/plain-writer w-string#)
+                 w-indent# (styled/indent-writer w-plain# "..")]
+       (-> w-indent# ~@body))
+     (.toString w-string#)))
+
+(deftest indent-test
+  (is (= ""
+         (with-indent->)))
+  (is (= "\n..\n"
+         (with-indent-> (nl))))
+  (is (= "\n..\n..\n"
+         (with-indent-> (nl) (nl))))
+
+  (is (= "a\n"
+         (with-indent-> (write "a"))))
+  (is (= "a\n..b\n"
+         (with-indent-> (write "a") (nl) (write "b"))))
+  (is (= "a\n..b\n..\n"
+         (with-indent-> (write "a") (nl) (write "b") (nl))))
+
+  (is (= "\n\n" ;first \newline is the raw text, second one from close
+         (with-indent-> (write "\n")))))
+
+;;; ------------------------------------------------------------------------
+
+(defmacro with-lines-> [& body]
+  `(let [w-string# (java.io.StringWriter.)]
+     (with-open [w-plain# (styled/plain-writer w-string#)
+                 w-lines# (styled/lines-writer w-plain#)]
+       (-> w-lines# ~@body))
+     (.toString w-string#)))
+
+(deftest lines-test
+  (is (= "" (with-lines->)))
+  
+  (is (= "\n" (with-lines-> (nl))))
+  (is (= "\n\n" (with-lines-> (nl) (nl))))
+
+  (is (= "\n" (with-lines-> (write "\n"))))
+  (is (= "\n\n" (with-lines-> (write "\n\n")))))

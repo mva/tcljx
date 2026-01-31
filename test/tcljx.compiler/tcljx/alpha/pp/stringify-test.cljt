@@ -1,0 +1,187 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.stringify-test
+  (:require (tcljx.alpha.pp [treetext :as treetext] [stringify :as stringify]
+                            [treetext-test :as ttt])
+            [tcljx.alpha.ptest :refer :all])
+  (:import (tcljx.alpha.pp.treetext TreeText)))
+
+(defn tree-str ^String [^TreeText txt]
+  (-> txt .styled-text .text))
+
+;;; Emit `forms` as a single long line.  Not pretty, but very simple.
+(defn stringify-forms ^String [forms]
+  (-> (stringify/forms-tree forms) (ttt/check-text) (tree-str)))
+(defmacro is-str* [exp forms]
+  (with-meta `(is (= ~exp (stringify-forms ~forms)))
+    (meta &form)))                      ;provide correct :line to `is`
+
+(defn stringify-form ^String [form]
+  (-> (stringify/form-tree form) (ttt/check-text) (tree-str)))
+(defmacro is-str [exp form]
+  (with-meta `(is (= ~exp (stringify-form (object ~form))))
+    (meta &form)))                      ;provide correct :line to `is`
+
+
+(deftest stringify-root-test
+  (is-str* " " ())
+  (is-str* " " [])
+  
+  (is-str* "1 " '(1))
+  (is-str* "1 2 " '(1 2)))
+
+
+(deftest stringify-form-test
+  ;; atomic text
+  (is-str "nil " nil)
+  (is-str "true " true)
+  (is-str "false " false)
+  (is-str "sym " 'sym)
+  (is-str ":kw " :kw)
+  (is-str "123 " 123)
+  (is-str "\\space " \space)
+  (is-str "\\newline " \newline)
+  (is-str "\\A " \A)
+  (is-str "\\u0000 " \u0000)
+  (is-str "\\u007f " \u007f)
+
+  ;; numbers
+  (is-str "1.0 " 1.0)
+  (is-str "1.0f " 1.0f)
+  (is-str "123l " 123l)
+  (is-str "##Inf " Double/POSITIVE_INFINITY)
+  (is-str "##-Inf " Double/NEGATIVE_INFINITY)
+  (is-str "##NaN " Double/NaN)
+  
+  ;; strings (incl escapes for \" and \\)
+  (is-str "\"\" " "")
+  (is-str "\"foo\" " "foo")
+  (is-str "\"\\\\\" " "\\")
+  (is-str "\"\\\"\" " "\"")
+  
+  ;; patterns
+  (is-str "#\".\" " #".")
+  (is-str "#\"\\\\\" " #"\\")
+  (is-str "#\"\\\"\" " #"\"")
+  (is-str "#\"\\Q*\\E\" " #"\Q*\E")
+  (is-str "#\"\\Q\\\"\\E\" " #"\Q\"\E")
+  
+  ;; collection: list
+  (is-str "() " ())
+  (is-str "(1) " '(1))
+  (is-str "(1 2) " '(1 2))
+  
+  ;; collection: vector
+  (is-str "[] " [])
+  (is-str "[1] " [1])
+  (is-str "[1 2] " [1 2])
+
+  ;; collection: map
+  (is-str "{} " {})
+  (is-str "{:a 123} " {:a 123})
+  (is-str "{:a 1, :b 2} " {:a 1, :b 2})
+  ;; order of entries not deterministic for two or more
+  
+  ;; collection: set
+  (is-str "#{} " #{})
+  (is-str "#{:a} " #{:a})
+  (is-str "#{\"a\" \"b\"} " #{"a" "b"})
+  ;; order of elements not deterministic for two or more
+  )
+
+(deftest stringify-map-entry-test
+  (let [m (array-map :a 123 :b 345)]
+    (is-str "{:a 123, :b 345} " m)
+    (is-str "([:a 123] [:b 345]) " (seq m))))
+
+(deftest stringify-meta-test
+  (is (= "^{} () "
+         (stringify-form ^{} ())))
+  (is (= "^{\"abc\" true} () "
+         (stringify-form ^{"abc" true} ())))
+  (is (= "^{\"abc\" true} () "
+         (stringify-form '^{"abc" true} ())))
+  
+  (is (= "^{} [] "
+         (stringify-form ^{} [])))
+  (is (= "^{\"abc\" true} [] "
+         (stringify-form ^{"abc" true} [])))
+
+  ;; shorthand notation
+  (is (= "^:foo sym "
+         (stringify-form '^:foo sym)))
+  (is (= "^String sym "
+         (stringify-form '^String sym))))
+
+
+(deftest forms-node-end-test
+  (let [txt (stringify/forms-tree nil)]
+    (is (= " " (tree-str txt)))
+    (is (= [0 1] (ttt/end-of-nodev txt))))
+
+  (let [txt (stringify/forms-tree '(:foo))]
+    (is (= ":foo " (tree-str txt)))
+    (is (= [4 4 5] (ttt/end-of-nodev txt)))))
+
+(deftest form-node-end-test
+  (let [txt (stringify/form-tree '())]
+    (is (= "() " (tree-str txt)))
+    (is (= [2 3] (ttt/end-of-nodev txt))))
+
+  (let [txt (stringify/form-tree '(a))]
+    (is (= "(a) " (tree-str txt)))
+    (is (= [3 3 4] (ttt/end-of-nodev txt))))
+
+  (let [txt (stringify/form-tree '(a b))]
+    (is (= "(a b) " (tree-str txt)))
+    (is (= [5 2 5 6] (ttt/end-of-nodev txt)))))
+
+
+(deftest root-info-test
+  (let [txt (stringify/forms-tree (list))]
+    (is (= " " (tree-str txt)))
+    (is (= [0 1] (ttt/end-of-nodev txt)))
+    (is (= [0 0] (ttt/indent-of-nodev txt))))
+  (let [txt (stringify/forms-tree (list :foo))]
+    (is (= ":foo " (tree-str txt)))
+    (is (= [4 4 5] (ttt/end-of-nodev txt)))
+    (is (= [0 0 0] (ttt/indent-of-nodev txt)))))
+
+(deftest list-info-test
+  (let [txt (stringify/form-tree '())]
+    (is (= "() " (tree-str txt)))
+    (is (= [2 3] (ttt/end-of-nodev txt)))
+    (is (= [1 0] (ttt/indent-of-nodev txt)))))
+
+(deftest vector-info-test
+  (let [txt (stringify/form-tree '[])]
+    (is (= "[] " (tree-str txt)))
+    (is (= [2 3] (ttt/end-of-nodev txt)))
+    (is (= [1 0] (ttt/indent-of-nodev txt)))))
+
+(deftest map-info-test
+  (let [txt (stringify/form-tree '{:a :B})]
+    (is (= "{:a :B} " (tree-str txt)))
+    (is (= [7 7 3 7 8] (ttt/end-of-nodev txt)))
+    (is (= [1 0 0 0 0] (ttt/indent-of-nodev txt))))
+  (let [txt (stringify/form-tree '{:a :B, :c :D})]
+    (is (= "{:a :B, :c :D} " (tree-str txt)))
+    (is (= [14 7 3 7 14 10 14 15] (ttt/end-of-nodev txt)))
+    (is (= [1 0 0 0 0 0 0 0] (ttt/indent-of-nodev txt)))))
+
+(deftest set-info-test
+  (let [txt (stringify/form-tree '#{})]
+    (is (= "#{} " (tree-str txt)))
+    (is (= [3 4] (ttt/end-of-nodev txt)))
+    (is (= [2 0] (ttt/indent-of-nodev txt)))))
+
+(deftest meta-info-test
+  (let [txt (stringify/form-tree '^:foo bar)]
+    (is (= "^:foo bar " (tree-str txt)))
+    (is (= [9 5 9 10] (ttt/end-of-nodev txt)))
+    (is (= [0 0 0 0] (ttt/indent-of-nodev txt)))))

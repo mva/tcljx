@@ -1,0 +1,197 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.prettydiff-test
+  (:require (tcljx.alpha.pp [buffer :as buffer] [stringify :as stringify]
+                            [prettydiff :as prettydiff])
+            [tcljx.alpha.ptest :refer :all])
+  (:import (tcljx.alpha.pp.buffer StyledText)
+           (tcljx.alpha.pp.prettydiff DiffText)))
+
+(defn diff-line-text ^DiffText [^vector av ^vector bv]
+   (assert (= (count av) (count bv)))
+   (let [n (* (inc (count av)) 2)
+         a (doto (new String/1 n)
+             (aset (- n 2) stringify/eof-str)
+             (aset (- n 1) stringify/eof-str))]
+     ;; turn the vertical pairs from `av`/`bv` into sequential pairs in `a`
+     (dotimes [i (count av)]
+       (let [str-a (nth av i), str-b (nth bv i)]
+         (assert (or (some? str-a) (some? str-b)))
+         (when (and (some? str-a) (some? str-b))
+           (assert (= str-a str-b)))
+         (aset a (* i 2) str-a)
+         ;; for identical objects if `str-b` is equal to `str-a`
+         (aset a (inc (* i 2)) (if (= str-b str-a) str-a str-b))))
+     (prettydiff/line-text a)))
+
+(defn to-line
+  (^vector [^vector av-bv] ;simulate degenerate case: all trace pairs are shared
+   (subvec (to-line av-bv av-bv) 0 1))
+  (^vector [^vector av ^vector bv]
+   ;; obtain stringified flat text for diff trace in `a`, returning a
+   ;; vector of the two versions as unstyled texts
+   (let [dlt (diff-line-text av bv)]
+     (vector (-> dlt .line-0 .text) (-> dlt .line-1 .text)))))
+
+(deftest line-basic-form
+  (is (= ["a"] (to-line ["a"])))
+  
+  (is (= ["a"
+          "b"]
+         (to-line ["a" nil]
+                  [nil "b"])))
+  (is (= ["a X"
+          "  X b"]
+         (to-line ["a" "X" nil]
+                  [nil "X" "b"]))))
+
+(deftest line-collection-form
+  (is (= ["[]"] (to-line ["[" "]"])))
+  (is (= ["[a]"] (to-line ["[" "a" "]"])))
+  (is (= ["[a b]"] (to-line ["[" "a" "b" "]"])))
+
+  (is (= ["()"] (to-line ["(" ")"])))
+  (is (= ["(a)"] (to-line ["(" "a" ")"])))
+  (is (= ["(a b)"] (to-line ["(" "a" "b" ")"])))
+
+  (is (= ["{}"] (to-line ["{" "}"])))
+  (is (= ["{a b}"] (to-line ["{" "a" "b" "}"])))
+  (is (= ["{a b c d}"] (to-line ["{" "a" "b" "c" "d" "}"])))
+
+  (is (= ["#{}"] (to-line ["#{" "}"])))
+  (is (= ["#{a}"] (to-line ["#{" "a" "}"])))
+  (is (= ["#{a b}"] (to-line ["#{" "a" "b" "}"]))))
+
+(deftest line-meta-form
+  (is (= ["^a b"] (to-line ["^" "a" "b"])))
+  (is (= ["[^a b]"] (to-line ["[" "^" "a" "b" "]"]))))
+
+
+(deftest line-nesting-mismatch-test
+  (is (= ["(bar  a)"
+          "(bar [a])"]
+         (to-line ["(" "bar" nil "a" nil ")"]
+                  ["(" "bar" "[" "a" "]" ")"])))
+  (is (= ["(foo [a  b c] d)"
+          "(foo  a [b c  d])"]
+         (to-line ["(" "foo" "[" "a" nil "b" "c" "]" "d" nil ")"]
+                  ["(" "foo" nil "a" "[" "b" "c" nil "d" "]" ")"]))))
+
+;;; ------------------------------------------------------------------------
+
+(defn to-width
+  (^vector [^vector av-bv] ;simulate degenerate case: all trace pairs are shared
+   (subvec (to-width av-bv av-bv) 0 1))
+  (^vector [^vector av ^vector bv]
+   (letfn [(token-widthv ^vector [^int start ^String/1 trace ^int/1 cp-width]
+             (loop [acc [], i start]
+               (let [token (aget trace i)]
+                 (if (stringify/eof? token)
+                   acc
+                   (recur (conj acc [token (aget cp-width i)]) (+ i 2))))))]
+     (let [dlt (diff-line-text av bv)]
+       (vector (token-widthv 0 (.trace dlt) (.cp-width dlt))
+               (token-widthv 1 (.trace dlt) (.cp-width dlt)))))))
+
+(deftest width-basic-form
+  ;; without any proper group, all width values are zero
+  
+  (is (= [[["a" 0]]] (to-width ["a"])))
+  
+  (is (= [#_"a"
+          [["a" 0] [nil 0]]
+          #_"b"
+          [[nil 0] ["b" 0]]]
+         (to-width ["a" nil]
+                   [nil "b"])))
+  (is (= [#_"a X"
+          [["a" 0] ["X" 0] [nil 0]]
+          #_"  X b"
+          [[nil 0] ["X" 0] ["b" 0]]]
+         (to-width ["a" "X" nil]
+                   [nil "X" "b"]))))
+
+(deftest width-collection-form
+  (is (= #_"[]" [[["[" 2] ["]" 0]]]
+         (to-width ["[" "]"])))
+  (is (= #_"[a]" [[["[" 3] ["a" 0] ["]" 0]]]
+         (to-width ["[" "a" "]"])))
+  (is (= #_"[a b]" [[["[" 5] ["a" 0] ["b" 0] ["]" 0]]]
+         (to-width ["[" "a" "b" "]"]))))
+
+(deftest width-nested-collection-form
+  (is (= [[["[" 4] ["(" 3] [")" 0] ["]" 0]]]
+         (to-width ["[" "(" ")" "]"]))))
+
+(deftest width-meta-form
+  (is (= #_"[^foo bar]"
+         [[["[" 10] ["^" 0] ["foo" 0] ["bar" 0] ["]" 0]]]
+         (to-width ["[" "^" "foo" "bar" "]"])))
+  ;; exotic: meta symbol has its own meta decoration
+  (is (= #_"[^^zzz foo bar]"
+         [[["[" 15] ["^" 0] ["^" 0] ["zzz" 0] ["foo" 0] ["bar" 0] ["]" 0]]]
+         (to-width ["[" "^" "^" "zzz" "foo" "bar" "]"]))))
+
+(deftest width-nesting-mismatch-test
+  (is (= [#_"(bar  a)"
+          [["(" 8] ["bar" 0] [nil 0] ["a" 0] [nil 0] [")" 0]]
+          #_"(bar [a])"
+          [["(" 9] ["bar" 0] ["[" 4] ["a" 0] ["]" 0] [")" 0]]]
+         (to-width ["(" "bar" nil "a" nil ")"]
+                   ["(" "bar" "[" "a" "]" ")"])))
+  (is (= [#_"(foo [a  b c] d)"
+          [["(" 16] ["foo" 0] ["[" 8] ["a" 0] [nil 0] ["b" 0] ["c" 0] ["]" 0]
+           ["d" 0] [nil 0] [")" 0]]
+          #_"(foo  a [b c  d])"
+          [["(" 17] ["foo" 0] [nil 0] ["a" 0] ["[" 9] ["b" 0] ["c" 0] [nil 0]
+           ["d" 0] ["]" 0] [")" 0]]]
+         (to-width ["(" "foo" "[" "a" nil "b" "c" "]" "d" nil ")"]
+                   ["(" "foo" nil "a" "[" "b" "c" nil "d" "]" ")"]))))
+
+;;; ------------------------------------------------------------------------
+
+(defn to-pretty ^vector [^int page-width ^vector av ^vector bv]
+  (letfn [(lines-of [^StyledText styled-text]
+            (-> styled-text .text (.lines) (stream-seq!)))
+          (interleave-lines ^vector [^StyledText/1 ptxt]
+            (let [lines-0 (lines-of (aget ptxt 0))
+                  lines-1 (lines-of (aget ptxt 1))
+                  n (max (count lines-0) (count lines-1))]
+              (vec (->> (interleave (concat lines-0 (repeat ""))
+                                    (concat lines-1 (repeat "")))
+                        (take (* n 2))))))]
+    (let [dlt (diff-line-text av bv)
+          ptxt (prettydiff/pretty-text dlt page-width)]
+      (interleave-lines ptxt))))
+
+(deftest pretty-basic-form
+  (is (= ["a" , "a"]
+         (to-pretty 8 ["a"] ["a"])))
+  
+  (is (= ["a" , "b"]
+         (to-pretty 8 ["a" nil] [nil "b"]))))
+
+(deftest pretty-vector-form
+  (is (= ["[a X]" , "[  X b]"]
+         (to-pretty 7
+                    #_"[a X]"   ["[" "a" "X" nil "]"]
+                    #_"[  X b]" ["[" nil "X" "b" "]"])))
+
+  (is (= ["[a X]" , "[  X"
+          ""      , " b]"]
+         (to-pretty 5
+                    #_"[a X]"   ["[" "a" "X" nil "]"]
+                    #_"[  X b]" ["[" nil "X" "b" "]"])))
+
+  (is (= ["[a"  , "["
+          " X]" , " X"
+          ""    , " b]"]
+         (to-pretty 4
+                    #_"[a X]"   ["[" "a" "X" nil "]"]
+                    #_"[  X b]" ["[" nil "X" "b" "]"]))))
+

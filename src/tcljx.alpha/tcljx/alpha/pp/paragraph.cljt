@@ -7,9 +7,13 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.alpha.pp.paragraph
   (:require (tcljx.alpha.pp [style :as style] [styled :as styled]
-                            [recording :as recording]))
+                            [buffer :as buffer]))
   (:import (tcljx.alpha.pp.styled StyledWriter)
-           (tcljx.alpha.pp.recording Recorder Recording)))
+           (tcljx.alpha.pp.buffer BufferWriter StyledText)))
+
+;;; A paragraph writer imposes a soft limit on the width of emitted
+;;; text.  If a line of text would exceed the limit, it replaces a
+;;; single space character with a call to `nl`.
 
 (def ^:private nl \newline)
 (def ^:private sep \space)
@@ -47,45 +51,47 @@
                 (forward-to-break i cs)
                 j))))]
   
-  (defn- flush-paragraph ^void [^StyledWriter w ^int width ^Recording rec]
+  (defn- flush-paragraph ^void [^StyledWriter w ^int width ^StyledText txt]
     (let [remain (max 0 (- width (.code-points-in-line w)))
-          eol (-> (.start rec)
-                  (offset-upto (.text rec) remain)
-                  (end-of-line (.text rec) (.start rec)))
-          rec' (recording/write-raw-to rec w eol)]
+          eol (-> (.pos txt)
+                  (offset-upto (.text txt) remain)
+                  (end-of-line (.text txt) (.pos txt)))
+          txt' (buffer/transfer-prefix-to txt eol w)]
       (when (< eol Integer/MAX_VALUE)
         (.nl w)
-        (recur w width (recording/skip-chars rec' 1))))))
+        (recur w width (buffer/skip-chars txt' 1))))))
 
-(deftype ParagraphWriter [^StyledWriter w ^Recorder wr ^int width]
+(deftype ParagraphWriter [^StyledWriter w ^BufferWriter wb ^int width]
   StyledWriter
   (nl [this]          ;ends the current paragraph and begins a new one
-    (flush-paragraph w width (.take-recording! wr))
+    (flush-paragraph w width (buffer/to-text wb))
+    (buffer/clear-buffer wb)
     (.nl w)                             ;prepare for next paragraph
     this)
   (append [this style cs start end]
-    (loop [i start]
-      (let [j (styled/index-of-nl cs i end)]
-        (if (neg? j)
-          (styled/write wr style cs i end)
-          (do (styled/write wr style cs i j)
-              (.nl this)
-              (recur (inc j))))))
-    this)
+    (let [j (styled/end-of-line cs start end)]
+      (styled/write wb style cs start j)
+      (if (< j end)
+        (do (.nl this)
+            (recur style cs (inc j) end))
+        this)))
+  (nl-count [_]
+    (throw (UnsupportedOperationException.)))
   (code-points-in-line [_]
     (throw (UnsupportedOperationException.)))
   (close [this]
-    (flush-paragraph w width (.take-recording! wr))))
+    (flush-paragraph w width (buffer/to-text wb))
+    (buffer/clear-buffer wb)))
 
-;;; Prints out paragraphs separated by a newline, either denoted by a
-;;; call to method `nl` or by the character \newline.  Tries to impose
-;;; `width` as a soft limit for the paragraph lines' length.  Within a
-;;; paragraph, line breaks are created by converting the rightmost
-;;; space just before a word.  By only replacing a space with a
-;;; newline character, the total number of characters written remains
-;;; unchanged.
+;;; Prints out paragraphs separated(!) by a newline, either denoted by
+;;; a call to method `nl` or by the character \newline.  Tries to
+;;; impose `width` as a soft limit for the paragraph lines' length.
+;;; Within a paragraph, line breaks are created by converting the
+;;; rightmost space just before a word.  By only replacing a space
+;;; with a newline character, the total number of characters written
+;;; remains unchanged.
 (defn writer
   (^StyledWriter [^StyledWriter w]
    (writer w 80))
   (^StyledWriter [^StyledWriter w ^int width]
-   (ParagraphWriter. w (recording/raw-recorder) width)))
+   (ParagraphWriter. w (buffer/buffer-writer) width)))

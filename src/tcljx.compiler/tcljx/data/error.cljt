@@ -8,9 +8,9 @@
 (ns tcljx.data.error
   (:require (tcljx.data [type :as type] [meta :as meta])
             (tcljx.alpha.pp [style :as style] [styled :as styled] [ansi :as ansi]
-                            [recording :as recording] [paragraph :as paragraph]))
+                            [buffer :as buffer] [paragraph :as paragraph]))
   (:import (tcljx.alpha.pp.styled StyledWriter)
-           (tcljx.alpha.pp.recording Recorder Recording)))
+           (tcljx.alpha.pp.buffer BufferWriter)))
 
 ;;; Compilation errors raise an exception of type WrongInfo.  It
 ;;; mirrors ExceptionInfo, but does not implement IExceptionInfo.  The
@@ -120,7 +120,7 @@
 (def ^:private style-txt style/default)
 (def ^:private style-quote (style/intensity style/intensity-bright))
 
-(deftype ErrorMsgImpl [^Recorder w ^:unsynchronized-mutable ^char last-char
+(deftype ErrorMsgImpl [^BufferWriter w ^:unsynchronized-mutable ^char last-char
                        ^:unsynchronized-mutable ^map ex-data
                        ^:unsynchronized-mutable ^Throwable cause]
   ErrorMsg
@@ -204,10 +204,10 @@
     this))
 
 (defn mk-error-msg ^ErrorMsg []
-  (ErrorMsgImpl. (recording/raw-recorder) \space nil nil))
+  (ErrorMsgImpl. (buffer/buffer-writer) \space nil nil))
 
 (defn to-error ^Exception [^ErrorMsg msg]
-  (let [rec (.take-recording! (.w ^ErrorMsgImpl msg))
+  (let [rec (buffer/to-text (.w ^ErrorMsgImpl msg))
         data (assoc (.get-ex-data msg) :styled-error-msg rec)]
     (wr-info (.text rec) data (.get-cause msg))))
 
@@ -235,13 +235,13 @@
 (def ^:private style-line (style/intensity style/intensity-bright))
 
 (letfn [(error-msg ^StyledWriter [^StyledWriter w-raw ^Exception ex]
-          (with-open [w-indent (styled/raw-indent-writer w-raw "    ")
+          (with-open [w-indent (styled/indent-writer w-raw "    ")
                       w-lines (styled/lines-writer w-indent)
                       w-paragraph (paragraph/writer w-lines width)]
             (let [data (wr-data ex)]
               (styled/write w-paragraph style-error "### ")
               (if-some [rec (:styled-error-msg data)]
-                (recording/write-raw-to rec w-paragraph)
+                (buffer/transfer-to rec w-paragraph)
                 (styled/write w-paragraph (.getMessage ex)))))
           w-raw)
         (relative-path ^String [^java.net.URI uri]
@@ -268,7 +268,7 @@
   
   (defn format ^String [^Exception ex]
     (let [w-string (java.io.StringWriter.)]
-      (with-open [w-ansi (ansi/raw-writer w-string)]
+      (with-open [w-ansi (ansi/styled-writer w-string)]
         (-> w-ansi
             (error-msg ex)
             (file-line-column ex)))

@@ -10,12 +10,27 @@
    (tcljx.data [config :as cfg] [error :as error] [type :as type] ir)
    (tcljx.nmspgen [runtime :as rt] [pkggen :as pkggen])
    (tcljx.main [options :as options])
-   [tcljx.alpha.ptest__style :as style])
+   (tcljx.alpha.pp [style :as style] [styled :as styled] [ansi :as ansi]))
   (:import
    (tcljx.data.ir Entity Resolver ProvidedNamespace)
    (tcljx.nmspgen.pkggen PackageBuilder CodePromise)
    (tcljx.main.options Options)
    (java.lang.invoke MethodType MethodHandle MethodHandles MethodHandles$Lookup)))
+
+(defn- styled-str ^String [^long style ^String plain]
+  (let [s (with-out-str
+            (with-open [w (ansi/styled-writer *out*)]
+              (styled/write w style plain)))]
+    (.substring s 0 (dec (.length s)))))
+(def ^:private highlight-str
+  (partial styled-str (style/intensity style/intensity-bright)))
+(def ^:private dim-str
+  (partial styled-str (style/intensity style/intensity-faint)))
+(def ^:private success-str
+  (partial styled-str (style/fg style/green)))
+(def ^:private error-str
+  (partial styled-str (style/fg style/red)))
+
 
 (defn namespace-of ^ProvidedNamespace [^map known-ns ^symbol var-name]
   (or ^ProvidedNamespace (get known-ns (namespace var-name))
@@ -69,7 +84,7 @@
           (let [res (try
                       (when print-var?
                         (println)
-                        (println (style/highlight-str "###")
+                        (println (highlight-str "###")
                                  (str "calling " (nth fn-specv i))))
                       (-> (.invoke ^MethodHandle (nth applicablev i) nil)
                           (encode-result))
@@ -92,13 +107,13 @@
 (defn completion-report ^String [^Options opts resultv]
   (letfn [(style ^String [^String s res]
             (case (result-style res)
-              :error (style/error-str s)
-              :success (style/success-str s)
-              :other (style/highlight-str s)
-              :no-result (style/dim-str s)))]
+              :error (error-str s)
+              :success (success-str s)
+              :other (highlight-str s)
+              :no-result (dim-str s)))]
     (loop [acc (str (if (invokes-successful? resultv)
-                      (style/success-str "###")
-                      (style/error-str "###"))
+                      (success-str "###")
+                      (error-str "###"))
                     " Completed:")
            [^String t :as targets] (seq (.targets opts))
            i 0]
@@ -106,10 +121,10 @@
         acc
         (let [ns-str (options/target-ns-str t)]
           (if (options/target-invoke-fn? t)
-            (recur (str acc " " (style/highlight-str ns-str)
+            (recur (str acc " " (highlight-str ns-str)
                         (style (.substring t (.length ns-str)) (nth resultv i)))
                    (next targets)
                    (inc i))
-            (recur (str acc " " (style/highlight-str ns-str))
+            (recur (str acc " " (highlight-str ns-str))
                    (next targets)
                    i)))))))

@@ -1,0 +1,54 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.tokenize-test
+  (:require (tcljx.alpha.pp [tokenize :as tokenize])
+            [tcljx.alpha.ptest :refer :all]))
+
+(defn to-tokens ^vector [form]
+  (let [txt (-> (tokenize/token-writer)
+                (tokenize/flatten form)
+                (.to-text))]
+    (->> (rest (.atokens txt))          ;drop leading token-invalid
+         (take (.token-count txt))      ;include trailing token-invalid
+         (mapv #(aget (.token-to-string txt) ^int %)))))
+
+(deftest tokens-basic-form
+  (is (= ["symbol" ""] (to-tokens 'symbol)))
+  (is (= [":keyword" ""] (to-tokens :keyword)))
+  (is (= ["123" ""] (to-tokens 123)))
+  (is (= ["true" ""] (to-tokens true)))
+  (is (= ["nil" ""] (to-tokens nil))))
+
+(deftest tokens-collection-form
+  (is (= ["[" "]" ""] (to-tokens '[])))
+  (is (= ["[" "a" "]" ""] (to-tokens '[a])))
+  (is (= ["[" "a" "b" "]" ""] (to-tokens '[a b])))
+
+  (is (= ["(" ")" ""] (to-tokens '())))
+  (is (= ["(" "a" ")" ""] (to-tokens '(a))))
+  (is (= ["(" "a" "b" ")" ""] (to-tokens '(a b))))
+
+  (is (= ["{" "}" ""] (to-tokens '{})))
+  (is (= ["{" "a" "b" "}" ""] (to-tokens '{a b})))
+  (is (= ["{" "a" "b" "c" "d" "}" ""] (to-tokens '{c d, a b})))
+
+  (is (= ["#{" "}" ""] (to-tokens '#{})))
+  (is (= ["#{" "a" "}" ""] (to-tokens '#{a})))
+  (is (= ["#{" "a" "b" "}" ""] (to-tokens '#{b a}))))
+
+(deftest tokens-map-entry-form
+  (is (= ["[" "k" "v" "]" ""] (to-tokens (first '{k v})))))
+
+(deftest tokens-meta-form
+  (is (= ["^" "a" "b" ""] (to-tokens '^a b)))
+  (is (= ["[" "^" "a" "b" "]" ""] (to-tokens '[^a b])))
+  (is (= ["^" "{" ":doc" "\"foo\"" ":tag" "bar" "}" "x" ""]
+         (to-tokens '^{:doc "foo", :tag bar} x))))
+
+(deftest tokens-array-form
+  (is (= ["[""a" "b" "]" ""] (to-tokens (into-array ['a 'b])))))

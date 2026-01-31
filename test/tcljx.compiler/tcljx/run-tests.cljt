@@ -7,7 +7,12 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.run-tests
   (:require
-   (tcljx.alpha textflow__pp-test ptest__align-test ptest-test)
+   (tcljx.alpha ptest-test)
+   
+   (tcljx.alpha.pp styled-test ansi-test buffer-test paragraph-test)
+   (tcljx.alpha.pp treetext-test stringify-test prettify-test)
+   (tcljx.alpha.pp tokenize-test diff-test prettydiff-test)
+   
    (tcljx.parser reader-test)
    (tcljx.nmspgen bootstrap-test invoke-test unreachable-test
                   const-test conv-test prim-conv-test dot-form-test new-test
@@ -26,8 +31,22 @@
 
 (def all-namespaces
   '[tcljx.alpha.ptest-test
-    tcljx.alpha.textflow__pp-test
-    tcljx.alpha.ptest__align-test
+    
+    ;; styled text output
+    tcljx.alpha.pp.styled-test
+    tcljx.alpha.pp.ansi-test
+    tcljx.alpha.pp.buffer-test
+    tcljx.alpha.pp.paragraph-test
+
+    ;; pretty-printing of forms
+    tcljx.alpha.pp.treetext-test
+    tcljx.alpha.pp.stringify-test
+    tcljx.alpha.pp.prettify-test
+
+    ;; pretty-printed diff of two forms
+    tcljx.alpha.pp.tokenize-test
+    tcljx.alpha.pp.diff-test
+    tcljx.alpha.pp.prettydiff-test
     
     tcljx.parser.reader-test
     tcljx.nmspgen.bootstrap-test

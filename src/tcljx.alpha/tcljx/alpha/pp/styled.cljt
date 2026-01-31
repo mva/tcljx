@@ -9,43 +9,104 @@
   (:require [tcljx.alpha.pp.style :as style])
   (:import (java.io Writer Closeable)))
 
+;;; A minimal layer on top of character output to the terminal
+;;; supporting styled, indented, or padded text.  Factory functions for
+;;; the lowest level writers are `ansi/styled-writer`,
+;;; `styled/plain-writer`, and `styled/null-writer`.
+;;; 
+;;; Styling is done through ANSI escape codes: intensity, weight, font
+;;; style, color, and so on.  All escape codes are subject to
+;;; interpretation by the terminal program being used, and may not be
+;;; supported everywhere or in an equivalent manner.
+;;; 
+;;; Most writer instances keep track of the number of Unicode code
+;;; points written in the current line.  Higher level writers build on
+;;; this to provide indented, pretty-printed, side-by-side, or tabular
+;;; output.
+;;;
+;;; Unless stated otherwise, writer implementations accept arbitrary
+;;; character data to `append` and pass it on, both unchanged and
+;;; without any additional interpretation.  This means a \newline
+;;; character passed in the text argument is *not* equivalent to
+;;; calling the writer's method `nl` -- but see `line-writer` below on
+;;; how to bridge this particular gap.
+;;; 
+;;; In general, application code should not pass characters with a
+;;; code value less than 32 (\space) to `append`.  A layered writer
+;;; may use characters from this range to denote additional text
+;;; structure, before passing on transformed text stripped of any
+;;; intermediate marker characters.
+
+;;; On `close()`, a writer flushes internal buffers (if any), resets
+;;; the output style to the default (if possible), and finishes an
+;;; incomplete line by calling `nl` one last time.
 (definterface StyledWriter
   :extends [Closeable]
-  ;; Starts a new line.  Sets line's code point counter to zero.
-  ;; Lowest-level writers upon close ensure that the last action is a
-  ;; call to `nl`.
+  ;; Starts a new line and increments `nl-count`.  Sets line's code
+  ;; point counter to zero.
   (nl ^StyledWriter [])
 
-  ;; Appends interval of `s` from position `start` (inclusive) to
-  ;; `end` (exclusive).  "Raw" writers pass on embedded \newline
-  ;; characters without interpreting them or calling the method `nl`
-  ;; in their place.
+  ;; Appends interval of `cs` from position `start` (inclusive) to
+  ;; `end` (exclusive), using styling `style`.  Most writers pass on
+  ;; embedded \newline characters without interpreting them or calling
+  ;; the method `nl` in their place.
   (append ^StyledWriter [^long style ^CharSequence cs ^int start ^int end])
 
+  ;; The number of calls to `nl` up to now.
+  (nl-count ^int [])
+  
   ;; The number of code points appended since the last call to `nl`.
-  ;; Unavailable for pretty-printing writers.
   (code-points-in-line ^int []))
 
+;;; Calls StyleWriter's method `nl`.
 (defn nl ^StyledWriter [^StyledWriter w]
   (.nl w))
 
+;;; Convenience wrapper for StyleWriter's `append` method.  Unstyled
+;;; arities use the default style.
 (defn write
   (^StyledWriter [^StyledWriter w ^CharSequence cs]
    (write w style/default cs))
-  (^StyledWriter [^StyledWriter w ^CharSequence cs ^int start ^int end]
+  (^StyledWriter [^StyledWriter w ^CharSequence cs
+                  ^int start ^int end]
    (write w style/default cs start end))
   
   (^StyledWriter [^StyledWriter w ^long style ^CharSequence cs]
    (.append w style cs 0 (.length cs)))
-  (^StyledWriter [^StyledWriter w ^long style ^CharSequence cs ^int start ^int end]
+  (^StyledWriter [^StyledWriter w ^long style ^CharSequence cs
+                  ^int start ^int end]
    (.append w style cs start end)))
 
-(def null-writer
-  (reify StyledWriter
-    (nl [this] this)
-    (append [this style cs start end] this)
-    (code-points-in-line [_] 0)
-    (close [_] nil)))
+;;; Writes `n` spaces to `w` using the given style.
+(defn pad
+  (^StyledWriter [^StyledWriter w ^int n]
+   (pad w style/default n))
+  (^StyledWriter [^StyledWriter w ^long style ^int n]
+   (if (pos? n) ;FIXME... this is slow, but does it matter to not chunk here?
+     (recur (.append w style " " 0 1) style (dec n))
+     w)))
+
+;;; Adds padding characters to as `w` until its `code-points-in-line`
+;;; is at least `column`.  Has no effect if the target column is
+;;; already reached or passed.
+(defn pad-to-column
+  (^StyledWriter [^StyledWriter w ^int column]
+   (pad-to-column w style/default column))
+  (^StyledWriter [^StyledWriter w ^long style ^int column]
+   (pad w style (- column (.code-points-in-line w)))))
+
+;;; Calls `nl` repeatedly on `w` until its `nl-count` is at least
+;;; `lines`.  Has no effect if the target line is already reached or
+;;; passed.
+(defn pad-to-line
+  (^StyledWriter [^StyledWriter w ^int lines]
+   (if (< (.nl-count w) lines)
+     (recur (nl w) lines)
+     w))
+  (^StyledWriter [^StyledWriter w ^int lines ^int column]
+   (cond-> w
+     (<= (.nl-count w) lines)
+     (-> (pad-to-line lines) (pad-to-column column)))))
 
 ;;; ------------------------------------------------------------------------
 
@@ -61,44 +122,56 @@
   (^int [^CharSequence cs ^int start ^int end]
    (Character/codePointCount cs start end)))
 
-;;; Returns index of leftmost \newline in interval from
-;;; `start` (inclusive) to `end` (exclusive).  Returns -1 if no
-;;; \newline exists.
-(defn index-of-nl ^int [^CharSequence cs ^int start ^int end]
-  (cond (= start end) -1
+;;; Returns index of leftmost \newline in the range from
+;;; `start` (inclusive) to `end` (exclusive), or `end` if no \newline
+;;; exists.
+(defn end-of-line ^int [^CharSequence cs ^int start ^int end]
+  (cond (>= start end) end
         (= (.charAt cs start) \newline) start
         :else (recur cs (inc start) end)))
 
 ;;; ------------------------------------------------------------------------
 
-(deftype PlainWriter [^:unsynchronized-mutable ^int cp-count ;counts since nl
+(deftype PlainWriter [^:unsynchronized-mutable ^int nl-count
+                      ^:unsynchronized-mutable ^int cp-count ;counts since nl
                       ^Writer w]
   StyledWriter
   (nl [this]
     (.append w \newline)
+    (set! nl-count (inc nl-count))
     (set! cp-count 0)
     this)
   (append [this _ cs start end]
     (.append w cs start end)
     (set! cp-count (+ cp-count (code-point-count cs start end)))
     this)
+  (nl-count [_]
+    nl-count)
   (code-points-in-line [_]
     cp-count)
   (close [this]
     (when (not= cp-count 0) (.nl this))))
 
-(defn plain-raw-writer ^StyledWriter [^Writer w]
-  (PlainWriter. 0 w))
+;;; Writes all character data to writer `w` as provided, ignoring any
+;;; styling directives.  Useful if the output is passed to a program
+;;; that does not interpret ANSI escape sequences, like `less` without
+;;; using option `-R`.
+(defn plain-writer ^StyledWriter [^Writer w]
+  (PlainWriter. 0 0 w))
 
 ;;; ------------------------------------------------------------------------
 
+;;; A plain text writer sending all input to a `nullWriter()`,
+;;; discarding all characters.
+(defn null-writer ^StyledWriter []
+  (plain-writer (Writer/nullWriter)))
+
 ;;; A writer whose method `nl` writes additional data `indent-text`
-;;; after every call to the corresponding downstream method.
-(defn raw-indent-writer
+;;; after the \newline to the corresponding downstream method.
+(defn indent-writer
   (^StyledWriter [^StyledWriter w ^String indent-text]
-   (raw-indent-writer w indent-text style/default))
-  (^StyledWriter [^StyledWriter w ^String indent-text
-                  ^long indent-style]
+   (indent-writer w indent-text style/default))
+  (^StyledWriter [^StyledWriter w ^String indent-text ^long indent-style]
    (reify StyledWriter
      (nl [this]
        (.nl w)
@@ -107,26 +180,29 @@
      (append [this style cs start end]
        (write w style cs start end)
        this)
+     (nl-count [_]
+       (.nl-count w))
      (code-points-in-line [_]
        (.code-points-in-line w))
      (close [_]
        nil))))
 
-;;; A writer converting \newline characters in text into calls to
-;;; method `nl`.
+;;; A writer converting \newline characters in appended text to calls
+;;; of method `nl`.
 (defn lines-writer ^StyledWriter [^StyledWriter w]
   (reify StyledWriter
     (nl [this]
       (.nl w)
       this)
     (append [this style cs start end]
-      (let [j (index-of-nl cs start end)]
-        (if (neg? j)
-          (do (write w style cs start end)
-              this)
-          (do (write w style cs start j)
-              (.nl this)
-              (recur style cs (inc j) end)))))
+      (let [j (end-of-line cs start end)]
+        (write w style cs start j)
+        (if (< j end)
+          (do (.nl this)
+              (recur style cs (inc j) end))
+          this)))
+    (nl-count [_]
+      (.nl-count w))
     (code-points-in-line [_]
       (.code-points-in-line w))
     (close [_]

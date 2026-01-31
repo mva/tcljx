@@ -1,0 +1,159 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.buffer
+  (:require (tcljx.alpha.pp [style :as style] [styled :as styled]))
+  (:import (tcljx.alpha.pp.styled StyledWriter)))
+
+;;; A buffer writer is used create a recording of styled text for
+;;; later playback.  Typical use cases are multi-pass text generation
+;;; algorithms, or writers that must collect some amount of text
+;;; before reformatting it and emitting it to the downstream writer.
+
+;;; The given `style` applies up to but excluding the character index
+;;; `end-of-style`.  From index `end-of-style` onward, the style of
+;;; `next` applies.  FIXME... value type?
+(deftype StyleUpTo [^long style, ^int end-of-style, ^StyleUpTo next])
+
+(def ^:private buffer-start (StyleUpTo. style/default 0 nil))
+
+(defn- cons-range ^StyleUpTo [^long style ^StringBuilder tb ^StyleUpTo tail]
+  (StyleUpTo. style (.length tb) tail))
+
+(defn- reverse-ranges ^StyleUpTo [^StyleUpTo acc ^StyleUpTo head]
+  (if (nil? head)
+    acc
+    (recur (StyleUpTo. (.style head) (.end-of-style head) acc) (.next head))))
+
+
+;;; Immutable representation of a range of styled text, beginning in
+;;; `text` at character position `pos`.  FIXME... non-null value
+;;; type?
+(deftype StyledText [^String text ^int pos ^int nl-count
+                     ^StyleUpTo style-at-pos])
+
+(definterface BufferWriter
+  :extends [StyledWriter]
+  (to-text ^StyledText [])
+  (clear-buffer ^void [])
+  (length ^int []))
+
+(deftype BufferWriterImpl [^StringBuilder text-builder
+                           ^:unsynchronized-mutable ^StyleUpTo rev-ranges
+                           ^:unsynchronized-mutable ^int nl-count
+                           ^:unsynchronized-mutable ^int cp-count
+                           ^:unsynchronized-mutable ^long active-style]
+  StyledWriter
+  (nl [this]
+    (.append text-builder \newline)
+    (set! nl-count (inc nl-count))
+    (set! cp-count 0)
+    this)
+  (append [this style cs start end]
+    (when-not (= style active-style)
+      (set! rev-ranges (cons-range active-style text-builder rev-ranges))
+      (set! active-style style))
+    (.append text-builder cs start end)
+    (set! cp-count (+ cp-count (styled/code-point-count cs start end)))
+    this)
+  (nl-count [_]
+    nl-count)
+  (code-points-in-line [_]
+    cp-count)
+  (close [this]
+    nil)
+  
+  BufferWriter
+  (to-text [_]
+    (->> (cons-range active-style text-builder rev-ranges)
+         (reverse-ranges nil)
+         (StyledText. (.toString text-builder) 0 nl-count)))
+  (clear-buffer [_]
+    (.setLength text-builder 0)
+    (set! rev-ranges nil)
+    (set! cp-count 0)
+    (set! active-style style/default))
+  (length [_]
+    (.length text-builder)))
+
+;;; A styled writer collecting both text and text style into a buffer.
+;;; The current state of the buffer can be converted to an immutable
+;;; text representation, and it can be cleared.  This writer is used
+;;; as a building block for other writers, like `paragraph/writer`.
+(defn buffer-writer ^BufferWriter []
+  (BufferWriterImpl. (StringBuilder.) buffer-start 0 0 style/default))
+
+(defn clear-buffer ^void [^BufferWriter wb]
+  (.clear-buffer wb))
+
+;;; Copy the current state of the buffer into an immutable text
+;;; representation positioned at character index 0.  This can then be
+;;; transferred piecewise to another writer.
+(defn to-text ^StyledText [^BufferWriter wb]
+  (.to-text wb))
+
+;;; Write text from `txt` up to but excluding character index `end` to
+;;; `w`, returning the remaining text starting at `end`.
+(defn transfer-prefix-to ^StyledText [^StyledText txt ^int end ^StyledWriter w]
+  (let [cs (.text txt)]
+    (loop [r (.style-at-pos txt), s (.pos txt)]
+      (if (and (< s end) (some? r))
+        (let [e (min end (.end-of-style r))]
+          (styled/write w (.style r) cs s e)
+          (recur (cond-> r (= e (.end-of-style r)) (.next)) e))
+        (StyledText. cs s (.nl-count txt) r)))))
+
+;;; Write all of `txt` to `w`, including any empty ranges at the end.
+(defn transfer-to ^StyledText [^StyledText txt ^StyledWriter w]
+  (transfer-prefix-to txt Integer/MAX_VALUE w))
+
+;;; Move text position of `txt` forward to character index `pos`.
+(defn forward-to ^StyledText [^StyledText txt ^int pos] ;(<= (.pos txt) pos)
+  (loop [r (.style-at-pos txt)]
+    (if (and (some? r) (<= (.end-of-style r) pos))
+      (recur (.next r))
+      (StyledText. (.text txt) pos (.nl-count txt) r))))
+
+;;; Move `txt` position forward by `n` characters, effectively
+;;; dropping the next `n` characters from it.
+(defn skip-chars ^StyledText [^StyledText txt ^int n] ;pre: (>= n 0)
+  (forward-to txt (+ (.pos txt) n)))
+#_(defn skip-code-points ^StyledText [^StyledText txt ^int n] ;pre: (>= n 0)
+    (forward-to txt (Character/offsetByCodePoints (.text txt) (.pos txt) n)))
+
+;;; ------------------------------------------------------------------------
+
+(defn side-by-side ^StyledWriter [^StyledWriter w ^StyledText/1 txts
+                                  ^int/1 columns]
+  (when-not (= (alength txts) (alength columns))
+    (throw (IllegalArgumentException.)))
+  (dotimes [i (alength txts)]
+    (when-not (.endsWith (.text (aget txts i)) "\n")
+      (throw (IllegalArgumentException.))))
+
+  (letfn [(append-line! ^StyledText/1 [^int line-count ^StyledText/1 txts]
+            (let [a (aclone txts)]
+              (dotimes [i (alength txts)]
+                (let [txt (aget txts i)]
+                  (when (< line-count (.nl-count txt))
+                    (let [end (styled/end-of-line (.text txt) (.pos txt)
+                                                  Integer/MAX_VALUE)]
+                      (styled/pad-to-column w (aget columns i))
+                      (aset a i (-> (transfer-prefix-to txt end w) ;exclude nl
+                                    (forward-to (inc end))))))))
+              a))
+          (progress? ^boolean [^StyledText/1 a ^StyledText/1 b]
+            (loop [i (dec (alength a))]
+              (cond (neg? i) false
+                    (identical? (aget a i) (aget b i)) (recur (dec i))
+                    :else true)))]
+    
+    (loop [txts txts, line-count 0]
+      (let [txts' (append-line! line-count txts)]
+        (if (progress? txts' txts)
+          (do (.nl w) (recur txts' (inc line-count)))
+          w)))))

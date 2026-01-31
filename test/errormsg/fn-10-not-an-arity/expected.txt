@@ -1,3 +1,3 @@
 tcljx.data.error.WrongInfo
-[31m### [0mexpect function arity ([...] ...) (got: [1mfoo[0m)
-[31m@@@ [0mtest/errormsg/fn-10-not-an-arity/src/pkg/ns0.cljt:[1m2[0m
+[31m### [mexpect function arity ([...] ...) (got: [1mfoo[m)
+[31m@@@ [mtest/errormsg/fn-10-not-an-arity/src/pkg/ns0.cljt:[1m2[m

@@ -7,7 +7,7 @@ diff -Nru src/tcljx.alpha/module-info.java ../tcljx.alpha.patched/module-info.ja
 +  requires transitive tcljx.core;
  
    exports tcljx.alpha.ptest;
-   exports tcljx.alpha.ptest__align;
+   exports tcljx.alpha.ptest__impl;
 diff -Nru src/tcljx.alpha/tcljx/alpha/ptest.cljt ../tcljx.alpha.patched/tcljx/alpha/ptest.cljt
 --- src/tcljx.alpha/tcljx/alpha/ptest.cljt	2025-10-30 06:40:31.251406039 +0100
 +++ ../tcljx.alpha.patched/tcljx/alpha/ptest.cljt	2025-10-30 07:25:47.720936439 +0100
@@ -29,18 +29,3 @@ diff -Nru src/tcljx.alpha/tcljx/alpha/ptest.cljt ../tcljx.alpha.patched/tcljx/al
      (println (str "\nRan " (.tests rep) " tests containing "
                    (impl/is-count rep) " assertions."))
      (println (str (.is-fail rep) " failures, " (.is-error rep) " errors."))
-diff -Nru src/tcljx.alpha/tcljx/alpha/textflow__pp.cljt ../tcljx.alpha.patched/tcljx/alpha/textflow__pp.cljt
---- src/tcljx.alpha/tcljx/alpha/textflow__pp.cljt	2025-10-30 06:40:31.251406039 +0100
-+++ ../tcljx.alpha.patched/tcljx/alpha/textflow__pp.cljt	2025-10-30 07:25:38.150822931 +0100
-@@ -8,9 +8,9 @@
- (ns tcljx.alpha.textflow__pp
-   (:require [tcljx.alpha.textflow :as tf]
-             [tcljx.alpha.textflow__insn :as insn]
--            [tinyclj.core.protocols :refer [datafy]])
-+            [clojure.core.protocols :refer [datafy]])
-   (:import (tcljx.alpha.textflow Cursor BufferedCursor)
--           (tinyclj.core.protocols Datafiable)
-+           (clojure.core.protocols Datafiable)
-            (java.util Map$Entry)
-            (clojure.lang IMeta)
-            (java.util.function BiFunction IntUnaryOperator)

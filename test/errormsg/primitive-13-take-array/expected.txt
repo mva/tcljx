@@ -1,4 +1,4 @@
 tcljx.data.error.WrongInfo
-[31m### [1;39mclojure.core.primitive/aget[0m expects array type for argument #1 (got:
-    [[1mjava.lang.String[0m [1mint[0m])
-[31m@@@ [0mtest/errormsg/primitive-13-take-array/src/pkg/ns0.cljt:[1m2[0m
+[31m### [m[1mclojure.core.primitive/aget[m expects array type for argument #1 (got:
+    [[1mjava.lang.String[m [1mint[m])
+[31m@@@ [mtest/errormsg/primitive-13-take-array/src/pkg/ns0.cljt:[1m2[m

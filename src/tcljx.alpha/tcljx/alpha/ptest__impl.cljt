@@ -7,9 +7,10 @@
 ;; You must not remove this notice, or any other, from this software.
 (ns tcljx.alpha.ptest__impl
   (:require
-   [tcljx.alpha.ptest__style :as style]
-   [tcljx.alpha.ptest__align :as align])
+   [tcljx.alpha.pp :as pp]
+   (tcljx.alpha.pp [style :as style] [styled :as styled] [ansi :as ansi]))
   (:import
+   (tcljx.alpha.pp.styled StyledWriter)
    (clojure.lang Var)
    (java.io StringWriter)
    (java.util ArrayList)
@@ -91,10 +92,11 @@
 
 ;;; ------------------------------------------------------------------------
 
-(defn- print-lines [^java.lang.StringBuffer buffer ^int start ^int end]
-  (let [s (.substring buffer start end)]
-    (print s)
-    (when-not (.endsWith s "\n") (newline))))
+(defn- print-lines ^StyledWriter [^StyledWriter w ^java.lang.StringBuffer buffer
+                                  ^int start ^int end]
+  (cond-> (styled/write w buffer start end)
+    (and (< start end) (not= (.charAt buffer (dec end)) \newline))
+    (styled/nl)))
 
 (definterface ITestContext
   (output-position ^int [])
@@ -113,7 +115,8 @@
     (when (< out-mark out-start)
       (.add outcomes
             (^Callable fn []
-             (print-lines (.getBuffer output) out-mark out-start)
+             (with-open [w (ansi/styled-writer *out*)]
+               (print-lines w (.getBuffer output) out-mark out-start))
              report-empty)))
     (when (some? outcome)       ;omit when marking the `deftest`'s end
       (.add outcomes outcome))
@@ -151,27 +154,58 @@
 
 ;;; ------------------------------------------------------------------------
 
+;; To pick up the terminal width, the shell must export COLUMNS into
+;; the program's environment.  When using make, this can be done by
+;; running "make test COLUMNS=$COLUMNS".
+;; 
+;; Additionally, this cannot pick up changes to the terminal's size
+;; after program startup.  For an ioctl based approach which may
+;; report the actual size, see
+;; https://man7.org/linux/man-pages/man4/tty_ioctl.4.htm
+(def ^:private exp-act-opts
+  {:page-width (let [fallback 80]
+                 (if-some [columns (System/getenv "COLUMNS")]
+                   (try
+                     (max 8 (Integer/parseInt columns))
+                     (catch NumberFormatException _
+                       fallback))
+                   fallback))})
+
+;; (defn env-color-output? ^boolean []
+;;   (if-some [cons (System/console)]
+;;     (.isTerminal cons)               ;always true starting with JDK 26
+;;     false))
+
+
 (defn- print-stack-trace ^void [^Throwable t]
   (when (some? t)
     (.printStackTrace t (java.io.PrintWriter. *out*))
     (println)))
 
-(defn- print-header [^TestContext test-ctx ^String prefix ^int line]
-  (let [line-suffix (when (>= line 0)
-                      (str ":" (style/highlight-str (str line))))]
-    (println prefix (str (.var-symbol test-ctx) line-suffix))))
+(defn- print-header ^void [^TestContext test-ctx fn-prefix ^int line]
+  (with-open [w (ansi/styled-writer *out*)]
+    (cond-> (-> (fn-prefix w) (styled/write " ")
+                (styled/write (str (.var-symbol test-ctx))))
+      (>= line 0)
+      (-> (styled/write ":")
+          (styled/write (style/intensity style/intensity-bright) (str line))))))
 
 (defn- some-output? ^boolean [^int out-start ^int out-end]
   (< out-start out-end))
 (defn- print-output ^void [^TestContext test-ctx ^int out-start ^int out-end]
   (when (some-output? out-start out-end)
-    (println (style/dim-str "---- output start ----"))
-    (print-lines (-> test-ctx .output (.getBuffer)) out-start out-end)
-    (println (style/dim-str "----- output end -----"))))
+    (let [dim (style/intensity style/intensity-faint)]
+      (with-open [w (ansi/styled-writer *out*)]
+        (-> (styled/write w dim "---- output start ----")
+            (print-lines (-> test-ctx .output (.getBuffer)) out-start out-end)
+            (styled/write dim "----- output end -----"))))))
 
-(def ^:private header-pass (style/success-str "PASS"))
-(def ^:private header-fail (style/error-header-str " FAIL " "*FAIL*"))
-(def ^:private header-error (style/error-header-str " ERROR " "*ERROR*"))
+(defn- write-pass ^StyledWriter [^StyledWriter w]
+  (styled/write w (style/fg style/green) "PASS"))
+(defn- write-fail ^StyledWriter [^StyledWriter w]
+  (styled/write w (-> (style/fg style/white) (style/bg style/red)) " FAIL "))
+(defn- write-error ^StyledWriter [^StyledWriter w]
+  (styled/write w (-> (style/fg style/white) (style/bg style/red)) " ERROR "))
 
 (deftype IsContextImpl [^TestContext test-ctx
                         ^int line    ;negative if "between" `is` forms
@@ -181,7 +215,7 @@
     (let [out-end (.output-position test-ctx)]
       (.register-outcome test-ctx out-start out-end
                          (^Callable fn []
-                          (print-header test-ctx header-error line)
+                          (print-header test-ctx write-error line)
                           (print-output test-ctx out-start out-end)
                           (print-stack-trace ex)
                           is-report-error))))
@@ -189,16 +223,19 @@
     (let [out-end (.output-position test-ctx)]
       (.register-outcome test-ctx out-start out-end 
                          (^Callable fn []
-                          (print-header test-ctx header-fail line)
+                          (print-header test-ctx write-fail line)
                           (print-output test-ctx out-start out-end)
-                          (align/print-expected-actual msg expected actual)
+                          #_(pp/pprint expected)
+                          #_(pp/pprint actual)
+                          (pp/print-expected-actual msg expected actual
+                                                    exp-act-opts)
                           is-report-fail))))
   (outcome-pass [this]
     (let [out-end (.output-position test-ctx)]
       (.register-outcome test-ctx out-start out-end
                          (^Callable fn []
                           (when (some-output? out-start out-end)
-                            (print-header test-ctx header-pass line)
+                            (print-header test-ctx write-pass line)
                             (print-output test-ctx out-start out-end))
                           is-report-pass)))))
 
@@ -294,8 +331,11 @@
                (let [report (->> (map Callable/.call outcomes)
                                  (add-reports report-empty))]
                  (when (all-pass? report)
-                   (println (str header-pass " " nmsp "/... ("
-                                 (.tests report) " tests)")))
+                   (with-open [w (ansi/styled-writer *out*)]
+                     (-> (write-pass w) (styled/write " ")
+                         (styled/write nmsp) (styled/write "/... (")
+                         (styled/write (str (.tests report)))
+                         (styled/write " tests)"))))
                  report))))]
     
     ;; Print outcomes sequentially in namespace execution order, as

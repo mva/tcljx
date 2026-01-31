@@ -1,3 +1,3 @@
 tcljx.data.error.WrongInfo
-[31m### [0mtype tag on function name is not supported
-[31m@@@ [0mtest/errormsg/fn-20-tag-on-name/src/pkg/ns0.cljt:[1m2[0m
+[31m### [mtype tag on function name is not supported
+[31m@@@ [mtest/errormsg/fn-20-tag-on-name/src/pkg/ns0.cljt:[1m2[m

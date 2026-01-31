@@ -1,0 +1,84 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.prettify-test
+  (:require (tcljx.alpha.pp [buffer :as buffer] [treetext :as treetext]
+                            [stringify :as stringify] [prettify :as prettify])
+            [tcljx.alpha.ptest :refer :all]
+            [tinyclj.string :as str]))
+
+(defn prettify-forms ^String [^int page-width forms]
+  (-> (buffer/buffer-writer)
+      (prettify/write-pretty (stringify/forms-tree forms) page-width)
+      (buffer/to-text)
+      (.text)))
+(defmacro is-pr [exp page-width forms]
+  (with-meta `(is (= ~exp (prettify-forms ~page-width ~forms)))
+    (meta &form)))                      ;provide correct :line to `is`
+(defmacro q-forms [& forms]
+  `(quote ~forms))
+
+(deftest prettify-abc-test
+  (let [abc (q-forms A [B C])] ;modified doc1 example from yield-pp.pdf
+    (is-pr "A [B C]" 8 abc)
+    (is-pr "A [B C]" 7 abc)
+    (is-pr "A\n[B C]" 6 abc)
+    (is-pr "A\n[B C]" 5 abc)
+    (is-pr "A\n[B\n C]" 4 abc)
+    (is-pr "A\n[B\n C]" 3 abc)
+    (is-pr "A\n[B\n C]" 2 abc)
+    (is-pr "A\n[B\n C]" 1 abc)))
+
+(deftest prettify-inner-last-test
+  (let [nested-abc (q-forms (a (b c)))]
+    (is-pr "(a (b c))" 9 nested-abc)
+    (is-pr "(a\n (b c))" 8 nested-abc)
+    (is-pr "(a\n (b c))" 7 nested-abc)
+    (is-pr "(a\n (b\n  c))" 6 nested-abc))
+
+  (let [nested-abcd (q-forms (a (b c) d))]
+    (is-pr "(a (b c) d)" 11 nested-abcd)
+    (is-pr "(a\n (b c)\n d)" 10 nested-abcd)
+    (is-pr "(a\n (b c)\n d)" 6 nested-abcd)
+    (is-pr "(a\n (b\n  c)\n d)" 5 nested-abcd)))
+
+(def flat-vector (q-forms [1 2 3]))
+(def nested-vector (q-forms [[1 2 3]]))
+(deftest prettify-align-test
+  (is-pr "[1 2 3]" 7 flat-vector)
+  (is-pr "[1\n 2\n 3]" 6 flat-vector)
+
+  (is-pr "[[1 2 3]]" 10 nested-vector)
+  (is-pr "[[1 2 3]]" 9 nested-vector)
+
+  ;; Nested would vector fit, outer would not.  By reserving space for
+  ;; the "]" after the "3]", the layout decision of the inner vector
+  ;; is forced to "needs line breaks"
+  (is-pr "[[1\n  2\n  3]]" 8 nested-vector)
+  
+  (is-pr "[[1\n  2\n  3]]" 7 nested-vector))
+
+(def nested-data
+  (q-forms ({:args [["VkInstance = 0x7f1bd84f53d0" 0]
+                    ["const VkAllocationCallbacks* = NULL" 0]]}
+            {:fct "vkDestroyDebugUtilsMessengerEXT"})))
+
+(deftest nested-data-test
+  (is-pr (str "({:args\n"
+              "  [[\"VkInstance = 0x7f1bd84f53d0\" 0] [\"const VkAllocationCallbacks* = NULL\" 0]]}\n"
+              " {:fct \"vkDestroyDebugUtilsMessengerEXT\"})")
+          80 nested-data))
+
+(deftest prettify-map-test
+  (is-pr "{:a :B, :c :D}"
+         14 (q-forms {:a :B, :c :D}))
+  (is-pr "{:a :B,\n :c :D}"
+         13 (q-forms {:a :B, :c :D}))
+  (is-pr "{:a :B,\n :c :D}"
+         7 (q-forms {:a :B, :c :D}))
+  (is-pr "{:a\n :B,\n :c\n :D}"
+         6 (q-forms {:a :B, :c :D})))

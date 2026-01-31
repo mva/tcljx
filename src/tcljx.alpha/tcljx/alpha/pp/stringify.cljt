@@ -1,0 +1,231 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.stringify
+  (:require (tcljx.alpha.pp [treetext :as treetext]))
+  (:import (tcljx.alpha.pp.treetext TreeWriter TreeText)
+           (clojure.lang IMeta)
+           (java.util Map$Entry)
+           (java.util.regex Pattern)))
+
+;;; Serializes a Clojure form or a sequence of Clojure forms into a
+;;; single long line of tree structured text.  Here, tree structured
+;;; means that an amount of grouping information is retained to
+;;; improve the output of the pretty-printer `prettify`:
+;;;
+;;; * Non-empty collections are groups.  Entries of a map are
+;;;   separated by ", " instead of just a single space " ".
+;;;
+;;; * Within a map, map entries are considered groups with two
+;;;   elements.  A standalone Map$Entry is serialized as a two element
+;;;   vector.
+;;;
+;;; * A value decorated with meta information is emitted as a two
+;;;   element group.
+;;;
+;;; The "single long line" output can be used directly, or it can be
+;;; passed to `prettify` to break groups that would exceed the page
+;;; width into multiple lines.
+
+(def eof-str "") ;end of forms: synthetic closing delimiter token of root
+(defn eof? ^boolean [x] (identical? eof-str x))
+
+;;; Given a form representing an atomic expression, return its
+;;; compiler readable representation.  Result is undefined if a
+;;; composite form is passed.  Composites are anything implementing
+;;; IMeta (this means symbols with non-nil meta and all collection
+;;; instances), instances of java.util.Map$Entry, and arrays.
+(defn atom-str ^String [form]
+  (letfn [(double-str ^String [^double n]
+            (cond
+              (= Double/POSITIVE_INFINITY n) "##Inf"
+              (= Double/NEGATIVE_INFINITY n) "##-Inf"
+              (Double/isNaN n) "##NaN"
+              :else (Double/toString n)))
+          (float-str ^String [^float n]
+            (if (or (= Float/POSITIVE_INFINITY n)
+                    (= Float/NEGATIVE_INFINITY n)
+                    (Float/isNaN n))
+              (throw (IllegalArgumentException. "not a regular float value"))
+              (str n \f)))
+          
+          (cntrl? ^boolean [^char c]
+            (or (< (int c) (int \u0020)) (= c \u007f)))
+          (u-char-str ^String [^char c]
+            (str "\\u" (.toHexDigits (java.util.HexFormat/of) c)))
+          (string-str ^String [^String s]
+            (loop [sb (StringBuilder. "\""), i 0]
+              (if (= i (.length s))
+                (-> sb (.append \") (.toString))
+                (let [c (.charAt s i)]
+                  (recur (if (or (= c \\) (= c \") (cntrl? c))
+                           (.append sb (if-some [s (get char-escape-string c)]
+                                         ^String s
+                                         (u-char-str c)))
+                           (.append sb c))
+                         (inc i))))))
+          (pattern-str ^String [^String s] ;see core_print.clj
+            (loop [sb (StringBuilder. "#\""), i 0, qmode false]
+              (if (= i (.length s))
+                (-> sb (.append \") (.toString))
+                (let [c (.charAt s i)]
+                  (case c
+                    \\ (let [c2 (.charAt s (inc i))]
+                         (recur (-> sb (.append \\) (.append c2)) (+ i 2)
+                                (if qmode (not= c2 \E) (= c2 \Q))))
+                    \" (recur (.append sb (if qmode "\\E\\\"\\Q" "\\\""))
+                              (inc i) qmode)
+                    (recur (.append sb c) (inc i) qmode))))))
+          (char-str ^String [^Character c]
+            (if-some [nm (char-name-string c)]
+              (str \\ ^String nm)
+              (let [c ^char c]
+                (if (cntrl? c)
+                  (u-char-str c)
+                  (str \\ c)))))]
+    (cond
+      (nil? form)
+      "nil"
+      
+      (string? form)
+      (string-str form)
+      
+      (instance? Long form)
+      (str ^Long form \l)
+      
+      (instance? Double form)
+      (double-str form)
+      
+      (instance? Float form)
+      (float-str form)
+      
+      (char? form)
+      (char-str form)
+      
+      (instance? Pattern form)
+      (pattern-str (.pattern ^Pattern form))
+      
+      :else (.toString form))))
+
+(defn meta-value ^Object [^map m]
+  (if (= (count m) 1)
+    (let [[k v] (first m)]
+      (cond
+        (and (identical? :tag k) (or (symbol? v) (string? v))) v
+        (and (identical? :param-tags k) (vector? v)) v
+        (and (keyword? k) (true? v)) k
+        :else m))
+    m))
+
+(defn array? ^boolean [form]
+  (if (some? form)
+    (-> form (.getClass) (.isArray))
+    false))
+          
+(defn- write-flex-space ^TreeWriter [^TreeWriter w]
+  (.append w " "))
+
+(defn- write-form ^TreeWriter [^TreeWriter w ^Object form ^int dist-to-flsp]
+  (letfn [(write-flex-seq ^TreeWriter [^TreeWriter w ^seq xs]
+            ;; pre: `xs` is not empty
+            (let [x (first xs)]
+              (if-some [xr (next xs)]
+                (recur (-> w (write-form x 0) (write-flex-space))
+                       xr)
+                (write-form w x (inc dist-to-flsp))))) ;closing delimiter
+          (write-coll ^TreeWriter [^TreeWriter w ^String begin ^String end
+                                   ^seq xs]
+            ;; pre: `xs` is nil when empty (i.e. result of a `seq` call)
+            (cond-> (.append w begin)
+              (some? xs) (write-flex-seq xs)
+              true (.append end)))
+          
+          (write-map-entry* ^TreeWriter [^TreeWriter w ^Map$Entry e
+                                         ^int dist-to-flsp]
+            (let [node-id (.allocate-node-id w)]
+              (-> (write-form w (.getKey e) 0)
+                  (write-flex-space)
+                  (write-form (.getValue e) dist-to-flsp)
+                  (.mark-end-of-node node-id dist-to-flsp))))
+          (write-map-seq ^TreeWriter [^TreeWriter w ^seq es]
+            ;; pre: `es` is not empty
+            (let [e (first es)]
+              (if-some [er (next es)]
+                (recur (-> (write-map-entry* w e 1) ;account for ","
+                           (.append ",")
+                           (write-flex-space))
+                       er)
+                (write-map-entry* w e (inc dist-to-flsp))))) ;closing "}"
+          (write-map ^TreeWriter [^TreeWriter w ^map map]
+            (let [es (seq map)]
+              (cond-> (.append w "{")
+                (some? es) (write-map-seq es)
+                true (.append "}"))))
+          
+          (write-meta-then-form ^TreeWriter [^TreeWriter w ^map m ^IMeta form]
+            (let [w (-> (.append w "^")
+                        (write-form (meta-value m) 0)
+                        (write-flex-space))
+                  node-id (.allocate-node-id w)]
+              (-> (write-imeta-value w node-id form)
+                  (.mark-end-of-node node-id dist-to-flsp))))
+          (write-imeta-value ^TreeWriter [^TreeWriter w
+                                          ^int node-id ^IMeta form]
+            ;; note: map & set have non-deterministic order
+            (cond
+              (symbol? form) (.append w (.toString form))
+              (seq? form) (-> (.set-indent-of w node-id 1)
+                              (write-coll "(" ")" (seq form)))
+              (vector? form) (-> (.set-indent-of w node-id 1)
+                                 (write-coll "[" "]" (seq form)))
+              (map? form) (-> (.set-indent-of w node-id 1)
+                              (write-map ^map form))
+              (set? form) (-> (.set-indent-of w node-id 2)
+                              (write-coll "#{" "}" (seq form)))
+              :else (throw (IllegalArgumentException. (str (class form))))))]
+
+    #_(prn :form form (class form))
+    (let [node-id (.allocate-node-id w)]
+      (-> (cond
+            (instance? IMeta form)
+            (if-some [m (meta form)]
+              (write-meta-then-form w m form)
+              (write-imeta-value w node-id form))
+            
+            (instance? Map$Entry form) ;standalone entry, *not* part of map
+            (write-imeta-value w node-id (vec form))
+            
+            (array? form)  ;FIXME... or render array type in some way?
+            (write-imeta-value w node-id (vec form))
+            
+            :else (.append w (atom-str form)))
+          (.mark-end-of-node node-id dist-to-flsp)))))
+
+(defn- write-forms ^TreeWriter [^TreeWriter w forms]
+  (let [node-id (.allocate-node-id w)
+        forms (seq forms)]
+    (-> (if (some? forms)
+          (loop [w (write-form w (first forms) 0), forms (next forms)]
+            (cond-> w
+              (some? forms)
+              (-> (write-flex-space)
+                  (write-form (first forms) 0)
+                  (recur (next forms)))))
+          w)
+        (.mark-end-of-node node-id 0))))
+
+;;; ------------------------------------------------------------------------
+
+(defn form-tree ^TreeText [form]
+  (-> (treetext/tree-writer) (write-form form 0) (treetext/to-text!)))
+(defn form-str ^String [form]
+  (-> (form-tree form) .styled-text .text))
+
+(defn forms-tree ^TreeText [forms]
+  (-> (treetext/tree-writer) (write-forms forms) (treetext/to-text!)))
+(defn forms-str ^String [form]
+  (-> (forms-tree form) .styled-text .text))

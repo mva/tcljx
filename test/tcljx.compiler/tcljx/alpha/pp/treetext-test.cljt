@@ -1,0 +1,120 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.treetext-test
+  (:require (tcljx.alpha.pp [treetext :as treetext])
+            [tcljx.alpha.ptest :refer :all])
+  (:import (tcljx.alpha.pp.treetext TreeText)))
+
+(defn tree-str ^String [^TreeText txt]
+  (-> txt .styled-text .text))
+(defn end-of-nodev ^vector [^TreeText txt]
+  (mapv #(treetext/end-of-node (.node-info txt) ^int %)
+        (range (alength (.node-info txt)))))
+(defn indent-of-nodev ^vector [^TreeText txt]
+  (mapv #(treetext/indent-of-node (.node-info txt) ^int %)
+        (range (alength (.node-info txt)))))
+
+(defn check-text ^TreeText [^TreeText txt]
+  (let [cs (tree-str txt)
+        ani (.node-info txt)]
+    ;; root node with id 0 covers whole text
+    (let [root-id 0]
+      (assert (= (treetext/end-of-node ani root-id) (dec (.length cs)))))
+    ;; synthetic node at end of node-info array
+    (let [last-id (dec (alength ani))]
+      (assert (= (treetext/end-of-node ani last-id) (.length cs)))
+      (assert (= (treetext/indent-of-node ani last-id) 0)))
+    ;; every non-synthetic end-of-node index points to \space
+    (dotimes [i (dec (alength ani))]
+      (assert (= (.charAt cs (treetext/end-of-node ani i)) \space)))
+    txt))
+
+(defmacro with-checked-tree-> [& body]
+  `(-> (treetext/tree-writer)
+       ~@body
+       (treetext/to-text!)
+       (check-text)))
+
+
+
+;;; No tree is *not* a valid TreeText instance: there is no root node
+;;; at index 0, and the synthetic node's end-of-node value is not the
+;;; index of a space character.
+(deftest no-tree-test
+  (let [txt (-> (treetext/tree-writer) (treetext/to-text!))]
+    (is (= " " (tree-str txt)))
+    (is (= [1] (end-of-nodev txt)))
+    (is (= [0] (indent-of-nodev txt)))))
+
+(deftest atomic-root-test
+  (let [txt (with-checked-tree->
+              (as-> w
+                  (let [node-id (.allocate-node-id w)]
+                    (-> (.append w "foo")
+                        (.mark-end-of-node node-id 0)))))]
+    (is (= "foo " (tree-str txt)))
+    (is (= [3 4] (end-of-nodev txt)))
+    (is (= [0 0] (indent-of-nodev txt)))))
+
+(deftest empty-root-test
+  (let [txt (with-checked-tree->
+              (as-> w
+                  (let [root-id (.allocate-node-id w)]
+                    (.mark-end-of-node w root-id 0))))]
+    (is (= " " (tree-str txt)))
+    (is (= [0 1] (end-of-nodev txt)))
+    (is (= [0 0] (indent-of-nodev txt)))))
+
+(deftest root-vector-no-elements-test
+  (let [txt (with-checked-tree->
+              (as-> w
+                  (let [root-id (.allocate-node-id w)]
+                    (-> (.set-indent-of w root-id 1)
+                        (.append "[")
+                        (.append "]")
+                        (.mark-end-of-node root-id 0)))))]
+    (is (= "[] " (tree-str txt)))
+    (is (= [2 3] (end-of-nodev txt)))
+    (is (= [1 0] (indent-of-nodev txt)))))
+
+(deftest root-vector-one-element-test
+  (let [txt (with-checked-tree->
+              (as-> w
+                  (let [root-id (.allocate-node-id w)]
+                    (-> (.set-indent-of w root-id 1)
+                        (.append "[")
+                        (as-> w
+                            (let [elem-id (.allocate-node-id w)]
+                              (-> (.append w "foo")
+                                  (.mark-end-of-node elem-id 1))))
+                        (.append "]")
+                        (.mark-end-of-node root-id 0)))))]
+    (is (= "[foo] " (tree-str txt)))
+    (is (= [5 5 6] (end-of-nodev txt)))
+    (is (= [1 0 0] (indent-of-nodev txt)))))
+
+(deftest root-vector-two-elements-test
+  (let [txt (with-checked-tree->
+              (as-> w
+                  (let [root-id (.allocate-node-id w)]
+                    (-> (.set-indent-of w root-id 1)
+                        (.append "[")
+                        (as-> w
+                            (let [elem-id (.allocate-node-id w)]
+                              (-> (.append w "foo")
+                                  (.mark-end-of-node elem-id 0))))
+                        (.append " ")   ;separator: single flex space
+                        (as-> w
+                            (let [elem-id (.allocate-node-id w)]
+                              (-> (.append w "bar")
+                                  (.mark-end-of-node elem-id 1))))
+                        (.append "]")
+                        (.mark-end-of-node root-id 0)))))]
+    (is (= "[foo bar] " (tree-str txt)))
+    (is (= [9 4 9 10] (end-of-nodev txt)))
+    (is (= [1 0 0 0] (indent-of-nodev txt)))))

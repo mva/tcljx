@@ -1,0 +1,102 @@
+(ns tcljx.alpha.pp
+  (:require
+   (tcljx.alpha.pp [style :as style] [styled :as styled] [ansi :as ansi]
+                   [paragraph :as paragraph] [buffer :as buffer]
+                   [stringify :as stringify] [prettify :as prettify]
+                   [diff :as diff] [prettydiff :as prettydiff]))
+  (:import (tcljx.alpha.pp.styled StyledWriter)
+           (tcljx.alpha.pp.prettydiff DiffText)))
+
+(defn prn [& xs]
+  (println (stringify/forms-str xs)))
+
+(defn pprint
+  (^void [x]
+   (pprint x *out*))
+  (^void [x ^java.io.Writer w]
+   (with-open [w (styled/plain-writer w)]
+     (prettify/write-pretty w (stringify/form-tree x) 80))))
+
+;;; ------------------------------------------------------------------------
+
+(deftype ExpActOptions [^String header-cause
+                        ^String header-expected
+                        ^String header-actual
+                        ^int page-width
+                        ^int line-header-size])
+
+(def ^:private exp-act-defaults
+  (ExpActOptions. "cause:" "expected:" "actual:" 80 9))
+
+(defn- parse-exp-act-options ^ExpActOptions [^map opts]
+  (if (empty? opts)
+    exp-act-defaults
+    (let [cause (or (:header-cause opts) (.header-cause exp-act-defaults))
+          exp (or (:header-expected opts) (.header-expected exp-act-defaults))
+          act (or (:header-actual opts) (.header-actual exp-act-defaults))
+          page-width (if-some [n (:page-width opts)]
+                       (max 8 ^int n)
+                       (.page-width exp-act-defaults))]
+      (ExpActOptions. cause exp act page-width
+                      (max (styled/code-point-count exp)
+                           (styled/code-point-count act))))))
+
+(def ^:private style-header (style/intensity style/intensity-faint))
+
+(defn- expected-actual ^StyledWriter [^StyledWriter w ^String cause
+                                      ^String/1 trace ^ExpActOptions opts]
+  (letfn [(write-line-header ^void [^StyledWriter w ^String header]
+            (let [col (- (.line-header-size opts)
+                         (styled/code-point-count header))]
+              (-> (styled/pad-to-column w col)
+                  (styled/write style-header header)
+                  (styled/write " "))))
+          (write-inline ^void [^DiffText dt]
+            (write-line-header w (.header-expected opts))
+            (buffer/transfer-to (.line-0 dt) w)
+            (styled/nl w)
+            (write-line-header w (.header-actual opts))
+            (buffer/transfer-to (.line-1 dt) w)
+            (styled/nl w))
+          
+          (write-side-by-side ^void [^DiffText dt]
+            (let [side-by-side-gap 4
+                  side-by-side-width (quot (- (.page-width opts)
+                                              side-by-side-gap) 2)
+                  txts (prettydiff/pretty-text dt side-by-side-width)
+                  columns (doto (new int/1 2)
+                            (aset 0 0)
+                            (aset 1 (+ side-by-side-width side-by-side-gap)))]
+              (-> (styled/pad-to-column w (aget columns 0))
+                  (styled/write style-header (.header-expected opts))
+                  (styled/pad-to-column (aget columns 1))
+                  (styled/write style-header (.header-actual opts))
+                  (styled/nl)
+                  (buffer/side-by-side txts columns))))]
+    (let [dt (prettydiff/line-text trace)]
+      (let [w (-> (styled/write w style-header (.header-cause opts))
+                  (styled/write " "))
+            pad (.repeat " " (.code-points-in-line w))]
+        (with-open [wi (styled/indent-writer w pad)
+                    wp (paragraph/writer wi (.page-width opts))]
+          (styled/write wp cause))
+        (.nl w))
+      
+      (if (<= (+ (.line-header-size opts) 1
+                 (max (.code-points-0 dt) (.code-points-1 dt)))
+              (.page-width opts))
+        (write-inline dt)
+        (write-side-by-side dt)))
+    w))
+
+;;; Returns false if there is no difference between `form-a` and
+;;; `form-b`.  In this case, no output is printed.  Warning: This
+;;; function implements a shortest path search within a `size(form-a)`
+;;; times `size(form-b)` grid.  Input with a large number of small
+;;; changes can take a long time to complete.
+(defn print-expected-actual ^boolean [^String cause form-a form-b & {:as opts}]
+  (let [trace (diff/two-forms-trace form-a form-b)]
+    (when-not (diff/only-shared-tokens? trace)
+      (with-open [w (ansi/styled-writer *out*)]
+        (expected-actual w cause trace (parse-exp-act-options opts)))
+      true)))

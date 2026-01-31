@@ -1,0 +1,192 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.prettydiff
+  (:require (tcljx.alpha.pp [style :as style] [styled :as styled]
+                            [buffer :as buffer] [stringify :as stringify]))
+  (:import (tcljx.alpha.pp.buffer BufferWriter StyledText)))
+
+;;; Given a diff trace of the string representation of two forms,
+;;; produce a side by side pretty-printed output of the forms.  The
+;;; output tries to match up tokens shared between the traces, and
+;;; highlights tokens appearing in one of the traces only.
+;;;
+;;; While the input traces are always syntactically valid, their
+;;; combined hierarchical structure does not need to follow that of
+;;; either of them.  For example, ignoring whitespace the traces
+;;;
+;;;     (foo [a  b c] d )    (bar  a )
+;;;     (foo  a [b c  d])    (bar [a])
+;;;
+;;; pair up all the symbols but assign some of them different nesting
+;;; levels, either inside or outside of the vector.
+;;;
+;;; This namespace implements the pretty-printing algorithm used by
+;;; `stringify` and `prettify`, taking as input sequences of tokens
+;;; without any whitespace and only implicit grouping.
+
+(defn- open? ^boolean [^String token] ;accepts "([{^" with optional prefix \#
+  (letfn [(open-char? ^boolean [^char ch]
+            (case ch
+              (\( \[ \{ \^) true
+              #_else false))]
+    (case (.length token)
+      1 (open-char? (.charAt token 0))
+      2 (and (= (.charAt token 0) \#) (open-char? (.charAt token 1)))
+      #_else false)))
+
+(defn- close? ^boolean [^String token]
+  (letfn [(close-char? ^boolean [^char ch]
+            (case ch
+              (\) \] \}) true
+              #_else false))]
+    (case (.length token)
+      0 true                            ;matches stringify/eof-str
+      1 (close-char? (.charAt token 0))
+      #_else false)))
+
+;;; ------------------------------------------------------------------------
+
+(def ^:private style-novel-0 (style/fg style/red))  ;side 0/a/left/expected
+(def ^:private style-novel-1 (style/fg style/blue)) ;side 1/b/right/actual
+(def ^:private style-shared style/default)
+
+(deftype PrettyGroup [^int indent ^int remain ;for pretty-printing
+                      ^int i-open ^int start-of-group ;for line printing
+                      ^PrettyGroup next])
+
+(defn- inline? ^boolean [^PrettyGroup pg]
+  (neg? (.indent pg)))
+
+;;; Note: `!width` is written to by `line-text` to be subsequently read
+;;; by `pretty-text`, before being overwritten again with garbage.
+(defn- write-pretty! ^void [^BufferWriter w-0 ^BufferWriter w-1
+                            ^String/1 trace ^int/1 !width ^PrettyGroup gs-init]
+  (letfn [(line-column ^long [^BufferWriter w]
+            (-> (bit-shift-left (long (.nl-count w)) 32)
+                (bit-or (long (.code-points-in-line w)))))
+          (line-of ^int [^long lc]
+            (int (unsigned-bit-shift-right lc 32)))
+          (column-of ^int [^long lc]
+            (int lc))
+          
+          (token-index-of ^int [^int offset ^int p]
+            (bit-or (bit-shift-left p 1) offset))
+          (pair-index-of ^int [^int i]
+            (unsigned-bit-shift-right i 1))
+          (skip-to-token ^int [^int offset ^int p]
+            (loop [i (token-index-of offset p)]
+              (if (some? (aget trace i))
+                (pair-index-of i)
+                (recur (+ i 2)))))
+          (token-at ^String [^int offset ^int p]
+            (aget trace (token-index-of offset p)))
+
+          (tail-size ^int [^int start]
+            (loop [acc 0, i start]
+              (let [token (aget trace i)]
+                (cond
+                  (stringify/eof? token) acc
+                  (nil? token) (recur acc (+ i 2))
+                  (close? token) (recur (inc acc) (+ i 2))
+                  :else acc))))
+          (push-group ^PrettyGroup [^PrettyGroup gs ^int offset ^int p-open
+                                    ^String open-delimiter ^int start-of-group]
+            (if (= open-delimiter "^")
+              gs               ;has no closing delimiter and no !width
+              (let [i (token-index-of offset p-open)]
+                (if (or (inline? gs) (<= (aget !width i) (.remain gs)))
+                  (PrettyGroup. -1 0 i start-of-group gs)
+                  (let [d (.length open-delimiter)]
+                    (PrettyGroup. (+ (.indent gs) d) (- (.remain gs) d)
+                                  i start-of-group gs))))))
+          (pop-group ^PrettyGroup [^PrettyGroup gs ^int offset ^int p-close
+                                   ^int start-of-close]
+            (aset !width (.i-open gs)
+                  (+ (- start-of-close (.start-of-group gs))
+                     (tail-size (token-index-of offset p-close))))
+            (.next gs))
+          
+          (write-separator! ^void [^BufferWriter w ^PrettyGroup gs]
+            (if (inline? gs)
+              (styled/write w " ")
+              (-> w (styled/nl) (styled/pad (.indent gs)))))
+          (write-token! ^PrettyGroup [^BufferWriter w ^PrettyGroup gs 
+                                      ^int offset ^int p ^int p'
+                                      ^boolean shared?]
+            (let [token (token-at offset p)
+                  token' (token-at offset p')
+                  start-of-token (.code-points-in-line w)
+                  style (cond shared? style-shared
+                              (zero? offset) style-novel-0
+                              :else style-novel-1)
+                  gs' (cond-> gs
+                        (open? token) (push-group offset p token start-of-token)
+                        (close? token) (pop-group offset p start-of-token))]
+              (styled/write w style token)
+              (when-not (open? token)
+                (when-not (close? token')
+                  (write-separator! w gs')))
+              gs'))]
+    
+    (loop [gs-0 gs-init, p-0 (skip-to-token 0 0)
+           gs-1 gs-init, p-1 (skip-to-token 1 0)]
+      (cond
+        (< p-0 p-1)
+        (let [p-0' (skip-to-token 0 (inc p-0))]
+          (recur (write-token! w-0 gs-0 0 p-0 p-0' false) p-0' gs-1 p-1))
+        
+        (< p-1 p-0)
+        (let [p-1' (skip-to-token 1 (inc p-1))]
+          (recur gs-0 p-0 (write-token! w-1 gs-1 1 p-1 p-1' false) p-1'))
+
+        ;; here holds (= p-0 p-1), i.e. looking at shared token
+        (not (stringify/eof? (token-at 0 p-0)))
+        (let [p-0' (skip-to-token 0 (inc p-0))
+              p-1' (skip-to-token 1 (inc p-1))
+              lc (when-not (close? (token-at 0 p-0))
+                   (max (line-column w-0) (line-column w-1)))]
+          ;; when looking at shared closing delimiter: elide
+          ;; padding to avoid whitespace between last element of
+          ;; collection and its last trailing closing delimiter
+          (recur (-> (styled/pad-to-line w-0 (line-of lc) (column-of lc))
+                     (write-token! gs-0 0 p-0 p-0' true)) p-0'
+                 (-> (styled/pad-to-line w-1 (line-of lc) (column-of lc))
+                     (write-token! gs-1 1 p-1 p-1' true)) p-1'))))))
+
+(deftype DiffText [^String/1 trace ^int/1 cp-width
+                   ^StyledText line-0 ^int code-points-0
+                   ^StyledText line-1 ^int code-points-1])
+
+;;; Produces two single lines of text representing the two paths
+;;; through `trace`.  The text is aligned for shared tokens.  That is,
+;;; if a token is consumed from both source forms at the same time,
+;;; then padding is inserted so that this token appears at the same
+;;; column in both paths.  The one exception to this rule are shared
+;;; closing delimiters: these are emitted as early as possible without
+;;; any padding.
+(defn line-text ^DiffText [^String/1 trace]
+  (let [w-0 (buffer/buffer-writer), w-1 (buffer/buffer-writer)
+        width (new int/1 (alength trace))]
+    (write-pretty! w-0 w-1 trace width
+                   (PrettyGroup. -1 Integer/MAX_VALUE -1 0 nil))
+    (DiffText. trace width
+               (buffer/to-text w-0) (.code-points-in-line w-0)
+               (buffer/to-text w-1) (.code-points-in-line w-1))))
+
+;;; Reformats the output of `line-text` using the given `page-width`
+;;; as a soft limit.  Matches the layout strategy of `line-text` token
+;;; for token, with a single difference: if a group is too wide to
+;;; fit, then newline plus indentation is inserted between the group's
+;;; elements instead of a single separating whitespace.
+(defn pretty-text ^StyledText/1 [^DiffText dt ^int page-width]
+  (let [w-0 (buffer/buffer-writer), w-1 (buffer/buffer-writer)]
+    (write-pretty! w-0 w-1 (.trace dt) (.cp-width dt)
+                   (PrettyGroup. 0 page-width -1 0 nil))
+    (doto (new StyledText/1 2)
+      (aset 0 (-> w-0 (styled/nl) (buffer/to-text)))
+      (aset 1 (-> w-1 (styled/nl) (buffer/to-text))))))

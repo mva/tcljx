@@ -1,0 +1,112 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.paragraph-test
+  (:require (tcljx.alpha.pp [style :as style] [styled :as styled]
+                            [ansi :as ansi] [paragraph :as paragraph])
+            [tcljx.alpha.pp.styled :refer [write nl]]
+            [tcljx.alpha.ptest :refer :all]))
+
+(def width 12)
+(defmacro with-writer-> [& body]
+  `(let [w-string# (java.io.StringWriter.)]
+     (with-open [w-ansi# (ansi/styled-writer w-string#)
+                 w-paragraph# (paragraph/writer w-ansi# width)]
+       (-> w-paragraph# ~@body))
+     (.toString w-string#)))
+
+(deftest empty-test
+  (is (= ""
+         (with-writer->)))
+  (is (= ""
+         (with-writer-> (write "") (write "")))))
+
+(deftest unstyled-test
+  (is (= "Hello\n"
+         (with-writer-> (write "Hello"))))
+  (is (= "Hello\n"
+         (with-writer-> (write "") (write "Hello"))))
+  (is (= "Hello\n"
+         (with-writer-> (write "Hello") (write "")))))
+
+(deftest styled-test
+  (is (= "\u001b[1mHello\u001b[m\n"
+         (with-writer-> (write (style/bold) "Hello"))))
+  (is (= "\u001b[1mHello\u001b[m\n"
+         (with-writer-> (write "") (write (style/bold) "Hello"))))
+  (is (= "\u001b[1mHello\u001b[m\n"
+         (with-writer-> (write (style/bold) "Hello") (write "")))))
+
+(deftest basic-line-break-test
+  (is (= "0123456789ab\n"
+         (with-writer-> (write "0123456789ab"))))
+  (is (= "0123456789ab \n"
+         (with-writer-> (write "0123456789ab "))))
+  (is (= "0123456789ab\n"
+         (with-writer-> (write "0123456789ab\n"))))
+  
+  (is (= "0123456789ab\nX\n"
+         (with-writer-> (write "0123456789ab") (nl) (write "X"))))
+  (is (= "0123456789ab\nX\n"
+         (with-writer-> (write "0123456789ab X"))))
+  (is (= "0123456789ab\nX\n"
+         (with-writer-> (write "0123456789ab\nX"))))
+  
+  (is (= "12345 12345\nabcde\n"
+         (with-writer-> (write "12345 12345 abcde")))))
+
+(deftest overflow-line-break-test
+  (is (= "0123456789abX\n"
+         (with-writer-> (write "0123456789abX"))))
+  (is (= "0123456789abX \n"
+         (with-writer-> (write "0123456789abX "))))
+  (is (= "0123456789abX\n"
+         (with-writer-> (write "0123456789abX\n"))))
+  
+  (is (= "0123456789abX\nY\n"
+         (with-writer-> (write "0123456789abX") (nl) (write "Y"))))
+  (is (= "0123456789abX\nY\n"
+         (with-writer-> (write "0123456789abX Y"))))
+  (is (= "0123456789abX\nY\n"
+         (with-writer-> (write "0123456789abX\nY")))))
+
+
+(deftest preserves-length-test
+  (is (= "           a\n"
+         (with-writer-> (write "           a"))))
+  (is (= "            \n"
+         (with-writer-> (write "            "))))
+  (is (= "           \nX\n"
+         (with-writer-> (write "            X"))))
+  (is (= "             \n"
+         (with-writer-> (write "             "))))
+  (is (= "            \nX\n"
+         (with-writer-> (write "             X")))))
+
+
+(defmacro with-indent-writer-> [& body]
+  `(let [w-string# (java.io.StringWriter.)]
+     (with-open [w-ansi# (ansi/styled-writer w-string#)
+                 w-indent# (styled/indent-writer w-ansi# "  | ")
+                 w-lines# (styled/lines-writer w-indent#)
+                 w-paragraph# (paragraph/writer w-lines# width)]
+       (-> w-paragraph# ~@body))
+     (.toString w-string#)))
+
+(deftest indented-paragraph-test
+  (is (= ""
+         (with-indent-writer-> )))
+  (is (= ""
+         (with-indent-writer-> (write ""))))
+  (is (= "### \n"
+         (with-indent-writer-> (write "### "))))
+  (is (= "### para1\n"
+         (with-indent-writer-> (write "### para1"))))
+  (is (= "### para1\n  | para2\n"
+         (with-indent-writer-> (write "### para1\npara2"))))
+  (is (= "### This is\n  | some\n  | multiline\n  | text.\n"
+         (with-indent-writer-> (write "### This is some multiline text.")))))

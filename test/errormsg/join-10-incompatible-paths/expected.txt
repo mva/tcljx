@@ -1,3 +1,3 @@
 tcljx.data.error.WrongInfo
-[31m### [0mincompatible path types (got: [[1mint[0m [1mboolean[0m])
-[31m@@@ [0mtest/errormsg/join-10-incompatible-paths/src/pkg/ns0.cljt:[1m2[0m
+[31m### [mincompatible path types (got: [[1mint[m [1mboolean[m])
+[31m@@@ [mtest/errormsg/join-10-incompatible-paths/src/pkg/ns0.cljt:[1m2[m

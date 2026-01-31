@@ -1,3 +1,3 @@
 tcljx.data.error.WrongInfo
-[31m### [0mtarget of redef must be unbound or :redef
-[31m@@@ [0mtest/errormsg/def-11-redef-when-bound/src/pkg/ns0.cljt:[1m3[0m
+[31m### [mtarget of redef must be unbound or :redef
+[31m@@@ [mtest/errormsg/def-11-redef-when-bound/src/pkg/ns0.cljt:[1m3[m

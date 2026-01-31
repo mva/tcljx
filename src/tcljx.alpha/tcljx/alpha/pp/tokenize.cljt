@@ -1,0 +1,203 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.tokenize
+  (:require (tcljx.alpha.pp [stringify :as stringify]))
+  (:refer-clojure :exclude [flatten])
+  (:import (clojure.lang IMeta)
+           (java.util HashMap Map$Entry Arrays)))
+
+;;; Serializes a single Clojure form into a sequence of strings, each
+;;; representing a single token as read by a Clojure compiler when
+;;; processing source code.  Superficially, this is similar to what
+;;; `stringify` does, but there are a number of differences:
+;;;
+;;; * No whitespace is emitted, nor any ", " separating map entries.
+;;;
+;;; * No structural information is retained.  Collection delimiters
+;;;   must be interpreted downstream to recover nesting information.
+;;;   Pairing of key/value or meta/value is not retained.
+;;;
+;;; * An attempt is made to sort elements of maps and sets into a
+;;;   deterministic order.
+;;; 
+;;; * Token strings are deduplicated so that string comparison can be
+;;;   strength reduced to `identical?` tests.
+;;;
+;;; Output is an array of String objects, for subsequent processing by
+;;; the shortest path search in namespace `diff`.  Note: This output
+;;; can differ even for equivalent forms.  For example, (= '() '[])
+;;; but the token sequences ("(" ")") and ("[" "]") are different.
+;;; Equivalence also ignores meta data, while tokenize does not.
+
+(defn- mk-range ^long [^int start ^int end]
+  (assert (< start end))
+  (bit-or (bit-shift-left (long end) 32) (long start)))
+(defn start-of ^int [^long r]
+  (int r))
+(defn- end-of ^int [^long r]
+  (int (unsigned-bit-shift-right r 32)))
+(defn range-count ^int [^long r]
+  (- (end-of r) (start-of r)))
+
+;;; Returns the count of tokens where ranges `r-a` and `r-b` of
+;;; `atokens` agree when going from the start of the respective ranges
+;;; towards the end.
+#_
+(defn- shared-prefix-length ^int [^int/1 atokens ^long r-a ^long r-b]
+  (let [max-shared (min (range-count r-a) (range-count r-b))
+        start-a (start-of r-a), start-b (start-of r-b)]
+    (loop [i 0]
+      (cond (>= i max-shared)
+            max-shared
+            (= (aget atokens (+ start-a i)) (aget atokens (+ start-b i)))
+            (recur (inc i))
+            :else i))))
+
+;;; Returns the count of tokens where ranges `r-a` and `r-b` of
+;;; `atokens` agree when going from the end of the respective ranges
+;;; towards the start.
+#_
+(defn- shared-suffix-length ^int [^int/1 atokens ^long r-a ^long r-b]
+  (let [max-shared (min (range-count r-a) (range-count r-b))
+        last-a (dec (end-of r-a)), last-b (dec (end-of r-b))]
+    (loop [i 0]
+      (cond (>= i max-shared)
+            max-shared
+            (= (aget atokens (- last-a i)) (aget atokens (- last-b i)))
+            (recur (inc i))
+            :else i))))
+
+;;; ------------------------------------------------------------------------
+
+(deftype TokenText [^int token-count
+                    ^int/1 atokens
+                    ^String/1 token-to-string])
+
+(definterface TokenWriter
+  (length ^int [])
+  (range-from ^long [^int start])
+  (append-token ^TokenWriter [^int token])
+  (append ^TokenWriter [^String s])
+  (to-text ^TokenText []))
+
+
+(def token-invalid 0)
+(deftype TokenWriterImpl [^:unsynchronized-mutable ^int token-count
+                          ^:unsynchronized-mutable ^int/1 atokens
+                          ^HashMap string-to-token
+                          ^:unsynchronized-mutable ^String/1 token-to-string]
+  TokenWriter
+  (length [_]
+    token-count)
+  (range-from [_ start]
+    (mk-range start token-count))
+  (append-token [this token]
+    (letfn [(expand-ints ^int/1 [^int/1 a]
+              (Arrays/copyOf a (bit-shift-left (alength a) 1)))]
+      (while (>= token-count (alength atokens))
+        (set! atokens (expand-ints atokens)))
+      (aset atokens token-count token)
+      (set! token-count (inc token-count))
+      this))
+  (append [this s]
+    (letfn [(expand-strings ^String/1 [^String/1 a]
+              (Arrays/copyOf a (bit-shift-left (alength a) 1)))]
+      (->> (if-some [id (.get string-to-token s)]
+             ^int id
+             (let [id (.size string-to-token)]
+               (.put string-to-token s id)
+               (while (>= id (alength token-to-string))
+                 (set! token-to-string (expand-strings token-to-string)))
+               (aset token-to-string id s)
+               id))
+           (.append-token this))))
+  (to-text [_]
+    (TokenText. token-count atokens token-to-string)))
+
+(defn token-writer ^TokenWriter []
+  (TokenWriterImpl. 1 (doto (new int/1 16) (aset 0 token-invalid))
+                    (doto (HashMap.) (.put "" token-invalid))
+                    (doto (new String/1 16) (aset token-invalid ""))))
+
+;;; Set elements and map entries are sorted before trying to align
+;;; them.  If the natural sort fails, then it is replaced with one
+;;; using the elements' `pr-str` representation.
+(defn- safe-sort [xs]
+  (try
+    (sort xs)
+    (catch ClassCastException _         ;hacky & fragile
+      (sort-by pr-str xs))))
+(defn- safe-sort-by-key [m]
+  (try
+    (sort-by key m)
+    (catch ClassCastException _         ;hacky & fragile
+      (sort-by #(pr-str (key %)) m))))
+
+(defn flatten ^TokenWriter [^TokenWriter w form]
+  (letfn [(append-flex-seq ^TokenWriter [^TokenWriter w ^seq xs]
+            (if-let [xs (seq xs)]
+              (loop [w (flatten w (first xs)), xs (next xs)]
+                (cond-> w
+                  (some? xs)
+                  (-> (flatten (first xs)) (recur (next xs)))))
+              w))
+          (flatten-coll ^TokenWriter [^TokenWriter w ^String begin ^String end
+                                      ^seq xs]
+            (-> w (.append begin) (append-flex-seq xs) (.append end)))
+
+
+          (append-map-entry ^TokenWriter [^TokenWriter w ^Map$Entry e]
+            (-> w (flatten (.getKey e)) (flatten (.getValue e))))
+          (append-map-entries ^TokenWriter [^TokenWriter w ^seq es]
+            (if-let [es (seq es)]
+              (loop [w (append-map-entry w (first es)), es (next es)]
+                (cond-> w
+                  (some? es)
+                  (-> (append-map-entry (first es)) (recur (next es)))))
+              w))
+          (flatten-map ^TokenWriter [^TokenWriter w ^seq es]
+            (-> w (.append "{") (append-map-entries es) (.append "}")))
+
+          (flatten-meta-then-form ^TokenWriter [^TokenWriter w ^map m
+                                                ^IMeta form]
+            (-> (.append w "^")
+                (flatten (stringify/meta-value m))
+                (flatten-imeta-value form)))
+          (flatten-imeta-value ^TokenWriter [^TokenWriter w ^IMeta form]
+            ;; note: forces map & set to deterministic order
+            (cond
+              (symbol? form) (.append w (.toString form))
+              (seq? form) (flatten-coll w "(" ")" (seq form))
+              (vector? form) (flatten-coll w "[" "]" (seq form))
+              (map? form) (flatten-map w (safe-sort-by-key form))
+              (set? form) (flatten-coll w "#{" "}" (safe-sort form))
+              :else (throw (IllegalArgumentException. (str (class form))))))]
+    
+    (let [start (.length w)]
+      (cond
+        (instance? IMeta form)
+        (if-some [m (meta form)]
+          (flatten-meta-then-form w m form)
+          (flatten-imeta-value w form))
+        
+        (instance? Map$Entry form) ;standalone entry, *not* part of map
+        (flatten-imeta-value w (vec form))
+        
+        (stringify/array? form) ;FIXME... or render array type in some way?
+        (flatten-imeta-value w (vec form))
+        
+        :else (.append w (stringify/atom-str form))))))
+
+(defn flattened-range ^long [^TokenWriter w form]
+  ;; post: both (dec (start-of %)) and (end-of %) point to
+  ;; an entry with value `token-invalid`
+  (let [start (.length w)]
+    (flatten w form)
+    (let [r (.range-from w start)]
+      (.append w "")
+      r)))

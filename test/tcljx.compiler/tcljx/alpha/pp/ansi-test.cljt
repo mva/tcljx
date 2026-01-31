@@ -1,0 +1,266 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.ansi-test
+  (:require (tcljx.alpha.pp [style :as style] [styled :as styled])
+            [tcljx.alpha.pp.styled :refer [write nl]]
+            [tcljx.alpha.pp.ansi :as ansi]
+            [tcljx.alpha.ptest :refer :all]))
+
+(def csi-intro "\u001b[")
+(def csi-end "m")
+
+(defn decode [^java.io.StringWriter w]
+  (let [s (.toString w)
+        sb (StringBuilder.)]
+    (loop [acc [], i 0]
+      (if (= i (.length s))
+        acc
+        (let [j (.indexOf s csi-intro i)]
+          (if (neg? j)
+            (recur (conj acc (.substring s i)) (.length s))
+            (let [start (+ j (.length csi-intro))
+                  end (.indexOf s csi-end start)]
+              (assert (>= end 0))
+              (recur (-> (cond-> acc (not= i j) (conj (.substring s i j)))
+                         (conj ['CSI (.substring s start end) 'm]))
+                     (inc end)))))))))
+
+(defmacro with-decode-> [& body]
+  `(let [w-string# (java.io.StringWriter.)]
+     (with-open [w-ansi# (ansi/styled-writer w-string#)]
+       (-> w-ansi# ~@body))
+     (decode w-string#)))
+
+(defmacro with-cp-> [& body]
+  `(with-open [w-ansi# (ansi/styled-writer (java.io.Writer/nullWriter))]
+     (-> w-ansi# ~@body)
+     (.code-points-in-line w-ansi#)))
+
+
+;;; "Left and Lower One Eighth Block" U+1FB7C / UTF-16 Encoding: 0xD83E 0xDF7C
+;;; "Right and Lower One Eighth Block" U+1FB7F / UTF-16 Encoding: 0xD83E 0xDF7F
+(deftest code-points-in-line-test
+  (is (= 0 (with-cp->)))
+  (is (= 0 (with-cp-> (write ""))))
+  (is (= 1 (with-cp-> (write "A"))))
+  (is (= 2 (with-cp-> (write "\uD83E\uDF7C\uD83E\uDF7F"))))
+
+  (is (= 0 (with-cp-> (write "X") (nl))))
+  (is (= 0 (with-cp-> (write "X") (nl) (write ""))))
+  (is (= 1 (with-cp-> (write "X") (nl) (write "A"))))
+  (is (= 2 (with-cp-> (write "X") (nl) (write "\uD83E\uDF7C\uD83E\uDF7F")))))
+
+(deftest unstyled-test
+  (is (= '[] (with-decode->
+               )))
+  (is (= '[] (with-decode->
+               (write ""))))
+  (is (= '["Hello\n"] (with-decode->
+                        (write "Hello")))))
+
+(deftest intensity-test
+  ;; enable style for some text, then drop back to default
+  (is (= '["Abc\n"]
+         (with-decode->
+           (write (style/intensity style/intensity-normal) "Abc"))))
+  (is (= '[[CSI "1" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/intensity style/intensity-bright) "Abc"))))
+  (is (= '[[CSI "2" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/intensity style/intensity-faint) "Abc"))))
+
+  ;; enable style, then disable and switch to italic
+  (is (= '[[CSI "1" m] "Abc" [CSI "22;3" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/intensity style/intensity-bright) "Abc")
+           (write (style/italic) "Foo")))))
+
+(deftest bold-test
+  (is (= '[[CSI "1" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/bold) "Abc"))))
+  (is (= '[[CSI "1" m] "Abc" [CSI "22;3" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/bold) "Abc")
+           (write (style/italic) "Foo"))))
+  
+  ;; the overlap between bold and intensity in the escape sequences is
+  ;; resolved by bold taking precedence
+  (is (= '[[CSI "1" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (-> (style/bold)
+                      (style/intensity style/intensity-normal)) "Abc"))))
+  (is (= '[[CSI "1" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (-> (style/bold)
+                      (style/intensity style/intensity-bright)) "Abc"))))
+  (is (= '[[CSI "1" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (-> (style/bold)
+                      (style/intensity style/intensity-faint)) "Abc"))))
+
+  (is (= '[[CSI "1" m] "Abc" [CSI "2" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (-> (style/bold)
+                      (style/intensity style/intensity-faint)) "Abc")
+           (write (style/intensity style/intensity-faint) "Foo")))))
+
+(deftest italic-test
+  (is (= '[[CSI "3" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/italic) "Abc"))))
+  (is (= '[[CSI "3" m] "Abc" [CSI "1;23" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/italic) "Abc")
+           (write (style/bold) "Foo")))))
+
+(deftest underline-test
+  (is (= '[[CSI "4" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/underline) "Abc"))))
+  (is (= '[[CSI "4" m] "Abc" [CSI "1;24" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/underline) "Abc")
+           (write (style/bold) "Foo")))))
+
+(deftest strikethrough-test
+  (is (= '[[CSI "9" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/strikethrough) "Abc"))))
+  (is (= '[[CSI "9" m] "Abc" [CSI "1;29" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/strikethrough) "Abc")
+           (write (style/bold) "Foo")))))
+
+(deftest overline-test
+  (is (= '[[CSI "53" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/overline) "Abc"))))
+  (is (= '[[CSI "53" m] "Abc" [CSI "1;55" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/overline) "Abc")
+           (write (style/bold) "Foo")))))
+
+(deftest conceal-test
+  (is (= '[[CSI "8" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/conceal) "Abc"))))
+  (is (= '[[CSI "8" m] "Abc" [CSI "1;28" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/conceal) "Abc")
+           (write (style/bold) "Foo")))))
+
+;;; ------------------------------------------------------------------------
+
+(deftest reversed-test
+  (is (= '[[CSI "7" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/reversed) "Abc"))))
+  (is (= '[[CSI "7" m] "Abc" [CSI "1;27" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/reversed) "Abc")
+           (write (style/bold) "Foo")))))
+
+(deftest foreground-test
+  ;; 4-bit color palette
+  (is (= '[[CSI "31" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/fg style/red) "Abc"))))
+  (is (= '[[CSI "31" m] "Abc" [CSI "1;39" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/fg style/red) "Abc")
+           (write (style/bold) "Foo"))))
+  (is (= '[[CSI "91" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/fg style/bright-red) "Abc"))))
+  (is (= '[[CSI "91" m] "Abc" [CSI "1;39" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/fg style/bright-red) "Abc")
+           (write (style/bold) "Foo"))))
+
+  ;; 8-bit color
+  (is (= '[[CSI "38;5;244" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/fg (style/color-8 244)) "Abc"))))
+  (is (= '[[CSI "38;5;244" m] "Abc" [CSI "1;39" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/fg (style/color-8 244)) "Abc")
+           (write (style/bold) "Foo"))))
+
+  ;; 24-bit color
+  (is (= '[[CSI "38;2;128;64;32" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/fg (style/color-rgb 128 64 32)) "Abc"))))
+  (is (= '[[CSI "38;2;128;64;32" m] "Abc" [CSI "1;39" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/fg (style/color-rgb 128 64 32)) "Abc")
+           (write (style/bold) "Foo")))))
+
+(deftest background-test
+  ;; 4-bit color palette
+  (is (= '[[CSI "41" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/bg style/red) "Abc"))))
+  (is (= '[[CSI "41" m] "Abc" [CSI "1;49" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/bg style/red) "Abc")
+           (write (style/bold) "Foo"))))
+  (is (= '[[CSI "101" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/bg style/bright-red) "Abc"))))
+  (is (= '[[CSI "101" m] "Abc" [CSI "1;49" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/bg style/bright-red) "Abc")
+           (write (style/bold) "Foo"))))
+
+  ;; 8-bit color
+  (is (= '[[CSI "48;5;244" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/bg (style/color-8 244)) "Abc"))))
+  (is (= '[[CSI "48;5;244" m] "Abc" [CSI "1;49" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/bg (style/color-8 244)) "Abc")
+           (write (style/bold) "Foo"))))
+
+  ;; 24-bit color
+  (is (= '[[CSI "48;2;128;64;32" m] "Abc" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/bg (style/color-rgb 128 64 32)) "Abc"))))
+  (is (= '[[CSI "48;2;128;64;32" m] "Abc" [CSI "1;49" m] "Foo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/bg (style/color-rgb 128 64 32)) "Abc")
+           (write (style/bold) "Foo")))))
+
+;;; ------------------------------------------------------------------------
+
+(deftest clear-before-nl-test
+  ;; non-background can be retained across nl
+  (is (= '[[CSI "31" m] "Abc\nFoo" [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/fg style/red) "Abc")
+           (nl)
+           (write (style/fg style/red) "Foo"))))
+
+  ;; but background color is cleared before nl
+  (is (= '[[CSI "44;32" m] "Abc" [CSI "49" m] "\n" [CSI "44" m] "Foo"
+           [CSI "" m] "\n"]
+         (with-decode->
+           (write (-> (style/fg style/green) (style/bg style/blue))
+                  "Abc")
+           (nl)
+           (write (-> (style/fg style/green) (style/bg style/blue))
+                  "Foo"))))
+
+  ;; and revered video is also cleared before nl
+  (is (= '[[CSI "7" m] "Abc" [CSI "" m] "\n" [CSI "7" m] "Foo"
+           [CSI "" m] "\n"]
+         (with-decode->
+           (write (style/reversed) "Abc")
+           (nl)
+           (write (style/reversed) "Foo")))))

@@ -1,0 +1,91 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.prettify
+  (:require (tcljx.alpha.pp [styled :as styled] [buffer :as buffer]
+                            [treetext :as treetext]))
+  (:import (tcljx.alpha.pp.styled StyledWriter)
+           (tcljx.alpha.pp.buffer StyledText)
+           (tcljx.alpha.pp.treetext TreeText)))
+
+;;; A simple pretty-printer implementation, spreading the child
+;;; elements of a group across multiple lines of output whenever the
+;;; group as a whole would exceed the given page width.
+;;;
+;;; Because `stringify` provides tree structure information tuned to
+;;; what this algorithm needs, the function doing the reformatting is
+;;; just a few lines of code.
+;;; 
+;;; Based on Kiselyov, Peyton-Jones, and Sabry:
+;;; 
+;;; "Lazy v. Yield: Incremental, Linear Pretty-printing"
+;;; http://www.cs.indiana.edu/~sabry/papers/yield-pp.pdf
+;;; 
+;;; which in turn builds upon the Derek C. Oppen's paper
+;;; "Prettyprinting" (1980)
+;;; https://www.cs.tufts.edu/~nr/cs257/archive/derek-oppen/prettyprinting.pdf
+
+(defn- overflows? ^boolean [^int width ^String text ^int start ^int end]
+  ;; FIXME... try to avoid counting code points whenever possible?
+  ;; assuming that this counting is a constant time operation for
+  ;; ISO-LATIN-1 coded text, this would only make a difference for
+  ;; input using a wider range of Unicode code points
+  (> (styled/code-point-count text start end) width))
+
+(defn- write-node ^StyledWriter [^StyledWriter w ^int/1 node-info
+                                 ^int txt-node ^StyledText txt-pos
+                                 ^int indent ^int remaining]
+  (let [txt-end (treetext/end-of-node node-info txt-node)
+        first-node (inc txt-node)
+        first-end (treetext/end-of-node node-info first-node)]
+    (letfn [(skip-past ^int [^int node ^int node-end]
+              ;; FIXME... repeated linear scan is slow if there are
+              ;; many nodes?  alternatives: start from last emitted
+              ;; node id, or do binary (leapfrog?) search, or store
+              ;; the sequentially following node in the node info
+              ;; table; also possible: a combination search using a
+              ;; non-linear variant only if `node-end` is far away
+              (if (<= (treetext/end-of-node node-info node) node-end)
+                (recur (inc node) node-end)
+                node))
+            (write-rest ^StyledWriter [^StyledWriter w ^int pos ^int node
+                                       ^int indent ^int remaining]
+              (let [end (treetext/end-of-node node-info node)]
+                (cond-> w
+                  (<= end txt-end)
+                  (-> (.nl) (styled/pad indent)
+                      (write-node node-info node
+                                  (buffer/forward-to txt-pos (inc pos))
+                                  indent remaining)
+                      (recur end (skip-past node end) indent remaining)))))]
+
+      (if (and (<= first-end txt-end)
+               (overflows? remaining (.text txt-pos) (.pos txt-pos) txt-end))
+        ;; writing a group with at least one child node that does not
+        ;; fit: opening delimiter is subsumed by the first
+        ;; child (which therefore gets this node's remaining space),
+        ;; and the closing delimiter by the last child
+        (let [d (treetext/indent-of-node node-info txt-node)
+              indent' (+ indent d)]
+          (-> (write-node w node-info first-node txt-pos indent' remaining)
+              (write-rest first-end (skip-past first-node first-end)
+                          indent' (- remaining d))))
+
+        ;; there is no child node (some non-group token or the group
+        ;; is empty) or the node fits into the remaining width
+        (do (buffer/transfer-prefix-to txt-pos txt-end w)
+            w)))))
+
+;;; Takes the stringified form representation `txt` and writes it to
+;;; `w` with one transformation applied: Whenever an inner node of
+;;; `txt` does not fit into the remaining `page-width`, then the
+;;; separating whitespace between its child nodes is replaced by
+;;; newline plus indentation.  The width of an inner node's opening
+;;; delimiter is added to the indentation level of its child nodes.
+(defn write-pretty ^StyledWriter [^StyledWriter w ^TreeText txt ^int page-width]
+  #_(prn :write-pretty (.text txt))
+  (write-node w (.node-info txt) 0 (.styled-text txt) 0 page-width))

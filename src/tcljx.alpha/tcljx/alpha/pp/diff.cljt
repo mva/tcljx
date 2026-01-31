@@ -1,0 +1,210 @@
+;; Copyright (c) Michael van Acken. All rights reserved.
+;; The use and distribution terms for this software are covered by the
+;; Eclipse Public License 2.0 (https://www.eclipse.org/legal/epl-v20.html)
+;; which can be found in the file epl-v20.html at the root of this distribution.
+;; By using this software in any fashion, you are agreeing to be bound by
+;; the terms of this license.
+;; You must not remove this notice, or any other, from this software.
+(ns tcljx.alpha.pp.diff
+  (:require (tcljx.alpha.pp [stringify :as stringify] [tokenize :as tokenize]))
+  (:import (java.util PriorityQueue HashMap)))
+
+;;; Implements a shortest path search to match up two token sequences,
+;;; usually generated from two given forms.  The assumption is that
+;;; there is a large overlap between the two sequences.  If `n` and
+;;; `m` are the length of the respective input sequences, then the
+;;; worst case runtime is at least proportional to O(n*m).  In short:
+;;; do not use this module if the input forms have a large number of
+;;; small differences.
+;;; 
+;;; Based on the ideas of Difftastic and Autochrome:
+;;;
+;;; https://www.wilfred.me.uk/blog/2022/09/06/difftastic-the-fantastic-diff/
+;;; https://difftastic.wilfred.me.uk/tricky_cases.html
+;;;
+;;; https://fazzone.github.io/autochrome.html
+
+(defn- mk-offsets ^long [^int off-a ^int off-b]
+  (+ (bit-shift-left (long off-a) 32) off-b))
+(defn- offset-a ^int [^long offsets]
+  (int (unsigned-bit-shift-right offsets 32)))
+(defn- offset-b ^int [^long offsets]
+  (int offsets))
+(defn- position-of ^int [^long r ^int offset]
+  (+ (tokenize/start-of r) offset))
+
+(def ^:private delta-cost-shared 0)
+(def ^:private delta-offsets-shared (mk-offsets +1 +1))
+(def ^:private delta-cost-novel 1)
+(def ^:private delta-offsets-novel-a (mk-offsets +1 0))
+(def ^:private delta-offsets-novel-b (mk-offsets 0 +1))
+
+(defn priority-fn ^long [^int cost ^long offsets]
+  (let [off-a (offset-a offsets), off-b (offset-b offsets)]
+    ;; A lower bound for the remaining path length is the number of
+    ;; forced novel non-diagonal moves.  This is (- (max off-a
+    ;; off-b) (min off-a off-b)), equivalent to the shorter (abs (-
+    ;; off-a off-b)).  This forward looking estimate makes this an A*
+    ;; instead of plain Dijkstra.
+    (+ (bit-shift-left (long (+ cost (abs (- off-a off-b)))) 32)
+       ;; For a given estimated cost, expand nodes with the lowest
+       ;; remaining distance to the goal first.
+       (+ off-a off-b))))
+
+(deftype Path [^long offsets, ^Path suffix, ^int cost]
+  Comparable
+  (compareTo [_ o]
+    (let [o ^Path o]
+      (Long/compare (priority-fn cost offsets)
+                    (priority-fn (.cost o) (.offsets o))))))
+
+
+(defn dijkstra ^Path [^int/1 atoken ^long r-a ^long r-b]
+  (let [init-offsets (mk-offsets (tokenize/range-count r-a)
+                                 (tokenize/range-count r-b))
+        init-cost 0
+        pq (doto (PriorityQueue.) (.add (Path. init-offsets nil init-cost)))
+        best-so-far (doto (HashMap.) (.put init-offsets init-cost))]
+    (letfn [(step-back ^void [^Path path ^int delta-cost ^long delta-offsets]
+              (let [offsets' (- (.offsets path) delta-offsets)
+                    cost' (+ (.cost path) delta-cost)
+                    k (object offsets')
+                    cost-so-far (.get best-so-far k)]
+                (when (or (nil? cost-so-far) (< cost' ^int cost-so-far))
+                  (.add pq (Path. offsets' path cost'))
+                  (.put best-so-far k cost'))))]
+      (loop []
+        (let [path ^Path (.poll pq), offsets (.offsets path)]
+          (cond
+            (zero? offsets)
+            ;; there cannot be another path reaching the end of both
+            ;; `r-a` and `r-b` with lower cost: we have a winner
+            path
+
+            (> (.cost path) ^int (.get best-so-far (.offsets path)))
+            ;; this is no longer a competitive path: at least one path
+            ;; with lower cost reaches this grid position as well
+            (recur)
+            
+            :else
+            ;; here holds: position is not at the end of both `r-a`
+            ;; and `r-b` at the same time
+            (let [off-a' (dec (offset-a offsets))
+                  off-b' (dec (offset-b offsets))]
+              (when (>= off-a' 0)
+                (step-back path delta-cost-novel delta-offsets-novel-a))
+              (when (>= off-b' 0)
+                (step-back path delta-cost-novel delta-offsets-novel-b))
+              ;; with a `token-invalid` located before both ranges
+              ;; `r-a` and `r-b`, there is no need to check that the
+              ;; array indices are non-negative
+              (when (= (aget atoken (position-of r-a off-a'))
+                       (aget atoken (position-of r-b off-b')))
+                (step-back path delta-cost-shared delta-offsets-shared))
+              (recur))))))))
+
+(letfn [(path-length ^int [^int acc ^Path path]
+          (if (nil? path)
+            acc
+            (recur (inc acc) (.suffix path))))
+        (set-delta ^void [^byte/1 adelta ^int i ^long position-delta]
+          (->> (byte (Long/compress position-delta delta-offsets-shared))
+               (aset adelta i)))
+        (get-delta ^long [^byte/1 adelta ^int i]
+          (-> (aget adelta i)
+              (Long/expand delta-offsets-shared)))]
+
+  ;; Returns an array of 2-bit values 2rAB, where A indicates that the
+  ;; position in `r-a` is incremented, and B that the position in
+  ;; `r-b` is incremented.  Only the last array element is zero.  The
+  ;; number of A bits matches the number of tokens taken from the A
+  ;; side, and vice versa for B.
+  (defn- position-delta-array ^byte/1 [^Path path]
+    (let [adelta (new byte/1 (path-length 0 path))]
+      (loop [ptr (.suffix path), offsets (.offsets path), i 0]
+        (when (some? ptr)
+          (set-delta adelta i (- (.offsets ptr) offsets))
+          (recur (.suffix ptr) (.offsets ptr) (inc i))))
+      adelta))
+
+  ;; Converts the path of deltas into id pairs [token-a token-b], with
+  ;; a component of `token-invalid` indicating that the other token is
+  ;; novel.  The last entry is pair [token-invalid token-invalid].
+  (defn- token-path ^int/1 [^int/1 atokens ^long position-start ^byte/1 adelta]
+    (let [a (new int/1 (* (alength adelta) 2))]
+      (loop [pos position-start, i 0]
+        (let [dp (get-delta adelta i)]
+          (when-not (zero? dp)
+            (->> (when-not (zero? (bit-and delta-offsets-novel-a dp))
+                   (aget atokens (offset-a pos)))
+                 (aset a (* i 2)))
+            (->> (when-not (zero? (bit-and delta-offsets-novel-b dp))
+                   (aget atokens (offset-b pos)))
+                 (aset a (inc (* i 2))))
+            (recur (+ pos dp) (inc i)))))
+      a))
+
+  ;; Converts token path into an array of [string-a string-b] pairs,
+  ;; with a component of nil indicating that the other token is novel.
+  ;; If a token string is shared by both the 0 trace and the 1 trace,
+  ;; then both elements of a pair hold identical strings.  The last
+  ;; elements of the result are pair [eof eof].
+  (defn- trace-2 ^String/1 [^String/1 token-to-string ^int/1 apath]
+    (let [n (alength apath)
+          a (new String/1 n)]
+      (dotimes [i (- n 2)]
+        (let [t (aget apath i)]
+          (aset a i (when-not (= t tokenize/token-invalid)
+                      (aget token-to-string t)))))
+      (doto a
+        (aset (- n 2) stringify/eof-str)
+        (aset (- n 1) stringify/eof-str))))
+
+  #_
+  (defn- trace-1 ^String/1 [^String/1 token-to-string ^int offset ^int/1 apath]
+    (let [a (new String/1 (bit-shift-right (alength apath) 1))]
+      (loop [i (+ (- (alength apath) 2) offset)]
+        (when-not (neg? i)
+          (let [t (aget apath i)]
+            (aset a (bit-shift-right i 1)
+                  (if (= t token-invalid)
+                    (let [t-other (aget apath (bit-xor i 2r1))
+                          s (aget token-to-string t-other)]
+                      (.repeat "·" (.length s))) ;middle dot, centered dot
+                    (aget token-to-string t)))
+            (recur (- i 2)))))
+      a)))
+
+
+;; Flattens the given forms into sequences of tokens and returns a
+;; trace through the sequences that tries to pair as many identical
+;; tokens as possible.  A trace is a sequence of pairs with [a nil]
+;; indicating that `a` is used from the first sequence, [nil b] that
+;; `b` is used from the second sequence, and [c c] indicates a token
+;; `c` appearing in both sequences at this position.
+(defn two-forms-trace ^String/1 [form-a form-b]
+  (let [w (tokenize/token-writer)
+        r-a (tokenize/flattened-range w form-a)
+        r-b (tokenize/flattened-range w form-b)
+        txt (.to-text w)]
+
+    ;; FIXME... Assume for now that shortest path search is fast
+    ;; enough even when both token paths are identical.
+    #_(and (= (range-count r-a)
+              (range-count r-b))
+           (= (shared-suffix-length (.atokens txt) r-a r-b)
+              (range-count r-a)))
+    
+    (let [path (dijkstra (.atokens txt) r-a r-b)
+          adelta (position-delta-array path)
+          start (mk-offsets (tokenize/start-of r-a) (tokenize/start-of r-b))
+          apath (token-path (.atokens txt) start adelta)]
+      (trace-2 (.token-to-string txt) apath))))
+
+;; Returns true if `trace` holds two identical token sequences.
+(defn only-shared-tokens? ^boolean [^String/1 trace]
+  (loop [i (- (alength trace) 2)]
+    (cond
+      (neg? i) true
+      (identical? (aget trace i) (aget trace (inc i))) (recur (- i 2))
+      :else false)))

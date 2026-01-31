@@ -10,6 +10,12 @@
   (:import (tcljx.alpha.pp.styled StyledWriter)
            (java.io Writer)))
 
+;;; A writer that translates style directives into ANSI escape codes.
+;;; Every call to append compares the given style with the one active
+;;; for the downstream terminal.  If the two differ, the delta is
+;;; computed and additional text is emitted that changes the current
+;;; output style to the one used by the new text.
+
 ;;; https://en.wikipedia.org/wiki/ANSI_escape_code#Select_Graphic_Rendition_parameters
 (defn- apply-style ^long [^Writer w ^long active-style ^long style]
   (letfn [(sep ^void []
@@ -22,10 +28,6 @@
             (^void [^int n ^int arg-1 ^int arg-2 ^int arg-3 ^int arg-4]
              (arg n) (sep) (arg arg-1) (sep) (arg arg-2)
              (sep) (arg arg-3) (sep) (arg arg-4)))
-          (apply-conceal ^long []
-            (let [mode (style/extract-conceal style)]
-              (arg (if (= mode style/conceal-invisible) 8 28))
-              style/mask-conceal))
           (apply-intensity ^long []
             (arg (if (zero? (style/extract-bold style))
                    (case (style/extract-intensity style)
@@ -56,12 +58,13 @@
                      (style/rgb-blue v)))))
           (applied-mask ^long [^int diff-lsb]
             (case diff-lsb
-              (#_conceal 0 1) (apply-conceal)
-              (#_intensity 2 3 #_bold 4) (apply-intensity)
-              (#_italic 5) (apply-flag style/mask-italic 3 23)
-              (#_underline 6) (apply-flag style/mask-underline 4 24)
-              (#_strikethrough 7) (apply-flag style/mask-strikethrough 9 29)
-              (#_overline 8) (apply-flag style/mask-overline 53 55)
+              (#_intensity 0 1 #_bold 2) (apply-intensity)
+              (#_italic 3) (apply-flag style/mask-italic 3 23)
+              (#_underline 4) (apply-flag style/mask-underline 4 24)
+              (#_strikethrough 5) (apply-flag style/mask-strikethrough 9 29)
+              (#_overline 6) (apply-flag style/mask-overline 53 55)
+              (#_conceal 7) (apply-flag style/mask-conceal 8 28)
+              (#_reversed 13) (apply-flag style/mask-reversed 7 27)
               #_else
               (cond
                 (>= diff-lsb #_(Long/numberOfTrailingZeros mask-foreground) 39)
@@ -74,8 +77,7 @@
                 (throw (IllegalArgumentException.)))))]
     (.append w \u001b)                  ;aka escape
     (.append w \[)
-    (if (= style style/default)
-      (.append w \0)                    ;shortcut: reset to default
+    (when-not (= style style/default) ;no arg aka 0 is "reset to default"
       (loop [diff (bit-xor active-style style)]
         (when-not (zero? diff)
           (let [diff-lsb (Long/numberOfTrailingZeros diff)
@@ -86,33 +88,35 @@
     (.append w \m)
     style))
 
+(def ^:private clear-before-nl (bit-or style/mask-background
+                                       style/mask-reversed))
 (deftype AnsiWriter [^:unsynchronized-mutable ^long active-style ;of terminal
+                     ^:unsynchronized-mutable ^int nl-count
                      ^:unsynchronized-mutable ^int cp-count ;counts since nl
                      ^Writer w]
   StyledWriter
   (nl [this]
-    (let [active-bg (bit-and style/mask-background active-style)]
+    (let [active-bg (bit-and clear-before-nl active-style)]
       (when-not (zero? active-bg)
         (set! active-style     ;clear any non-default background color
               (apply-style w active-style (bit-xor active-style active-bg))))
       (.append w \newline)
+      (set! nl-count (inc nl-count))
       (set! cp-count 0)
       this))
   (append [this style cs start end]
     (when-not (= active-style style)
       (set! active-style (apply-style w active-style style)))
-    (let [n (styled/code-point-count cs start end)]
-      (case (style/extract-conceal style)
-        (#_conceal-XXX 2) (.append w (.repeat "X" n))
-        (#_conceal-spaces 3) (.append w (.repeat " " n))
-        #_else (.append w cs start end))
-      (set! cp-count (+ cp-count n)))
+    (.append w cs start end)
+    (set! cp-count (+ cp-count (styled/code-point-count cs start end)))
     this)
+  (nl-count [_]
+    nl-count)
   (code-points-in-line [_]
     cp-count)
   (close [this]
     (styled/write this "")
     (when (not= cp-count 0) (.nl this))))
 
-(defn raw-writer ^StyledWriter [^Writer w]
-  (AnsiWriter. style/default 0 w))
+(defn styled-writer ^StyledWriter [^Writer w]
+  (AnsiWriter. style/default 0 0 w))
