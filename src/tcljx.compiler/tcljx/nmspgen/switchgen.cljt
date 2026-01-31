@@ -152,20 +152,21 @@
   (defn switch-map ^CodeEmitter [^CodeEmitter select ^Class produced-type
                                  ^Exprs/1 guards ^CodeEmitter/1 paths
                                  ^CodeEmitter default-path ^long fctx]
-    (^CodeEmitter fn [xb consumed-type then-leave?]
-     (when (emit/insn? xb fctx Object select)
-       (let [cpb (.constantPool xb)
-             mhe (.methodHandleEntry cpb rt/bsm-clause-code)
-             les (for [^Insns xs guards]
-                   (-> (if (= (.length xs) 1)
-                         (insn/emitter xs 0)
-                         (constgen/collection (.emitters xs) type/list false))
-                       (Loadable/.loadable-entry cpb false)))
-             bsm (.bsmEntry cpb mhe les)
-             mtd (MethodTypeDesc/of ConstantDescs/CD_int
-                                    ConstantDescs/CD_Object)
-             nat (.nameAndTypeEntry cpb ConstantDescs/DEFAULT_NAME mtd)]
-         (-> (emit/with-line-number xb fctx)
-             (.invokedynamic (.invokeDynamicEntry cpb bsm nat)))
-         (switch-int* (indexes-to-switch-cases xb guards) paths default-path
-                      xb fctx produced-type then-leave?))))))
+    (emit/with-adaption-barrier produced-type
+      (^CodeEmitter fn [xb consumed-type then-leave?]
+       (when (emit/insn? xb fctx Object select)
+         (let [cpb (.constantPool xb)
+               mhe (.methodHandleEntry cpb rt/bsm-clause-code)
+               les (for [^Insns xs guards]
+                     (-> (if (= (.length xs) 1)
+                           (insn/emitter xs 0)
+                           (constgen/collection (.emitters xs) type/list false))
+                         (Loadable/.loadable-entry cpb false)))
+               bsm (.bsmEntry cpb mhe les)
+               mtd (MethodTypeDesc/of ConstantDescs/CD_int
+                                      ConstantDescs/CD_Object)
+               nat (.nameAndTypeEntry cpb ConstantDescs/DEFAULT_NAME mtd)]
+           (-> (emit/with-line-number xb fctx)
+               (.invokedynamic (.invokeDynamicEntry cpb bsm nat)))
+           (switch-int* (indexes-to-switch-cases xb guards) paths default-path
+                        xb fctx consumed-type then-leave?)))))))

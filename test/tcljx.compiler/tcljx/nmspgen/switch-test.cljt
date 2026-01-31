@@ -700,3 +700,24 @@
                                               :continue
                                               :fail))))))
              (deterministic-gensyms)))))
+
+(deftest switch-bad-return-type
+  (is (= '[["LOCAL 0: String s"]
+           ["LOCAL 1: Object res"]
+           (ALOAD_1)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;)I"
+                          :bsm-clause-code
+                          [[:bsm-quote "keyword" "Lclojure/lang/Keyword;" ["error"]]])
+           (TABLESWITCH 0 0 L:1 [L:0])
+           [L:0]
+           (ALOAD_1)
+           (ALOAD_0)
+           (INVOKEDYNAMIC "_" "(Ljava/lang/Object;Ljava/lang/String;)Ljava/lang/Object;"
+                          :bsm-invoke-fn [])
+           (CHECKCAST String)
+           (ARETURN)
+           [L:1]
+           (ACONST_NULL)
+           (ARETURN)]
+         (asm-expr ^String [^String s res]
+                   (case* res :error (res s) #_else nil)))))
